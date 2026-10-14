@@ -276,6 +276,14 @@ class UiWalkthroughTest {
             publish("00-app-icon-$size", bytes)
             bitmap.recycle()
         }
+        // The Photos icon the icon pack and the shortcut give Ente, drawn the same way.
+        val photos = target.getDrawable(R.mipmap.ic_shortcut_photos)!!
+        val bitmap = Bitmap.createBitmap(432, 432, Bitmap.Config.ARGB_8888)
+        photos.setBounds(0, 0, 432, 432)
+        photos.draw(Canvas(bitmap))
+        val png = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        publish("01-photos-icon-432", png)
+        bitmap.recycle()
         // The monochrome layer must exist for themed icons on Android 13+.
         val mono = target.getDrawable(R.drawable.ic_launcher_monochrome)
         assertNotNull(mono)
