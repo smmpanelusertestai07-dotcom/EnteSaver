@@ -70,11 +70,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.entesaver.ui.theme.BrandGreen
-import app.entesaver.ui.theme.BrandGreenDeep
+import app.entesaver.ui.theme.BrandIndigo
+import app.entesaver.ui.theme.BrandIndigoDeep
 import app.entesaver.ui.theme.Dimens
+import app.entesaver.ui.theme.LocalIsDarkTheme
 import app.entesaver.ui.theme.MetricTextStyle
 import app.entesaver.ui.theme.OnBrand
+import app.entesaver.ui.theme.OnSuccessContainerDark
+import app.entesaver.ui.theme.OnSuccessContainerLight
+import app.entesaver.ui.theme.SuccessContainerDark
+import app.entesaver.ui.theme.SuccessContainerLight
 import kotlinx.coroutines.launch
 
 /*
@@ -149,10 +154,10 @@ private fun Modifier.pressScale(interaction: MutableInteractionSource): Modifier
 /**
  * App-wide background: the theme's own surface, plain.
  *
- * There used to be two blurred brand glows behind every page. With a green
- * brand they read on a dark screen as a stain over whatever they fell behind,
- * and a plain surface is what Ente itself draws - so the page is flat, and
- * the green is kept for what the person can tap.
+ * There used to be two blurred brand glows behind every page. They read on a
+ * dark screen as a stain over whatever they fell behind, and a plain surface
+ * is what Ente itself draws - so the page is flat, and the accent colour is
+ * kept for what the person can tap.
  *
  * It also provides LocalContentColor. Material 3 leaves that to Surface, not
  * to MaterialTheme, so a plain Box root leaves every Text that does not name
@@ -199,8 +204,8 @@ fun AppCard(
 
 /**
  * Brand gradient card used for the dashboard hero. Its content is white, so
- * both ends of the gradient have to carry white text: the two greens are
- * 5.1:1 and 8.5:1, while the icon's own bright green would be 2.4:1.
+ * both ends of the gradient have to carry white text: Saver Indigo is 6.4:1
+ * and the deep violet 9.4:1, while the icon's own bright green would be 2.4:1.
  */
 @Composable
 fun HeroCard(
@@ -214,7 +219,7 @@ fun HeroCard(
             modifier = modifier
                 .fillMaxWidth()
                 .clip(CardShape)
-                .background(Brush.linearGradient(listOf(BrandGreen, BrandGreenDeep)))
+                .background(Brush.linearGradient(listOf(BrandIndigo, BrandIndigoDeep)))
                 .padding(20.dp),
             content = content
         )
@@ -794,7 +799,11 @@ fun StateBadge(text: String, tone: BadgeTone, modifier: Modifier = Modifier) {
     val (background, foreground) = when (tone) {
         BadgeTone.NEUTRAL -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         BadgeTone.PROGRESS -> scheme.primaryContainer to scheme.onPrimaryContainer
-        BadgeTone.SUCCESS -> scheme.secondaryContainer to scheme.onSecondaryContainer
+        BadgeTone.SUCCESS -> if (LocalIsDarkTheme.current) {
+            SuccessContainerDark to OnSuccessContainerDark
+        } else {
+            SuccessContainerLight to OnSuccessContainerLight
+        }
         // The outline colour is a rule's colour, not a word's: on this fill it
         // was 3.7:1, under what text this small needs. Muted is said by the
         // paler pill; the words on it stay readable.

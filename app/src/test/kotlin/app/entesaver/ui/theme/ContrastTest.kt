@@ -131,10 +131,16 @@ class ContrastTest {
     }
 
     @Test
+    fun `the done badge is readable in both themes`() {
+        assertReadable("light done badge", OnSuccessContainerLight, SuccessContainerLight, 4.5)
+        assertReadable("dark done badge", OnSuccessContainerDark, SuccessContainerDark, 4.5)
+    }
+
+    @Test
     fun `text on the brand gradient is readable`() {
         // The hero card paints its own background, so the scheme's pairings do
         // not cover it. Both ends of the gradient have to work.
-        for ((name, background) in listOf("green" to BrandGreen, "deep green" to BrandGreenDeep)) {
+        for ((name, background) in listOf("indigo" to BrandIndigo, "deep violet" to BrandIndigoDeep)) {
             assertReadable("OnBrand over $name", OnBrand, background, 4.5)
             // The muted variant carries supporting lines, not body copy.
             assertReadable("OnBrandMuted over $name", OnBrandMuted, background, 3.0)
@@ -148,7 +154,7 @@ class ContrastTest {
         // check above passed a label that was really 4.45:1 on the lighter end
         // of the banner, and white tiles that took the figures on them under
         // 4:1. Small text needs 4.5:1 at both ends of the gradient.
-        for ((name, background) in listOf("green" to BrandGreen, "deep green" to BrandGreenDeep)) {
+        for ((name, background) in listOf("indigo" to BrandIndigo, "deep violet" to BrandIndigoDeep)) {
             assertReadable(
                 "OnBrandMuted blended over $name",
                 OnBrandMuted.compositeOver(background),
