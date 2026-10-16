@@ -26,7 +26,7 @@ android {
         // monotonic, it never collides across branches, and it leaves room
         // for 99 minors and 99 patches without ever needing a reset.
         //   3.0.0 -> 30000
-        versionName = "13.1.0"
+        versionName = "13.2.0"
         versionCode = versionName!!.split(".").let { (major, minor, patch) ->
             major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
         }
