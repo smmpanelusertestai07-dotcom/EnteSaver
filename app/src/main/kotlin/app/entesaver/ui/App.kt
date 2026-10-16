@@ -6,12 +6,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -21,9 +25,10 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.ShortNavigationBar
+import androidx.compose.material3.ShortNavigationBarItem
+import androidx.compose.material3.ShortNavigationBarItemDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +39,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -288,22 +295,16 @@ private fun MainNav(vm: AppViewModel) {
             // a second copy of the list here is a bar that shows on a screen
             // it cannot navigate to, the day one of them changes.
             if (!needsLock && route in Routes.TABS) {
-                // Opaque, and one step off the page rather than translucent:
-                // a see-through bar let content slide under the selected pill,
-                // which read as a stray shape floating over the screen.
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 0.dp
-                ) {
-                    TabItem(nav, route, Routes.HOME, R.drawable.ic_tab_home, R.string.nav_home)
-                    TabItem(nav, route, Routes.FILES, R.drawable.ic_tab_files, R.string.nav_files)
+                FloatingTabBar {
+                    TabItem(nav, route, Routes.HOME, R.drawable.ic_tab_home, R.drawable.ic_tab_home_on, R.string.nav_home)
+                    TabItem(nav, route, Routes.FILES, R.drawable.ic_tab_files, R.drawable.ic_tab_files_on, R.string.nav_files)
                     TabItem(
-                        nav, route, Routes.STORAGE, R.drawable.ic_tab_storage,
+                        nav, route, Routes.STORAGE, R.drawable.ic_tab_storage, R.drawable.ic_tab_storage_on,
                         R.string.nav_storage,
                         badge = TabBadges.storage(reclaimable)
                     )
                     TabItem(
-                        nav, route, Routes.OPTIONS, R.drawable.ic_tab_options,
+                        nav, route, Routes.OPTIONS, R.drawable.ic_tab_options, R.drawable.ic_tab_options_on,
                         R.string.nav_options,
                         badge = TabBadges.settings(
                             cloudMissing = health.cloudMissing,
@@ -430,51 +431,87 @@ private fun MainNav(vm: AppViewModel) {
     }
 }
 
+/**
+ * The bottom bar: Material 3's short navigation bar, floating on the page.
+ *
+ * A rounded bar inset from the screen's edges, one step above the page, as
+ * current Android and iOS apps draw theirs. The page shows round it, so it
+ * reads as a control resting on the screen rather than a band across the
+ * bottom of it. It is opaque on purpose: a see-through bar let content slide
+ * under the selected pill, which read as a stray shape floating over the
+ * screen. The gesture or button bar below it keeps its own inset.
+ */
 @Composable
-private fun RowScope.TabItem(
+private fun FloatingTabBar(content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = Dimens.Screen, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(TabBarCorner),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shadowElevation = 6.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        ) {
+            ShortNavigationBar(
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                content = content
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabItem(
     nav: NavHostController,
     current: String,
     route: String,
     iconRes: Int,
+    selectedIconRes: Int,
     labelRes: Int,
     badge: Boolean = false
 ) {
     // The dot was drawn and never said. A screen reader heard "Settings, tab"
     // whether or not something there needed fixing.
     val attention = stringResource(R.string.a11y_needs_attention)
-    NavigationBarItem(
-        selected = current == route,
+    val selected = current == route
+    ShortNavigationBarItem(
+        selected = selected,
         onClick = { nav.goTo(route) },
         modifier = if (badge) Modifier.semantics { stateDescription = attention } else Modifier,
-        colors = NavigationBarItemDefaults.colors(
-            selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            selectedTextColor = MaterialTheme.colorScheme.onSurface,
-            indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+        colors = ShortNavigationBarItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+            selectedTextColor = MaterialTheme.colorScheme.primary,
+            selectedIndicatorColor = MaterialTheme.colorScheme.primary,
             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         icon = {
+            // Filled when selected, outlined otherwise: the tab you are on
+            // reads by its shape as well as its colour.
+            val glyph = painterResource(if (selected) selectedIconRes else iconRes)
             if (badge) {
                 BadgedBox(badge = { Badge() }) {
-                    Icon(
-                        painterResource(iconRes),
-                        contentDescription = stringResource(labelRes)
-                    )
+                    Icon(glyph, contentDescription = null)
                 }
             } else {
-                Icon(
-                    painterResource(iconRes),
-                    contentDescription = stringResource(labelRes)
-                )
+                Icon(glyph, contentDescription = null)
             }
         },
         label = {
-            // Material fixes the bar at 80 dp. A label that wraps to a second
-            // line is not made room for, it is cut off half way down the
-            // letters - so it truncates instead, which at least reads as a
-            // word. The four labels fit on every phone at every font size the
-            // system offers; this is the floor under that, not a substitute
-            // for keeping them short.
+            // The bar has a fixed height. A label that wraps to a second line
+            // is not made room for, it is cut off half way down the letters -
+            // so it truncates instead, which at least reads as a word. The
+            // four labels fit on every phone at every font size the system
+            // offers; this is the floor under that, not a substitute for
+            // keeping them short.
             //
             // The bar's height is the one thing on screen that does not grow
             // with the text setting, so past a point the label cannot grow
@@ -500,6 +537,9 @@ private fun RowScope.TabItem(
         }
     )
 }
+
+/** The bar's corner: a pill, half its height. */
+private val TabBarCorner = 32.dp
 
 /** How far a bottom-bar label may follow the system text size. */
 private const val NavLabelMaxScale = 1.3f
