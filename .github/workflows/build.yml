@@ -207,7 +207,7 @@ jobs:
 
           Needs Android 10 or newer. Install: download ${APK_NAME} below and
           open it on your phone.
-          Play Protect may warn about an app installed from a file - choose
+          Play Protect may warn about an app installed from a file — choose
           "More details" › "Install anyway". The app holds no INTERNET permission.
 
           APK SHA-256: ${APK_SHA256}
