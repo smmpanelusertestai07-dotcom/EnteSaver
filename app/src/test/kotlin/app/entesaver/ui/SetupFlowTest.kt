@@ -53,7 +53,7 @@ class SetupFlowTest {
         )
         val failed = stringsNamed("transfer_failed").single().second
         assertTrue("a wrong file must say nothing changed", failed.contains("nothing was changed"))
-        assertTrue("and name what to pick instead", failed.contains("Backup and restore"))
+        assertTrue("and name what to pick instead", failed.contains("Save and restore settings"))
     }
 
     @Test

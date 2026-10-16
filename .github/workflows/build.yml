@@ -194,9 +194,9 @@ jobs:
           From 12.3 Ente Saver has its own application ID (package name),
           app.entesaver; until 12.2 it was app.cloudsaver. To Android that is a
           different app, so it installs next to an earlier Ente Saver, not over
-          it. Moving is once, and takes a minute:
+          it. Moving takes a minute and is needed only once:
           1. Install this one, open it, and on the first screen tap "Restore
-             from a backup file". Choose history.json in Documents > Ente Saver.
+             from a saved file". Choose history.json in Documents › Ente Saver.
           2. Uninstall the earlier Ente Saver. The new one shows a button for it
              for as long as the earlier one is on the phone.
           Your photos, the copies waiting for Ente and your Ente account are not
@@ -207,8 +207,8 @@ jobs:
 
           Needs Android 10 or newer. Install: download ${APK_NAME} below and
           open it on your phone.
-          Play Protect may warn about a sideloaded APK - choose "More details" ->
-          "Install anyway". The app holds no INTERNET permission.
+          Play Protect may warn about an app installed from a file - choose
+          "More details" › "Install anyway". The app holds no INTERNET permission.
 
           APK SHA-256: ${APK_SHA256}
           Signing cert SHA-256: ${CERT_SHA256}

@@ -193,7 +193,7 @@ class FreeUpConsentE2eTest {
 
             // The app must say plainly that nothing went.
             compose.onNodeWithText(
-                s(R.string.reclaim_done_body, Formats.bytes(0), Formats.count(0))
+                plural(R.plurals.reclaim_done_body, 0, Formats.bytes(0), Formats.count(0))
             ).assertIsDisplayed()
             compose.onNodeWithText(
                 plural(R.plurals.reclaim_done_skipped, seeds.size, seeds.size)
@@ -261,8 +261,9 @@ class FreeUpConsentE2eTest {
             awaitText(R.string.reclaim_done_title)
 
             compose.onNodeWithText(
-                s(
-                    R.string.reclaim_done_body,
+                plural(
+                    R.plurals.reclaim_done_body,
+                    seeds.size,
                     Formats.bytes(expectedFreed),
                     Formats.count(seeds.size)
                 )
