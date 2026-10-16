@@ -6,7 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -29,7 +29,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.ShortNavigationBarItemDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -41,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -439,9 +439,17 @@ private fun MainNav(vm: AppViewModel) {
  * bottom of it. It is opaque on purpose: a see-through bar let content slide
  * under the selected pill, which read as a stray shape floating over the
  * screen. The gesture or button bar below it keeps its own inset.
+ *
+ * The bar is shaped through its own modifier, not wrapped in a Surface. Its
+ * layout gives each tab an equal share of the widest the bar may be, but
+ * never less than the narrowest it must be - and a Surface hands its whole
+ * width down as that minimum. Wrapped in one, every tab came out as wide as
+ * the bar itself and only Home was on screen, with the other three laid out
+ * beyond its right edge.
  */
 @Composable
 private fun FloatingTabBar(content: @Composable () -> Unit) {
+    val shape = RoundedCornerShape(TabBarCorner)
     Box(
         Modifier
             .fillMaxWidth()
@@ -449,21 +457,16 @@ private fun FloatingTabBar(content: @Composable () -> Unit) {
             .padding(horizontal = Dimens.Screen, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Surface(
-            modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
-            shape = RoundedCornerShape(TabBarCorner),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ShortNavigationBar(
+            modifier = Modifier
+                .widthIn(max = 480.dp)
+                .shadow(6.dp, shape)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), shape),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            shadowElevation = 6.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-        ) {
-            ShortNavigationBar(
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                content = content
-            )
-        }
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            content = content
+        )
     }
 }
 
