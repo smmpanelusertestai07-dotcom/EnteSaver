@@ -364,14 +364,14 @@ private fun headline(kind: ActivityLog.Kind, row: ActivityRow): String = when (k
         if (row.count == 0) {
             stringResource(R.string.activity_optimised_none)
         } else {
-            stringResource(R.string.activity_optimised, Formats.count(row.count), Formats.bytes(row.bytes))
+            pluralStringResource(R.plurals.activity_optimised, row.count, Formats.count(row.count), Formats.bytes(row.bytes))
         }
     ActivityLog.Kind.RELEASED ->
-        stringResource(R.string.activity_released, Formats.count(row.count))
+        pluralStringResource(R.plurals.activity_released, row.count, Formats.count(row.count))
     ActivityLog.Kind.BACKED_UP ->
-        stringResource(R.string.activity_backed_up, Formats.count(row.count))
+        pluralStringResource(R.plurals.activity_backed_up, row.count, Formats.count(row.count))
     ActivityLog.Kind.RECLAIMED ->
-        stringResource(R.string.activity_reclaimed, Formats.count(row.count), Formats.bytes(row.bytes))
+        pluralStringResource(R.plurals.activity_reclaimed, row.count, Formats.count(row.count), Formats.bytes(row.bytes))
     ActivityLog.Kind.PAUSED -> stringResource(R.string.activity_paused)
     ActivityLog.Kind.RESUMED -> stringResource(R.string.activity_resumed)
     ActivityLog.Kind.CLOUD_PROBLEM -> stringResource(R.string.activity_cloud_problem)

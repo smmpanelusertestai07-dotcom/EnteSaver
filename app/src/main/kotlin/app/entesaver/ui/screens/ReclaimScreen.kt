@@ -687,9 +687,10 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
                     // been told a number and believes it. The space figure was
                     // already counted the right way; the rest now matches it.
                     Text(
-                        stringResource(
-                            if (copiesOnly) R.string.reclaim_confirm_copies_body
-                            else R.string.reclaim_confirm_body,
+                        pluralStringResource(
+                            if (copiesOnly) R.plurals.reclaim_confirm_copies_body
+                            else R.plurals.reclaim_confirm_body,
+                            selectedEntries.size,
                             Formats.count(selectedEntries.size),
                             Formats.bytes(freed)
                         )
@@ -865,8 +866,9 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
                 // has to stay reachable, at any font size.
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        stringResource(
-                            R.string.reclaim_done_body,
+                        pluralStringResource(
+                            R.plurals.reclaim_done_body,
+                            r.done.size,
                             Formats.bytes(r.freedBytes),
                             Formats.count(r.done.size)
                         )
@@ -885,8 +887,9 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
                     val dropped = rvm.droppedAtAction
                     if (dropped.isNotEmpty()) {
                         Text(
-                            stringResource(
-                                R.string.reclaim_done_dropped,
+                            pluralStringResource(
+                                R.plurals.reclaim_done_dropped,
+                                dropped.size,
                                 dropped.size,
                                 dropped.take(3).joinToString(", ")
                             ),

@@ -114,7 +114,7 @@ class FreeUpWiringTest {
         assertTrue(reclaim.contains("FreeUpFlow.buttonWording(mode, rvm.canUndoRemoval)"))
         assertTrue(reclaim.contains("FreeUpFlow.sheetWording(mode, permanent)"))
         assertTrue(reclaim.contains("R.string.reclaim_remove_copies"))
-        assertTrue(reclaim.contains("R.string.reclaim_confirm_copies_body"))
+        assertTrue(reclaim.contains("R.plurals.reclaim_confirm_copies_body"))
     }
 
     @Test

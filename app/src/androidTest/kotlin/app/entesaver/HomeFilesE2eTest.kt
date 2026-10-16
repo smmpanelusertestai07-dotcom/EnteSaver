@@ -325,7 +325,7 @@ class HomeFilesE2eTest {
     /**
      * Taps a bottom-bar tab.
      *
-     * Not by the icon's content description: NavigationBarItem merges the
+     * Not by the icon's content description: a bar item merges the
      * icon and the label into one node, and the node that lookup lands on has
      * no touch bounds of its own - every test in this class failed with
      * "failed to inject touch input" before its first assertion. The
