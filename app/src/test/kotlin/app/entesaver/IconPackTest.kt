@@ -132,17 +132,18 @@ class IconPackTest {
 
     @Test
     fun `the pack's Ente icon is round, at the size icon packs ship`() {
-        // One PNG, unscaled (drawable-nodpi), 256 px square: crisp at the
-        // largest launcher icon size, and a launcher scales it down.
+        // One PNG, unscaled (drawable-nodpi), 512 px square: twice the
+        // largest launcher icon size, so a launcher only ever scales it down
+        // and it never looks soft, even with the icon size turned up.
         val icon = Rgba.read(File("src/main/res/drawable-nodpi/iconpack_photos.png"))
-        assertEquals(256, icon.width)
-        assertEquals(256, icon.height)
+        assertEquals(512, icon.width)
+        assertEquals(512, icon.height)
         fun alpha(x: Int, y: Int) = icon.alpha(x, y)
         // Round: clear corners, a solid disc, edge to edge but for a thin margin.
-        for ((x, y) in listOf(0 to 0, 255 to 0, 0 to 255, 255 to 255, 30 to 30, 225 to 225)) {
+        for ((x, y) in listOf(0 to 0, 511 to 0, 0 to 511, 511 to 511, 60 to 60, 450 to 450)) {
             assertEquals("corner ($x, $y) must be clear", 0, alpha(x, y))
         }
-        for ((x, y) in listOf(128 to 128, 128 to 12, 12 to 128, 243 to 128, 128 to 243)) {
+        for ((x, y) in listOf(256 to 256, 256 to 24, 24 to 256, 487 to 256, 256 to 487)) {
             assertEquals("disc ($x, $y) must be solid", 255, alpha(x, y))
         }
         val keep = File("src/main/res/raw/keep.xml").readText()
