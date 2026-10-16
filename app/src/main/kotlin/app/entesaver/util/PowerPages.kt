@@ -134,19 +134,19 @@ object PowerPages {
         // app's battery entry, which must not be the one selected.
         ID_BACKGROUND_RESTRICTION -> when (vendor) {
             Vendor.COLOR_OS ->
-                "Settings › Battery › App battery management › Ente Saver - not \"Restricted\" " +
+                "Settings › Battery › App battery management › Ente Saver — not \"Restricted\" " +
                     "(some phones: App info › Battery usage)"
-            else -> "Settings › Apps › Ente Saver › Battery (App battery usage) - Unrestricted or Optimised, not Restricted"
+            else -> "Settings › Apps › Ente Saver › Battery (App battery usage) — Unrestricted or Optimised, not Restricted"
         }
         // Android's own words for the switch changed with each version.
         ID_KEEP_PERMISSIONS -> when {
             Build.VERSION.SDK_INT >= 33 ->
-                "Settings › Apps › Ente Saver › Pause app activity if unused - off " +
+                "Settings › Apps › Ente Saver › Pause app activity if unused — off " +
                     "(Android 13 and later: under \"Unused app settings\")"
             Build.VERSION.SDK_INT >= 31 ->
-                "Settings › Apps › Ente Saver › Pause app activity if unused - off"
+                "Settings › Apps › Ente Saver › Pause app activity if unused — off"
             else ->
-                "Settings › Apps › Ente Saver › Permissions › Remove permissions if app isn't used - off"
+                "Settings › Apps › Ente Saver › Permissions › Remove permissions if app isn't used — off"
         }
         else -> null
     }

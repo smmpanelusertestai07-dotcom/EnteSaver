@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name" translatable="false">Ente Saver</string>
 
     <!-- common -->
@@ -155,12 +155,12 @@
 
     <!-- tamper evidence (13.A) -->
     <string name="tamper_title">Unofficial build of Ente Saver</string>
-    <string name="tamper_text">The signature on this copy is not the one Ente Saver is built with, so it was not built by its owner. Deleting is turned off for safety, and it stays off. The only official builds are the releases at github.com/smmpanelusertestai07-dotcom/EnteSaver \u2014 each one shows a long code that belongs to that exact file, so you can compare it with what you downloaded before you install it.</string>
+    <string name="tamper_text">This copy is not signed with Ente Saver\'s own key, so it is not an official build. Deleting is turned off for safety, and it stays off. Official builds come only from the releases at github.com/smmpanelusertestai07-dotcom/EnteSaver \u2014 each one lists a long code that belongs to that exact file, so you can compare it with the file you downloaded before you install it.</string>
 
     <!-- files -->
     <string name="files_size_pair">%1$s → %2$s</string>
     <string name="files_size_saving">%1$s → %2$s (%3$s smaller)</string>
-    <string name="files_size_waiting">%1$s - waiting</string>
+    <string name="files_size_waiting">%1$s \u2014 waiting</string>
     <string name="detail_album">Album</string>
     <string name="detail_preset">Made with</string>
     <string name="detail_photo_settings">%1$s, %2$s, quality %3$d</string>
@@ -177,8 +177,8 @@
     <string name="state_freed">Original removed</string>
     <string name="state_freed_kept">Replaced with light copy</string>
     <string name="state_unknown">Not confirmed (restored)</string>
-    <string name="evidence_confirmed_exact">Confirmed - Ente collected it</string>
-    <string name="evidence_confirmed_paced">Confirmed - sent and accounted for</string>
+    <string name="evidence_confirmed_exact">Confirmed \u2014 Ente collected it</string>
+    <string name="evidence_confirmed_paced">Confirmed \u2014 sent and accounted for</string>
     <string name="evidence_verified">Covered by how much Ente Photos uploaded</string>
     <string name="evidence_aged">Not confirmed \u2014 waiting over 10 days</string>
     <string name="evidence_none">Not confirmed yet</string>
@@ -200,11 +200,11 @@
     <string name="detail_reason">Reason</string>
     <string name="detail_original_missing">The original is no longer in the gallery.</string>
     <string name="detail_as_is">Kept unchanged</string>
-    <string name="asis_motion_photo">Motion photo - the moving part only survives in the original file</string>
-    <string name="asis_depth_photo">Portrait/depth photo - the depth data only survives in the original file</string>
-    <string name="asis_multi_picture">Multi-picture file - it holds more than one image</string>
-    <string name="asis_animated">Animated picture - only the original keeps every frame</string>
-    <string name="asis_transparency">See-through picture - only the original keeps the clear areas</string>
+    <string name="asis_motion_photo">Motion photo \u2014 the moving part only survives in the original file</string>
+    <string name="asis_depth_photo">Portrait/depth photo \u2014 the depth data only survives in the original file</string>
+    <string name="asis_multi_picture">Multi-picture file \u2014 it holds more than one image</string>
+    <string name="asis_animated">Animated picture \u2014 only the original keeps every frame</string>
+    <string name="asis_transparency">See-through picture \u2014 only the original keeps the clear areas</string>
     <string name="asis_format">This format is kept as it is</string>
     <string name="asis_already_small">Already small enough</string>
     <string name="asis_not_smaller">Optimising would not have made it smaller</string>
@@ -263,7 +263,7 @@
     <string name="activity_recovered">Records restored from the daily safety copy</string>
     <string name="activity_removed_early">%1$s kept disappearing before upload</string>
     <string name="activity_pending_repaired">Finished light copies that an interrupted run left incomplete</string>
-    <string name="activity_reclaim_skipped">%1$s was left alone - Ente Saver could not confirm it was safe</string>
+    <string name="activity_reclaim_skipped">%1$s was left alone \u2014 Ente Saver could not confirm it was safe</string>
     <string name="activity_restore_unmatched">%1$s came back from the trash, but Ente Saver could not match it to its record. It may be optimised again.</string>
     <string name="activity_reclaim_unrecorded">Ente Saver could not add the last batch to Recently freed up.</string>
     <string name="activity_cloud_ok">Ente Photos is uploading again</string>
@@ -287,7 +287,7 @@
     <string name="volume_active_mark">(in use)</string>
     <string name="volume_missing_warning">The chosen SD card is not available. Ente Saver paused safely.</string>
     <string name="volume_use_phone">Use phone storage instead</string>
-    <string name="volume_sd_note">SD cards are slower and removable - if the SD card is removed, Ente Saver pauses safely.</string>
+    <string name="volume_sd_note">SD cards are slower and removable \u2014 if the SD card is removed, Ente Saver pauses safely.</string>
     <string name="storage_temp_title">Leftover work files</string>
     <string name="storage_temp_text">Half-finished files left behind when a run was interrupted. They are not needed and nothing of yours is lost by clearing them. A file Ente Saver is writing right now is left alone, so clearing during a run may not free all of it.</string>
     <string name="storage_temp_cleared">Cleared %1$s.</string>
@@ -320,7 +320,7 @@
     <string name="compare_original">Original</string>
     <string name="compare_optimised">Optimised</string>
     <string name="compare_keep_this">Keep this one</string>
-    <string name="compare_hint">Drag to compare. Check a few before removing a batch - your eyes are the only test that matters here.</string>
+    <string name="compare_hint">Drag to compare. Check a few before removing a batch \u2014 your eyes are the only test that matters here.</string>
     <string name="compare_in_cloud">This copy is already in Ente and no longer on the phone, so there is nothing to show side by side. The recorded sizes are below.</string>
     <string name="reclaim_no_trash_here">This phone runs Android 10, which has no gallery trash. Removing an original here cannot be undone, and Android will ask you to confirm each file separately.</string>
     <string name="reclaim_no_internet">Ente Saver has no internet permission, so it can never bring a file back from Ente. Only Ente Photos can download it again.</string>
@@ -375,8 +375,8 @@
     </plurals>
     <string name="reclaim_done_trash">You can restore them from your gallery\'s trash for 30 days.</string>
     <plurals name="reclaim_done_skipped">
-        <item quantity="one">%1$d was left alone - see Activity for why.</item>
-        <item quantity="other">%1$d were left alone - see Activity for why.</item>
+        <item quantity="one">%1$d was left alone \u2014 see Activity for why.</item>
+        <item quantity="other">%1$d were left alone \u2014 see Activity for why.</item>
     </plurals>
     <string name="reclaim_history_open">Recently freed up</string>
     <string name="sort_oldest">Oldest</string>
@@ -462,7 +462,7 @@
         <item quantity="other">%1$d files · %2$s freed</item>
     </plurals>
     <string name="history_trashed">In your gallery\'s trash until %1$s</string>
-    <string name="history_permanent">Deleted permanently - cannot be restored</string>
+    <string name="history_permanent">Deleted permanently \u2014 cannot be restored</string>
     <string name="history_restore">Restore these</string>
     <string name="history_trash_emptied">Android emptied its trash of these on %1$s</string>
     <string name="history_unknown">Check your gallery\'s trash</string>
@@ -628,15 +628,15 @@
     <string name="wait_charger">Waiting for charger (Charging only mode)</string>
     <string name="wait_battery">Waiting: battery below %1$d%%</string>
     <string name="wait_screen">Waiting: will start when the screen has been off a couple of minutes</string>
-    <string name="wait_budget">Waiting: today\'s battery budget used - plug in to continue (resets at midnight)</string>
-    <string name="wait_photo_cap">Waiting: daily photo limit on battery reached - plug in to continue</string>
-    <string name="wait_space_full">Waiting: the copies folder has reached the space you allowed - it clears as copies are collected or removed</string>
+    <string name="wait_budget">Waiting: today\'s battery budget used \u2014 plug in to continue (resets at midnight)</string>
+    <string name="wait_photo_cap">Waiting: daily photo limit on battery reached \u2014 plug in to continue</string>
+    <string name="wait_space_full">Waiting: the copies folder has reached the space you allowed \u2014 it clears as copies are collected or removed</string>
     <string name="wait_low_space">Waiting: the phone is below the free space you asked Ente Saver to keep</string>
     <string name="wait_long_videos">Waiting: long videos finish while Ente Saver is open, or in the background once the battery is set to Unrestricted</string>
     <string name="wait_next_too_big">Waiting: the next files need more room than the phone has above the free space Ente Saver keeps</string>
     <string name="wait_videos_charging">Waiting for charger: on this phone videos are made only while charging</string>
     <string name="wait_volume_missing">Waiting: the storage location you chose is not available right now</string>
-    <string name="wait_earlier_app">Waiting: the earlier Ente Saver is still on this phone - remove it first, as the card above says</string>
+    <string name="wait_earlier_app">Waiting: the earlier Ente Saver is still on this phone \u2014 remove it first, as the card above says</string>
     <string name="opt_daily_cap">Daily limit for new copies</string>
     <string name="opt_daily_cap_hint">How much Ente Saver adds to the upload folder each day.</string>
     <string name="unlimited">Unlimited</string>
@@ -775,7 +775,7 @@
     <string name="perm_bucket_detail">Android decides this from how often the app is opened. Nothing to set; it is shown so a slow week has an explanation.</string>
     <string name="perm_group_ledger">What Ente Saver holds</string>
     <string name="perm_ledger_intro">Every permission in the app as installed, read from the phone itself rather than promised here, with what it is for and whether it is held right now. The only place to grant or take one back is the phone\u2019s own settings.</string>
-    <string name="perm_ledger_summary">%1$d of %2$d held \u00b7 %3$d of them yours to take back</string>
+    <string name="perm_ledger_summary" tools:ignore="PluralsCandidate">%1$d of %2$d held \u00b7 %3$d of them yours to take back</string>
     <string name="perm_ledger_show">Show the full list</string>
     <string name="perm_ledger_hide">Hide the list</string>
     <string name="perm_never_asked_title">Never asked for</string>
@@ -843,14 +843,14 @@
     <string name="opt_transfer">Save and restore settings</string>
     <string name="opt_transfer_hint">Save your settings and file history to a file, protected with a password.</string>
     <string name="backup_password_title">Protect this file</string>
-    <string name="backup_password_body">The file is encrypted on this device with your password. Anyone who gets the file - including a cloud provider - cannot read it without that password.</string>
+    <string name="backup_password_body">The file is encrypted on this device with your password. Anyone who gets the file \u2014 including a cloud provider \u2014 cannot read it without that password.</string>
     <string name="backup_password_label">Password</string>
     <string name="backup_password_confirm">Repeat password</string>
     <string name="backup_password_short">Use at least 8 characters.</string>
     <string name="backup_password_mismatch">The two passwords do not match.</string>
     <string name="backup_password_skip">Save without a password</string>
     <string name="backup_password_lost_warning">There is no recovery: lose the password and the file cannot be opened.</string>
-    <string name="backup_strength_weak">Weak password - add length or a number.</string>
+    <string name="backup_strength_weak">Weak password \u2014 add length or a number.</string>
     <string name="backup_strength_fair">Good password.</string>
     <string name="backup_strength_strong">Strong password.</string>
     <string name="restore_password_title">Enter the file\u2019s password</string>
@@ -930,7 +930,7 @@
     </plurals>
     <string name="albums_sheet_done">Done</string>
     <string name="onb_start">Get started</string>
-    <string name="onb_done_next">Done, next</string>
+    <string name="onb_done_next">Continue</string>
     <string name="onb_next">Next</string>
     <string name="onb0_title">Welcome!</string>
     <string name="onb0_text">Ente Saver makes light copies of your photos and videos in one folder. Ente Photos backs up that folder, and your originals stay exactly where they are.</string>
@@ -974,7 +974,7 @@
     <string name="folder_pick_one">In Ente Photos, back up only this folder:</string>
     <string name="folder_pick_two">In Ente Photos, back up only these folders:</string>
     <string name="promise_exact">Ente Photos\u2019 Free up device space removes the copies it has backed up, and Ente skips duplicates, so confirmation is exact and a re-sent file never becomes a second copy.</string>
-    <string name="link_connected">Looks connected - Ente Photos is installed, the folder has files, and it has been uploading.</string>
+    <string name="link_connected">Looks connected \u2014 Ente Photos is installed, the folder has files, and it has been uploading.</string>
     <string name="link_no_app">Ente Photos is not installed. Install it with one of the buttons above.</string>
     <string name="link_no_folder">The upload folder is still empty. Come back after Ente Saver has optimised its first files.</string>
     <string name="link_no_traffic">Ente Photos has not uploaded anything in the last day. Open it and check the folder is selected and backup is on.</string>
@@ -1035,7 +1035,7 @@
     <string name="about_text">Works entirely on your phone. No account, no ads, and no internet permission at all.</string>
 
 
-    <string name="licenses_text" translatable="false">This app uses open-source libraries:\n\n• AndroidX (Compose, Room, WorkManager, DataStore, ExifInterface, HeifWriter, Biometric, Navigation, Lifecycle, Core, AppCompat) - Apache License 2.0\n• AndroidX Media3 (Transformer, Effect, Muxer, Common) - Apache License 2.0\n• Kotlin Standard Library and kotlinx.coroutines - Apache License 2.0\n• Material Symbols icons (Google) - Apache License 2.0\n\nApache License 2.0: http://www.apache.org/licenses/LICENSE-2.0</string>
+    <string name="licenses_text" translatable="false">This app uses open-source libraries:\n\n• AndroidX (Compose, Room, WorkManager, DataStore, ExifInterface, HeifWriter, Biometric, Navigation, Lifecycle, Core, AppCompat) \u2014 Apache License 2.0\n• AndroidX Media3 (Transformer, Effect, Muxer, Common) \u2014 Apache License 2.0\n• Kotlin Standard Library and kotlinx.coroutines \u2014 Apache License 2.0\n• Material Symbols icons (Google) \u2014 Apache License 2.0\n\nApache License 2.0: https://www.apache.org/licenses/LICENSE-2.0</string>
 
     <!-- quality page -->
     <string name="quality_explained_title">Quality explained</string>
@@ -1049,9 +1049,9 @@
     <string name="quality_table_title">What to expect on Balanced</string>
     <string name="quality_table_note">These figures are for Balanced, the setting every install starts with. Best keeps more detail and saves less; Smallest saves more \u2014 the summary above changes with your choice, this table does not.</string>
     <string name="quality_row1_k">1080p video</string>
-    <string name="quality_row1_v" formatted="false">60-75% smaller, looks the same</string>
+    <string name="quality_row1_v" formatted="false">60\u201375% smaller, looks the same</string>
     <string name="quality_row2_k">4K video saved as 1080p</string>
-    <string name="quality_row2_v" formatted="false">75-85% smaller</string>
+    <string name="quality_row2_v" formatted="false">75\u201385% smaller</string>
     <string name="quality_row3_k">12 MP photo</string>
     <string name="quality_row3_v" formatted="false">About 30% smaller, no visible difference</string>
     <string name="quality_row4_k">Photo over 16 MP</string>
@@ -1066,7 +1066,7 @@
     <string name="channel_working">Working</string>
     <string name="channel_working_desc">A quiet, ongoing note while files are being optimised.</string>
     <string name="channel_alerts">Alerts</string>
-    <string name="channel_alerts_desc">Rare - only when something needs you.</string>
+    <string name="channel_alerts_desc">Rare \u2014 only when something needs you.</string>
     <string name="notif_mute_7_days">Mute for 7 days</string>
     <string name="notif_working_title">Ente Saver is working</string>
     <string name="notif_working_text">Making light copies\u2026</string>
@@ -1096,7 +1096,7 @@
     </plurals>
     <string name="biggest_after">about %1$s after</string>
     <string name="list_optimise_these_first">Optimise these first</string>
-    <string name="bulk_optimise_of">Optimise %1$d of %2$d selected</string>
+    <string name="bulk_optimise_of" tools:ignore="PluralsCandidate">Optimise %1$d of %2$d selected</string>
     <plurals name="bulk_hidden_note">
         <item quantity="one">%1$d more is still ticked but hidden by the filters above.</item>
         <item quantity="other">%1$d more are still ticked but hidden by the filters above.</item>
@@ -1174,7 +1174,7 @@
     <string name="list_sort_saved">Most saved</string>
     <string name="list_exit_selection">Stop selecting</string>
     <string name="list_select">Select</string>
-    <string name="list_selected_count">%1$d selected</string>
+    <string name="list_selected_count" tools:ignore="PluralsCandidate">%1$d selected</string>
     <string name="list_select_all_matching">Select all (%1$d)</string>
     <string name="list_deselect_all">Deselect all</string>
     <string name="list_filtered_empty">Nothing matches these filters.</string>
