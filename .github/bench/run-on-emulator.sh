@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # One shard of the savings benchmark, inside a booted emulator: fill the
 # gallery with the shard's library, run SavingsBenchTest over it, pull the
-# results. Called by .github/workflows/savings-bench.yml with the shard number.
+# results and the copies it kept for grading (quality.py). Called by
+# .github/workflows/savings-bench.yml with the shard number.
 set -uo pipefail
 SHARD=${1:?usage: run-on-emulator.sh <shard>}
 LIB=bench-library
 OUT=bench-out
+KEEP=bench-keep
 PKG=app.entesaver
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$KEEP"
 
 adb wait-for-device
 adb shell settings put global hide_error_dialogs 1
@@ -66,21 +68,43 @@ fi
 echo "MediaStore lists $n of $expected videos"
 echo "::endgroup::"
 
+# The files whose copies are kept for grading, one name per line, handed
+# over as base64url: names with spaces and brackets reach the test as they
+# are, through every shell on the way.
+keep=()
+if [ -s "$LIB-keep.txt" ]; then
+  keep=(-e keep "$(base64 -w0 < "$LIB-keep.txt" | tr '+/' '-_' | tr -d '=')")
+  echo "Keeping the copies of $(wc -l < "$LIB-keep.txt") videos for grading"
+fi
+
 echo "::group::Run the benchmark"
 adb logcat -c || true
 # Bounded below the job's own limit: the results are written line by line,
-# so a run that is cut short still leaves everything it measured to pull.
-timeout 7800 adb shell am instrument -w -r \
+# so a run that is cut short still leaves everything it measured to pull,
+# and the grading after it still has time.
+timeout 7200 adb shell am instrument -w -r \
   -e class app.entesaver.SavingsBenchTest \
   -e savingsBench true \
   -e expected "$expected" \
+  ${keep[@]+"${keep[@]}"} \
   "$PKG.test/androidx.test.runner.AndroidJUnitRunner" | tee "$OUT/instrument-shard$SHARD.txt"
 echo "::endgroup::"
 
 adb exec-out run-as "$PKG" cat files/savings/savings.csv > "$OUT/savings-shard$SHARD.csv"
 adb exec-out run-as "$PKG" cat files/savings/device.txt > "$OUT/device-shard$SHARD.txt"
 adb logcat -d > "$OUT/logcat-shard$SHARD.txt" 2> /dev/null || true
+
+# The kept copies, out of the app's private files the same way (the debug
+# build lets run-as read them; no root). The test names them in characters
+# that need no quoting.
+echo "::group::Pull the copies kept for grading"
+for f in $(adb exec-out run-as "$PKG" ls files/savings/keep 2> /dev/null | tr -d '\r'); do
+  adb exec-out run-as "$PKG" cat "files/savings/keep/$f" > "$KEEP/$f" || echo "::warning::Could not pull $f"
+done
+ls -l "$KEEP"
+echo "::endgroup::"
+
 lines=$(($(wc -l < "$OUT/savings-shard$SHARD.csv") - 1))
-echo "Measured $lines of $expected videos"
+echo "Measured $lines of $expected videos; pulled $(find "$KEEP" -type f | wc -l) copies for grading"
 cat "$OUT/device-shard$SHARD.txt"
 [ "$lines" -ge 1 ] || { echo "::error::The benchmark wrote no results"; exit 1; }
