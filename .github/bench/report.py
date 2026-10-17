@@ -112,7 +112,12 @@ def main():
             outcome = "kept as it was (" + m["kept_reason"] + ")" if m["kept_reason"] else "made smaller"
         else:
             after = before
-            outcome = "not measured" if not m else "failed: " + (m["skip_reason"] or m["error"] or state)
+            if not m and row.get("in_gallery") == "0":
+                outcome = "not in the gallery (.nomedia)"
+            elif not m:
+                outcome = "not measured"
+            else:
+                outcome = "failed: " + (m["skip_reason"] or m["error"] or state)
         reencoded = bool(m) and state == "STAGED" and not m["kept_reason"]
         # How far the encoder landed from the bitrate the app asked of it,
         # measured on this file: carried over to the HEVC estimate.
@@ -164,16 +169,23 @@ def main():
     for d in devices[:1]:
         lines.append(f"- Emulator: {d.get('model')} API {d.get('sdk')}, RAM {int(d.get('ram_bytes', 0)) / GB:.1f} GB, "
                      f"tier {d.get('tier')}, HEVC chip {d.get('hevc_hardware_1080p30')}")
-    lines.append("")
-    lines.append("| Kind of video | Videos | Before GB | After GB (H.264) | Saved | After GB (HEVC est.) | Saved |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|")
-    for label, sel in groups.items():
-        gb, ga = totals(sel)
-        _, gh = totals(sel, "after_hevc")
-        pct = lambda x: f"{100 * (gb - x) / gb:.0f}%" if gb else "-"
-        lines.append(f"| {label} | {len(sel)} | {gb / GB:.2f} | {ga / GB:.2f} | {pct(ga)} | {gh / GB:.2f} | {pct(gh)} |")
-    lines.append(f"| **All** | {len(files)} | {b / GB:.2f} | {af / GB:.2f} | {100 * (b - af) / b:.0f}% | "
-                 f"{ah / GB:.2f} | {100 * (b - ah) / b:.0f}% |")
+    broad = OrderedDict()
+    for f in files:
+        broad.setdefault(f["row"]["group"], []).append(f)
+    for title, table in (("Where the videos came from", broad), ("Every kind of video", groups)):
+        lines.append("")
+        lines.append(f"### {title}")
+        lines.append("")
+        lines.append("| Kind of video | Videos | Before GB | After GB (H.264) | Saved | After GB (HEVC est.) | Saved |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|")
+        for label, sel in table.items():
+            gb, ga = totals(sel)
+            _, gh = totals(sel, "after_hevc")
+            pct = lambda x: f"{100 * (gb - x) / gb:.0f}%" if gb else "-"
+            lines.append(f"| {label} | {len(sel)} | {gb / GB:.2f} | {ga / GB:.2f} | {pct(ga)} | {gh / GB:.2f} | "
+                         f"{pct(gh)} |")
+        lines.append(f"| **All** | {len(files)} | {b / GB:.2f} | {af / GB:.2f} | {100 * (b - af) / b:.0f}% | "
+                     f"{ah / GB:.2f} | {100 * (b - ah) / b:.0f}% |")
     lines.append("")
     lines.append("### The 20-minute limit (a video that cannot be encoded in 20 minutes is kept as it is)")
     lines.append("")
@@ -204,11 +216,11 @@ def main():
         fh.write("\n".join(lines) + "\n")
     with open(os.path.join(a.out, "per-file.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["name", "kind", "folder", "real_minutes", "width", "height", "fps", "codec", "video_kbps",
+        w.writerow(["name", "group", "kind", "folder", "real_minutes", "width", "height", "fps", "codec", "video_kbps",
                     "before_mb", "after_mb_h264", "after_mb_hevc_estimate", "outcome"])
         for f in files:
             r = f["row"]
-            w.writerow([f["name"], r["label"], r["folder"], f"{f['real_s'] / 60:.2f}", r["width"], r["height"],
+            w.writerow([f["name"], r["group"], r["label"], r["folder"], f"{f['real_s'] / 60:.2f}", r["width"], r["height"],
                         r["fps"], r["codec"], r["video_kbps"], f"{f['before'] / 1e6:.1f}", f"{f['after'] / 1e6:.1f}",
                         f"{f['after_hevc'] / 1e6:.1f}", f["outcome"]])
     with open(os.path.join(a.out, "summary.json"), "w") as fh:

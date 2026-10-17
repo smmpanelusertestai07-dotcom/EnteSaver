@@ -14,8 +14,10 @@ adb shell settings put global hide_error_dialogs 1
 adb install -r -g app-debug.apk
 adb install -r -g app-debug-androidTest.apk
 
-expected=$(find "$LIB" -type f | wc -l)
-echo "::group::Fill the gallery ($expected videos)"
+# Files in a folder with a .nomedia (WhatsApp's Sent) are on the phone but
+# in no gallery; the library says how many the gallery should list.
+expected=$(cat "$LIB-in-gallery.txt")
+echo "::group::Fill the gallery ($(find "$LIB" -type f ! -name .nomedia | wc -l) videos, $expected in the gallery)"
 # One push per top folder: a push into a folder that already exists merges
 # into it, so DCIM/Camera lands beside whatever DCIM the image has.
 for top in "$LIB"/*; do

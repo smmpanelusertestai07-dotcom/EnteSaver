@@ -2,18 +2,22 @@
 """The savings benchmark's video library: one ordinary phone's worth of videos.
 
 Every kind of video is described once, in PROFILES: where Android keeps it,
-its resolution, frame rate, codec and bitrate, and how long such videos run.
-A fixed seed draws the library from that - the same files on every run - and
-sizes it to LIBRARY_GB.
+its resolution, rotation, frame rate, codec, bitrate and sound, and how long
+such videos run. The numbers are a Realme 11 Pro 5G's own camera where they
+have been measured (1080p30 H.264 at 20 Mbps, 4K at 50 Mbps, AAC at 256 kbps)
+and what WhatsApp, Instagram, YouTube downloaders, the screen recorder and
+Telegram actually write; the rest are estimates, marked in the table. A fixed
+seed draws the library from it - the same files on every run - and sizes it
+to LIBRARY_GB.
 
 The files themselves are made shorter than the videos they stand for (gen_s
-against real_s), so three emulators can get through the whole library in one
-CI run. Everything the app decides by - resolution, rotation, frame rate,
-codec, bitrate, audio - is the real video's, and at a fixed bitrate a file's
-size grows in step with its length, so report.py can put each measured result
-back at the real length. The picture is a moving test pattern under sensor-
-like noise, so an encoder has to spend real bits on it, as it would on a
-camera's; a screen recording of menus gets less noise, as it would.
+against real_s), so three emulators get through the whole library in one CI
+run. Everything the app decides by - resolution, rotation, frame rate, codec,
+bitrate, sound, container - is the real video's, and at a fixed bitrate a
+file's size grows in step with its length, so report.py can put each measured
+result back at the real length. The picture is a moving test pattern under
+sensor-like noise, so an encoder has to spend real bits on it, as it would on
+a camera's; a screen recording of menus gets little noise, as it would.
 
   library.py manifest --out manifest.csv
   library.py make --shard 0 --shards 3 --out bench-library
@@ -33,120 +37,172 @@ SEED = 20231016
 # A made file is this share of the real video's length, but never shorter
 # than MIN_S or longer than MAX_S.
 SCALE, MIN_S, MAX_S = 0.08, 3.0, 12.0
-# A constant-bitrate H.264 or HEVC stream comes out a few percent over the
-# rate it was asked for (headers, the HRD's padding); sizing the library on
-# the asked-for rate alone would overshoot LIBRARY_GB by that much.
-OVERHEAD = 1.065
+# x264's constant-bitrate mode lands a few percent over the asked-for rate on
+# clips this short (the first keyframe, the HRD's padding); asking for this
+# share of it lands on the real rate. x265's strict CBR lands on it as asked.
+X264_ASK = 0.95
+# Real files are not all at one rate: each is drawn within this much of its
+# profile's.
+SPREAD = 0.15
 
-WA = "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video"
-TG = "Android/media/org.telegram.messenger/Telegram/Telegram Video"
+WA = "Android/media/com.whatsapp/WhatsApp/Media"
 
 
-def P(pid, label, folder, count, dur, size, fps, codec, vkbps, akbps, names, portrait=0.0, noise=20,
-      channels=2, rate=48000):
+def P(pid, group, label, folder, count, dur, size, fps, codec, vkbps, akbps, names, rot=(), landscape=0.0,
+      noise=20, channels=2, rate=48000, container="mp4", exact30=0.0, hidden=False):
+    """One kind of video. dur is (shortest, mean, longest) in seconds; size is
+    width x height as stored; rot lists (rotation, share) for the files a
+    camera tags as turned; landscape is the share of a portrait profile whose
+    pixels are stored the other way round; hidden folders carry a .nomedia,
+    as the app that writes them leaves one, so no gallery - Ente Saver's
+    included - ever sees what is in them."""
     w, h = size
-    return dict(id=pid, label=label, folder=folder, count=count, dur=dur, width=w, height=h, fps=fps,
-                codec=codec, video_kbps=vkbps, audio_kbps=akbps, names=names, portrait=portrait, noise=noise,
-                channels=channels, sample_rate=rate)
+    return dict(id=pid, group=group, label=label, folder=folder, count=count, dur=dur, width=w, height=h,
+                fps=fps, codec=codec, video_kbps=vkbps, audio_kbps=akbps, names=names, rot=rot,
+                landscape=landscape, noise=noise, channels=channels, sample_rate=rate, container=container,
+                exact30=exact30, hidden=hidden)
 
 
-# width x height as stored. A camera stores a portrait clip as landscape
-# pixels with a rotation tag (portrait = the share filmed upright); WhatsApp,
-# reels and downloads store portrait pixels as they are.
+CAM, WAG, SHORT, YT, SCREEN, TG = ("Camera", "WhatsApp", "Reels and short videos", "YouTube downloads",
+                                   "Screen recordings", "Telegram")
+
+# [E] marks an estimate; everything else was measured or is documented.
 PROFILES = [
-    # Realme 11 Pro 5G rear camera, default 1080p 30 fps, H.264.
-    P("cam1080", "Camera 1080p 30fps", "DCIM/Camera", 150, (6, 45, 600), (1920, 1080), 30, "h264", 17000, 128,
-      "camera", portrait=0.7),
-    P("cam1080_60", "Camera 1080p 60fps", "DCIM/Camera", 22, (8, 40, 300), (1920, 1080), 60, "h264", 25000, 128,
-      "camera", portrait=0.5),
-    P("cam4k", "Camera 4K 30fps", "DCIM/Camera", 14, (8, 50, 240), (3840, 2160), 30, "h264", 45000, 128,
-      "camera", portrait=0.4),
-    P("slowmo", "Camera slow motion 120fps", "DCIM/Camera", 6, (4, 10, 30), (1920, 1080), 120, "h264", 40000, 128,
-      "camera", portrait=0.3),
-    P("front", "Front camera 1080p", "DCIM/Camera", 20, (5, 30, 180), (1920, 1080), 30, "h264", 14000, 128,
-      "camera", portrait=1.0),
-    P("cam_long", "Long family videos (functions)", "DCIM/Camera", 4, (900, 1500, 2400), (1920, 1080), 30, "h264",
-      17000, 128, "camera", portrait=0.5),
-    # Received and saved from apps: already compressed by whoever sent them.
-    P("wa", "WhatsApp videos", WA, 170, (5, 40, 300), (480, 848), 30, "h264", 1100, 64, "whatsapp", noise=14,
-      channels=1, rate=44100),
-    P("wa_hd", "WhatsApp HD videos", WA, 30, (5, 45, 240), (720, 1280), 30, "h264", 2600, 96, "whatsapp",
-      noise=14),
-    P("status", "WhatsApp status saves", "Pictures/Status Saver", 30, (8, 25, 30), (720, 1280), 30, "h264",
-      1600, 64, "status", noise=14),
-    P("reels", "Instagram reels (saved)", "Movies/Instagram", 40, (8, 30, 90), (1080, 1920), 30, "h264", 3500, 128,
-      "instagram", noise=14),
-    P("shorts", "Moj / ShareChat / Shorts downloads", "Download", 18, (8, 25, 60), (720, 1280), 30, "h264", 2000,
-      96, "download", noise=14),
-    P("yt720", "YouTube / Snaptube downloads 720p", "Download/Snaptube", 6, (240, 600, 1500), (1280, 720), 30,
-      "h264", 2200, 128, "download", noise=10),
-    P("screen_game", "Screen recordings (games)", "DCIM/Screenrecorder", 6, (120, 480, 1200), (1080, 2400), 60,
-      "h264", 16000, 128, "screen", noise=12),
-    P("screen", "Screen recordings (apps)", "DCIM/Screenrecorder", 8, (20, 90, 300), (1080, 2400), 30, "h264",
-      8000, 128, "screen", noise=2),
-    P("movie", "Telegram movie downloads", TG, 2, (6000, 8100, 9000), (1280, 720), 24, "hevc", 1100, 128,
-      "telegram", noise=10),
+    # Realme 11 Pro 5G rear camera, default 1080p30 H.264, 20 Mbps, AAC 256k.
+    P("cam_1080p30", CAM, "Camera 1080p 30fps (default)", "DCIM/Camera", 115, (3, 37, 300), (1920, 1080), 30,
+      "h264", 20000, 256, "camera", rot=((90, 0.75),)),
+    # Weddings, pujas, birthdays, school functions [E: lengths].
+    P("cam_long", CAM, "Long function videos", "DCIM/Camera", 9, (300, 660, 1500), (1920, 1080), 30, "h264",
+      20000, 256, "camera", rot=((90, 0.4),)),
+    P("cam_4k", CAM, "Camera 4K 30fps", "DCIM/Camera", 12, (5, 40, 180), (3840, 2160), 30, "h264", 50000, 256,
+      "camera"),
+    P("cam_1080p60", CAM, "Camera 1080p 60fps", "DCIM/Camera", 10, (5, 30, 120), (1920, 1080), 60, "h264",
+      30000, 256, "camera"),  # [E: bitrate]
+    P("cam_slowmo", CAM, "Camera slow motion 1080p 120fps", "DCIM/Camera", 6, (3, 12, 30), (1920, 1080), 120,
+      "h264", 40000, 256, "camera", rot=((90, 1.0),)),  # [E: bitrate]
+    P("cam_front", CAM, "Front camera 1080p", "DCIM/Camera", 25, (3, 30, 180), (1920, 1080), 30, "h264", 20000,
+      256, "camera", rot=((270, 1.0),)),  # [E: bitrate]
+    # WhatsApp: 480p standard, 720p HD [E: bitrates].
+    P("wa_sd", WAG, "WhatsApp videos (standard)", WA + "/WhatsApp Video", 135, (3, 45, 600), (480, 848), 30,
+      "h264", 1200, 96, "whatsapp", landscape=0.4, noise=14, rate=44100, exact30=0.15),
+    P("wa_hd", WAG, "WhatsApp videos (HD)", WA + "/WhatsApp Video", 35, (3, 40, 300), (720, 1280), 30, "h264",
+      2500, 128, "whatsapp", landscape=0.4, noise=14, rate=44100, exact30=0.15),
+    # WhatsApp keeps a .nomedia in Sent, so these are on the phone but in no gallery.
+    P("wa_sent", WAG, "WhatsApp sent copies", WA + "/WhatsApp Video/Sent", 25, (3, 30, 180), (480, 848), 30,
+      "h264", 1200, 96, "whatsapp", landscape=0.4, noise=14, rate=44100, hidden=True),
+    P("wa_status", WAG, "Saved WhatsApp statuses", "Pictures/Status Saver", 25, (5, 30, 90), (720, 1280), 30,
+      "h264", 2000, 128, "status", noise=14, rate=44100, exact30=0.15),
+    # Originals sent as documents are not recompressed: an iPhone's 1080p HEVC.
+    P("wa_docs_iphone", WAG, "iPhone videos sent as documents", WA + "/WhatsApp Documents", 8, (30, 180, 600),
+      (1920, 1080), 30, "hevc", 7800, 160, "iphone", rot=((90, 1.0),), noise=18, rate=44100, container="mov"),
+    P("reels", SHORT, "Instagram reels (saved in the app)", "Movies/Instagram", 30, (6, 25, 180), (720, 1280),
+      30, "h264", 3000, 128, "instagram", noise=14, rate=44100),  # [E: bitrate]
+    P("short_dl", SHORT, "Reels / Shorts / Moj / ShareChat downloads", "Download", 25, (6, 22, 60),
+      (720, 1280), 30, "h264", 1400, 72, "short", noise=14),
+    P("yt_720", YT, "YouTube downloads 720p (Snaptube)", "snaptube/download/SnapTube Video", 12,
+      (120, 600, 3600), (1280, 720), 30, "h264", 1300, 128, "youtube", noise=10, rate=44100),
+    # realme's recorder at its native size [E: size, bitrate, folder].
+    P("screen_apps", SCREEN, "Screen recordings (apps, calls)", "DCIM/Screenshots", 8, (10, 90, 600),
+      (1080, 2412), 30, "h264", 10000, 128, "screen", noise=2),
+    P("screen_games", SCREEN, "Screen recordings (games)", "DCIM/Screenshots", 5, (120, 600, 1800),
+      (2412, 1080), 30, "h264", 10000, 128, "screen", noise=12),
+    P("tg_episodes", TG, "Telegram web-series episodes 720p", "Download/Telegram", 6, (2100, 2580, 3300),
+      (1280, 720), 23.976, "h264", 1000, 128, "episode", noise=10),  # [E: bitrate]
+    P("tg_movies", TG, "Telegram movies 720p HEVC", "Download/Telegram", 2, (7800, 9000, 10200), (1280, 536),
+      23.976, "hevc", 900, 128, "movie", noise=10),  # [E: bitrate]
 ]
 
 
+def durations(p, rng):
+    """A profile's lengths: log-normal between its shortest and longest,
+    averaging its mean, with WhatsApp's share of clips cut at 30 s."""
+    lo, mean, hi = p["dur"]
+    sigma = math.log(hi / lo) / 5
+    d = [min(max(mean * math.exp(rng.gauss(0, sigma)), lo), hi) for _ in range(p["count"])]
+    for _ in range(4):
+        k = mean / (sum(d) / len(d))
+        d = [min(max(x * k, lo), hi) for x in d]
+    for i in range(len(d)):
+        if lo <= 30 <= hi and rng.random() < p["exact30"]:
+            d[i] = 30.0
+    return d
+
+
 def draw():
-    """The library: every file's kind, real length, name and place, from SEED."""
+    """The library: every file's kind, real length, bitrate, name and place."""
     rng = random.Random(SEED)
     start = datetime.datetime(2023, 7, 1)
     files = []
     for p in PROFILES:
-        lo, typ, hi = p["dur"]
-        sigma = math.log(hi / lo) / 5
-        for i in range(p["count"]):
-            real = min(max(typ * math.exp(rng.gauss(0, sigma)), lo), hi)
-            when = start + datetime.timedelta(seconds=rng.randrange(0, 820 * 86400))
-            files.append(dict(p=p, i=i, real_s=real, when=when, rot=90 if rng.random() < p["portrait"] else 0,
+        for i, real in enumerate(durations(p, rng)):
+            rot = 0
+            r = rng.random()
+            for angle, share in p["rot"]:
+                if r < share:
+                    rot = angle
+                    break
+                r -= share
+            w, h = p["width"], p["height"]
+            if rng.random() < p["landscape"]:
+                w, h = h, w
+            files.append(dict(p=p, i=i, real_s=real, width=w, height=h, rot=rot,
+                              video_kbps=round(p["video_kbps"] * rng.uniform(1 - SPREAD, 1 + SPREAD)),
+                              when=start + datetime.timedelta(seconds=rng.randrange(0, 820 * 86400)),
                               n=rng.randrange(1000, 9999)))
-    # Lengths scaled together so the library adds up to LIBRARY_GB.
-    total = sum((f["p"]["video_kbps"] + f["p"]["audio_kbps"]) * 1000 * OVERHEAD / 8 * f["real_s"] for f in files)
+    total = sum((f["video_kbps"] + f["p"]["audio_kbps"]) * 1000 / 8 * f["real_s"] for f in files)
     k = LIBRARY_GB * 1e9 / total
     seen = set()
     for idx, f in enumerate(files):
-        p = f["p"]
-        lo, _, hi = p["dur"]
-        f["real_s"] = round(min(max(f["real_s"] * k, lo), hi * 1.25), 1)
+        f["real_s"] = round(f["real_s"] * k, 1)
         f["gen_s"] = round(min(max(f["real_s"] * SCALE, MIN_S), MAX_S), 1)
-        name = name_for(p["names"], f, idx)
-        while name in seen:
+        name = name_for(f["p"]["names"], f, idx)
+        while name.lower() in seen:
             f["when"] += datetime.timedelta(seconds=1)
-            name = name_for(p["names"], f, idx)
-        seen.add(name)
+            f["n"] += 1
+            name = name_for(f["p"]["names"], f, idx)
+        seen.add(name.lower())
         f["name"] = name
         f["seed"] = idx + 1
     return files
 
 
 def name_for(style, f, idx):
-    t = f["when"]
+    t, n = f["when"], f["n"]
     if style == "camera":
         return t.strftime("VID%Y%m%d%H%M%S") + ".mp4"
     if style == "whatsapp":
-        return t.strftime("VID-%Y%m%d-WA") + f"{f['n'] % 1000:04d}.mp4"
+        return t.strftime("VID-%Y%m%d-WA") + f"{n % 10000:04d}.mp4"
     if style == "status":
-        return f"{(f['n'] * 2654435761 + idx) & 0xFFFFFFFF:08x}{t.strftime('%H%M%S')}.mp4"
+        return f"{(n * 2654435761 + idx) & 0xFFFFFFFF:08x}{t.strftime('%d%H%M%S')}.mp4"
+    if style == "iphone":
+        return f"IMG_{n:04d}.MOV"
     if style == "instagram":
-        return f"VID_{f['n']}{t.strftime('%m%d')}_{t.strftime('%H%M%S')}_{idx % 1000:03d}.mp4"
-    if style == "download":
-        return f"video_{t.strftime('%Y%m%d_%H%M%S')}.mp4"
+        return f"VID_{n}{t.strftime('%m%d')}_{t.strftime('%H%M%S')}_{idx % 1000:03d}.mp4"
+    if style == "short":
+        app = ("Moj", "ShareChat", "Josh", "Shorts", "Reel")[idx % 5]
+        return f"{app}_{t.strftime('%Y%m%d_%H%M%S')}.mp4"
+    if style == "youtube":
+        return f"Video {n}(720P_HD).mp4"
     if style == "screen":
-        return t.strftime("Screenrecorder-%Y-%m-%d-%H-%M-%S") + f"-{f['n'] % 1000:03d}.mp4"
-    if style == "telegram":
-        return t.strftime("video_%Y-%m-%d_%H-%M-%S") + ".mp4"
+        return t.strftime("Screen_Recording_%Y%m%d_%H%M%S") + ".mp4"
+    if style == "episode":
+        return f"Series {n % 7 + 1} S01E{f['i'] + 1:02d} 720p.mp4"
+    if style == "movie":
+        return f"Movie {n} ({t.year}) 720p HEVC.mp4"
     raise ValueError(style)
 
 
 def manifest_rows(files, shards):
     for idx, f in enumerate(files):
         p = f["p"]
-        yield dict(name=f["name"], profile=p["id"], label=p["label"], folder=p["folder"], real_s=f["real_s"],
-                   gen_s=f["gen_s"], width=p["width"], height=p["height"], rotation=f["rot"], fps=p["fps"],
-                   codec=p["codec"], video_kbps=p["video_kbps"], audio_kbps=p["audio_kbps"],
-                   shard=idx % shards, seed=f["seed"])
+        yield dict(name=f["name"], profile=p["id"], group=p["group"], label=p["label"], folder=p["folder"],
+                   real_s=f["real_s"], gen_s=f["gen_s"], width=f["width"], height=f["height"], rotation=f["rot"],
+                   fps=p["fps"], codec=p["codec"], video_kbps=f["video_kbps"], audio_kbps=p["audio_kbps"],
+                   in_gallery=0 if p["hidden"] else 1, shard=idx % shards, seed=f["seed"])
+
+
+def rate_of(fps):
+    return "24000/1001" if abs(fps - 23.976) < 0.01 else str(fps)
 
 
 def make_one(f, out_root):
@@ -154,29 +210,36 @@ def make_one(f, out_root):
     p = f["p"]
     folder = os.path.join(out_root, p["folder"])
     os.makedirs(folder, exist_ok=True)
+    if p["hidden"]:
+        open(os.path.join(folder, ".nomedia"), "a").close()
     dest = os.path.join(folder, f["name"])
-    tmp = dest + ".tmp.mp4"
-    s, fps, vk, ak = f["gen_s"], p["fps"], p["video_kbps"], p["audio_kbps"]
-    video = (f"testsrc2=size={p['width']}x{p['height']}:rate={fps}:duration={s},"
+    fmt = p["container"]
+    tmp = dest + ".tmp." + fmt
+    s, fps, ak = f["gen_s"], p["fps"], p["audio_kbps"]
+    gop = round(fps)
+    video = (f"testsrc2=size={f['width']}x{f['height']}:rate={rate_of(fps)}:duration={s},"
              f"noise=alls={p['noise']}:allf=t+u:all_seed={f['seed']},format=yuv420p")
-    audio = (f"anoisesrc=color=pink:amplitude=0.05:sample_rate={p['sample_rate']}:duration={s}:seed={f['seed']}")
+    audio = f"anoisesrc=color=pink:amplitude=0.05:sample_rate={p['sample_rate']}:duration={s}:seed={f['seed']}"
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", video,
            "-f", "lavfi", "-i", audio]
     if p["codec"] == "hevc":
+        vk = f["video_kbps"]
         cmd += ["-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1", "-x265-params",
-                f"bitrate={vk}:vbv-maxrate={vk}:vbv-bufsize={vk}:keyint={fps}:strict-cbr=1:log-level=error"]
+                f"bitrate={vk}:vbv-maxrate={vk}:vbv-bufsize={vk}:keyint={gop}:strict-cbr=1:log-level=error"]
     else:
-        cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-g", str(fps), "-b:v", f"{vk}k", "-minrate", f"{vk}k",
+        vk = round(f["video_kbps"] * X264_ASK)
+        cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-g", str(gop), "-b:v", f"{vk}k", "-minrate", f"{vk}k",
                 "-maxrate", f"{vk}k", "-bufsize", f"{vk}k", "-x264-params", "nal-hrd=cbr:force-cfr=1"]
     cmd += ["-c:a", "aac", "-b:a", f"{ak}k", "-ac", str(p["channels"]), "-threads", "2",
             "-metadata", "creation_time=" + f["when"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "-movflags", "+faststart", tmp if f["rot"] else dest]
+            "-movflags", "+faststart", "-f", fmt, tmp if f["rot"] else dest]
     subprocess.run(cmd, check=True)
     if f["rot"]:
         # A camera writes upright clips as landscape pixels plus a rotation
-        # tag; -90 here is what Android reads back as 90.
+        # tag; ffmpeg counts the other way, so -90 here reads back as 90.
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-display_rotation:v:0",
-                        str(-f["rot"]), "-i", tmp, "-c", "copy", "-movflags", "+faststart", dest], check=True)
+                        str(-f["rot"]), "-i", tmp, "-c", "copy", "-movflags", "+faststart", "-f", fmt, dest],
+                       check=True)
         os.remove(tmp)
     t = f["when"].timestamp()
     os.utime(dest, (t, t))
@@ -204,25 +267,25 @@ def main():
             w = csv.DictWriter(fh, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)
-        gb = sum((float(r["video_kbps"]) + float(r["audio_kbps"])) * OVERHEAD * 1000 / 8 * float(r["real_s"])
-                 for r in rows) / 1e9
+        gb = sum((float(r["video_kbps"]) + float(r["audio_kbps"])) * 1000 / 8 * float(r["real_s"]) for r in rows)
         hours = sum(float(r["real_s"]) for r in rows) / 3600
-        print(f"{len(rows)} videos, about {gb:.1f} GB, {hours:.1f} hours")
+        print(f"{len(rows)} videos, about {gb / 1e9:.1f} GB, {hours:.1f} hours")
         return
 
     mine = [f for idx, f in enumerate(files) if idx % a.shards == a.shard]
     if a.only:
         keep = set(a.only.split(","))
         mine = [f for f in mine if f["p"]["id"] in keep]
-    made = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:
-        for name, gen_s, size in pool.map(lambda f: make_one(f, a.out), mine):
-            made.append((name, gen_s, size))
+        made = list(pool.map(lambda f: make_one(f, a.out), mine))
     made_csv = os.path.join(os.path.dirname(os.path.abspath(a.out)), os.path.basename(a.out) + "-made.csv")
     with open(made_csv, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["name", "gen_s", "bytes"])
         w.writerows(made)
+    # What the emulator's gallery should end up listing: the hidden folders' files never appear.
+    with open(made_csv.replace("-made.csv", "-in-gallery.txt"), "w") as fh:
+        fh.write(f"{sum(1 for f in mine if not f['p']['hidden'])}\n")
     print(f"made {len(made)} videos, {sum(s for _, _, s in made) / 1e9:.2f} GB, "
           f"{sum(g for _, g, _ in made) / 60:.1f} minutes, listed in {made_csv}")
 
