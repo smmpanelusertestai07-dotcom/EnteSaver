@@ -39,7 +39,9 @@ BPP = {"H264": 0.10, "HEVC": 0.065}
 CAP_BPS, CAP_BPS_UHD, FLOOR_BPS, UHD_LONG_SIDE = 12_000_000, 20_000_000, 1_000_000, 2560
 COPY_FACTOR = 1.15
 BUDGET_S = 20 * 60
-SPEEDS = (1.0, 2.0, 4.0)
+# How fast a phone encodes, as a multiple of playing the video: 0.5 takes
+# twice its length (what the emulator's software encoder managed), 2 half.
+SPEEDS = (0.5, 1.0, 2.0)
 GB = 1e9
 
 
@@ -128,7 +130,8 @@ def main():
             out_bps = int(m["out_bytes"]) * 8 / gen_s - AUDIO_BPS
             landed = out_bps / target_h264 if target_h264 else None
         files.append(dict(row=row, name=name, real_s=real_s, before=before, after=after, outcome=outcome,
-                          reencoded=reencoded, landed=landed, measured=bool(m), src_bps=src_bps))
+                          reencoded=reencoded, landed=landed, measured=bool(m), src_bps=src_bps, gen_s=gen_s,
+                          ms=int(m["ms"]) if m else 0))
 
     landed_all = [f["landed"] for f in files if f["landed"]]
     landed_typ = statistics.median(landed_all) if landed_all else 1.0
@@ -166,6 +169,9 @@ def main():
                  f"({100 * (b - ah) / b:.1f}%)**")
     lines.append(f"- Kept as they were (nothing to gain, or failed): {n_kept} videos")
     lines.append(f"- Encoder landed at {landed_typ:.2f} x the bitrate the app asked for (median)")
+    speeds = [f["gen_s"] / (f["ms"] / 1000) for f in files if f["reencoded"] and f["ms"] > 0]
+    if speeds:
+        lines.append(f"- The emulator's software encoder ran at {statistics.median(speeds):.2f} x real time (median)")
     for d in devices[:1]:
         lines.append(f"- Emulator: {d.get('model')} API {d.get('sdk')}, RAM {int(d.get('ram_bytes', 0)) / GB:.1f} GB, "
                      f"tier {d.get('tier')}, HEVC chip {d.get('hevc_hardware_1080p30')}")
@@ -189,7 +195,7 @@ def main():
     lines.append("")
     lines.append("### The 20-minute limit (a video that cannot be encoded in 20 minutes is kept as it is)")
     lines.append("")
-    lines.append("| Phone encodes at | Videos that would run out of time | Saved (H.264) | Saved (HEVC est.) |")
+    lines.append("| Encoding takes | Videos that would run out of time | Saved (H.264) | Saved (HEVC est.) |")
     lines.append("|---|---:|---:|---:|")
     speed_rows = {}
     for speed in SPEEDS:
@@ -198,7 +204,7 @@ def main():
         a1 = sum(f["before"] if id(f) in late_ids else f["after"] for f in files)
         a2 = sum(f["before"] if id(f) in late_ids else f["after_hevc"] for f in files)
         speed_rows[speed] = dict(late=len(late), saved_h264=b - a1, saved_hevc=b - a2)
-        lines.append(f"| {speed:g}x the video's length | {len(late)} | {(b - a1) / GB:.2f} GB | {(b - a2) / GB:.2f} GB |")
+        lines.append(f"| {1 / speed:g}x the video's length | {len(late)} | {(b - a1) / GB:.2f} GB | {(b - a2) / GB:.2f} GB |")
     lines.append("")
     outcomes = OrderedDict()
     for f in files:
