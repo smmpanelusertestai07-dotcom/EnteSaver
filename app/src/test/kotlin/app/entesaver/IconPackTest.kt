@@ -71,6 +71,20 @@ class IconPackTest {
     }
 
     @Test
+    fun `only the home-screen icon and the icon pack are open to other apps`() {
+        // Every other screen opens from the app's own icon, alerts and
+        // shortcuts, which Android starts as the app itself.
+        val open = (activities + aliases).filter { it.getAttribute("android:exported") == "true" }
+            .map { it.getAttribute("android:name") }
+        assertEquals(listOf(".IconPackActivity", ".MainActivity").sorted(), open.sorted())
+        val host = File("src/main/kotlin/app/entesaver/HostActivity.kt").readText()
+        assertTrue(
+            "a route is taken only from an intent that names the activity itself",
+            host.contains("if (intent?.component?.className == HostActivity::class.java.name)")
+        )
+    }
+
+    @Test
     fun `the Photos shortcut opens through a screen of its own`() {
         val open = activities.single { it.getAttribute("android:name") == ".OpenEnteActivity" }
         assertEquals("true", open.getAttribute("android:noHistory"))

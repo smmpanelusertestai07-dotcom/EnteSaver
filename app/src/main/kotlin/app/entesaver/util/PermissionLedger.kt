@@ -49,6 +49,8 @@ object PermissionLedger {
         "android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" to (R.string.perm_name_foreground_type to R.string.perm_purpose_foreground_type),
         Manifest.permission.PACKAGE_USAGE_STATS to (R.string.perm_name_usage to R.string.perm_purpose_usage),
         Manifest.permission.USE_BIOMETRIC to (R.string.perm_name_biometric to R.string.perm_purpose_biometric),
+        Manifest.permission.MANAGE_EXTERNAL_STORAGE to (R.string.perm_name_all_files to R.string.perm_purpose_all_files),
+        Manifest.permission.WRITE_EXTERNAL_STORAGE to (R.string.perm_name_write_storage to R.string.perm_purpose_all_files),
         Manifest.permission.WAKE_LOCK to (R.string.perm_name_wake to R.string.perm_purpose_wake),
         Manifest.permission.RECEIVE_BOOT_COMPLETED to (R.string.perm_name_boot to R.string.perm_purpose_boot)
     )
@@ -65,12 +67,16 @@ object PermissionLedger {
         Manifest.permission.READ_EXTERNAL_STORAGE,
         Manifest.permission.ACCESS_MEDIA_LOCATION,
         Manifest.permission.POST_NOTIFICATIONS,
-        Manifest.permission.PACKAGE_USAGE_STATS
+        Manifest.permission.PACKAGE_USAGE_STATS,
+        Manifest.permission.MANAGE_EXTERNAL_STORAGE,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE
     )
 
     /** Declared with a ceiling or a floor, so on the wrong Android they do not apply at all. */
     private fun appliesHere(permission: String): Boolean = when (permission) {
         Manifest.permission.READ_EXTERNAL_STORAGE -> Build.VERSION.SDK_INT <= 32
+        Manifest.permission.WRITE_EXTERNAL_STORAGE -> Build.VERSION.SDK_INT <= 29
+        Manifest.permission.MANAGE_EXTERNAL_STORAGE -> Build.VERSION.SDK_INT >= 30
         Manifest.permission.READ_MEDIA_IMAGES,
         Manifest.permission.READ_MEDIA_VIDEO,
         Manifest.permission.POST_NOTIFICATIONS -> Build.VERSION.SDK_INT >= 33
@@ -87,7 +93,6 @@ object PermissionLedger {
         NeverAsked(context.getString(R.string.never_location), context.getString(R.string.never_location_why)),
         NeverAsked(context.getString(R.string.never_microphone), context.getString(R.string.never_microphone_why)),
         NeverAsked(context.getString(R.string.never_contacts), context.getString(R.string.never_contacts_why)),
-        NeverAsked(context.getString(R.string.never_all_files), context.getString(R.string.never_all_files_why)),
         NeverAsked(context.getString(R.string.never_other_apps), context.getString(R.string.never_other_apps_why))
     )
 
@@ -105,6 +110,9 @@ object PermissionLedger {
             val held = when (permission) {
                 // An app-op, not a grant: the flag is false even while it is on.
                 Manifest.permission.PACKAGE_USAGE_STATS -> UsageVerifier.hasUsageAccess(context)
+                // A special access, not a grant: the flag stays false while it is on.
+                Manifest.permission.MANAGE_EXTERNAL_STORAGE ->
+                    Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()
                 else -> flags != null && i < flags.size &&
                     flags[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED != 0
             }

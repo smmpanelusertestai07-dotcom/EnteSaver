@@ -26,8 +26,8 @@ class ProfileBuilder(private val context: Context) {
         val totals = runCatching { scanner.totals(options.excludedBuckets, now) }
             .getOrDefault(MediaScanner.Totals())
 
-        val photoKey = PlannedEncode.photoKey(context, options)
-        val videoKey = PlannedEncode.videoKey(options)
+        val photoKey = PlannedEncode.photoKey()
+        val videoKey = PlannedEncode.videoKey()
         val photoSamples = db.items().photoRatioSamples(photoKey)
         val videoSamples = db.items().videoRatioSamples(videoKey)
 
@@ -114,7 +114,7 @@ class ProfileBuilder(private val context: Context) {
      * correct and is stated as such.
      */
     suspend fun current(options: Options): MediaProfile.Profile {
-        val row = db.profile().get(PlannedEncode.photoKey(context, options), PlannedEncode.videoKey(options))
+        val row = db.profile().get(PlannedEncode.photoKey(), PlannedEncode.videoKey())
             ?: rebuild(options)
         return row.toProfile(db.items().bytesAddedSince(monthAgoSeconds()))
     }

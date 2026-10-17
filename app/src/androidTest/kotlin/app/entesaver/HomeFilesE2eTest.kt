@@ -1257,13 +1257,13 @@ class HomeFilesE2eTest {
             videoCount = totals.videoCount
         )
         val ratios = CapacityMath.ratios(
-            photo = db.items().photoRatioSamples(PlannedEncode.photoKey(context, options)).map {
+            photo = db.items().photoRatioSamples(PlannedEncode.photoKey()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes)
             },
-            video = db.items().videoRatioSamples(PlannedEncode.videoKey(options)).map {
+            video = db.items().videoRatioSamples(PlannedEncode.videoKey()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes, it.durationMs / 60_000.0)
             },
-            codec = PlannedEncode.videoCodec(options.video.spec()),
+            codec = PlannedEncode.videoCodec(),
             source = CapacityMath.Source.MEASURED,
             galleryPhotoMedian = if (totals.photoCount > 0) {
                 totals.photoBytes / totals.photoCount

@@ -35,6 +35,15 @@ class DayBudget(context: Context) {
         db.dayBudget().addPhotos(day, count)
     }
 
+    /** Bytes Replace on this phone wrote today. */
+    suspend fun replacedToday(now: Long): Long = db.dayBudget().byDay(Formats.dayKey(now))?.replacedBytes ?: 0L
+
+    suspend fun addReplaced(now: Long, bytes: Long) {
+        if (bytes <= 0) return
+        val day = ensureRow(now)
+        db.dayBudget().addReplaced(day, bytes)
+    }
+
     private suspend fun ensureRow(now: Long): String {
         val day = Formats.dayKey(now)
         db.dayBudget().insert(DayBudgetRow(day))

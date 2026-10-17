@@ -16,11 +16,9 @@ import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.Evidence
 import app.entesaver.core.logic.FolderName
 import app.entesaver.core.logic.ItemState
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.VideoCodec
-import app.entesaver.core.logic.VideoCodecChoice
-import app.entesaver.core.logic.VideoPreset
-import app.entesaver.core.logic.VideoSettings
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.engine.MaintainEngine
@@ -268,7 +266,7 @@ class PipelineE2eTest {
     }
 
     /**
-     * An ordinary 60 fps clip is written at 30, the cap every preset carries:
+     * An ordinary 60 fps clip is written at 30, the cap every copy carries:
      * half the frames is most of the saving, and nothing a phone shows misses
      * them. (Slow motion, 90 fps and up, keeps every frame - MediaSettingsTest.)
      */
@@ -281,7 +279,7 @@ class PipelineE2eTest {
         val src = File(context.cacheDir, "sixty_out").apply { mkdirs() }
         val result = VideoCompressor.compress(
             context, uri!!, "e2e_sixty.mp4", "video/mp4", sizeOf(uri),
-            VideoSettings().spec(), src
+            MediaSettings.VIDEO, src
         )
         try {
             assertFalse(
@@ -297,17 +295,17 @@ class PipelineE2eTest {
 
     /**
      * HEVC is never encoded in software: on a phone without an HEVC chip -
-     * every emulator - a clip asked for in HEVC comes out H.264, and Settings
-     * says so.
+     * every emulator - a clip comes out H.264, and Settings says so.
      */
     @Test
     fun hevcWithoutAChipFallsBackToH264() = runBlockingTest {
         assumeFalse("this phone has an HEVC chip", EncoderCaps.hevcFits(640, 360, 10f))
         val uri = MediaFixtures.insertVideo(context, "e2e_hevc_ask.mp4", width = 640, height = 360, frames = 30)
         assertNotNull(uri)
-        val spec = VideoSettings(VideoPreset.CUSTOM, codec = VideoCodecChoice.HEVC, audioKbps = 64).spec()
         val out = File(context.cacheDir, "hevc_out").apply { mkdirs() }
-        val result = VideoCompressor.compress(context, uri!!, "e2e_hevc_ask.mp4", "video/mp4", sizeOf(uri), spec, out)
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_hevc_ask.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
         try {
             if (!result.asIs) {
                 assertEquals(VideoCodec.H264, result.codec)

@@ -135,6 +135,12 @@ data class ItemRow(
     /** Where the kept light copy lives once the original was replaced. */
     val keptUri: String? = null,
     /**
+     * Where the original waits after it was replaced in place: an item of
+     * Ente Saver's own in the phone's trash, or (Android 10) a hidden file
+     * beside it - 30 days either way, then gone. Null for every other row.
+     */
+    val backupUri: String? = null,
+    /**
      * Output size the profile predicted before this item was processed, kept
      * against the real result so the app can state how wrong its estimates
      * have been instead of implying they are exact.
@@ -227,7 +233,9 @@ data class MediaProfileRow(
 data class DayBudgetRow(
     @PrimaryKey val day: String,
     val videoEncodeMs: Long = 0,
-    val photosOnBattery: Int = 0
+    val photosOnBattery: Int = 0,
+    /** Bytes written by Replace on this phone today, against the daily limit (Pacing.replaceFitsToday). */
+    val replacedBytes: Long = 0
 )
 
 /**
@@ -344,6 +352,9 @@ object Search {
         .replace("%", LIKE_ESCAPE + "%")
         .replace("_", LIKE_ESCAPE + "_")
 }
+
+/** Replaced originals still in the trash ([ItemDao.keptOriginalsFlow]). */
+data class KeptOriginals(val count: Int, val bytes: Long)
 
 /** The originals that may be freed now (ItemDao.reclaimableBytesFlow explains each clause). */
 private const val RECLAIMABLE_BYTES =
@@ -820,12 +831,42 @@ interface ItemDao {
     )
     suspend fun largest(limit: Int): List<ItemRow>
 
-    /** Light copies the user kept, which are their files now. */
+    /**
+     * Every row that names a file on the phone as its own by address: the
+     * light copies, and the files replaced on this phone. What the scanner
+     * must never read as new photos.
+     */
     @Query("SELECT * FROM items WHERE keptUri IS NOT NULL ORDER BY captureAt DESC")
     suspend fun keptCopies(): List<ItemRow>
 
-    @Query("SELECT COALESCE(SUM(outputBytes), 0) FROM items WHERE keptUri IS NOT NULL")
+    /**
+     * Light copies the user kept, which are their files now. Not a file
+     * replaced on this phone (backupUri set): there the file at the address
+     * is the only one the phone has, and Remove would delete it.
+     */
+    @Query("SELECT * FROM items WHERE keptUri IS NOT NULL AND backupUri IS NULL ORDER BY captureAt DESC")
+    suspend fun keptLightCopies(): List<ItemRow>
+
+    @Query("SELECT COALESCE(SUM(outputBytes), 0) FROM items WHERE keptUri IS NOT NULL AND backupUri IS NULL")
     fun keptBytesFlow(): Flow<Long>
+
+    /**
+     * Originals replaced in place that still wait in the trash: how many,
+     * and the space they hold. An empty backupUri is an original no longer
+     * kept - deleted, or past its 30 days.
+     */
+    @Query(
+        "SELECT COUNT(*) AS count, COALESCE(SUM(sizeBytes), 0) AS bytes FROM items " +
+            "WHERE state = 'FREED_KEPT' AND backupUri IS NOT NULL AND backupUri != ''"
+    )
+    fun keptOriginalsFlow(): Flow<KeptOriginals>
+
+    @Query("SELECT * FROM items WHERE state = 'FREED_KEPT' AND backupUri IS NOT NULL AND backupUri != ''")
+    suspend fun keptOriginals(): List<ItemRow>
+
+    /** An original no longer kept: deleted for good, or gone with the trash's 30 days. */
+    @Query("UPDATE items SET backupUri = '', updatedAt = :now WHERE id = :id")
+    suspend fun forgetBackup(id: Long, now: Long)
 
     /**
      * Everything reclaim may offer, before the per-item checks. The strict
@@ -1068,6 +1109,9 @@ interface DayBudgetDao {
     @Query("UPDATE day_budget SET photosOnBattery = photosOnBattery + :n WHERE day = :day")
     suspend fun addPhotos(day: String, n: Int)
 
+    @Query("UPDATE day_budget SET replacedBytes = replacedBytes + :bytes WHERE day = :day")
+    suspend fun addReplaced(day: String, bytes: Long)
+
     /** Yesterday and older are useless; keep the table at one row. */
     @Query("DELETE FROM day_budget WHERE day <> :day")
     suspend fun pruneOlderThan(day: String)
@@ -1201,7 +1245,7 @@ interface CloudCapabilityDao {
         LedgerRow::class, ActivityRow::class, CloudCapabilityRow::class,
         ReclaimBatchRow::class, ReclaimItemRow::class, MediaProfileRow::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -1463,6 +1507,16 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        /** v10: where a replaced-in-place original waits ([ItemRow.backupUri]). */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE `items` ADD COLUMN `backupUri` TEXT")
+                connection.execSQL(
+                    "ALTER TABLE `day_budget` ADD COLUMN `replacedBytes` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         /**
          * Every migration, in order. Public so the instrumented suite can
          * open a database built at an older version and prove the upgrade
@@ -1471,7 +1525,7 @@ abstract class AppDb : RoomDatabase() {
          */
         val MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10
         )
 
         @Volatile

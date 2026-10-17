@@ -6,11 +6,14 @@ import android.os.Process
 import android.provider.MediaStore
 import androidx.room.withTransaction
 import app.entesaver.core.logic.Fingerprint
+import app.entesaver.core.logic.FormatResolver
 import app.entesaver.core.logic.ImportMerge
 import app.entesaver.core.logic.ItemState
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.PhotoFormat
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.StageRules
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
@@ -19,6 +22,7 @@ import app.entesaver.engine.InFlight
 import app.entesaver.util.DeviceTier
 import app.entesaver.util.Locks
 import app.entesaver.util.Storage
+import app.entesaver.work.DayBudget
 import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.CancellationException
@@ -180,12 +184,13 @@ class Stager(private val context: Context, private val db: AppDb) {
         val tempDir = Storage.tempDir(context, options.storageVolume)
         // Held to what this phone can decode without running out of memory;
         // asked only for a photo, since it reads the memory free right now.
-        val photoSpec = if (row.isVideo) options.photo.spec() else DeviceTier.fit(context, options.photo.spec())
-        val videoSpec = options.video.spec()
-        // HEIC only once this phone has passed its own test; the test runs
-        // here, in background work, the first time a photo would want it.
+        val photoSpec = if (row.isVideo) MediaSettings.PHOTO else DeviceTier.fit(context, MediaSettings.PHOTO)
+        val videoSpec = MediaSettings.VIDEO
+        // A HEIC is written back as HEIC only once this phone has passed its
+        // own test; the test runs here, in background work, the first time
+        // a HEIC photo comes up.
         val heicWorks = !row.isVideo &&
-            (photoSpec.format == PhotoFormat.AUTO || photoSpec.format == PhotoFormat.HEIC) &&
+            FormatResolver.sourceFormat(row.displayName) == PhotoFormat.HEIC &&
             HeicSupport.probeIfNeeded(context, tempDir) == HeicSupport.State.OK
         // Compression must never make the phone feel slow, even with the
         // screen on while charging. The thread doing it belongs to a shared
@@ -248,6 +253,7 @@ class Stager(private val context: Context, private val db: AppDb) {
             InFlight.end(context)
             priorPriority?.let { runCatching { Process.setThreadPriority(tid, it) } }
         }
+        if (options.saveMode == SaveMode.IN_PLACE) return replaceInPlace(row, uri, result, predictedBytes)
 
         var stageFile: File? = null
         return try {
@@ -270,14 +276,17 @@ class Stager(private val context: Context, private val db: AppDb) {
                     outPixels = result.outPixels,
                     outputSha256 = sha,
                     outputFolder = folder.name,
-                    // Grouped under what the settings stand for on this
-                    // phone, the key estimates are read back by.
+                    // Grouped under how it was made, the key estimates are
+                    // read back by.
                     presetUsed = if (row.isVideo) {
-                        PlannedEncode.videoKey(options)
+                        MediaSettings.videoKey(result.codec ?: PlannedEncode.videoCodec())
                     } else {
-                        PlannedEncode.photoKey(context, options)
+                        MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
                     },
                     codecUsed = result.codec?.name,
+                    // How it was made ("compressed_tuned", "compressed_jpeg"):
+                    // which rung of the encoder ladder took it.
+                    encoderName = if (result.asIs) null else result.reason,
                     predictedBytes = predictedBytes,
                     skipReason = null,
                     lastError = if (result.asIs) result.reason else null,
@@ -350,9 +359,218 @@ class Stager(private val context: Context, private val db: AppDb) {
             }
         }
 
+    /**
+     * The in-place end of [stageLocked]: the original replaced by [result]
+     * where it is ([InPlace]) - or, for a file a copy would not improve,
+     * left exactly as it is and finished. Nothing is staged or published,
+     * so nothing is left in any folder of Ente Saver's own.
+     */
+    private suspend fun replaceInPlace(row: ItemRow, uri: Uri, result: CompressResult, predictedBytes: Long): Boolean {
+        try {
+            val now = System.currentTimeMillis()
+            if (result.asIs) {
+                // Nothing to write: already small, or a copy would lose
+                // something. Counted as kept whole, as a whole copy is in
+                // the other mode, and the reason stays for its details.
+                return settle(row) { cur ->
+                    cur.copy(
+                        state = ItemState.DONE.name,
+                        outputBytes = cur.sizeBytes,
+                        lastError = result.reason,
+                        skipReason = null,
+                        predictedBytes = predictedBytes,
+                        updatedAt = now
+                    )
+                }
+            }
+            // Asked once more just before the file is touched: excluded, or
+            // its original gone, while it encoded.
+            val cur = db.items().byId(row.id)
+            if (cur == null ||
+                !StageRules.stillWaiting(cur.state, cur.neverOptimise, cur.originalMissing, cur.fingerprint, row.fingerprint)
+            ) {
+                return false
+            }
+            return when (val outcome = InPlace.replace(context, uri, row.isVideo, row.sizeBytes, result.file, row.id)) {
+                is InPlace.Result.Failed -> {
+                    fail(row, IN_PLACE_FAILED, outcome.reason)
+                    false
+                }
+                is InPlace.Result.Replaced -> {
+                    // The file has changed whatever the row says now, so the
+                    // row is written to match it, unconditionally.
+                    db.withTransaction {
+                        db.items().byId(row.id)?.let { latest ->
+                            db.items().update(
+                                replaced(latest, outcome.backup, outcome.bytes, outcome.sha256, now).copy(
+                                    srcPixels = result.srcPixels,
+                                    outPixels = result.outPixels,
+                                    presetUsed = if (row.isVideo) {
+                                        MediaSettings.videoKey(result.codec ?: PlannedEncode.videoCodec())
+                                    } else {
+                                        MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
+                                    },
+                                    codecUsed = result.codec?.name,
+                                    encoderName = result.reason,
+                                    predictedBytes = predictedBytes
+                                )
+                            )
+                        }
+                    }
+                    InPlace.settled(context)
+                    // Counted against the daily limit: Ente uploads this
+                    // smaller version in place of the original.
+                    runCatching { DayBudget(context).addReplaced(now, outcome.bytes) }
+                    true
+                }
+            }
+        } finally {
+            result.file.delete()
+        }
+    }
+
+    /**
+     * Finishes or undoes a replace the phone cut short (see [InPlace.recover]),
+     * before a run takes any other file.
+     */
+    suspend fun recoverInPlace() = Locks.stage.withLock {
+        val now = System.currentTimeMillis()
+        when (val found = InPlace.recover(context)) {
+            null, is InPlace.Recovered.Undone -> Unit
+            is InPlace.Recovered.Finished -> {
+                db.items().byId(found.rowId)?.let { cur ->
+                    db.items().update(replaced(cur, found.backup, found.bytes, found.sha256, now))
+                }
+                InPlace.settled(context)
+            }
+            is InPlace.Recovered.Stuck -> db.items().byId(found.rowId)?.let { cur ->
+                // The file is not what either side was; the original waits in
+                // the trash, named on the row, and nothing touches it again.
+                db.items().update(
+                    cur.copy(
+                        state = ItemState.SKIP.name,
+                        skipReason = IN_PLACE_FAILED,
+                        lastError = "restore_failed",
+                        backupUri = found.backup,
+                        updatedAt = now
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Forgets originals the trash no longer holds - Android empties it after
+     * 30 days - and, on Android 10, which has no trash, deletes the hidden
+     * ones that are older. At most [limit] are looked at, oldest first.
+     */
+    suspend fun pruneKeptOriginals(limit: Int = 500) {
+        val now = System.currentTimeMillis()
+        val kept = db.items().keptOriginals().sortedBy { it.updatedAt }.take(limit)
+        for (row in kept) {
+            val backup = row.backupUri ?: continue
+            if (backup.startsWith("file:")) {
+                val path = Uri.parse(backup).path ?: continue
+                if (InPlace.purgeExpired(listOf(path), now) > 0 || !File(path).exists()) {
+                    db.items().forgetBackup(row.id, now)
+                }
+            } else if (!InPlace.backupExists(context, backup)) {
+                db.items().forgetBackup(row.id, now)
+            }
+        }
+    }
+
+    /** Deletes every original still kept after a replace, now; how many and the bytes they held. */
+    suspend fun deleteKeptOriginals(): Pair<Int, Long> {
+        val now = System.currentTimeMillis()
+        var count = 0
+        var bytes = 0L
+        for (row in db.items().keptOriginals()) {
+            val backup = row.backupUri ?: continue
+            if (InPlace.deleteBackup(context, backup) || !InPlace.backupExists(context, backup)) {
+                db.items().forgetBackup(row.id, now)
+                count++
+                bytes += row.sizeBytes
+            }
+        }
+        return count to bytes
+    }
+
+    /**
+     * Writes the original of row [id], replaced on this phone, back into its
+     * item ([InPlace.putBack]). The file is then left alone - skipped by the
+     * person's own choice, with "Optimise again" to undo that - and still
+     * known by its address, so the scanner never reads it as a new photo.
+     */
+    suspend fun putBackOriginal(id: Long): InPlace.PutBack = Locks.stage.withLock {
+        val row = db.items().byId(id)
+        val backup = row?.backupUri?.takeIf { it.isNotEmpty() && row.state == ItemState.FREED_KEPT.name }
+            ?: return@withLock InPlace.PutBack.NOT_KEPT
+        val uri = row.contentUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+            ?: return@withLock InPlace.PutBack.FAILED
+        val outcome = InPlace.putBack(context, backup, uri)
+        val now = System.currentTimeMillis()
+        when (outcome) {
+            InPlace.PutBack.DONE -> db.items().update(putBack(row, now))
+            InPlace.PutBack.NOT_KEPT -> db.items().forgetBackup(row.id, now)
+            InPlace.PutBack.NO_SPACE, InPlace.PutBack.FAILED -> Unit
+        }
+        outcome
+    }
+
     companion object {
         /** Why a file was set aside after three tries (see [fail]). */
         const val ENCODE_FAILED = "encode_failed"
+
+        /** A replace in place that did not happen; the file was left as it was. */
+        const val IN_PLACE_FAILED = "in_place_failed"
+
+        /**
+         * [cur] once its original was replaced in place by [bytes] of copy
+         * hashing to [sha256], with the original kept at [backup]. FREED_KEPT
+         * with the item's own address as its kept copy: the scanner then
+         * knows the smaller file as this row's, never as a new photo, and
+         * the original's size stays on the row so the saving counts.
+         */
+        fun replaced(cur: ItemRow, backup: String, bytes: Long, sha256: String, now: Long): ItemRow = cur.copy(
+            state = ItemState.FREED_KEPT.name,
+            keptUri = cur.contentUri,
+            backupUri = backup,
+            outputBytes = bytes,
+            outputSha256 = sha256,
+            outputName = cur.displayName,
+            stagePath = null,
+            lastError = null,
+            skipReason = null,
+            updatedAt = now
+        )
+
+        /** A file whose original the person put back (see [putBackOriginal]). */
+        const val PUT_BACK = "put_back"
+
+        /**
+         * [cur] once its original is back in its item: the original's own
+         * bytes, so nothing of the copy stays on the row. keptUri stays the
+         * item's address, which keeps the scanner from reading the rewritten
+         * file as a new photo, and the empty backupUri keeps the row out of
+         * the light copies - whose Remove would delete this original.
+         */
+        fun putBack(cur: ItemRow, now: Long): ItemRow = cur.copy(
+            state = ItemState.SKIP.name,
+            skipReason = PUT_BACK,
+            neverOptimise = true,
+            keptUri = cur.contentUri,
+            backupUri = "",
+            outputBytes = null,
+            outputSha256 = null,
+            outputName = null,
+            presetUsed = null,
+            codecUsed = null,
+            srcPixels = 0,
+            outPixels = 0,
+            lastError = null,
+            updatedAt = now
+        )
         const val OUT_OF_MEMORY = "out_of_memory"
 
         /**

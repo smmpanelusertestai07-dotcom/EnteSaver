@@ -16,7 +16,7 @@ object ActivityWording {
      * single preset and codec before 11, kept so older entries still read;
      * PHOTOS and VIDEOS replaced them.
      */
-    enum class Setting { QUALITY, CLOUD_APP, SPEED, LAYOUT, CODEC, THEME, SCOPE, SPACE, PHOTOS, VIDEOS, FOLDER }
+    enum class Setting { QUALITY, CLOUD_APP, SPEED, LAYOUT, CODEC, THEME, SCOPE, SPACE, PHOTOS, VIDEOS, FOLDER, SAVE_MODE }
 
     data class Change(val setting: Setting, val value: String)
 

@@ -18,22 +18,61 @@ class EncoderChoiceTest {
     private fun encode(format: PhotoFormat) = FormatResolver.Decision.Encode(format)
 
     @Test
-    fun `Auto is HEIC only where the phone passed its own test`() {
-        assertEquals(encode(PhotoFormat.HEIC), FormatResolver.resolve(PhotoFormat.AUTO, heicWorks = true, isUltraHdr = false, sdkInt = 30))
-        assertEquals(encode(PhotoFormat.JPEG), FormatResolver.resolve(PhotoFormat.AUTO, heicWorks = false, isUltraHdr = false, sdkInt = 30))
-        // Asked for HEIC on a phone that cannot: JPEG, said in the setting.
-        assertEquals(encode(PhotoFormat.JPEG), FormatResolver.resolve(PhotoFormat.HEIC, heicWorks = false, isUltraHdr = false, sdkInt = 30))
-        assertEquals(encode(PhotoFormat.WEBP), FormatResolver.resolve(PhotoFormat.WEBP, heicWorks = true, isUltraHdr = false, sdkInt = 29))
-        assertEquals(encode(PhotoFormat.JPEG), FormatResolver.resolve(PhotoFormat.JPEG, heicWorks = true, isUltraHdr = false, sdkInt = 34))
+    fun `a photo is written back in its own format`() {
+        for (format in PhotoFormat.entries) {
+            assertEquals(encode(format), FormatResolver.resolve(format, heicWorks = true, isUltraHdr = false, sdkInt = 30))
+        }
+        // A HEIC on a phone whose chip failed its own test is kept whole.
+        assertEquals(
+            FormatResolver.Decision.AsIs("format_as_is"),
+            FormatResolver.resolve(PhotoFormat.HEIC, heicWorks = false, isUltraHdr = false, sdkInt = 30)
+        )
+        assertEquals(encode(PhotoFormat.JPEG), FormatResolver.resolve(PhotoFormat.JPEG, heicWorks = false, isUltraHdr = false, sdkInt = 29))
+    }
+
+    @Test
+    fun `the format comes from the file's own name`() {
+        assertEquals(PhotoFormat.JPEG, FormatResolver.sourceFormat("IMG_20240101_101010.jpg"))
+        assertEquals(PhotoFormat.JPEG, FormatResolver.sourceFormat("scan.JPEG"))
+        assertEquals(PhotoFormat.HEIC, FormatResolver.sourceFormat("photo.heif"))
+        assertEquals(PhotoFormat.WEBP, FormatResolver.sourceFormat("sticker.webp"))
+        assertEquals(PhotoFormat.PNG, FormatResolver.sourceFormat("Screenshot_1.png"))
+        assertNull(FormatResolver.sourceFormat("animation.gif"))
+        assertNull(FormatResolver.sourceFormat("RAW_0001.dng"))
+        assertNull(FormatResolver.sourceFormat("no-extension"))
     }
 
     @Test
     fun `an Ultra HDR photo keeps its HDR or is left alone`() {
         // Only JPEG carries the gain map, and only Android 14 writes it back.
-        for (wanted in PhotoFormat.entries) {
-            assertEquals(encode(PhotoFormat.JPEG), FormatResolver.resolve(wanted, heicWorks = true, isUltraHdr = true, sdkInt = 34))
-            assertTrue(FormatResolver.resolve(wanted, heicWorks = true, isUltraHdr = true, sdkInt = 33) is FormatResolver.Decision.AsIs)
+        assertEquals(encode(PhotoFormat.JPEG), FormatResolver.resolve(PhotoFormat.JPEG, heicWorks = true, isUltraHdr = true, sdkInt = 34))
+        assertTrue(FormatResolver.resolve(PhotoFormat.JPEG, heicWorks = true, isUltraHdr = true, sdkInt = 33) is FormatResolver.Decision.AsIs)
+        for (other in PhotoFormat.entries - PhotoFormat.JPEG) {
+            assertTrue(FormatResolver.resolve(other, heicWorks = true, isUltraHdr = true, sdkInt = 36) is FormatResolver.Decision.AsIs)
         }
+    }
+
+    @Test
+    fun `only formats with transparency keep a see-through photo, and HEIC keeps only sRGB`() {
+        assertTrue(FormatResolver.carriesTransparency(PhotoFormat.PNG))
+        assertTrue(FormatResolver.carriesTransparency(PhotoFormat.WEBP))
+        assertFalse(FormatResolver.carriesTransparency(PhotoFormat.JPEG))
+        assertFalse(FormatResolver.carriesTransparency(PhotoFormat.HEIC))
+        assertFalse(FormatResolver.keepsColour(PhotoFormat.HEIC, srgb = false))
+        assertTrue(FormatResolver.keepsColour(PhotoFormat.JPEG, srgb = false))
+        assertTrue(FormatResolver.keepsColour(PhotoFormat.HEIC, srgb = true))
+    }
+
+    @Test
+    fun `a lossless WebP is told from a lossy one by its image chunk`() {
+        fun webp(vararg chunks: Pair<String, Int>) = ascii("RIFF") + le32(100) + ascii("WEBP") +
+            chunks.fold(ByteArray(0)) { acc, (fourCc, size) -> acc + ascii(fourCc) + le32(size) + ByteArray(size + (size and 1)) }
+        assertTrue(FormatResolver.webpIsLossless(webp("VP8L" to 20)))
+        assertFalse(FormatResolver.webpIsLossless(webp("VP8 " to 20)))
+        // Extended: header, a colour profile, alpha, then the picture.
+        assertTrue(FormatResolver.webpIsLossless(webp("VP8X" to 10, "ICCP" to 33, "VP8L" to 8)))
+        assertFalse(FormatResolver.webpIsLossless(webp("VP8X" to 10, "ALPH" to 7, "VP8 " to 8)))
+        assertFalse(FormatResolver.webpIsLossless(ascii("not a webp at all")))
     }
 
     /**
@@ -55,18 +94,15 @@ class EncoderChoiceTest {
         assertEquals("image/heic", FormatResolver.mimeOf("a.heic", "image/jpeg"))
         assertEquals("image/webp", FormatResolver.mimeOf("a.WEBP", "image/jpeg"))
         assertEquals("video/mp4", FormatResolver.mimeOf("a.mp4", "video/quicktime"))
+        assertEquals("image/png", FormatResolver.mimeOf("a.png", "image/jpeg"))
         // Anything unknown keeps what the original said it was.
-        assertEquals("video/quicktime", FormatResolver.mimeOf("a.mov", "video/quicktime"))
+        assertEquals("video/x-matroska", FormatResolver.mimeOf("a.mkv", "video/x-matroska"))
     }
 
     @Test
-    fun `HEVC needs a hardware encoder, whatever was asked`() {
-        val chip = VideoCodecResolver.Hardware(hevcFits = true)
-        val none = VideoCodecResolver.Hardware(hevcFits = false)
-        assertEquals(VideoCodec.HEVC, VideoCodecResolver.resolve(VideoCodecChoice.AUTO, chip))
-        assertEquals(VideoCodec.H264, VideoCodecResolver.resolve(VideoCodecChoice.AUTO, none))
-        assertEquals("never HEVC in software", VideoCodec.H264, VideoCodecResolver.resolve(VideoCodecChoice.HEVC, none))
-        assertEquals(VideoCodec.H264, VideoCodecResolver.resolve(VideoCodecChoice.H264, chip))
+    fun `HEVC needs a hardware encoder`() {
+        assertEquals(VideoCodec.HEVC, VideoCodecResolver.resolve(VideoCodecResolver.Hardware(hevcFits = true)))
+        assertEquals("never HEVC in software", VideoCodec.H264, VideoCodecResolver.resolve(VideoCodecResolver.Hardware(hevcFits = false)))
     }
 
     @Test
@@ -198,12 +234,7 @@ class EncoderChoiceTest {
     }
 
     @Test
-    fun `a wide-gamut photo is not written as HEIC, and see-through pixels are found`() {
-        assertEquals(PhotoFormat.JPEG, FormatResolver.forColourSpace(PhotoFormat.HEIC, srgb = false))
-        assertEquals(PhotoFormat.HEIC, FormatResolver.forColourSpace(PhotoFormat.HEIC, srgb = true))
-        assertEquals(PhotoFormat.WEBP, FormatResolver.forColourSpace(PhotoFormat.WEBP, srgb = false))
-        assertEquals(PhotoFormat.JPEG, FormatResolver.forColourSpace(PhotoFormat.JPEG, srgb = false))
-
+    fun `see-through pixels are found`() {
         val opaque = IntArray(64) { 0xFF336699.toInt() }
         assertFalse(FormatResolver.anyTransparent(opaque))
         val clear = opaque.copyOf().also { it[40] = 0x00000000 }

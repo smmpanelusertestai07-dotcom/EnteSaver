@@ -13,6 +13,18 @@
 *.keystore
 *.jks
 !debug.keystore
+# Signing keys and anything holding their passwords never enter the repository.
+*.p12
+*.pfx
+*.pem
+*.key
+*.b64
+.env
+.env.*
+*[Ss]ecrets*.txt
+*[Ss]ecret*.json
+signing.properties
+keystore.properties
 /app/release
 /app/schemas
 .local-release.jks

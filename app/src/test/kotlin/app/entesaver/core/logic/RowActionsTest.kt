@@ -12,8 +12,9 @@ class RowActionsTest {
         state: ItemState,
         evidence: Evidence = Evidence.NONE,
         neverOptimise: Boolean = false,
-        originalMissing: Boolean = false
-    ) = RowActions.Row(state, evidence, neverOptimise, originalMissing)
+        originalMissing: Boolean = false,
+        originalKept: Boolean = false
+    ) = RowActions.Row(state, evidence, neverOptimise, originalMissing, originalKept)
 
     @Test
     fun `a waiting file can be pushed forward or skipped`() {
@@ -94,6 +95,25 @@ class RowActionsTest {
     fun `an already reclaimed file offers nothing further`() {
         assertEquals(listOf(Action.OPEN), RowActions.forItem(row(ItemState.FREED)))
         assertEquals(listOf(Action.OPEN), RowActions.forItem(row(ItemState.FREED_KEPT)))
+    }
+
+    @Test
+    fun `a file replaced on this phone can be put back while its original is kept`() {
+        assertEquals(
+            listOf(Action.OPEN, Action.PUT_BACK),
+            RowActions.forItem(row(ItemState.FREED_KEPT, originalKept = true))
+        )
+        // Past its 30 days, or deleted: there is nothing to put back.
+        assertEquals(listOf(Action.OPEN), RowActions.forItem(row(ItemState.FREED_KEPT, originalKept = false)))
+        // And never for a file that is not on the phone any more.
+        assertEquals(
+            listOf(Action.OPEN),
+            RowActions.forItem(row(ItemState.FREED_KEPT, originalMissing = true, originalKept = true))
+        )
+        // Nor, by a stray flag, for any other state.
+        for (state in ItemState.entries - ItemState.FREED_KEPT) {
+            assertFalse("$state", Action.PUT_BACK in RowActions.forItem(row(state, originalKept = true)))
+        }
     }
 
     @Test

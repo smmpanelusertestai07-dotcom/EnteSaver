@@ -73,6 +73,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import app.entesaver.R
@@ -84,6 +86,7 @@ import app.entesaver.core.logic.OutputPaths
 import app.entesaver.core.logic.OutputRoots
 import app.entesaver.core.logic.Projection
 import app.entesaver.core.logic.RunDecider
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.data.EarlierInstall
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ItemRow
@@ -135,6 +138,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     val leftoverUris by vm.leftoverUris.collectAsStateWithLifecycle()
     val consentCopies by vm.consentCopies.collectAsStateWithLifecycle()
     val tampered by vm.tampered.collectAsStateWithLifecycle()
+    val fileAccess by vm.fileAccess.collectAsStateWithLifecycle()
     val mediaAccess by vm.mediaAccess.collectAsStateWithLifecycle()
     val savings by vm.savings.collectAsStateWithLifecycle()
     val budget by vm.budget.collectAsStateWithLifecycle()
@@ -163,6 +167,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
     var lastConfirm by remember { mutableIntStateOf(confirmResult ?: 0) }
     LaunchedEffect(confirmResult) { confirmResult?.let { lastConfirm = it } }
 
+    // Granted on Android's own page, so asked again on the way back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshFileAccess() }
     LaunchedEffect(Unit) {
         vm.refreshHealth()
         vm.detectLeftoverFiles()
@@ -1022,7 +1028,9 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             minFreeBytes = options.minFreeBytes,
             waitReason = runCatching { RunDecider.Wait.valueOf(options.waitReason) }
                 .getOrDefault(RunDecider.Wait.NONE),
-            earlierApp = health.earlierInstall
+            earlierApp = health.earlierInstall,
+            needsFileAccess = options.saveMode == SaveMode.IN_PLACE && !fileAccess,
+            modifiedBuild = options.saveMode == SaveMode.IN_PLACE && tampered
         )
 
         Spacer(Modifier.height(16.dp))
@@ -1080,6 +1088,10 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                             stringResource(R.string.optimise_blocked_space)
                         HomeAction.Blocker.EARLIER_APP ->
                             stringResource(R.string.optimise_blocked_earlier)
+                        HomeAction.Blocker.FILE_ACCESS ->
+                            stringResource(R.string.optimise_blocked_file_access)
+                        HomeAction.Blocker.MODIFIED_BUILD ->
+                            stringResource(R.string.optimise_blocked_modified)
                         // CC7.2: when the button bypasses a scheduling rule,
                         // say which one. "Even though the schedule is waiting"
                         // is true of all of them and useful about none.
@@ -1090,7 +1102,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                                 }.getOrDefault(RunDecider.Wait.NONE)
                                 stringResource(
                                     when (wait) {
-                                        RunDecider.Wait.BUDGET_USED, RunDecider.Wait.PHOTO_CAP ->
+                                        RunDecider.Wait.BUDGET_USED, RunDecider.Wait.PHOTO_CAP,
+                                        RunDecider.Wait.DAILY_LIMIT ->
                                             R.string.optimise_now_override_budget
                                         RunDecider.Wait.NOT_CHARGING ->
                                             R.string.optimise_now_override_charger
@@ -1227,6 +1240,53 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                     )
                 }
             }
+        }
+
+        // Originals replaced in place wait 30 days in the trash; until then
+        // they still take their space, which is the one thing worth knowing
+        // and the one thing a person can do something about.
+        val keptOriginals by vm.keptOriginals.collectAsStateWithLifecycle()
+        var confirmTrash by remember { mutableStateOf(false) }
+        AnimatedVisibility(
+            visible = keptOriginals.count > 0,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            AppCard(modifier = Modifier.padding(top = 12.dp)) {
+                Text(
+                    pluralStringResource(R.plurals.trash_card_title, keptOriginals.count, keptOriginals.count),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    stringResource(R.string.trash_card_body, Formats.bytes(keptOriginals.bytes)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+                TextButton(onClick = { confirmTrash = true }) {
+                    Text(stringResource(R.string.trash_card_empty))
+                }
+            }
+        }
+        if (confirmTrash) {
+            AlertDialog(
+                onDismissRequest = { confirmTrash = false },
+                title = { Text(stringResource(R.string.trash_confirm_title)) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        Text(stringResource(R.string.trash_confirm_body))
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmTrash = false
+                        vm.deleteKeptOriginals { _, _ -> }
+                    }) { Text(stringResource(R.string.trash_confirm_yes)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmTrash = false }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
         }
 
         AnimatedVisibility(
@@ -1432,6 +1492,9 @@ private fun statusLine(
             RunDecider.Wait.NEXT_TOO_BIG -> stringResource(R.string.wait_next_too_big)
             RunDecider.Wait.VIDEOS_CHARGING -> stringResource(R.string.wait_videos_charging)
             RunDecider.Wait.EARLIER_APP -> stringResource(R.string.wait_earlier_app)
+            RunDecider.Wait.NEEDS_FILE_ACCESS -> stringResource(R.string.wait_file_access)
+            RunDecider.Wait.MODIFIED_BUILD -> stringResource(R.string.wait_modified_build)
+            RunDecider.Wait.DAILY_LIMIT -> stringResource(R.string.wait_daily_limit)
         }
         return reason ?: pluralStringResource(R.plurals.status_working, waiting, waiting)
     }

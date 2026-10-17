@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import app.entesaver.R
 import app.entesaver.core.logic.CapacityMath
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.data.EnteApp
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.components.AccessNotice
@@ -92,7 +93,7 @@ fun CalculatorScreen(vm: AppViewModel, nav: NavHostController) {
     val profile by vm.profile.collectAsStateWithLifecycle()
     val scheme = MaterialTheme.colorScheme
 
-    LaunchedEffect(options.photo, options.video, options.excludedBuckets) {
+    LaunchedEffect(options.excludedBuckets) {
         vm.refreshCalculator()
         vm.refreshProfile()
     }
@@ -471,8 +472,8 @@ fun CalculatorScreen(vm: AppViewModel, nav: NavHostController) {
                     Text(
                         stringResource(
                             R.string.calc_quality_limits,
-                            photoLimitPhrase(options.photo.spec()),
-                            videoLimitPhrase(options.video.spec())
+                            photoLimitPhrase(MediaSettings.PHOTO),
+                            videoLimitPhrase(MediaSettings.VIDEO)
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = scheme.onSurfaceVariant

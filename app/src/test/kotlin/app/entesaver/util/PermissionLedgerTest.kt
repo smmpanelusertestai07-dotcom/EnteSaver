@@ -84,13 +84,25 @@ class PermissionLedgerTest {
 
     @Test
     fun `what the app never asks for is named on the screen`() {
-        for (absent in listOf("never_camera", "never_location", "never_microphone", "never_contacts", "never_all_files")) {
+        for (absent in listOf("never_camera", "never_location", "never_microphone", "never_contacts")) {
             assertTrue("$absent must be in the ledger", ledger.contains(absent))
             assertTrue("$absent must have a string", strings.contains("name=\"$absent\""))
         }
         // And none of them is in the manifest.
-        for (name in listOf("CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "RECORD_AUDIO", "READ_CONTACTS", "MANAGE_EXTERNAL_STORAGE", "READ_SMS")) {
+        for (name in listOf("CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "RECORD_AUDIO", "READ_CONTACTS", "READ_SMS")) {
             assertFalse("the manifest must not ask for $name", manifest.contains("android.permission.$name"))
         }
+    }
+
+    @Test
+    fun `all files access is declared for replacing in place, explained, and never with the internet`() {
+        assertTrue(manifest.contains("android.permission.MANAGE_EXTERNAL_STORAGE"))
+        // Storage write access only for Android 10, which has no All files access.
+        assertTrue(
+            Regex("""WRITE_EXTERNAL_STORAGE"\s+android:maxSdkVersion="29"""").containsMatchIn(manifest)
+        )
+        assertTrue(ledger.contains("MANAGE_EXTERNAL_STORAGE to (R.string.perm_name_all_files to R.string.perm_purpose_all_files)"))
+        assertTrue(strings.contains("Only for Replace on this phone"))
+        assertFalse(declared().contains("android.permission.INTERNET"))
     }
 }

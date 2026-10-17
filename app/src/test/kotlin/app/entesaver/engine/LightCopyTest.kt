@@ -48,12 +48,12 @@ class LightCopyTest {
     }
 
     @Test
-    fun `a missing local copy is remade from the original with the current preset`() {
+    fun `a missing local copy is remade from the original the one way files are optimised`() {
         val source = engine.substringAfter("private suspend fun pinSource")
             .substringBefore("private suspend fun writeVerified")
         assertTrue(
-            "the remake must use the current quality setting",
-            source.contains("options.photo.spec()") && source.contains("options.video.spec()")
+            "the remake must use the same limits as every other copy",
+            source.contains("MediaSettings.PHOTO") && source.contains("MediaSettings.VIDEO")
         )
         assertTrue(source.contains("PhotoCompressor.compress"))
         assertTrue(source.contains("VideoCompressor.compress"))
@@ -288,7 +288,7 @@ class LightCopyTest {
         )
         assertTrue(
             "the remake must be capped like Stager's encode",
-            source.contains("DeviceTier.fit(context, options.photo.spec())")
+            source.contains("DeviceTier.fit(context, MediaSettings.PHOTO)")
         )
         val skipAt = source.indexOf("if (row.id == remakeDiedOn) return null")
         val noteAt = source.indexOf("InFlight.beginRemake(")

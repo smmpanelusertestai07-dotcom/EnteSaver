@@ -60,4 +60,22 @@ class OnboardingStepsTest {
         assertFalse(OnboardingSteps.isRequired(OnboardingSteps.Step.CLOUD))
         assertFalse(OnboardingSteps.isRequired(OnboardingSteps.Step.READY))
     }
+
+    @Test
+    fun `how space is saved is asked right after the albums, before anything happens to them`() {
+        assertEquals(OnboardingSteps.Step.SAVE_MODE, OnboardingSteps.next(OnboardingSteps.Step.ALBUMS))
+    }
+
+    @Test
+    fun `replacing in place never asks for usage access, copies do`() {
+        val inPlace = OnboardingSteps.visible(SaveMode.IN_PLACE)
+        assertFalse(OnboardingSteps.Step.USAGE in inPlace)
+        assertEquals(OnboardingSteps.ALL - OnboardingSteps.Step.USAGE, inPlace)
+        assertEquals(OnboardingSteps.ALL, OnboardingSteps.visible(SaveMode.COPIES))
+        // Both still start at welcome and end at the start button.
+        for (mode in SaveMode.entries) {
+            assertEquals(OnboardingSteps.Step.WELCOME, OnboardingSteps.visible(mode).first())
+            assertEquals(OnboardingSteps.Step.READY, OnboardingSteps.visible(mode).last())
+        }
+    }
 }

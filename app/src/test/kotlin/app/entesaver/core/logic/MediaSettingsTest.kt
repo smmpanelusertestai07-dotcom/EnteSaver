@@ -6,63 +6,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Photos and videos each have their own setting now. An upgrade must land on
- * the same encode the single preset made, and every choice must mean what
- * the screen says it does.
+ * There is one way to optimise: Storage saver's size limits, each file at
+ * the quality it needs. These pin the limits and the keys results are
+ * grouped under, which files made by earlier versions still carry.
  */
 class MediaSettingsTest {
 
     @Test
-    fun `the old single preset lands on the same encode`() {
-        val (photo, video) = MediaSettings.fromLegacy("STORAGE_SAVER", "H264")
-        assertEquals(PhotoPreset.BALANCED, photo.preset)
-        assertEquals(16, photo.spec().maxMp)
-        assertEquals(82, photo.spec().quality)
-        assertEquals(1920, video.spec().longSide)
-        assertEquals(VideoQuality.STANDARD, video.spec().quality)
-
-        val (best, bestVideo) = MediaSettings.fromLegacy("BALANCED", null)
-        assertEquals(PhotoPreset.BEST, best.preset)
-        assertEquals(24, best.spec().maxMp)
-        assertEquals(2560, bestVideo.spec().longSide)
-
-        val (small, smallVideo) = MediaSettings.fromLegacy("MAX_SAVER", "H264")
-        assertEquals(PhotoPreset.SMALLEST, small.preset)
-        assertEquals(1280, smallVideo.spec().longSide)
-    }
-
-    @Test
-    fun `a new install starts on Balanced for both`() {
-        val (photo, video) = MediaSettings.fromLegacy(null, null)
-        assertEquals(PhotoSettings(), photo)
-        assertEquals(VideoSettings(), video)
-    }
-
-    @Test
-    fun `an explicit HEVC choice is kept, as a Custom video setting`() {
-        val (_, video) = MediaSettings.fromLegacy("BALANCED", "HEVC")
-        assertEquals(VideoPreset.CUSTOM, video.preset)
-        assertEquals(VideoCodecChoice.HEVC, video.spec().codec)
-        // Everything else is what Best stands for.
-        assertEquals(2560, video.spec().longSide)
-        assertEquals(VideoQuality.HIGH, video.spec().quality)
-    }
-
-    @Test
-    fun `custom values only count under Custom`() {
-        val photo = PhotoSettings(PhotoPreset.BALANCED, PhotoFormat.WEBP, 8, 75)
-        assertEquals(PhotoFormat.AUTO, photo.spec().format)
-        assertEquals(PhotoFormat.WEBP, photo.copy(preset = PhotoPreset.CUSTOM).spec().format)
-        val video = VideoSettings(VideoPreset.SMALLEST, longSide = 3840, audioKbps = 64)
-        assertEquals(1280, video.spec().longSide)
-        assertEquals(96, video.spec().audioKbps)
-        assertEquals(64, video.copy(preset = VideoPreset.CUSTOM).spec().audioKbps)
+    fun `the limits are Storage saver's own`() {
+        assertEquals(16, MediaSettings.PHOTO.maxMp)
+        assertEquals(16_000_000L, MediaSettings.PHOTO.maxPixels)
+        assertEquals(1920, MediaSettings.VIDEO.longSide)
+        assertEquals(1920, MediaSettings.VIDEO.longSideLimit)
+        assertEquals(30, MediaSettings.VIDEO.fpsCap)
     }
 
     @Test
     fun `full size and same resolution keep everything`() {
-        assertEquals(Long.MAX_VALUE, PhotoSpec(PhotoFormat.JPEG, 0, 90).maxPixels)
-        assertEquals(Int.MAX_VALUE, VideoSettings(VideoPreset.CUSTOM, longSide = 0).spec().longSideLimit)
+        assertEquals(Long.MAX_VALUE, PhotoSpec(0).maxPixels)
+        assertEquals(Int.MAX_VALUE, VideoSpec(longSide = 0, fpsCap = 30).longSideLimit)
     }
 
     @Test
@@ -78,51 +40,23 @@ class MediaSettingsTest {
     }
 
     @Test
-    fun `keys group results by the encode and read back for the details`() {
-        val photoKey = MediaSettings.photoKey(PhotoFormat.HEIC, PhotoSettings().spec())
-        assertEquals("heic-16-82", photoKey)
-        assertEquals(MediaSettings.PhotoKey(PhotoFormat.HEIC, 16, 82), MediaSettings.parsePhotoKey(photoKey))
-        val videoKey = MediaSettings.videoKey(VideoCodec.HEVC, VideoSettings().spec())
-        assertEquals("hevc-1920-std", videoKey)
-        assertEquals(
-            MediaSettings.VideoKey(VideoCodec.HEVC, 1920, VideoQuality.STANDARD),
-            MediaSettings.parseVideoKey(videoKey)
-        )
-        // Keys the version-8 migration writes for files made before 11.
-        assertEquals(MediaSettings.PhotoKey(PhotoFormat.JPEG, 16, 82), MediaSettings.parsePhotoKey("jpeg-16-82"))
-        assertEquals(
-            MediaSettings.VideoKey(VideoCodec.H264, 2560, VideoQuality.STANDARD),
-            MediaSettings.parseVideoKey("h264-2560-std")
-        )
+    fun `keys group results by how the file was made and read back for the details`() {
+        assertEquals("heic-16", MediaSettings.photoKey(PhotoFormat.HEIC))
+        assertEquals(MediaSettings.PhotoKey(PhotoFormat.HEIC, 16), MediaSettings.parsePhotoKey("heic-16"))
+        assertEquals("hevc-1920", MediaSettings.videoKey(VideoCodec.HEVC))
+        assertEquals(MediaSettings.VideoKey(VideoCodec.HEVC, 1920), MediaSettings.parseVideoKey("hevc-1920"))
+        // Keys written by versions with quality presets still read.
+        assertEquals(MediaSettings.PhotoKey(PhotoFormat.JPEG, 16), MediaSettings.parsePhotoKey("jpeg-16-82"))
+        assertEquals(MediaSettings.VideoKey(VideoCodec.H264, 2560), MediaSettings.parseVideoKey("h264-2560-std"))
         assertNull(MediaSettings.parsePhotoKey("STORAGE_SAVER"))
+        assertNull(MediaSettings.parsePhotoKey("auto-16-82"))
         assertNull(MediaSettings.parseVideoKey("garbage"))
     }
 
     @Test
-    fun `the screen's choices are the ones a backup may restore`() {
-        assertTrue(PhotoSettings().maxMp in MediaSettings.PHOTO_MP_CHOICES)
-        assertTrue(PhotoSettings().quality in MediaSettings.PHOTO_QUALITY_CHOICES)
-        assertTrue(VideoSettings().longSide in MediaSettings.VIDEO_LONG_SIDE_CHOICES)
-        assertTrue(VideoSettings().fpsCap in MediaSettings.VIDEO_FPS_CHOICES)
-        assertTrue(VideoSettings().audioKbps in MediaSettings.AUDIO_KBPS_CHOICES)
-        for (preset in VideoPreset.entries) {
-            val spec = VideoSettings(preset).spec()
-            assertTrue(spec.longSide in MediaSettings.VIDEO_LONG_SIDE_CHOICES)
-            assertTrue(spec.audioKbps in MediaSettings.AUDIO_KBPS_CHOICES)
-        }
-    }
-
-    @Test
-    fun `quality steps cost bits in the right order`() {
-        for (codec in VideoCodec.entries) {
-            assertTrue(BitrateCalc.bppFor(codec, VideoQuality.HIGH) > BitrateCalc.bppFor(codec, VideoQuality.STANDARD))
-            assertTrue(BitrateCalc.bppFor(codec, VideoQuality.STANDARD) > BitrateCalc.bppFor(codec, VideoQuality.SMALL))
-        }
-        // HEVC needs fewer bits for the same look at every step.
-        for (q in VideoQuality.entries) {
-            assertTrue(BitrateCalc.bppFor(VideoCodec.HEVC, q) < BitrateCalc.bppFor(VideoCodec.H264, q))
-        }
-        // Standard is what every version before 11 used.
+    fun `HEVC needs fewer bits than H264 for the same look`() {
+        assertTrue(BitrateCalc.bppFor(VideoCodec.HEVC) < BitrateCalc.bppFor(VideoCodec.H264))
         assertEquals(BitrateCalc.BPP_H264, BitrateCalc.bppFor(VideoCodec.H264), 0.0)
+        assertEquals(BitrateCalc.BPP_HEVC, BitrateCalc.bppFor(VideoCodec.HEVC), 0.0)
     }
 }

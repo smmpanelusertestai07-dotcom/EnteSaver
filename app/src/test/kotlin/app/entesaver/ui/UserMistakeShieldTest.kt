@@ -120,10 +120,8 @@ class UserMistakeShieldTest {
     fun `the standing warnings did not quietly disappear`() {
         // (a) the camera-folder question during setup
         assertTrue(strings.contains("name=\"double_backup_title\""))
-        // (b) a quality change applies to new items only
-        assertTrue(strings.contains("name=\"applies_to_new_only\""))
-        assertTrue(File("src/main/kotlin/app/entesaver/ui/screens/HelpScreens.kt")
-            .readText().contains("applies_to_new_only"))
+        // (b) a file is never optimised twice
+        assertTrue(strings.contains("A file is never optimised twice."))
         // (c) files the cloud app downloads back are recognised, not re-done
         assertTrue(
             "faq_a7 must cover copies the cloud downloads back",

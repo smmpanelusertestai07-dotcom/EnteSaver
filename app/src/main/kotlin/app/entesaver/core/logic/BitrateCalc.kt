@@ -5,12 +5,11 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
- * Video bitrate policy:
- * target = OUTPUT pixels x fps x bits-per-pixel-per-frame, by codec and the
- * quality chosen (H.264 0.13 / 0.10 / 0.075, HEVC 0.085 / 0.065 / 0.05 for
- * high / standard / small), clamped to [1 Mbps, 12 Mbps] - 20 Mbps above
- * 1440p, where 12 would starve a 4K picture. Standard is ~6 Mbps for 1080p30
- * H.264 and ~4 Mbps HEVC, what every version before 11 used.
+ * Video bitrate policy: the standard rate is OUTPUT pixels x fps x
+ * bits-per-pixel-per-frame by codec (H.264 0.10, HEVC 0.065), clamped to
+ * [1 Mbps, 12 Mbps] - 20 Mbps above 1440p, where 12 would starve a 4K
+ * picture: about 6 Mbps for 1080p30 H.264 and 4 Mbps HEVC. A clip is given a
+ * measured share of it (QualityLadder.VIDEO).
  */
 object BitrateCalc {
 
@@ -37,32 +36,17 @@ object BitrateCalc {
      */
     const val FALLBACK_MAX_RATIO = 0.9
 
-    fun bppFor(codec: VideoCodec, quality: VideoQuality = VideoQuality.STANDARD): Double =
-        when (codec) {
-            VideoCodec.H264 -> when (quality) {
-                VideoQuality.HIGH -> 0.13
-                VideoQuality.STANDARD -> BPP_H264
-                VideoQuality.SMALL -> 0.075
-            }
-            VideoCodec.HEVC -> when (quality) {
-                VideoQuality.HIGH -> 0.085
-                VideoQuality.STANDARD -> BPP_HEVC
-                VideoQuality.SMALL -> 0.05
-            }
-        }
+    fun bppFor(codec: VideoCodec): Double = when (codec) {
+        VideoCodec.H264 -> BPP_H264
+        VideoCodec.HEVC -> BPP_HEVC
+    }
 
     fun capFor(outWidth: Int, outHeight: Int): Int =
         if (maxOf(outWidth, outHeight) > UHD_LONG_SIDE) CAP_BPS_UHD else CAP_BPS
 
-    fun targetBps(
-        outWidth: Int,
-        outHeight: Int,
-        fps: Float,
-        codec: VideoCodec,
-        quality: VideoQuality = VideoQuality.STANDARD
-    ): Int {
+    fun targetBps(outWidth: Int, outHeight: Int, fps: Float, codec: VideoCodec): Int {
         val safeFps = if (fps.isFinite() && fps > 1f) fps else 30f
-        val raw = outWidth.toDouble() * outHeight.toDouble() * safeFps * bppFor(codec, quality)
+        val raw = outWidth.toDouble() * outHeight.toDouble() * safeFps * bppFor(codec)
         return raw.toLong().coerceIn(FLOOR_BPS.toLong(), capFor(outWidth, outHeight).toLong()).toInt()
     }
 

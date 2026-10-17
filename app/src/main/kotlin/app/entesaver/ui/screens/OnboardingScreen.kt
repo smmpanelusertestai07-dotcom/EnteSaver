@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +62,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -72,14 +75,15 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.entesaver.R
 import app.entesaver.core.logic.BackupScope
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OnboardingSteps
 import app.entesaver.core.logic.OnboardingSteps.Step
 import app.entesaver.core.logic.OutputLayout
 import app.entesaver.core.logic.OutputPaths
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ItemRow
-import app.entesaver.data.prefs.Options
 import app.entesaver.engine.UsageVerifier
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.components.AlbumGrid
@@ -165,7 +169,8 @@ fun OnboardingScreen(vm: AppViewModel) {
      * to unwind any more.
      */
     fun backOneStep() {
-        goTo(step - 1)
+        // A step this way of saving space never shows is stepped over.
+        if (OnboardingSteps.at(step - 1) !in OnboardingSteps.visible(options.saveMode)) goTo(step - 2) else goTo(step - 1)
     }
 
     // Without this the system Back gesture finishes the activity from every
@@ -204,6 +209,11 @@ fun OnboardingScreen(vm: AppViewModel) {
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { go(Step.BATTERY) }
+
+    // Android 10's storage write access, for Replace on this phone.
+    val writeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { vm.refreshFileAccess() }
 
     val importOkLabel = stringResource(R.string.transfer_import_ok)
     val failedLabel = stringResource(R.string.transfer_failed)
@@ -306,13 +316,16 @@ fun OnboardingScreen(vm: AppViewModel) {
                 )
             }
         }
+        // Counted over the steps this way of saving space shows.
+        val visible = OnboardingSteps.visible(options.saveMode)
+        val position = visible.indexOf(OnboardingSteps.at(step)).coerceAtLeast(0)
         Text(
-            stringResource(R.string.onb_step_counter, step + 1, OnboardingSteps.TOTAL),
+            stringResource(R.string.onb_step_counter, position + 1, visible.size),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 18.dp)
         )
-        StepDots(current = step, total = OnboardingSteps.TOTAL)
+        StepDots(current = position, total = visible.size)
 
         AnimatedContent(
             targetState = step,
@@ -427,7 +440,7 @@ fun OnboardingScreen(vm: AppViewModel) {
                     // No Skip. Everything else here is a permission the app can
                     // work without; this is the list of someone's photos.
                     buttonLabel = stringResource(R.string.onb_albums_confirm),
-                    onButton = { go(Step.NOTIFICATIONS) },
+                    onButton = { go(Step.SAVE_MODE) },
                     buttonAtEnd = true
                 ) {
                     // Empty has two meanings and they are not the same
@@ -545,6 +558,59 @@ fun OnboardingScreen(vm: AppViewModel) {
                 }
             }
 
+            Step.SAVE_MODE -> {
+                val fileAccess by vm.fileAccess.collectAsStateWithLifecycle()
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshFileAccess() }
+                val mode = options.saveMode
+                // Replace on this phone cannot start without Android's file
+                // access, so the button asks for it first and moves on after.
+                val ready = mode == SaveMode.COPIES || fileAccess
+                StepCard(
+                    title = stringResource(R.string.onb_save_title),
+                    text = stringResource(R.string.onb_save_text),
+                    buttonLabel = stringResource(if (ready) R.string.onb_next else R.string.file_access_grant),
+                    onButton = {
+                        when {
+                            ready -> go(Step.NOTIFICATIONS)
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> vm.openFileAccess()
+                            else -> writeLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        }
+                    },
+                    buttonAtEnd = true
+                ) {
+                    SaveModeOption(
+                        selected = mode == SaveMode.IN_PLACE,
+                        title = stringResource(R.string.save_mode_in_place),
+                        badge = stringResource(R.string.save_mode_recommended),
+                        lines = listOf(
+                            stringResource(R.string.save_mode_in_place_note),
+                            stringResource(R.string.save_mode_in_place_ente)
+                        )
+                    ) { vm.setSaveMode(SaveMode.IN_PLACE, note = false) }
+                    SaveModeOption(
+                        selected = mode == SaveMode.COPIES,
+                        title = stringResource(R.string.save_mode_copies),
+                        badge = null,
+                        lines = listOf(
+                            stringResource(R.string.save_mode_copies_note),
+                            stringResource(R.string.save_mode_copies_limit)
+                        )
+                    ) { vm.setSaveMode(SaveMode.COPIES, note = false) }
+                    if (mode == SaveMode.IN_PLACE) {
+                        Text(
+                            if (fileAccess) {
+                                stringResource(R.string.file_access_granted)
+                            } else {
+                                stringResource(R.string.file_access_needed) + " " + stringResource(R.string.file_access_safe)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                    }
+                }
+            }
+
             Step.NOTIFICATIONS -> {
                 // Asked again on every return, so coming back from the
                 // system's notification page shows what was chosen there.
@@ -584,7 +650,7 @@ fun OnboardingScreen(vm: AppViewModel) {
                     title = stringResource(R.string.onb3_title),
                     text = stringResource(R.string.onb3_text),
                     buttonLabel = stringResource(R.string.onb_next),
-                    onButton = { go(Step.USAGE) }
+                    onButton = { go(if (Step.USAGE in OnboardingSteps.visible(options.saveMode)) Step.USAGE else Step.CLOUD) }
                 ) {
                     // One row per thing this particular phone can break, each
                     // opening the page that holds that switch.
@@ -614,6 +680,10 @@ fun OnboardingScreen(vm: AppViewModel) {
             // next" here and a text "Skip" everywhere else - one action in
             // two costumes, and a "Done" on a step nobody had done.
             Step.USAGE -> {
+                // Resumed onto a step this way of saving space does not use.
+                if (Step.USAGE !in OnboardingSteps.visible(options.saveMode)) {
+                    LaunchedEffect(Unit) { go(Step.CLOUD) }
+                }
                 // The step knows whether it has been done. It used to offer
                 // "Grant usage access" forever, even to someone who had just
                 // granted it on the system page and come back. Granted, the
@@ -656,9 +726,13 @@ fun OnboardingScreen(vm: AppViewModel) {
                 // step sends off to install Ente returns to a step that
                 // already knows, without having to go back and forth.
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshEnte() }
+                // Replacing in place leaves Ente as it is: it backs the
+                // albums up and takes each smaller version over the old one.
+                // Everything about Ente Saver's own folder is for copies.
+                val copies = options.saveMode == SaveMode.COPIES
                 StepCard(
                     title = stringResource(R.string.onb5_title),
-                    text = stringResource(R.string.cloud_intended),
+                    text = stringResource(if (copies) R.string.cloud_intended else R.string.save_mode_in_place_ente),
                     // The primary action is last, after everything the user
                     // has to read and do. Continuing past the double-backup
                     // card is the acknowledgement Z5.2 asks to record - the
@@ -700,6 +774,23 @@ fun OnboardingScreen(vm: AppViewModel) {
                             onInstall = { vm.installEnte(it) },
                             modifier = Modifier.padding(top = 8.dp)
                         )
+                    }
+                    if (!copies) {
+                        Text(
+                            stringResource(R.string.save_mode_ente_folders),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                        if (installed) {
+                            OutlinedButton(onClick = { vm.openEnte() }, modifier = Modifier.padding(top = 8.dp)) {
+                                Text(
+                                    stringResource(R.string.onb5_open, EnteApp.LABEL),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        return@StepCard
                     }
                     // Z5.1: the one mistake that silently doubles a cloud
                     // bill - Ente backing up Camera AND the light copies.
@@ -825,7 +916,7 @@ fun OnboardingScreen(vm: AppViewModel) {
                 }
                 SummaryLine(
                     stringResource(R.string.onb_ready_quality),
-                    qualitySummary(options)
+                    qualitySummary()
                 )
                 SummaryLine(
                     stringResource(R.string.onb_ready_when),
@@ -1159,10 +1250,10 @@ private fun scopeSummary(
 }
 
 @Composable
-private fun qualitySummary(options: Options): String = stringResource(
+private fun qualitySummary(): String = stringResource(
     R.string.onb_ready_quality_value,
-    photoPresetLabel(options.photo.preset),
-    videoPresetLabel(options.video.preset)
+    photoLimitPhrase(MediaSettings.PHOTO),
+    videoLimitPhrase(MediaSettings.VIDEO)
 )
 
 @Composable
@@ -1207,6 +1298,47 @@ private fun StepDots(current: Int, total: Int) {
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+/** One way of saving space, as a card to choose. */
+@Composable
+private fun SaveModeOption(
+    selected: Boolean,
+    title: String,
+    badge: String?,
+    lines: List<String>,
+    onSelect: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        onClick = onSelect,
+        shape = RoundedCornerShape(Dimens.ControlCorner),
+        color = if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh,
+        border = if (selected) BorderStroke(2.dp, scheme.primary) else null,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .semantics { this.selected = selected }
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+            RadioButton(selected = selected, onClick = null)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                if (badge != null) {
+                    Text(badge, style = MaterialTheme.typography.labelMedium, color = scheme.primary)
+                }
+                for (line in lines) {
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StepCard(
     title: String,

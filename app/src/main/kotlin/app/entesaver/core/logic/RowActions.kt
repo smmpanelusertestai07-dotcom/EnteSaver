@@ -34,7 +34,10 @@ object RowActions {
         ALLOW_AGAIN,
 
         /** Delete the original, through the one reclaim path. */
-        REMOVE_FROM_PHONE
+        REMOVE_FROM_PHONE,
+
+        /** Write an original replaced on this phone back into its item. */
+        PUT_BACK
     }
 
     /** A row as the rule needs to see it, whatever table it came from. */
@@ -42,7 +45,9 @@ object RowActions {
         val state: ItemState,
         val evidence: Evidence,
         val neverOptimise: Boolean,
-        val originalMissing: Boolean
+        val originalMissing: Boolean,
+        /** Replaced on this phone, with the original still kept in the trash. */
+        val originalKept: Boolean = false
     )
 
     /**
@@ -77,8 +82,12 @@ object RowActions {
                 if (row.evidence.isPerFile) add(Action.REMOVE_FROM_PHONE)
             }
 
+            // Replaced on this phone: while the trash keeps the original,
+            // it can go back into the same item.
+            ItemState.FREED_KEPT -> if (row.originalKept) add(Action.PUT_BACK)
+
             // Already reclaimed, or never understood. Nothing to offer.
-            ItemState.FREED, ItemState.FREED_KEPT, ItemState.UNKNOWN -> Unit
+            ItemState.FREED, ItemState.UNKNOWN -> Unit
         }
     }
 

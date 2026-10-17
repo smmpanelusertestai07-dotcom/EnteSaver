@@ -14,6 +14,11 @@ Every step checks what is on screen. Never reaching the tab bar, or a tab
 that does not become the selected one, fails the run instead of passing
 over a screen that was never drawn.
 
+One step asks for a choice before it moves on: how to save space. Its
+default, Replace on this phone, needs All files access, and its button
+then opens Android's settings page instead of the next step. The walk
+stays inside the app and picks Copies for Ente, whose button is Next.
+
 Usage: release-tab-walk.py <package> <screenshot dir>
 """
 
@@ -34,6 +39,9 @@ DUMP = "/sdcard/entesaver-release-ui.xml"
 # it is the way past the two steps whose main button leaves the app (the
 # notification prompt and the usage access page).
 FORWARD = ["onb_start", "onb_next", "onb_albums_confirm", "onb_done_next", "onb_ready_start", "skip"]
+# A button that would leave the app, and the option on its step that turns
+# it into one that moves setup forward.
+CHOOSE_FIRST = {"file_access_grant": "save_mode_copies"}
 TABS = ["nav_home", "nav_files", "nav_storage", "nav_options"]
 BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 
@@ -64,7 +72,7 @@ def load_labels():
     labels = {}
     for el in ET.parse(STRINGS).getroot().iter("string"):
         labels[el.get("name")] = android_text("".join(el.itertext()))
-    missing = [k for k in FORWARD + TABS if k not in labels]
+    missing = [k for k in FORWARD + TABS + list(CHOOSE_FIRST) + list(CHOOSE_FIRST.values()) if k not in labels]
     if missing:
         fail("strings.xml no longer has %s" % missing)
     return labels
@@ -159,8 +167,15 @@ def main():
         bar = tab_bar(nodes, height, labels)
         if bar:
             break
+        choice = next((n for button, option in CHOOSE_FIRST.items()
+                       if any(m["label"] == labels[button] for m in nodes)
+                       for n in nodes if n["label"] == labels[option]), None)
         forward = next((n for key in FORWARD for n in nodes if n["label"] == labels[key]), None)
-        if forward:
+        if choice:
+            print("setup: choose " + choice["label"])
+            tap(choice)
+            time.sleep(2)
+        elif forward:
             print("setup: " + forward["label"])
             tap(forward)
             time.sleep(2)

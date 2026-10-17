@@ -32,23 +32,22 @@ import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.OutputPaths
 import app.entesaver.core.logic.OutputRoots
 import app.entesaver.core.logic.Pacing
-import app.entesaver.core.logic.PhotoFormat
-import app.entesaver.core.logic.PhotoSettings
 import app.entesaver.core.logic.Projection
 import app.entesaver.core.logic.QualityKept
 import app.entesaver.core.logic.ReclaimRules
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.ScanSources
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.StallAlert
 import app.entesaver.core.logic.Stops
 import app.entesaver.core.logic.ThemeMode
 import app.entesaver.core.logic.VideoCodec
-import app.entesaver.core.logic.VideoSettings
 import app.entesaver.data.EarlierInstall
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ActivityRow
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
+import app.entesaver.data.db.KeptOriginals
 import app.entesaver.data.db.RatioSample
 import app.entesaver.data.db.Search
 import app.entesaver.data.db.leftFolderAtAfter
@@ -63,6 +62,7 @@ import app.entesaver.engine.SnapshotStore
 import app.entesaver.engine.UsageVerifier
 import app.entesaver.media.EncoderCaps
 import app.entesaver.media.HeicSupport
+import app.entesaver.media.InPlace
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.OutputInventory
 import app.entesaver.media.PlannedEncode
@@ -73,6 +73,7 @@ import app.entesaver.util.Errand
 import app.entesaver.util.FirstFrame
 import app.entesaver.util.Formats
 import app.entesaver.util.Locks
+import app.entesaver.util.OemPages
 import app.entesaver.util.Permissions
 import app.entesaver.util.PowerPages
 import app.entesaver.util.SpaceLimits
@@ -359,8 +360,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshMeasuredQuality() {
         viewModelScope.launch(Dispatchers.IO) {
             val o = repo.current()
-            val photos = db.items().photoRatioSamples(PlannedEncode.photoKey(ctx, o))
-            val videos = db.items().videoRatioSamples(PlannedEncode.videoKey(o))
+            val photos = db.items().photoRatioSamples(PlannedEncode.photoKey())
+            val videos = db.items().videoRatioSamples(PlannedEncode.videoKey())
             fun shrink(rows: List<RatioSample>): Int {
                 val original = rows.sumOf { it.sizeBytes }
                 if (original <= 0) return 0
@@ -905,10 +906,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 monthlyVideoBytes = totals.monthlyVideoBytes,
                 videoCount = totals.videoCount
             )
-            val photoSamples = db.items().photoRatioSamples(PlannedEncode.photoKey(ctx, o)).map {
+            val photoSamples = db.items().photoRatioSamples(PlannedEncode.photoKey()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes)
             }
-            val videoSamples = db.items().videoRatioSamples(PlannedEncode.videoKey(o)).map {
+            val videoSamples = db.items().videoRatioSamples(PlannedEncode.videoKey()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes, it.durationMs / 60_000.0)
             }
             // The gallery's own median is what the sample is judged against:
@@ -917,7 +918,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             calcRatios.value = CapacityMath.ratios(
                 photo = photoSamples,
                 video = videoSamples,
-                codec = PlannedEncode.videoCodec(o.video.spec()),
+                codec = PlannedEncode.videoCodec(),
                 source = calcSource.value ?: CapacityMath.Source.MEASURED,
                 galleryPhotoMedian = if (totals.photoCount > 0) {
                     totals.photoBytes / totals.photoCount
@@ -1029,6 +1030,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val keptBytes: StateFlow<Long> =
         db.items().keptBytesFlow().stateIn(viewModelScope, screenLocal, 0L)
 
+    /** Originals replaced in place that still wait in the trash. */
+    val keptOriginals: StateFlow<KeptOriginals> =
+        db.items().keptOriginalsFlow().stateIn(viewModelScope, screenLocal, KeptOriginals(0, 0L))
+
+    /**
+     * Writes the original of [row], replaced on this phone, back in its
+     * place; [done] hears how it went, on the main thread.
+     */
+    fun putBackOriginal(row: ItemRow, done: (InPlace.PutBack) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = runCatching { Stager(ctx, db).putBackOriginal(row.id) }.getOrDefault(InPlace.PutBack.FAILED)
+            withContext(Dispatchers.Main) { done(outcome) }
+        }
+    }
+
+    /** Deletes those originals for good, after the person confirmed it; the result goes to [message]. */
+    fun deleteKeptOriginals(done: (count: Int, bytes: Long) -> Unit) {
+        // A modified build deletes nothing (TamperCheck).
+        if (TamperCheck.isModified(ctx)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val (count, bytes) = Stager(ctx, db).deleteKeptOriginals()
+            withContext(Dispatchers.Main) { done(count, bytes) }
+        }
+    }
+
     val neverOptimiseCount: StateFlow<Int> = db.items().neverOptimiseCountFlow()
         .stateIn(viewModelScope, screenLocal, 0)
 
@@ -1091,7 +1117,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadKeptCopies() {
         viewModelScope.launch(Dispatchers.IO) {
-            keptCopies.value = db.items().keptCopies()
+            keptCopies.value = db.items().keptLightCopies()
         }
     }
 
@@ -1510,43 +1536,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     /**
-     * A change to how photos are optimised, written whole. The history names
-     * the preset, which is the choice a person makes; Custom's knobs are
-     * details of that one choice.
-     */
-    fun setPhoto(v: PhotoSettings) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val before = repo.current().photo
-            repo.setPhoto(v)
-            if (before.preset != v.preset) {
-                noteSettingChange(detail = ActivityWording.encode(ActivityWording.Setting.PHOTOS, v.preset.name))
-            }
-        }
-    }
-
-    fun setVideo(v: VideoSettings) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val before = repo.current().video
-            repo.setVideo(v)
-            if (before.preset != v.preset) {
-                noteSettingChange(detail = ActivityWording.encode(ActivityWording.Setting.VIDEOS, v.preset.name))
-            }
-        }
-    }
-
-    /**
-     * What Auto turns into on this phone, for the notes under the two
-     * settings. HEIC is known only once the background work has tried it.
+     * What optimising turns into on this phone, for the Optimisation card.
+     * HEIC is known only once the background work has tried it.
      */
     data class EncodePlan(
         val heic: HeicSupport.State = HeicSupport.State.UNKNOWN,
-        val photoFormat: PhotoFormat = PhotoFormat.JPEG,
         val videoCodec: VideoCodec = VideoCodec.H264,
         val hevcHardware: Boolean = false,
         /** This phone's photo ceiling in MP (its memory, and what it has taught the app). */
-        val photoCeilingMp: Int = 0,
-        /** The long side this phone holds the video setting to, or 0 when it makes what is asked. */
-        val videoHeldTo: Int = 0
+        val photoCeilingMp: Int = 0
     ) {
         /** Whether the photo ceiling is this phone's own, rather than the 50 MP every phone has. */
         val photoCeilingIsPhones: Boolean get() = photoCeilingMp in 1 until DeviceTier.ANY_PHONE_CEILING_MP
@@ -1556,18 +1554,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshEncodePlan() {
         viewModelScope.launch(Dispatchers.Default) {
-            val o = repo.current()
-            val video = o.video.spec()
-            val smallest = DeviceTier.tier(ctx) == DeviceTier.Tier.VERY_LOW
             encodePlan.value = EncodePlan(
                 heic = HeicSupport.state(ctx),
-                photoFormat = PlannedEncode.photoFormat(ctx, o.photo.spec()),
-                videoCodec = PlannedEncode.videoCodec(video, smallest),
+                videoCodec = PlannedEncode.videoCodec(),
                 hevcHardware = EncoderCaps.hardwareEncoders(EncoderCaps.MIME_HEVC).isNotEmpty(),
-                photoCeilingMp = DeviceTier.lastingCeilingMp(ctx),
-                videoHeldTo = PlannedEncode.videoHeldTo(video, smallest)
+                photoCeilingMp = DeviceTier.lastingCeilingMp(ctx)
             )
         }
+    }
+
+    /** Where optimised files go from now on; files already done stay as they are. */
+    fun setSaveMode(mode: SaveMode, note: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (repo.current().saveMode == mode && note) return@launch
+            repo.setString(OptionsRepo.K.SAVE_MODE, mode.name)
+            // A choice made during setup is where it starts, not a change.
+            if (note) noteSettingChange(detail = ActivityWording.encode(ActivityWording.Setting.SAVE_MODE, mode.name))
+        }
+    }
+
+    /** Whether Android lets Ente Saver replace files in place; asked again on every resume. */
+    val fileAccess = MutableStateFlow(InPlace.canReplace(ctx))
+
+    fun refreshFileAccess() {
+        fileAccess.value = InPlace.canReplace(ctx)
+    }
+
+    fun openFileAccess() {
+        OemPages.openFileAccess(ctx)
     }
 
     fun setTheme(v: ThemeMode) {
@@ -1725,6 +1739,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun installEnte(source: EnteApp.Source): Boolean = EnteApp.openInstallPage(ctx, source)
 
+    fun openEnteHelp(url: String): Boolean = EnteApp.openHelp(ctx, url)
+
     /**
      * Everything about the link that can actually be checked, checked.
      *
@@ -1791,6 +1807,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun finishOnboarding() {
         viewModelScope.launch {
+            // Written down before setup counts as done: with nothing stored,
+            // a finished setup reads as an install from before 14.
+            repo.setString(OptionsRepo.K.SAVE_MODE, repo.current().saveMode.name)
             repo.setBool(OptionsRepo.K.ONBOARDING_DONE, true)
             Scheduler.ensure(ctx, repo.current())
             Scheduler.runNow(ctx)

@@ -15,6 +15,7 @@ import app.entesaver.core.logic.FormatResolver
 import app.entesaver.core.logic.GoneReason
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.KeptCopies
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OriginalCheck
 import app.entesaver.core.logic.ReclaimRules
 import app.entesaver.data.db.AppDb
@@ -226,7 +227,7 @@ class ReclaimEngine(private val context: Context) {
             if (row.isVideo) {
                 VideoCompressor.compress(
                     context, original, row.displayName, row.mimeType, row.sizeBytes,
-                    options.video.spec(), tempDir
+                    MediaSettings.VIDEO, tempDir
                 )
             } else {
                 // HEIC only where this phone has already passed its test;
@@ -237,7 +238,7 @@ class ReclaimEngine(private val context: Context) {
                 // not a catchable error, is what answers that.
                 PhotoCompressor.compress(
                     context, original, row.displayName, row.sizeBytes,
-                    DeviceTier.fit(context, options.photo.spec()), HeicSupport.works(context), tempDir
+                    DeviceTier.fit(context, MediaSettings.PHOTO), HeicSupport.works(context), tempDir
                 )
             }
         } catch (ce: kotlin.coroutines.cancellation.CancellationException) {

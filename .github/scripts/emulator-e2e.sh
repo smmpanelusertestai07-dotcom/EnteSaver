@@ -308,8 +308,15 @@ if ! adb shell cmd package query-activities -a org.adw.launcher.THEMES | grep -q
   echo "::error::The icon pack is not discoverable by launchers"
   exit 1
 fi
-# The Photos shortcut's landing screen must open without bringing the app down.
-adb shell am start -n "$PKG/.OpenEnteActivity" || true
+# Ente Saver's own screens open only from its icon, its alerts and its
+# shortcuts. From outside - here the shell - Android must refuse them.
+for cls in HostActivity OpenEnteActivity; do
+  out=$(adb shell am start -W -n "$PKG/.$cls" 2>&1 || true)
+  if echo "$out" | grep -q "Status: ok"; then
+    echo "::error::$cls can be opened by other apps: $out"
+    exit 1
+  fi
+done
 sleep 3
 
 if adb logcat -d -b crash | grep -q "$PKG"; then
