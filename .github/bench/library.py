@@ -35,12 +35,15 @@ import sys
 LIBRARY_GB = 46.0
 SEED = 20231016
 # A made file is this share of the real video's length, but never shorter
-# than MIN_S or longer than MAX_S.
-SCALE, MIN_S, MAX_S = 0.08, 3.0, 12.0
-# x264's constant-bitrate mode lands a few percent over the asked-for rate on
-# clips this short (the first keyframe, the HRD's padding); asking for this
-# share of it lands on the real rate. x265's strict CBR lands on it as asked.
-X264_ASK = 0.95
+# than MIN_S or longer than MAX_S. An encoder spends a burst of about 0.7 s
+# worth of bits getting started, whatever the length - a quarter more than
+# its rate on a 3 s clip, which a 37 s camera clip never shows - so no file
+# is shorter than 20 s, where the burst is under 4%.
+SCALE, MIN_S, MAX_S = 0.08, 20.0, 45.0
+# x264's constant-bitrate mode lands a little over the asked-for rate (the
+# first keyframe, the HRD's padding); asking for this share of it lands on the
+# real rate. x265's strict CBR lands on it as asked.
+X264_ASK = 0.985
 # Real files are not all at one rate: each is drawn within this much of its
 # profile's.
 SPREAD = 0.15

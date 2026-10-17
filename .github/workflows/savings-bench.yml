@@ -62,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -86,7 +86,7 @@ jobs:
           ffmpeg -hide_banner -version | head -1
 
       - name: Make this shard's videos
-        run: python3 .github/bench/library.py make --shard ${{ matrix.shard }} --shards 3 --out bench-library
+        run: python3 .github/bench/library.py make --shard ${{ matrix.shard }} --shards 8 --out bench-library
 
       - name: Enable KVM
         run: |
@@ -143,7 +143,7 @@ jobs:
 
   report:
     needs: shard
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
@@ -157,7 +157,7 @@ jobs:
 
       - name: Work out the saving
         run: |
-          python3 .github/bench/library.py manifest --out manifest.csv
+          python3 .github/bench/library.py manifest --shards 8 --out manifest.csv
           python3 .github/bench/report.py --manifest manifest.csv --shards shards --out bench-report
           cat bench-report/summary.txt >> "$GITHUB_STEP_SUMMARY"
 
