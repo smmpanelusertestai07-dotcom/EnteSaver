@@ -7,8 +7,9 @@ on:
       - "claude/**"
   workflow_dispatch:
 
+# Read-only for every job; the release job alone asks for write, to publish.
 permissions:
-  contents: write
+  contents: read
 
 env:
   # The Ente Saver release certificate (public). Every release is signed by
@@ -34,6 +35,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config for the build to find.
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -42,63 +46,47 @@ jobs:
           java-version: "17"
 
       - name: Set up Gradle (with cache)
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
-      # Keystore first: the signing-cert SHA-256 is embedded into the APK
-      # (tamper evidence), so it must exist before the build.
+      # The certificate first: its SHA-256 is embedded into the APK (tamper
+      # evidence), so it must be known before the build. The release key
+      # itself is not opened here: the build runs Gradle, its plugins and
+      # every dependency, and none of that needs the key or its passwords.
       #
-      # - release: the four signing secrets are set. The key is checked against
-      #   RELEASE_CERT_SHA256 before it signs anything, so a wrong secret fails
-      #   here, with its name, not on people's phones.
-      # - throwaway: no secrets (a fork). A key that lives for this run only;
-      #   the release step refuses to publish with it.
-      - name: Prepare signing keystore
+      # - release: the four signing secrets are set, and the APK will carry
+      #   RELEASE_CERT_SHA256. The sign step checks the key really is that
+      #   one before it signs anything.
+      # - throwaway: no secrets (a fork). A key that lives for this run only,
+      #   in the runner's temporary folder; the release job refuses it.
+      - name: Choose the signing certificate
         id: keystore
         env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-          SECRET_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          SECRET_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          HAS_RELEASE_KEY: ${{ secrets.KEYSTORE_B64 != '' }}
         run: |
           set -eu
-          cert_of() {
-            keytool -exportcert -keystore "$1" -alias "$2" -storepass "$3" -rfc \
-              | openssl x509 -noout -fingerprint -sha256 \
-              | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f'
-          }
-          if [ -n "${KEYSTORE_B64:-}" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > release.p12
-            KS_PASS="$SECRET_KEYSTORE_PASSWORD"
-            KEY_ALIAS="${SECRET_KEY_ALIAS:-entesaver}"
-            KEY_PASS="${SECRET_KEY_PASSWORD:-$KS_PASS}"
-            CERT_SHA=$(cert_of release.p12 "$KEY_ALIAS" "$KS_PASS" || true)
-            if [ "$CERT_SHA" != "$RELEASE_CERT_SHA256" ]; then
-              echo "::error title=KEYSTORE_B64 is not the Ente Saver release key::It holds certificate '$CERT_SHA' (empty: KEYSTORE_PASSWORD or KEY_ALIAS does not open it), but releases are signed with $RELEASE_CERT_SHA256. Use the four values from the secrets file."
-              exit 1
-            fi
+          if [ "$HAS_RELEASE_KEY" = "true" ]; then
+            CERT_SHA="$RELEASE_CERT_SHA256"
             MODE=release
             echo "generated=false" >> "$GITHUB_OUTPUT"
-            echo "Using the release key from repository secrets."
+            echo "The release key is in repository secrets; it is opened only to sign."
           else
+            umask 077
             KS_PASS=$(openssl rand -hex 16)
             echo "::add-mask::$KS_PASS"
-            KEY_ALIAS=entesaver
-            KEY_PASS="$KS_PASS"
-            keytool -genkeypair -v -keystore release.p12 -storetype PKCS12 -alias "$KEY_ALIAS" \
+            printf '%s' "$KS_PASS" > "$RUNNER_TEMP/throwaway.pass"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/throwaway.p12" -storetype PKCS12 -alias entesaver \
               -keyalg RSA -keysize 4096 -validity 9125 \
-              -storepass "$KS_PASS" -keypass "$KEY_PASS" \
+              -storepass:file "$RUNNER_TEMP/throwaway.pass" -keypass:file "$RUNNER_TEMP/throwaway.pass" \
               -dname "CN=Ente Saver Release, OU=Ente Saver, O=Ente Saver"
-            CERT_SHA=$(cert_of release.p12 "$KEY_ALIAS" "$KS_PASS")
+            CERT_SHA=$(keytool -exportcert -keystore "$RUNNER_TEMP/throwaway.p12" -alias entesaver \
+                -storepass:file "$RUNNER_TEMP/throwaway.pass" -rfc \
+              | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
             MODE=throwaway
             echo "generated=true" >> "$GITHUB_OUTPUT"
             echo "No signing secrets found - minted a throwaway key for THIS RUN only."
-            echo "It is not written anywhere but this runner, and the release step will refuse to publish with it."
+            echo "It is not written anywhere but this runner, and the release job will refuse to publish with it."
           fi
           {
-            echo "KEYSTORE_PASSWORD=$KS_PASS"
-            echo "KEY_ALIAS=$KEY_ALIAS"
-            echo "KEY_PASSWORD=$KEY_PASS"
-            echo "SIGN_KS=release.p12"
             echo "SIGN_MODE=$MODE"
             echo "CERT_SHA256=$CERT_SHA"
           } >> "$GITHUB_ENV"
@@ -111,13 +99,44 @@ jobs:
           ./gradlew --no-daemon lint testDebugUnitTest assembleRelease
           -PsigningCertSha256=${{ env.CERT_SHA256 }}
 
-      - name: Sign APK (apksigner - v2+v3)
+      - name: Name the APK
         run: |
           set -eu
           VERSION=$(./gradlew -q printVersionName --no-daemon | tail -1)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          APK_NAME="EnteSaver-v$VERSION-release.apk"
-          echo "APK_NAME=$APK_NAME" >> "$GITHUB_ENV"
+          echo "APK_NAME=EnteSaver-v$VERSION-release.apk" >> "$GITHUB_ENV"
+
+      # The key and its passwords exist in this step alone: decoded into the
+      # runner's temporary folder, checked, used and removed again.
+      - name: Sign APK (apksigner - v2+v3)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          SECRET_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SECRET_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          KS="$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$KS" "$RUNNER_TEMP/throwaway.p12" "$RUNNER_TEMP/throwaway.pass"' EXIT
+          if [ "$SIGN_MODE" = release ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
+            export KEYSTORE_PASSWORD="$SECRET_KEYSTORE_PASSWORD"
+            export KEY_PASSWORD="${SECRET_KEY_PASSWORD:-$SECRET_KEYSTORE_PASSWORD}"
+            ALIAS="${SECRET_KEY_ALIAS:-entesaver}"
+            CERT_SHA=$(keytool -exportcert -keystore "$KS" -alias "$ALIAS" -storepass:env KEYSTORE_PASSWORD -rfc \
+              | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f' || true)
+            if [ "$CERT_SHA" != "$RELEASE_CERT_SHA256" ]; then
+              echo "::error title=KEYSTORE_B64 is not the Ente Saver release key::It holds certificate '$CERT_SHA' (empty: KEYSTORE_PASSWORD or KEY_ALIAS does not open it), but releases are signed with $RELEASE_CERT_SHA256. Use the four values from the secrets file."
+              exit 1
+            fi
+          else
+            cp "$RUNNER_TEMP/throwaway.p12" "$KS"
+            KEYSTORE_PASSWORD=$(cat "$RUNNER_TEMP/throwaway.pass")
+            export KEYSTORE_PASSWORD
+            export KEY_PASSWORD="$KEYSTORE_PASSWORD"
+            ALIAS=entesaver
+          fi
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
           [ -f "$UNSIGNED" ] || UNSIGNED=app/build/outputs/apk/release/app-release.apk
@@ -131,7 +150,7 @@ jobs:
           # rather than by reading the flag name and assuming.
           "$BT/zipalign" -f -P 16 4 "$UNSIGNED" EnteSaver-aligned.apk
           # The one signing recipe (sign-apk.sh).
-          SIGN_KS_ALIAS="$KEY_ALIAS" bash .github/scripts/sign-apk.sh EnteSaver-aligned.apk "$APK_NAME"
+          SIGN_KS="$KS" SIGN_KS_ALIAS="$ALIAS" bash .github/scripts/sign-apk.sh EnteSaver-aligned.apk "$APK_NAME"
           "$BT/apksigner" verify --print-certs "$APK_NAME"
           # The emulator job installs a fixed name, so keep one alongside it.
           cp "$APK_NAME" EnteSaver-release.apk
@@ -186,21 +205,23 @@ jobs:
           cat > RELEASE_NOTES.md <<EOF
           Ente Saver, made for Ente Photos.
 
-          Offline storage saver. Light copies go to one folder (Pictures/EnteSaver);
-          Ente Photos backs up only that folder. Photos and videos have their own
-          settings. Originals are never touched automatically. Everything else is
-          explained inside the app (Help).
+          Makes your photos and videos smaller on the phone, each at the quality
+          its picture needs, within the size limits of Google Photos' Storage
+          saver (16 MP, 1080p). Every file keeps its format, name, album and dates,
+          and a file is never made smaller twice.
 
-          From 12.3 Ente Saver has its own application ID (package name),
-          app.entesaver; until 12.2 it was app.cloudsaver. To Android that is a
-          different app, so it installs next to an earlier Ente Saver, not over
-          it. Moving takes a minute and is needed only once:
-          1. Install this one, open it, and on the first screen tap "Restore
-             from a saved file". Choose history.json in Documents › Ente Saver.
-          2. Uninstall the earlier Ente Saver. The new one shows a button for it
-             for as long as the earlier one is on the phone.
-          Your photos, the copies waiting for Ente and your Ente account are not
-          touched.
+          Two ways to save space, in Settings › Saving space:
+          - Replace on this phone (the default): the smaller version takes the
+            original's place in the same file, so Ente Photos uploads it in place
+            of the original and your Ente storage shrinks too. The original waits
+            in the phone's trash for 30 days, and Files can put it back.
+          - Copies for Ente: smaller copies go to Pictures/EnteSaver for Ente
+            Photos to back up, and the originals stay until you free them.
+
+          Coming from Ente Saver 12.2 or older (app.cloudsaver)? That is a
+          different app to Android: install this one, tap "Restore from a saved
+          file" on its first screen and choose history.json in Documents › Ente
+          Saver, then uninstall the earlier one.
 
           No server, no account, no analytics, no internet permission, nothing
           that expires.
@@ -249,6 +270,8 @@ jobs:
             EnteSaver-*.apk
             RELEASE_NOTES.md
           if-no-files-found: error
+          # The release is the lasting copy; a run's own copy need not outlive a fortnight.
+          retention-days: 14
 
   emulator:
     # Every Android this app installs on, from minSdk to targetSdk, not just
@@ -279,6 +302,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config for the build to find.
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -287,7 +313,7 @@ jobs:
           java-version: "17"
 
       - name: Set up Gradle (with cache)
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       # A stock runner has ~7.3 GB free, and the AVD wants 7.37 GB for its
       # userdata partition alone - it dies at launch with "Not enough space to
@@ -342,7 +368,7 @@ jobs:
           exit 1
 
       - name: Run instrumented suite + live install on a real emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           # The update-over-the-last-release check downloads that release.
           GH_TOKEN: ${{ github.token }}
@@ -373,6 +399,7 @@ jobs:
             artifacts/logcat.txt
             artifacts/logcat-crash.txt
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload instrumentation report
         if: always()
@@ -383,12 +410,16 @@ jobs:
             app/build/reports/androidTests/**
             app/build/outputs/androidTest-results/**
           if-no-files-found: warn
+          retention-days: 14
 
   release:
     name: publish release
     needs: [build, emulator]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04  # the build's image (see there)
+    # The one job that writes: it creates the tag and the release.
+    permissions:
+      contents: write
     steps:
       # A release nobody can install as an update is not a release.
       #

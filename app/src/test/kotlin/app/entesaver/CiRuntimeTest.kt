@@ -64,7 +64,8 @@ class CiRuntimeTest {
     @Test
     fun `no action is pinned to a major that loses its runtime`() {
         assertTrue("the workflows directory must be found from app/", workflows.isDirectory)
-        val uses = Regex("""uses:\s*([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-/]+)@v(\d+)""")
+        // A tag, or a commit with the tag it is written next to.
+        val uses = Regex("""uses:\s*([A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-/]+)@(?:[0-9a-f]{40}\s+#\s*)?v(\d+)""")
         val expiring = mutableListOf<String>()
         val unknown = mutableListOf<String>()
         for (file in workflows.listFiles { f -> f.extension == "yml" || f.extension == "yaml" }.orEmpty()) {
@@ -190,5 +191,67 @@ class CiRuntimeTest {
             walker.contains("never reached its tabs") && walker.contains("sys.exit(1)")
         )
         assertTrue("and when a tab does not open", walker.contains("tab never opened"))
+    }
+
+    /**
+     * An action outside GitHub's own runs with the build's files in reach,
+     * and a tag is a pointer its owner can move. A moved tag in the build
+     * job could change the APK before it is signed, so every action that is
+     * not GitHub's is pinned to the commit that was reviewed.
+     */
+    @Test
+    fun `an action from outside GitHub is pinned to a commit`() {
+        val uses = Regex("""uses:\s*([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-/]+)@(\S+)""")
+        val loose = mutableListOf<String>()
+        for (file in workflows.listFiles { f -> f.extension == "yml" || f.extension == "yaml" }.orEmpty()) {
+            file.readLines().forEachIndexed { idx, line ->
+                val m = uses.find(line) ?: return@forEachIndexed
+                val (owner, _, ref) = m.destructured
+                if (owner != "actions" && !Regex("[0-9a-f]{40}").matches(ref)) loose += "${file.name}:${idx + 1} ${m.value}"
+            }
+        }
+        assertTrue("pin these to a commit SHA, with the tag as a comment: $loose", loose.isEmpty())
+    }
+
+    /**
+     * The signing key and its passwords reach one step, and only that one.
+     * They used to be written into the job's environment before the build,
+     * where Gradle, every plugin and every dependency could read them, with
+     * the keystore beside the sources and a write token in .git/config.
+     */
+    @Test
+    fun `the release key reaches only the signing step, and the token only reads`() {
+        val build = File(workflows, "build.yml").readText()
+        assertTrue("read-only by default", build.contains("permissions:\n  contents: read"))
+        val releaseJob = build.substringAfter("\n  release:\n")
+        assertTrue("the release job alone may write", releaseJob.contains("permissions:\n      contents: write"))
+        assertFalse("no other job may write", build.substringBefore("\n  release:\n").contains("contents: write"))
+        val checkouts = Regex("""uses: actions/checkout@\S+\n\s+with:\n\s+(?:#.*\n\s+)*persist-credentials: false""")
+        assertTrue(
+            "every checkout leaves no token behind",
+            checkouts.findAll(build).count() == Regex("uses: actions/checkout@").findAll(build).count()
+        )
+        // Each secret is named exactly once in the file's steps: in the env of the signing step.
+        val steps = build.split("\n      - name: ")
+        for (secret in listOf("KEYSTORE_B64", "KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")) {
+            val using = steps.filter { it.contains("secrets.$secret }}") }
+            assertTrue(
+                "$secret may be read by the signing step only, not by ${using.map { it.lineSequence().first() }}",
+                using.size == 1 && using.single().startsWith("Sign APK")
+            )
+        }
+        assertFalse("no password goes into the job's environment", Regex("""echo "(KEYSTORE_PASSWORD|KEY_PASSWORD)=""").containsMatchIn(build))
+        assertTrue("the key is written outside the checkout", build.contains("KS=\"\$RUNNER_TEMP/release.p12\""))
+        assertTrue("and removed after signing", build.contains("trap 'rm -f \"\$KS\""))
+    }
+
+    @Test
+    fun `a run's artifacts expire`() {
+        for (file in workflows.listFiles { f -> f.extension == "yml" || f.extension == "yaml" }.orEmpty()) {
+            val text = file.readText()
+            val uploads = Regex("uses: actions/upload-artifact@").findAll(text).count()
+            val expiring = Regex("retention-days: \\d+").findAll(text).count()
+            assertTrue("${file.name}: every upload needs retention-days", uploads == expiring)
+        }
     }
 }

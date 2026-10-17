@@ -105,10 +105,12 @@
 
              It has no launcher entry of its own: the home-screen icon is the
              alias below, so the component launchers know never depends on
-             the class's name. -->
+             the class's name. Not exported: other apps reach the app only
+             through that icon, and its own alerts and shortcuts open it as
+             the app itself. -->
         <activity
             android:name=".HostActivity"
-            android:exported="true"
+            android:exported="false"
             android:launchMode="singleTop"
             android:screenOrientation="fullUser"
             android:windowSoftInputMode="adjustResize" />
@@ -132,11 +134,12 @@
             </intent-filter>
         </activity-alias>
         <!-- Opens Ente Photos from the "Photos" home-screen shortcut, or Ente
-             Saver's install buttons when Ente is not there. Shows nothing. -->
+             Saver's install buttons when Ente is not there. Shows nothing.
+             Not exported: a pinned shortcut opens it as the app itself. -->
         <activity
             android:name=".OpenEnteActivity"
             android:excludeFromRecents="true"
-            android:exported="true"
+            android:exported="false"
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
