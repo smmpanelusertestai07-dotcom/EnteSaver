@@ -100,15 +100,20 @@ object Ssim {
     }
 
     /**
-     * The scores a copy must reach against its own original.
+     * The scores a copy must reach.
      *
-     * Chosen to sit at or above what Google Photos' Storage saver gives: a
-     * 16 MP photo and a 1080p video that look the same as the original at
-     * the size a phone shows them. Measured on full-size crops for a photo,
-     * where blocking shows first, and on whole frames for a video.
+     * Chosen to sit at or above what Google Photos' Storage saver keeps, and
+     * measured, not guessed. A photo is compared with its own decoded
+     * original, on a mosaic of full-size squares where blocking shows first:
+     * 0.965 is where JPEG quality 85 - about Storage saver's - lands on the
+     * Kodak test photos, so a detailed photo gets that and a plain one less.
+     * A video is compared with a near-lossless encode of the same frames:
+     * on real 1080p camera footage, 0.965 there is a VMAF of about 90 to 96
+     * (Netflix's scale, 93 and up looking like the source), and the hardest
+     * scenes, which never reach it, get the top rung.
      */
     object Targets {
         const val PHOTO = 0.965
-        const val VIDEO = 0.950
+        const val VIDEO = 0.965
     }
 }

@@ -70,17 +70,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import app.entesaver.BuildConfig
 import app.entesaver.R
-import app.entesaver.core.logic.PhotoPreset
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.Platform
 import app.entesaver.core.logic.QualityKept
-import app.entesaver.core.logic.VideoPreset
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.Routes
 import app.entesaver.ui.components.AppCard
 import app.entesaver.ui.components.BrandMark
 import app.entesaver.ui.components.KeyValueRow
 import app.entesaver.ui.components.PhotosIcon
-import app.entesaver.ui.components.SegmentedChoice
 import app.entesaver.ui.components.ShortcutDialog
 import app.entesaver.ui.goTo
 import app.entesaver.util.Errand
@@ -325,8 +323,8 @@ fun HelpFaqScreen(nav: NavHostController) {
  *
  * The glossary is gone with the words it existed to explain: a page that has
  * to define "bits per pixel" before it can make its point was making the
- * wrong point. What is left is what happens, how small, how it looks, what
- * this phone actually measured, and the one real choice.
+ * wrong point. What is left is what happens, how small, how it looks, and
+ * what this phone actually measured.
  */
 @Composable
 fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
@@ -334,16 +332,15 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
     val kept by vm.detailKept.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refreshMeasuredQuality() }
 
-    val options by vm.options.collectAsStateWithLifecycle()
     val plan by vm.encodePlan.collectAsStateWithLifecycle()
-    LaunchedEffect(options.photo, options.video) { vm.refreshEncodePlan() }
-    val photoSpec = options.photo.spec()
-    val videoSpec = options.video.spec()
+    LaunchedEffect(Unit) { vm.refreshEncodePlan() }
+    val photoSpec = MediaSettings.PHOTO
+    val videoSpec = MediaSettings.VIDEO
 
     HelpPage(nav, stringResource(R.string.quality_explained_title)) {
-        // Which setting is on right now, what it means in numbers, and the
-        // other two - all three visible, so choosing does not mean guessing
-        // what the names stand for.
+        // The one way files are optimised, in numbers, and how each file's
+        // quality is checked - there is nothing to choose, so nothing to
+        // guess about.
         AppCard(modifier = Modifier.padding(vertical = 4.dp), tonal = true) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -363,30 +360,11 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
                 )
             }
             Text(
-                stringResource(R.string.opt_photos),
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            SegmentedChoice(
-                PhotoPreset.entries.map { it.name to photoPresetLabel(it) },
-                options.photo.preset.name
-            ) { vm.setPhoto(options.photo.copy(preset = PhotoPreset.valueOf(it))) }
-            Text(
-                stringResource(R.string.opt_videos),
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            SegmentedChoice(
-                VideoPreset.entries.map { it.name to videoPresetLabel(it) },
-                options.video.preset.name
-            ) { vm.setVideo(options.video.copy(preset = VideoPreset.valueOf(it))) }
-            Text(
                 stringResource(
                     R.string.quality_current_limits,
                     photoLimitPhrase(photoSpec),
-                    formatLabel(plan.photoFormat),
-                    QualityKept.photoQuality(photoSpec),
-                    videoLimitPhrase(videoSpec)
+                    videoLimitPhrase(videoSpec),
+                    codecLabel(plan.videoCodec)
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 10.dp)
@@ -404,27 +382,11 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
-            // CC3.2: how it looks, per preset - deliberately separate from the
-            // pixel table below, and said to be, because "kept 33% of the
-            // pixels" and "looks 97% the same" are both true at once and the
-            // difference is the entire subject of this screen.
-            // A Custom setting has no figure: the looks were judged for the
-            // three presets, and a guess for an arbitrary mix is not one.
-            val looks = listOfNotNull(
-                when (options.photo.preset) {
-                    PhotoPreset.BEST -> R.string.quality_looks_photo_best
-                    PhotoPreset.BALANCED -> R.string.quality_looks_photo_balanced
-                    PhotoPreset.SMALLEST -> R.string.quality_looks_photo_smallest
-                    PhotoPreset.CUSTOM -> null
-                },
-                when (options.video.preset) {
-                    VideoPreset.BEST -> R.string.quality_looks_video_best
-                    VideoPreset.BALANCED -> R.string.quality_looks_video_balanced
-                    VideoPreset.SMALLEST -> R.string.quality_looks_video_smallest
-                    VideoPreset.CUSTOM -> null
-                }
-            )
-            for (line in looks) {
+            // How it looks - deliberately separate from the pixel table
+            // below, because "kept 33% of the pixels" and "looks the same"
+            // are both true at once and the difference is the entire subject
+            // of this screen.
+            for (line in listOf(R.string.quality_looks_photo, R.string.quality_looks_video)) {
                 Text(
                     stringResource(line),
                     style = MaterialTheme.typography.bodyMedium,
@@ -437,12 +399,6 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
-            )
-            Text(
-                stringResource(R.string.applies_to_new_only),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 6.dp)
             )
         }
 
@@ -945,10 +901,8 @@ fun HelpAboutScreen(vm: AppViewModel, nav: NavHostController) {
             Text(
                 stringResource(
                     R.string.about_quality_line,
-                    photoPresetLabel(options.photo.preset),
-                    photoLimitPhrase(options.photo.spec()),
-                    videoPresetLabel(options.video.preset),
-                    videoLimitPhrase(options.video.spec())
+                    photoLimitPhrase(MediaSettings.PHOTO),
+                    videoLimitPhrase(MediaSettings.VIDEO)
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 8.dp)

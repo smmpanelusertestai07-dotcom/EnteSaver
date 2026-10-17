@@ -7,12 +7,12 @@ import org.junit.Test
 
 class QualityKeptTest {
 
-    private val balancedPhoto = PhotoSettings(PhotoPreset.BALANCED).spec()
-    private val smallestPhoto = PhotoSettings(PhotoPreset.SMALLEST).spec()
-    private val bestPhoto = PhotoSettings(PhotoPreset.BEST).spec()
-    private val balancedVideo = VideoSettings(VideoPreset.BALANCED).spec()
-    private val smallestVideo = VideoSettings(VideoPreset.SMALLEST).spec()
-    private val bestVideo = VideoSettings(VideoPreset.BEST).spec()
+    private val balancedPhoto = MediaSettings.PHOTO
+    private val smallestPhoto = PhotoSpec(8)
+    private val bestPhoto = PhotoSpec(24)
+    private val balancedVideo = MediaSettings.VIDEO
+    private val smallestVideo = VideoSpec(longSide = 1280, fpsCap = 30)
+    private val bestVideo = VideoSpec(longSide = 2560, fpsCap = 30)
 
     @Test
     fun `a file already under the cap keeps every pixel`() {
@@ -27,7 +27,7 @@ class QualityKeptTest {
     fun `a photo above the cap keeps the cap's share of its pixels`() {
         // 48 MP capped at 16 MP keeps a third.
         assertEquals(33, QualityKept.photoDetailKeptPercent(48.0, balancedPhoto))
-        // 24 MP capped at 8 MP on the most aggressive preset keeps a third too.
+        // 24 MP capped at 8 MP keeps a third too.
         assertEquals(33, QualityKept.photoDetailKeptPercent(24.0, smallestPhoto))
     }
 
@@ -41,21 +41,20 @@ class QualityKeptTest {
 
     @Test
     fun `the figures come from the real encoder settings`() {
-        // If a preset is retuned, these move with it rather than going stale.
-        assertEquals(balancedPhoto.quality, QualityKept.photoQuality(balancedPhoto))
+        // If a limit is retuned, these move with it rather than going stale.
         assertEquals(bestPhoto.maxMp, QualityKept.photoCapMp(bestPhoto))
         assertEquals(smallestVideo.longSide, QualityKept.videoCapLongSide(smallestVideo))
     }
 
     @Test
-    fun `the cap still beats the screen on every preset that claims to`() {
+    fun `the cap still beats the screen wherever it claims to`() {
         // The reassurance the app offers has to be true before it is offered.
         assertTrue(QualityKept.screenHeadroom(balancedPhoto)!! > 5.0)
         assertTrue(QualityKept.screenHeadroom(bestPhoto)!! > 5.0)
         assertTrue(QualityKept.screenHeadroom(smallestPhoto)!! > 2.0)
         // Full size has no cap to compare, and claims nothing.
-        assertNull(QualityKept.screenHeadroom(PhotoSpec(PhotoFormat.JPEG, 0, 90)))
-        assertEquals(100, QualityKept.photoDetailKeptPercent(108.0, PhotoSpec(PhotoFormat.JPEG, 0, 90)))
+        assertNull(QualityKept.screenHeadroom(PhotoSpec(0)))
+        assertEquals(100, QualityKept.photoDetailKeptPercent(108.0, PhotoSpec(0)))
         assertEquals(100, QualityKept.videoDetailKeptPercent(3840, bestVideo.copy(longSide = 0)))
     }
 

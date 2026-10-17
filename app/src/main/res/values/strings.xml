@@ -163,8 +163,8 @@
     <string name="files_size_waiting">%1$s \u2014 waiting</string>
     <string name="detail_album">Album</string>
     <string name="detail_preset">Made with</string>
-    <string name="detail_photo_settings">%1$s, %2$s, quality %3$d</string>
-    <string name="detail_video_settings">%1$s, %2$s, %3$s quality</string>
+    <string name="detail_photo_settings">%1$s, %2$s</string>
+    <string name="detail_video_settings">%1$s, %2$s</string>
     <string name="detail_folder">Upload folder</string>
     <string name="files_empty_title">No files yet</string>
     <string name="files_empty">Nothing here yet. The first scan runs shortly after setup.</string>
@@ -651,63 +651,31 @@
     <string name="opt_volume">Storage location</string>
     <string name="opt_volume_hint">Where Ente Saver keeps its optimised copies and the upload folder.</string>
     <string name="opt_photos">Photos</string>
-    <string name="opt_photos_hint">How much smaller photos are made. Originals are never changed.</string>
     <string name="opt_videos">Videos</string>
-    <string name="opt_videos_hint">How much smaller videos are made. Originals are never changed.</string>
+    <string name="opt_optimise">Optimisation</string>
+    <string name="opt_optimise_hint">One way, the same on every phone. Each file gets only the bytes its picture needs.</string>
+    <string name="optimise_value">Automatic</string>
+    <string name="optimise_photos">Photos: %1$s, each in its own format — a JPEG stays a JPEG. Each gets the lowest quality that still measures like its original.</string>
+    <string name="optimise_videos">Videos: up to 1080p as %1$s, 30 fps at most; slow motion keeps every frame. Two short pieces are test-encoded first, so each gets the bitrate its picture needs. Sound that is already small is kept as it is.</string>
+    <string name="optimise_kept_whole">Motion, portrait and HDR photos, and anything a copy would lose something from, are kept whole. A file is never optimised twice.</string>
     <string name="preset_best">Best</string>
     <string name="preset_balanced">Balanced</string>
     <string name="preset_smallest">Smallest</string>
     <string name="preset_custom">Custom</string>
-    <string name="preset_best_photo">Up to 24 MP. The most detail, a smaller saving.</string>
-    <string name="preset_balanced_photo">Up to 16 MP: more than any phone screen shows. A big saving you would have to look for. Recommended.</string>
-    <string name="preset_smallest_photo">Up to 8 MP. The most saving; fine detail goes when you zoom right in.</string>
-    <string name="preset_best_video">1440p, high quality. Sharp on a big screen, a smaller saving.</string>
-    <string name="preset_balanced_video">1080p, standard quality. Full HD, a big saving. Recommended.</string>
-    <string name="preset_smallest_video">720p, small quality, lighter sound. The most saving; softer on a big screen.</string>
-    <string name="photo_plan">On this phone: %1$s, %2$s, quality %3$d</string>
     <string name="photo_size_full">full size</string>
     <string name="photo_size_mp">up to %1$d MP</string>
     <string name="photo_size_mp_phone">up to %1$d MP (this phone\u2019s memory)</string>
-    <string name="res_phone_cap">up to %1$s (this phone)</string>
-    <string name="size_full_short">Full</string>
-    <string name="size_mp_short">%1$d MP</string>
-    <string name="format_auto">Auto</string>
     <string name="format_heic">HEIC</string>
     <string name="format_jpeg">JPEG</string>
     <string name="format_webp">WebP</string>
-    <string name="photo_heic_unknown">Auto writes HEIC, about half the size of JPEG, once this phone passes a quick check on the next run. Until then, and on a phone that fails it, JPEG.</string>
-    <string name="photo_heic_ok">This phone\u2019s chip passed the HEIC check, so Auto writes HEIC: about half the size of JPEG at the same look.</string>
-    <string name="photo_heic_fail">This phone\u2019s chip did not pass the HEIC check, so photos are written as JPEG.</string>
-    <string name="photo_webp_note">WebP is small and sharp; Ente and most galleries open it.</string>
-    <string name="photo_ultra_hdr_note">Ultra HDR photos stay JPEG so they keep their HDR.</string>
-    <string name="custom_format">Format</string>
-    <string name="custom_size">Largest size</string>
-    <string name="custom_quality">Quality</string>
-    <string name="video_plan">On this phone: %1$s, %2$s, %3$s, %4$s quality, sound %5$d kbps</string>
+    <string name="format_png">PNG</string>
+    <string name="photo_heic_unknown">HEIC photos are made smaller as HEIC once this phone passes a quick check on the next run. Until then, and on a phone that fails it, they are kept as they are.</string>
+    <string name="photo_heic_ok">This phone\u2019s chip passed the HEIC check, so HEIC photos are made smaller as HEIC.</string>
+    <string name="photo_heic_fail">This phone\u2019s chip did not pass the HEIC check, so HEIC photos are kept as they are.</string>
     <string name="res_keep">as filmed</string>
     <string name="video_size_p">up to %1$s</string>
-    <string name="res_keep_short">Same</string>
-    <string name="fps_keep">frame rate as filmed</string>
-    <string name="fps_cap">up to %1$d fps</string>
-    <string name="fps_keep_short">Same</string>
-    <string name="fps_cap_short">%1$d fps</string>
-    <string name="codec_auto">Auto</string>
     <string name="video_hevc_none">This phone has no HEVC chip, so videos are made with H.264. HEVC without one would take far longer and run the phone hot.</string>
     <string name="video_hevc_ok">This phone has an HEVC chip, so Auto makes videos about a third smaller than H.264 at the same look.</string>
-    <string name="video_fps_note">Slow-motion clips always keep every frame.</string>
-    <string name="video_quality_high">High</string>
-    <string name="video_quality_standard">Standard</string>
-    <string name="video_quality_small">Small</string>
-    <string name="custom_codec">Codec</string>
-    <string name="custom_resolution">Resolution</string>
-    <string name="custom_fps">Frame rate</string>
-    <string name="custom_sound">Sound (kbps)</string>
-    <string name="custom_hdr">HDR video</string>
-    <string name="hdr_keep">Keep when possible</string>
-    <string name="hdr_sdr">Convert to standard</string>
-    <string name="hdr_keep_note">HDR is kept where this phone can write it; otherwise it is converted carefully to standard colour.</string>
-    <string name="hdr_sdr_note">HDR clips are converted to standard colour: smaller, and they look the same on every screen.</string>
-    <string name="applies_to_new_only">Changes apply to new items only. Already-processed files are not redone.</string>
     <string name="codec_h264">H.264</string>
     <string name="codec_hevc">HEVC</string>
     <string name="opt_theme">Theme</string>
@@ -1045,9 +1013,9 @@
     <string name="quality_measured_none">Nothing measured yet \u2014 this fills in after your first 20 photos and 20 videos are optimised.</string>
     <string name="quality_originals_safe">Whatever the setting, your originals are never edited, moved or deleted by this.</string>
     <string name="quality_codec_title">H.264 or HEVC?</string>
-    <string name="quality_codec_text" formatted="false">Two ways of packing a video. H.264 plays on everything, including old phones and TVs. HEVC makes files about a third smaller for the same picture, but some older devices cannot play it. Automatic, the setting every install starts with, uses HEVC only where this phone has the chip for it, and H.264 everywhere else.</string>
-    <string name="quality_table_title">What to expect on Balanced</string>
-    <string name="quality_table_note">These figures are for Balanced, the setting every install starts with. Best keeps more detail and saves less; Smallest saves more \u2014 the summary above changes with your choice, this table does not.</string>
+    <string name="quality_codec_text" formatted="false">Two ways of packing a video. H.264 plays on everything, including old phones and TVs. HEVC makes files about a third smaller for the same picture, but some older devices cannot play it. Ente Saver uses HEVC only where this phone has the chip for it, and H.264 everywhere else.</string>
+    <string name="quality_table_title">What to expect</string>
+    <string name="quality_table_note">Typical results. Each file gets the quality its own picture needs, so its saving is its own.</string>
     <string name="quality_row1_k">1080p video</string>
     <string name="quality_row1_v" formatted="false">60\u201375% smaller, looks the same</string>
     <string name="quality_row2_k">4K video saved as 1080p</string>
@@ -1356,19 +1324,15 @@
     <string name="trial_goes_away">This card goes once they have moved there, and every before-and-after is then in Files. Rather not keep them? Remove them now: the photos go back in the queue and are optimised again later.</string>
     <string name="trial_discard">Remove trial copies</string>
     <string name="trial_tap_compare">Tap to compare before and after</string>
-    <string name="quality_current_title">Your setting</string>
-    <string name="quality_current_limits">Photos %1$s, saved as %2$s at quality %3$d. Videos %4$s.</string>
-    <string name="quality_looks_photo_best" formatted="false">Photos keep about 99% of how they look.</string>
-    <string name="quality_looks_photo_balanced" formatted="false">Photos keep about 97% of how they look.</string>
-    <string name="quality_looks_photo_smallest" formatted="false">Photos keep about 90% of how they look.</string>
-    <string name="quality_looks_video_best" formatted="false">Videos keep 95\u201398% of how they look.</string>
-    <string name="quality_looks_video_balanced" formatted="false">Videos keep 90\u201395% of how they look.</string>
-    <string name="quality_looks_video_smallest" formatted="false">Videos keep 80\u201385% of how they look.</string>
+    <string name="quality_current_title">How files are optimised</string>
+    <string name="quality_current_limits">Photos %1$s, each in its own format. Videos %2$s as %3$s, 30 fps at most; slow motion keeps every frame.</string>
+    <string name="quality_looks_photo">Every photo is checked against its original before it is written. It gets the lowest quality at which it still looks the same.</string>
+    <string name="quality_looks_video">Every video longer than 15 seconds has two short pieces test-encoded first. It gets the bitrate at which they still look like the original.</string>
     <string name="quality_looks_note">Detail kept counts pixels; these lines describe how it looks.</string>
     <string name="quality_current_headroom">That is about %1$s times more detail than a phone screen can display.</string>
-    <string name="about_quality_title">Quality setting</string>
-    <string name="about_quality_line">Photos: %1$s, %2$s. Videos: %3$s, %4$s.</string>
-    <string name="about_quality_change">Change or read how it works</string>
+    <string name="about_quality_title">Optimisation</string>
+    <string name="about_quality_line">Photos %1$s and videos %2$s, each at the quality its picture needs.</string>
+    <string name="about_quality_change">How it works</string>
     <string name="detail_kept">Detail kept</string>
     <string name="detail_kept_value">%1$d%% of the original pixels</string>
     <string name="detail_kept_all">All of them — this file was already under the limit</string>

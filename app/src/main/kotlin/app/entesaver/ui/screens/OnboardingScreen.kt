@@ -72,6 +72,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.entesaver.R
 import app.entesaver.core.logic.BackupScope
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OnboardingSteps
 import app.entesaver.core.logic.OnboardingSteps.Step
 import app.entesaver.core.logic.OutputLayout
@@ -79,7 +80,6 @@ import app.entesaver.core.logic.OutputPaths
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ItemRow
-import app.entesaver.data.prefs.Options
 import app.entesaver.engine.UsageVerifier
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.components.AlbumGrid
@@ -825,7 +825,7 @@ fun OnboardingScreen(vm: AppViewModel) {
                 }
                 SummaryLine(
                     stringResource(R.string.onb_ready_quality),
-                    qualitySummary(options)
+                    qualitySummary()
                 )
                 SummaryLine(
                     stringResource(R.string.onb_ready_when),
@@ -1159,10 +1159,10 @@ private fun scopeSummary(
 }
 
 @Composable
-private fun qualitySummary(options: Options): String = stringResource(
+private fun qualitySummary(): String = stringResource(
     R.string.onb_ready_quality_value,
-    photoPresetLabel(options.photo.preset),
-    videoPresetLabel(options.video.preset)
+    photoLimitPhrase(MediaSettings.PHOTO),
+    videoLimitPhrase(MediaSettings.VIDEO)
 )
 
 @Composable

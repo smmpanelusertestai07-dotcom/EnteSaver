@@ -39,14 +39,8 @@ import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.OutputLayout
 import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.OutputPaths
-import app.entesaver.core.logic.PhotoFormat
-import app.entesaver.core.logic.PhotoPreset
-import app.entesaver.core.logic.PhotoSettings
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.ThemeMode
-import app.entesaver.core.logic.VideoCodecChoice
-import app.entesaver.core.logic.VideoPreset
-import app.entesaver.core.logic.VideoSettings
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
@@ -170,8 +164,6 @@ class SettingsE2eTest {
         repo.setInt(OptionsRepo.K.DAILY_CAP_MB, Defaults.DAILY_CAP_MB)
         repo.setInt(OptionsRepo.K.MIN_FREE_MB, Defaults.MIN_FREE_MB)
         repo.setInt(OptionsRepo.K.MAX_EXTRA_MB, Defaults.MAX_EXTRA_MB)
-        repo.setPhoto(PhotoSettings())
-        repo.setVideo(VideoSettings())
         repo.setString(OptionsRepo.K.THEME, ThemeMode.SYSTEM.name)
         repo.setBool(OptionsRepo.K.DYNAMIC_COLOR, false)
         repo.setString(OptionsRepo.K.STORAGE_VOLUME, "")
@@ -493,50 +485,23 @@ class SettingsE2eTest {
         assertEquals(card, options().storageVolume)
     }
 
-    /** 8. Photos and 9. Videos: presets, Custom's knobs, and the info button. */
+    /** 8. Optimisation: nothing to choose, what this phone will do, and the info button. */
     @Test
-    fun photoAndVideoSettingsChangeSeparatelyAndExplainThemselves() {
+    fun optimisationSaysWhatThisPhoneDoesAndExplainsItself() {
         openSettings()
-        val photoHint = s(R.string.opt_photos_hint)
-        val videoHint = s(R.string.opt_videos_hint)
-
-        // Both start on Balanced, each saying what that means.
-        assertCardValue(photoHint, s(R.string.preset_balanced))
-        assertCardValue(videoHint, s(R.string.preset_balanced))
-        compose.onNodeWithText(s(R.string.preset_balanced_photo)).performScrollTo().assertIsDisplayed()
-
-        // Photos move on their own; videos stay where they were.
-        tap(segment(photoHint, s(R.string.preset_best)))
-        awaitOption("photo preset") { it.photo.preset == PhotoPreset.BEST }
-        assertEquals(VideoPreset.BALANCED, options().video.preset)
-        compose.onNodeWithText(s(R.string.preset_best_photo)).performScrollTo().assertIsDisplayed()
-
-        // Custom opens every knob.
-        tap(segment(photoHint, s(R.string.preset_custom)))
-        awaitOption("photo preset") { it.photo.preset == PhotoPreset.CUSTOM }
-        awaitNode(hasText(s(R.string.custom_format)), "Custom did not open the photo knobs")
-        tap(segment(s(R.string.custom_format), s(R.string.format_webp)))
-        awaitOption("photo format") { it.photo.format == PhotoFormat.WEBP }
-        compose.onNodeWithText(s(R.string.photo_webp_note)).performScrollTo().assertIsDisplayed()
-        tap(segment(s(R.string.custom_size), context.getString(R.string.size_mp_short, 8)))
-        awaitOption("photo size") { it.photo.maxMp == 8 }
-
-        // Videos, separately.
-        tap(segment(videoHint, s(R.string.preset_smallest)))
-        awaitOption("video preset") { it.video.preset == VideoPreset.SMALLEST }
-        compose.onNodeWithText(s(R.string.preset_smallest_video)).performScrollTo().assertIsDisplayed()
-        tap(segment(videoHint, s(R.string.preset_custom)))
-        awaitOption("video preset") { it.video.preset == VideoPreset.CUSTOM }
-        awaitNode(hasText(s(R.string.custom_sound)), "Custom did not open the video knobs")
-        tap(segment(s(R.string.custom_sound), "64"))
-        awaitOption("sound") { it.video.audioKbps == 64 }
-        tap(segment(s(R.string.custom_codec), s(R.string.codec_hevc)))
-        awaitOption("video codec") { it.video.codec == VideoCodecChoice.HEVC }
+        val hint = s(R.string.opt_optimise_hint)
+        assertCardValue(hint, s(R.string.optimise_value))
+        // No preset to pick: every phone optimises one way. ("Custom" is
+        // still a word on this screen - the space limits use it.)
+        for (gone in listOf(R.string.preset_balanced, R.string.preset_smallest, R.string.preset_best)) {
+            compose.onAllNodes(hasText(s(gone))).assertCountEquals(0)
+        }
+        compose.onNodeWithText(s(R.string.optimise_kept_whole)).performScrollTo().assertIsDisplayed()
         // No emulator has an HEVC chip, and the card says what that means
         // rather than quietly encoding in software.
         compose.onNodeWithText(s(R.string.video_hevc_none)).performScrollTo().assertIsDisplayed()
 
-        // The (i) beside each opens the page that explains what they mean.
+        // The (i) beside it opens the page that explains it.
         compose.onAllNodesWithContentDescription(s(R.string.quality_explained_title))[0]
             .performScrollTo()
             .performClick()
@@ -544,20 +509,10 @@ class SettingsE2eTest {
             hasText(s(R.string.quality_explained_title)) and hasNoClickAction(),
             "the info button did not open the quality page"
         )
-        awaitNodeGone(hasText(photoHint), "Settings stayed under the quality page")
+        compose.onNodeWithText(s(R.string.quality_looks_photo)).performScrollTo().assertIsDisplayed()
+        awaitNodeGone(hasText(hint), "Settings stayed under the quality page")
         compose.onNodeWithContentDescription(s(R.string.back)).performClick()
-        awaitNode(hasText(photoHint), "Back did not return to Settings")
-
-        recreateAndOpenSettings()
-        val o = options()
-        assertEquals(PhotoPreset.CUSTOM, o.photo.preset)
-        assertEquals(PhotoFormat.WEBP, o.photo.format)
-        assertEquals(8, o.photo.maxMp)
-        assertEquals(VideoPreset.CUSTOM, o.video.preset)
-        assertEquals(64, o.video.audioKbps)
-        assertEquals(VideoCodecChoice.HEVC, o.video.codec)
-        assertCardValue(photoHint, s(R.string.preset_custom))
-        assertCardValue(videoHint, s(R.string.preset_custom))
+        awaitNode(hasText(hint), "Back did not return to Settings")
     }
 
     /** 10. Theme, and the wallpaper-colours switch that lives inside it. */
@@ -794,10 +749,10 @@ class SettingsE2eTest {
 
         awaitNode(hasText(s(R.string.help_faq)), "the Help row did not open Help")
         compose.onNodeWithText(s(R.string.help_deleted)).performScrollTo().assertIsDisplayed()
-        awaitNodeGone(hasText(s(R.string.opt_photos_hint)), "Settings stayed under Help")
+        awaitNodeGone(hasText(s(R.string.opt_optimise_hint)), "Settings stayed under Help")
 
         compose.onNodeWithContentDescription(s(R.string.back)).performClick()
-        awaitNode(hasText(s(R.string.opt_photos_hint)), "Back did not return to Settings")
+        awaitNode(hasText(s(R.string.opt_optimise_hint)), "Back did not return to Settings")
         compose.onNodeWithText(s(R.string.options_footer)).performScrollTo().assertIsDisplayed()
     }
 
@@ -811,10 +766,10 @@ class SettingsE2eTest {
             hasText(s(R.string.activity_filter_all)),
             "the Activity row did not open Activity"
         )
-        awaitNodeGone(hasText(s(R.string.opt_photos_hint)), "Settings stayed under Activity")
+        awaitNodeGone(hasText(s(R.string.opt_optimise_hint)), "Settings stayed under Activity")
 
         device.pressBack()
-        awaitNode(hasText(s(R.string.opt_photos_hint)), "Back did not return to Settings")
+        awaitNode(hasText(s(R.string.opt_optimise_hint)), "Back did not return to Settings")
         compose.onNodeWithText(s(R.string.options_footer)).performScrollTo().assertIsDisplayed()
     }
 
@@ -830,7 +785,7 @@ class SettingsE2eTest {
             compose.onAllNodes(NavTabs.matcher(tab)).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNode(NavTabs.matcher(tab)).performClick()
-        awaitNode(hasText(s(R.string.opt_photos_hint)), "the Settings screen never appeared")
+        awaitNode(hasText(s(R.string.opt_optimise_hint)), "the Settings screen never appeared")
     }
 
     /** Unfolds Advanced, where the settings most people never change live; nothing if it is open. */

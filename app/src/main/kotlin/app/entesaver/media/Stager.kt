@@ -6,8 +6,10 @@ import android.os.Process
 import android.provider.MediaStore
 import androidx.room.withTransaction
 import app.entesaver.core.logic.Fingerprint
+import app.entesaver.core.logic.FormatResolver
 import app.entesaver.core.logic.ImportMerge
 import app.entesaver.core.logic.ItemState
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.PhotoFormat
@@ -180,12 +182,13 @@ class Stager(private val context: Context, private val db: AppDb) {
         val tempDir = Storage.tempDir(context, options.storageVolume)
         // Held to what this phone can decode without running out of memory;
         // asked only for a photo, since it reads the memory free right now.
-        val photoSpec = if (row.isVideo) options.photo.spec() else DeviceTier.fit(context, options.photo.spec())
-        val videoSpec = options.video.spec()
-        // HEIC only once this phone has passed its own test; the test runs
-        // here, in background work, the first time a photo would want it.
+        val photoSpec = if (row.isVideo) MediaSettings.PHOTO else DeviceTier.fit(context, MediaSettings.PHOTO)
+        val videoSpec = MediaSettings.VIDEO
+        // A HEIC is written back as HEIC only once this phone has passed its
+        // own test; the test runs here, in background work, the first time
+        // a HEIC photo comes up.
         val heicWorks = !row.isVideo &&
-            (photoSpec.format == PhotoFormat.AUTO || photoSpec.format == PhotoFormat.HEIC) &&
+            FormatResolver.sourceFormat(row.displayName) == PhotoFormat.HEIC &&
             HeicSupport.probeIfNeeded(context, tempDir) == HeicSupport.State.OK
         // Compression must never make the phone feel slow, even with the
         // screen on while charging. The thread doing it belongs to a shared
@@ -270,12 +273,12 @@ class Stager(private val context: Context, private val db: AppDb) {
                     outPixels = result.outPixels,
                     outputSha256 = sha,
                     outputFolder = folder.name,
-                    // Grouped under what the settings stand for on this
-                    // phone, the key estimates are read back by.
+                    // Grouped under how it was made, the key estimates are
+                    // read back by.
                     presetUsed = if (row.isVideo) {
-                        PlannedEncode.videoKey(options)
+                        MediaSettings.videoKey(result.codec ?: PlannedEncode.videoCodec())
                     } else {
-                        PlannedEncode.photoKey(context, options)
+                        MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
                     },
                     codecUsed = result.codec?.name,
                     predictedBytes = predictedBytes,

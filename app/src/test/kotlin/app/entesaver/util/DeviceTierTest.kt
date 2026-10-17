@@ -1,6 +1,5 @@
 package app.entesaver.util
 
-import app.entesaver.core.logic.PhotoFormat
 import app.entesaver.core.logic.PhotoSpec
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -8,7 +7,7 @@ import org.junit.Test
 /** A phone's decode ceiling only ever makes a photo smaller, never larger. */
 class DeviceTierTest {
 
-    private fun spec(mp: Int) = PhotoSpec(PhotoFormat.JPEG, mp, 82)
+    private fun spec(mp: Int) = PhotoSpec(mp)
 
     @Test
     fun `Original is held to the ceiling`() {

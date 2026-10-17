@@ -322,7 +322,7 @@ class UiWalkthroughTest {
             compose.onNodeWithText(s(R.string.nav_options)).performClick()
             shoot("23-settings-top")
             // Scroll through the long settings list to catch layout problems.
-            compose.onAllNodes(hasText(s(R.string.opt_photos_hint))).onFirst()
+            compose.onAllNodes(hasText(s(R.string.opt_optimise_hint))).onFirst()
                 .performScrollTo().assertIsDisplayed()
             shoot("24-settings-quality")
             compose.openRow(s(R.string.opt_advanced_show))

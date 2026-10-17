@@ -316,25 +316,11 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
             ChoiceNote(stringResource(R.string.folders_gap_note))
         }
 
-        // Photos and videos: two settings, because they are two
-        // trade-offs. The note under each says what this phone will actually
-        // do, which depends on its encoder chips - asked once per visit.
+        // Optimisation: nothing to choose, only what this phone will do,
+        // which depends on its encoder chips - asked once per visit.
         val plan by vm.encodePlan.collectAsStateWithLifecycle()
-        LaunchedEffect(o.photo, o.video) { vm.refreshEncodePlan() }
-        PhotoSettingsCard(
-            photo = o.photo,
-            plan = plan,
-            icon = IconQuality,
-            onChange = { vm.setPhoto(it) },
-            onInfo = { nav.goTo(Routes.HELP_QUALITY) }
-        )
-        VideoSettingsCard(
-            video = o.video,
-            plan = plan,
-            icon = IconCodec,
-            onChange = { vm.setVideo(it) },
-            onInfo = { nav.goTo(Routes.HELP_QUALITY) }
-        )
+        LaunchedEffect(Unit) { vm.refreshEncodePlan() }
+        OptimisationCard(plan = plan, icon = IconQuality, onInfo = { nav.goTo(Routes.HELP_QUALITY) })
 
         // When to work
         OptionCard(

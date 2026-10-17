@@ -413,8 +413,7 @@ fun FilesScreen(vm: AppViewModel) {
                                 stringResource(
                                     R.string.detail_video_settings,
                                     codecLabel(codec),
-                                    if (k.longSide <= 0) stringResource(R.string.res_keep) else MediaSettings.pLabel(k.longSide),
-                                    videoQualityLabel(k.quality).lowercase()
+                                    if (k.longSide <= 0) stringResource(R.string.res_keep) else MediaSettings.pLabel(k.longSide)
                                 )
                             }
                         } else {
@@ -427,8 +426,7 @@ fun FilesScreen(vm: AppViewModel) {
                                         stringResource(R.string.photo_size_full)
                                     } else {
                                         stringResource(R.string.photo_size_mp, k.maxMp)
-                                    },
-                                    k.quality
+                                    }
                                 )
                             }
                         }
