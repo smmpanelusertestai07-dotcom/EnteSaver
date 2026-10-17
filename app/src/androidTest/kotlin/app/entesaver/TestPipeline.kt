@@ -43,8 +43,16 @@ object TestPipeline {
         runCatching { wm.cancelAllWork().result.get(TIMEOUT_MS, TimeUnit.MILLISECONDS) }
 
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
+        var polls = 0
         while (System.currentTimeMillis() < deadline) {
             if (busyWork(wm).isEmpty()) return
+            // A run that finished a moment before the cancel re-arms its
+            // content trigger on the way out, as it should; that new work
+            // is cancelled too.
+            if (++polls % 10 == 0) {
+                Scheduler.cancelAll(context)
+                runCatching { wm.cancelAllWork().result.get(TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+            }
             Thread.sleep(POLL_MS)
         }
         val left = busyWork(wm).joinToString { "${it.state}" }

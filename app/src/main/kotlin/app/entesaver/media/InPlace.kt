@@ -348,13 +348,14 @@ object InPlace {
     /**
      * A pending copy moved into the trash: out of pending and into the trash
      * in one update, so it never shows in a gallery - Ente's included - even
-     * for a moment; in two where a provider takes one flag at a time.
+     * for a moment. Only ever one update: Android works both states out from
+     * the file's name, so the trash flag set while the copy is still pending
+     * is dropped, and publishing it after would leave a visible duplicate.
      */
     @RequiresApi(Build.VERSION_CODES.R)
     private fun moveToTrash(context: Context, item: Uri): Boolean {
-        val resolver = context.contentResolver
         runCatching {
-            resolver.update(
+            context.contentResolver.update(
                 item,
                 ContentValues().apply {
                     put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -362,11 +363,6 @@ object InPlace {
                 },
                 includeAll()
             )
-        }
-        if (isKeptInTrash(context, item)) return true
-        runCatching {
-            resolver.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }, includeAll())
-            resolver.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, includeAll())
         }
         return isKeptInTrash(context, item)
     }

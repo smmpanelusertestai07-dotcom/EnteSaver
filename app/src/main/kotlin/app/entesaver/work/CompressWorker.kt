@@ -5,6 +5,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.entesaver.R
 import app.entesaver.core.logic.BackupScope
@@ -38,6 +40,7 @@ import app.entesaver.util.Permissions
 import app.entesaver.util.SpaceLimits
 import app.entesaver.util.Storage
 import app.entesaver.util.TamperCheck
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.min
 import kotlinx.coroutines.NonCancellable
@@ -465,7 +468,10 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                 // Never leave a "working" icon in the status bar once the run
                 // is over, whatever ended it.
                 Notifications.clearWorking(app)
-                reschedule(app, repo)
+                // A run the app itself cancelled - setup reset, everything
+                // stopped - arms nothing: a trigger armed now would outlive
+                // the cancel and wake the app for the next new photo.
+                if (!cancelledByApp()) reschedule(app, repo)
             }
         }
         return Result.success()
@@ -486,6 +492,16 @@ class CompressWorker(context: Context, params: WorkerParameters) :
     } else {
         RunDecider.decide(o.speed, power, budget, paused = o.pauseAll, videosNeedCharger = smallestPhone)
     }
+
+    /**
+     * Whether this run ended because its own work was cancelled. WorkManager
+     * marks the work cancelled before it stops the run, so the state says
+     * so on every Android version, where the stop reason does only from 12.
+     */
+    private fun cancelledByApp(): Boolean = isStopped && runCatching {
+        WorkManager.getInstance(applicationContext).getWorkInfoById(id)
+            .get(5, TimeUnit.SECONDS)?.state == WorkInfo.State.CANCELLED
+    }.getOrDefault(false)
 
     /** FAST re-arms its content trigger after every run (triggers are one-shot). */
     private suspend fun reschedule(context: Context, repo: OptionsRepo) {
