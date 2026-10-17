@@ -29,10 +29,13 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import app.entesaver.core.logic.AudioPlan
 import app.entesaver.core.logic.BitrateCalc
 import app.entesaver.core.logic.HdrPolicy
 import app.entesaver.core.logic.MediaSettings
+import app.entesaver.core.logic.QualityLadder
 import app.entesaver.core.logic.RunDecider
+import app.entesaver.core.logic.Ssim
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.core.logic.VideoCodecResolver
 import app.entesaver.core.logic.VideoSpec
@@ -50,12 +53,19 @@ import kotlinx.coroutines.withTimeout
 /**
  * Video pipeline (Media3 Transformer): MP4 out, H.264 or HEVC (HEVC only on a
  * hardware encoder that takes the clip), aspect kept, rotation applied
- * upright, an ordinary high frame rate capped (slow motion kept), AAC at the
- * setting's bitrate. Target bitrate from OUTPUT pixels x fps x the quality's
- * bits per pixel, VBR first. Known Media3 pitfalls are handled with a
- * mandatory result check and a retry ladder: VBR -> CBR -> H.264 (on its
- * hardware for an HEVC clip, in software for an H.264 one) -> copy as-is.
- * An item is never lost.
+ * upright, an ordinary high frame rate capped (slow motion kept).
+ *
+ * How many bits a clip gets is measured, not assumed: two short stretches
+ * of it are encoded at candidate rates and compared with a near-lossless
+ * encode of the same stretches ([QualityLadder], [Ssim]), and the clip gets
+ * the cheapest rate that still looks like it. Sound that is already lean is
+ * copied across untouched ([AudioPlan]). Key frames every few seconds and
+ * B-frames where the chip makes them spend the bits on the picture.
+ *
+ * Known Media3 pitfalls are handled with a mandatory result check and a
+ * retry ladder: VBR with B-frames -> VBR -> CBR -> H.264 (on its hardware
+ * for an HEVC clip, in software for an H.264 one) -> copy as-is. An item is
+ * never lost.
  */
 @OptIn(UnstableApi::class)
 object VideoCompressor {
@@ -73,7 +83,9 @@ object VideoCompressor {
         val cbr: Boolean,
         val software: Boolean,
         val label: String,
-        val codec: VideoCodec
+        val codec: VideoCodec,
+        /** B-frames: about a tenth smaller where the chip makes them; the next rung goes without. */
+        val bFrames: Boolean = false
     )
 
     /**
@@ -83,6 +95,7 @@ object VideoCompressor {
      * phone has.
      */
     private fun attemptsFor(codec: VideoCodec): List<Attempt> = listOf(
+        Attempt(cbr = false, software = false, label = "vbr_b", codec = codec, bFrames = true),
         Attempt(cbr = false, software = false, label = "vbr", codec = codec),
         Attempt(cbr = true, software = false, label = "cbr", codec = codec),
         if (codec == VideoCodec.HEVC) {
@@ -124,6 +137,25 @@ object VideoCompressor {
 
     /** Below this there is no point starting another attempt at all. */
     private const val MIN_ATTEMPT_MS = 60_000L
+
+    /**
+     * Seconds between key frames. A camera writes one every second so it can
+     * be cut anywhere; a copy that is only watched spends those bits better
+     * on the picture, and three seconds is what streaming services use.
+     */
+    const val KEY_FRAME_SECONDS = 3f
+
+    /** Each probe encodes two stretches this long, a third and two thirds in. */
+    private const val PROBE_WINDOW_MS = 1_500L
+
+    /** Where the two stretches are compared: two frames in each. */
+    private val PROBE_FRAMES_US = longArrayOf(400_000L, 1_100_000L, 1_900_000L, 2_600_000L)
+
+    /** The yardstick's rate, as a share of the standard one: enough to look like the original. */
+    private const val REFERENCE_SHARE = 3.0
+
+    /** The most measuring may take of a clip's budget, and of a short budget, a quarter. */
+    private const val PROBE_BUDGET_MS = 3 * 60_000L
 
     /**
      * The ladder's budget for a caller with [remainingMs] left on its deadline.
@@ -169,12 +201,16 @@ object VideoCompressor {
         val codec = VideoCodecResolver.resolve(
             spec.codec, VideoCodecResolver.Hardware(hevcFits = EncoderCaps.hevcFits(outW, outH, outFps))
         )
-        val targetBps = BitrateCalc.targetBps(outW, outH, outFps, codec, spec.quality)
+        // The standard rate for this picture; what the clip is given is a
+        // measured share of it (QualityLadder).
+        val base = BitrateCalc.targetBps(outW, outH, outFps, codec, spec.quality)
         val containerOk = mimeType.lowercase() in COPY_OK_CONTAINERS
         val srcLongSide = maxOf(upright.first, upright.second)
 
-        if (cappedFps == null &&
-            BitrateCalc.shouldCopyAsIs(srcLongSide, spec.longSideLimit, probe.bitrateBps, targetBps, containerOk)
+        // Leaner already than the least any clip is given: nothing to win.
+        if (cappedFps == null && BitrateCalc.shouldCopyAsIs(
+                srcLongSide, spec.longSideLimit, probe.bitrateBps, (base * QualityLadder.RUNGS.first()).toInt(), containerOk
+            )
         ) {
             return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
         }
@@ -202,6 +238,29 @@ object VideoCompressor {
             hdr == MediaTraits.Hdr.NONE -> ""
             keepHdr -> "_hdr"
             else -> "_tonemap"
+        }
+        val sound = audioTrackOf(context, uri)
+        val audio = sound?.let { AudioPlan.decide(it.mime, it.channels, it.bitrateBps) }
+
+        // A 10-bit HDR picture read back as 8-bit frames would be compared
+        // with the wrong thing, so it keeps the standard rate.
+        val share = if (probe.durationMs >= QualityLadder.MIN_PROBE_DURATION_MS && !keepHdr) {
+            measuredShare(
+                context, uri, probe.durationMs, outW, outH, base, codec,
+                hdrMode = if (hdr == MediaTraits.Hdr.NONE) Composition.HDR_MODE_KEEP_HDR else toneMap,
+                frameRateCap = cappedFps?.toInt(),
+                tempDir = tempDir,
+                budgetMs = minOf(PROBE_BUDGET_MS, (budgetEndsAt - System.currentTimeMillis()) / 4)
+            )
+        } else {
+            QualityLadder.UNPROBED
+        }
+        val rateFor = { c: VideoCodec -> (BitrateCalc.targetBps(outW, outH, outFps, c, spec.quality) * share).toInt() }
+        // Measured, the clip needs no fewer bits than it already has.
+        if (cappedFps == null &&
+            BitrateCalc.shouldCopyAsIs(srcLongSide, spec.longSideLimit, probe.bitrateBps, rateFor(codec), containerOk)
+        ) {
+            return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
         }
 
         var outOfTime = false
@@ -232,10 +291,9 @@ object VideoCompressor {
             val outFile = File(tempDir, "video_${System.nanoTime()}_${attempt.label}.mp4")
             val export = try {
                 runTransform(
-                    context, uri, outFile, outW, outH,
-                    BitrateCalc.targetBps(outW, outH, outFps, attempt.codec, spec.quality),
+                    context, uri, outFile, outW, outH, rateFor(attempt.codec),
                     codecMime, attempt, hdrMode, leftMs,
-                    audioBps = spec.audioKbps * 1000,
+                    audio = audio,
                     frameRateCap = cappedFps?.toInt(),
                     onError = { detail = "${attempt.label}: $it" }
                 )
@@ -263,7 +321,7 @@ object VideoCompressor {
                     probeDurationMs(outFile)
                 }
                 val outBps = if (outDur > 0) outBytes * 8000L / outDur else Long.MAX_VALUE
-                val rungTarget = BitrateCalc.targetBps(outW, outH, outFps, attempt.codec, spec.quality)
+                val rungTarget = rateFor(attempt.codec)
                 if (BitrateCalc.resultAcceptable(srcBytes, outBytes, outBps, rungTarget, probe.durationMs, outDur)) {
                     return CompressResult(
                         outFile,
@@ -340,9 +398,10 @@ object VideoCompressor {
         attempt: Attempt,
         hdrMode: Int,
         attemptMs: Long,
-        audioBps: Int,
+        audio: AudioPlan.Decision?,
         frameRateCap: Int?,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        windowsMs: List<LongRange>? = null
     ): ExportResult? = withContext(Dispatchers.Default) {
         // Background priority: encoding must never make the phone feel slow.
         val thread = HandlerThread("entesaver-transform", Process.THREAD_PRIORITY_BACKGROUND)
@@ -358,15 +417,25 @@ object VideoCompressor {
                 } else {
                     MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
                 }
+                // Profile and level are left to Media3, which asks for H.264
+                // High at the highest level the chip supports (minus the chips
+                // known to break on it), and HEVC Main.
                 val videoSettings = VideoEncoderSettings.Builder()
                     .setBitrate(bitrateBps)
                     .setBitrateMode(bitrateMode)
+                    .setiFrameIntervalSeconds(KEY_FRAME_SECONDS)
+                    .apply { if (attempt.bFrames) setMaxBFrames(1) }
                     .build()
+                // Asking for any sound settings at all makes Media3 re-encode
+                // the sound, so a track that is kept asks for none.
+                val encode = audio as? AudioPlan.Decision.Encode
                 val encoderFactory = DefaultEncoderFactory.Builder(context)
                     .setRequestedVideoEncoderSettings(videoSettings)
-                    .setRequestedAudioEncoderSettings(
-                        AudioEncoderSettings.Builder().setBitrate(audioBps).build()
-                    )
+                    .apply {
+                        if (encode != null) {
+                            setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(encode.bps).build())
+                        }
+                    }
                     .setEnableFallback(true)
                     .apply { if (attempt.software) setVideoEncoderSelector(SOFTWARE_SELECTOR) }
                     .build()
@@ -388,7 +457,7 @@ object VideoCompressor {
 
                 val transformer = Transformer.Builder(context)
                     .setVideoMimeType(codecMime)
-                    .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                    .apply { if (encode != null) setAudioMimeType(MimeTypes.AUDIO_AAC) }
                     .setEncoderFactory(encoderFactory)
                     .addListener(listener)
                     .build()
@@ -396,7 +465,7 @@ object VideoCompressor {
 
                 // Presentation is always applied: it keeps aspect (even dims) and
                 // forces a real re-encode so the bitrate settings actually apply.
-                val edited = EditedMediaItem.Builder(MediaItem.fromUri(uri))
+                fun edited(item: MediaItem) = EditedMediaItem.Builder(item)
                     .setEffects(
                         Effects(
                             emptyList<AudioProcessor>(),
@@ -423,11 +492,23 @@ object VideoCompressor {
                 // Either way the copy carries exactly the tracks the original
                 // did. Both branches are pinned by instrumented tests against
                 // real clips, because the wrong choice fails nothing else - the
-                // copy is smaller, valid, and either silent or padded.
-                val sequence = if (hasAudioTrack(context, uri)) {
-                    EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited))
-                } else {
-                    EditedMediaItemSequence.withVideoFrom(listOf(edited))
+                // copy is smaller, valid, and either silent or padded. A probe
+                // is its stretches of picture alone.
+                val sequence = when {
+                    windowsMs != null -> EditedMediaItemSequence.withVideoFrom(
+                        windowsMs.map { window ->
+                            edited(
+                                MediaItem.Builder().setUri(uri).setClippingConfiguration(
+                                    MediaItem.ClippingConfiguration.Builder()
+                                        .setStartPositionMs(window.first)
+                                        .setEndPositionMs(window.last)
+                                        .build()
+                                ).build()
+                            )
+                        }
+                    )
+                    audio != null -> EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited(MediaItem.fromUri(uri))))
+                    else -> EditedMediaItemSequence.withVideoFrom(listOf(edited(MediaItem.fromUri(uri))))
                 }
                 val composition = Composition.Builder(sequence).setHdrMode(hdrMode).build()
                 transformer.start(composition, outFile.absolutePath)
@@ -447,6 +528,98 @@ object VideoCompressor {
             throw ce
         } finally {
             handler.post { thread.quitSafely() }
+        }
+    }
+
+    /**
+     * The share of the standard rate this clip needs (see [QualityLadder]).
+     *
+     * Every probe encodes the same two stretches of the clip in the same way;
+     * the first, at [REFERENCE_SHARE], is the yardstick. Compared with that
+     * rather than with the original, the frames line up exactly and the
+     * scaling is the same on both sides, so the one difference measured is
+     * what the lower rate cost. A probe that cannot be made or read ends the
+     * measuring with what is known ([QualityLadder.settle]); it never fails
+     * the clip.
+     */
+    private suspend fun measuredShare(
+        context: Context,
+        uri: Uri,
+        durationMs: Long,
+        outW: Int,
+        outH: Int,
+        base: Int,
+        codec: VideoCodec,
+        hdrMode: Int,
+        frameRateCap: Int?,
+        tempDir: File,
+        budgetMs: Long
+    ): Double {
+        val endsAt = System.currentTimeMillis() + budgetMs
+        val windows = listOf(durationMs / 3, durationMs * 2 / 3).map { mid ->
+            val start = (mid - PROBE_WINDOW_MS / 2).coerceAtLeast(0L)
+            start..(start + PROBE_WINDOW_MS)
+        }
+        val attempt = attemptsFor(codec).first()
+        val codecMime = if (codec == VideoCodec.H264) MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
+        val ceiling = 2 * BitrateCalc.capFor(outW, outH)
+        val target = Ssim.Targets.VIDEO
+
+        suspend fun framesAt(share: Double): List<FrameQuality.Luma>? {
+            val leftMs = endsAt - System.currentTimeMillis()
+            if (leftMs <= 0) return null
+            val file = File(tempDir, "probe_${System.nanoTime()}.mp4")
+            try {
+                val bps = (base * share).toLong().coerceAtMost(ceiling.toLong()).toInt()
+                runTransform(
+                    context, uri, file, outW, outH, bps, codecMime, attempt, hdrMode, leftMs,
+                    audio = null, frameRateCap = frameRateCap, onError = {}, windowsMs = windows
+                ) ?: return null
+                return FrameQuality.framesOf(file, PROBE_FRAMES_US)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                return null
+            } finally {
+                file.delete()
+            }
+        }
+
+        val reference = framesAt(REFERENCE_SHARE) ?: return QualityLadder.UNPROBED
+        val points = mutableListOf<QualityLadder.Point>()
+        while (true) {
+            when (val step = QualityLadder.next(points, target)) {
+                is QualityLadder.Step.Encode -> return step.share
+                is QualityLadder.Step.Probe -> {
+                    val ssim = framesAt(step.share)?.let { FrameQuality.score(reference, it) }
+                        ?: return QualityLadder.settle(points, target)
+                    points += QualityLadder.Point(step.share, ssim)
+                }
+            }
+        }
+    }
+
+    /** The original's sound track; null when it has none (or cannot be read). */
+    private data class SourceAudio(val mime: String?, val channels: Int, val bitrateBps: Int?)
+
+    private fun audioTrackOf(context: Context, uri: Uri): SourceAudio? {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(context, uri, null)
+            (0 until extractor.trackCount).asSequence()
+                .map { extractor.getTrackFormat(it) }
+                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?.let { f ->
+                    SourceAudio(
+                        mime = f.getString(MediaFormat.KEY_MIME),
+                        channels = if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) f.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2,
+                        bitrateBps = if (f.containsKey(MediaFormat.KEY_BIT_RATE)) f.getInteger(MediaFormat.KEY_BIT_RATE) else null
+                    )
+                }
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { extractor.release() }
         }
     }
 
@@ -486,22 +659,6 @@ object VideoCompressor {
             null
         } finally {
             runCatching { mmr.release() }
-        }
-    }
-
-    /** True when the container has an audio track; a probe failure reads as none. */
-    fun hasAudioTrack(context: Context, uri: Uri): Boolean {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(context, uri, null)
-            (0 until extractor.trackCount).any { i ->
-                extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
-                    ?.startsWith("audio/") == true
-            }
-        } catch (e: Exception) {
-            false
-        } finally {
-            runCatching { extractor.release() }
         }
     }
 
