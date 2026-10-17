@@ -90,6 +90,24 @@ object EnteApp {
         return start(context, intent, errand)
     }
 
+    /** Ente's own help pages, for the tools Ente Saver points to rather than copies. */
+    object Help {
+        private const val BASE = "https://ente.com/help/photos"
+        const val STORAGE = "$BASE/features/albums-and-organization/storage-optimization"
+        const val FREE_UP_DEVICE = "$STORAGE#free-up-device-space"
+        const val DEVICE_CACHE = "$STORAGE#manage-device-cache"
+        const val DUPLICATES = "$STORAGE#remove-exact-duplicates"
+        const val SIMILAR = "$STORAGE#remove-similar-images"
+        const val LARGE_FILES = "$STORAGE#view-large-files"
+        const val SUGGESTIONS = "$STORAGE#delete-suggestions"
+        const val TRASH = "$BASE/features/albums-and-organization/deleting"
+        const val BACKUP = "$BASE/faq/backup-and-sync"
+    }
+
+    /** Opens one of Ente's help pages in the phone's browser. */
+    fun openHelp(context: Context, url: String, errand: Boolean = true): Boolean =
+        start(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), errand)
+
     /** Opens the page Ente is installed from; the phone picks the store or browser. */
     fun openInstallPage(context: Context, source: Source, errand: Boolean = true): Boolean {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(source.uri))

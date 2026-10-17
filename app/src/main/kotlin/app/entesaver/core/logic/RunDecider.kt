@@ -54,7 +54,10 @@ object RunDecider {
          * The earlier Ente Saver (until 12.2) is still installed: it would
          * make copies of the same photos, so this one waits until it is gone.
          */
-        EARLIER_APP
+        EARLIER_APP,
+
+        /** Replace on this phone is on, and Android's file access for it is not. */
+        NEEDS_FILE_ACCESS
     }
 
     /**

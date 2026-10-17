@@ -20,6 +20,8 @@ class OptionsEffectsTest {
         assertEquals(1500, o.minFreeMb)
         assertEquals(1500, o.maxExtraMb)
         assertEquals(ThemeMode.SYSTEM, o.theme)
+        // A new install replaces in place; Options() is a new install.
+        assertEquals(SaveMode.IN_PLACE, o.saveMode)
         // The brand palette is the default; wallpaper colours are opt-in, or
         // the app looks like a different product on every phone.
         assertFalse(o.dynamicColor)

@@ -13,6 +13,7 @@ import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.PhotoFormat
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.StageRules
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
@@ -251,6 +252,7 @@ class Stager(private val context: Context, private val db: AppDb) {
             InFlight.end(context)
             priorPriority?.let { runCatching { Process.setThreadPriority(tid, it) } }
         }
+        if (options.saveMode == SaveMode.IN_PLACE) return replaceInPlace(row, uri, result, predictedBytes)
 
         var stageFile: File? = null
         return try {
@@ -353,9 +355,163 @@ class Stager(private val context: Context, private val db: AppDb) {
             }
         }
 
+    /**
+     * The in-place end of [stageLocked]: the original replaced by [result]
+     * where it is ([InPlace]) - or, for a file a copy would not improve,
+     * left exactly as it is and finished. Nothing is staged or published,
+     * so nothing is left in any folder of Ente Saver's own.
+     */
+    private suspend fun replaceInPlace(row: ItemRow, uri: Uri, result: CompressResult, predictedBytes: Long): Boolean {
+        try {
+            val now = System.currentTimeMillis()
+            if (result.asIs) {
+                // Nothing to write: already small, or a copy would lose
+                // something. The reason stays, for the file's details.
+                return settle(row) { cur ->
+                    cur.copy(
+                        state = ItemState.DONE.name,
+                        lastError = result.reason,
+                        skipReason = null,
+                        predictedBytes = predictedBytes,
+                        updatedAt = now
+                    )
+                }
+            }
+            // Asked once more just before the file is touched: excluded, or
+            // its original gone, while it encoded.
+            val cur = db.items().byId(row.id)
+            if (cur == null ||
+                !StageRules.stillWaiting(cur.state, cur.neverOptimise, cur.originalMissing, cur.fingerprint, row.fingerprint)
+            ) {
+                return false
+            }
+            return when (val outcome = InPlace.replace(context, uri, row.isVideo, row.sizeBytes, result.file, row.id)) {
+                is InPlace.Result.Failed -> {
+                    fail(row, IN_PLACE_FAILED, outcome.reason)
+                    false
+                }
+                is InPlace.Result.Replaced -> {
+                    // The file has changed whatever the row says now, so the
+                    // row is written to match it, unconditionally.
+                    db.withTransaction {
+                        db.items().byId(row.id)?.let { latest ->
+                            db.items().update(
+                                replaced(latest, outcome.backup, outcome.bytes, outcome.sha256, now).copy(
+                                    srcPixels = result.srcPixels,
+                                    outPixels = result.outPixels,
+                                    presetUsed = if (row.isVideo) {
+                                        MediaSettings.videoKey(result.codec ?: PlannedEncode.videoCodec())
+                                    } else {
+                                        MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
+                                    },
+                                    codecUsed = result.codec?.name,
+                                    predictedBytes = predictedBytes
+                                )
+                            )
+                        }
+                    }
+                    InPlace.settled(context)
+                    true
+                }
+            }
+        } finally {
+            result.file.delete()
+        }
+    }
+
+    /**
+     * Finishes or undoes a replace the phone cut short (see [InPlace.recover]),
+     * before a run takes any other file.
+     */
+    suspend fun recoverInPlace() = Locks.stage.withLock {
+        val now = System.currentTimeMillis()
+        when (val found = InPlace.recover(context)) {
+            null, is InPlace.Recovered.Undone -> Unit
+            is InPlace.Recovered.Finished -> {
+                db.items().byId(found.rowId)?.let { cur ->
+                    db.items().update(replaced(cur, found.backup, found.bytes, found.sha256, now))
+                }
+                InPlace.settled(context)
+            }
+            is InPlace.Recovered.Stuck -> db.items().byId(found.rowId)?.let { cur ->
+                // The file is not what either side was; the original waits in
+                // the trash, named on the row, and nothing touches it again.
+                db.items().update(
+                    cur.copy(
+                        state = ItemState.SKIP.name,
+                        skipReason = IN_PLACE_FAILED,
+                        lastError = "restore_failed",
+                        backupUri = found.backup,
+                        updatedAt = now
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Forgets originals the trash no longer holds - Android empties it after
+     * 30 days - and, on Android 10, which has no trash, deletes the hidden
+     * ones that are older. At most [limit] are looked at, oldest first.
+     */
+    suspend fun pruneKeptOriginals(limit: Int = 500) {
+        val now = System.currentTimeMillis()
+        val kept = db.items().keptOriginals().sortedBy { it.updatedAt }.take(limit)
+        for (row in kept) {
+            val backup = row.backupUri ?: continue
+            if (backup.startsWith("file:")) {
+                val path = Uri.parse(backup).path ?: continue
+                if (InPlace.purgeExpired(listOf(path), now) > 0 || !File(path).exists()) {
+                    db.items().forgetBackup(row.id, now)
+                }
+            } else if (!InPlace.backupExists(context, backup)) {
+                db.items().forgetBackup(row.id, now)
+            }
+        }
+    }
+
+    /** Deletes every original still kept after a replace, now; how many and the bytes they held. */
+    suspend fun deleteKeptOriginals(): Pair<Int, Long> {
+        val now = System.currentTimeMillis()
+        var count = 0
+        var bytes = 0L
+        for (row in db.items().keptOriginals()) {
+            val backup = row.backupUri ?: continue
+            if (InPlace.deleteBackup(context, backup) || !InPlace.backupExists(context, backup)) {
+                db.items().forgetBackup(row.id, now)
+                count++
+                bytes += row.sizeBytes
+            }
+        }
+        return count to bytes
+    }
+
     companion object {
         /** Why a file was set aside after three tries (see [fail]). */
         const val ENCODE_FAILED = "encode_failed"
+
+        /** A replace in place that did not happen; the file was left as it was. */
+        const val IN_PLACE_FAILED = "in_place_failed"
+
+        /**
+         * [cur] once its original was replaced in place by [bytes] of copy
+         * hashing to [sha256], with the original kept at [backup]. FREED_KEPT
+         * with the item's own address as its kept copy: the scanner then
+         * knows the smaller file as this row's, never as a new photo, and
+         * the original's size stays on the row so the saving counts.
+         */
+        fun replaced(cur: ItemRow, backup: String, bytes: Long, sha256: String, now: Long): ItemRow = cur.copy(
+            state = ItemState.FREED_KEPT.name,
+            keptUri = cur.contentUri,
+            backupUri = backup,
+            outputBytes = bytes,
+            outputSha256 = sha256,
+            outputName = cur.displayName,
+            stagePath = null,
+            lastError = null,
+            skipReason = null,
+            updatedAt = now
+        )
         const val OUT_OF_MEMORY = "out_of_memory"
 
         /**

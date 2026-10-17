@@ -1,16 +1,23 @@
 package app.entesaver.ui.screens
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import app.entesaver.R
 import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.PhotoFormat
 import app.entesaver.core.logic.PhotoSpec
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.core.logic.VideoSpec
 import app.entesaver.media.HeicSupport
 import app.entesaver.ui.AppViewModel
+import app.entesaver.ui.components.SegmentedChoice
 import app.entesaver.util.DeviceTier
 
 /**
@@ -53,6 +60,59 @@ fun OptimisationCard(plan: AppViewModel.EncodePlan, icon: ImageVector, onInfo: (
         ChoiceNote(stringResource(R.string.optimise_kept_whole))
     }
 }
+
+/**
+ * Saving space: whether each original is replaced where it is, or a copy is
+ * made for Ente. The one choice that decides what happens to a person's own
+ * files, so each side says plainly what it does - and Replace on this phone
+ * says what Android must allow first, and why that is safe.
+ */
+@Composable
+fun SaveModeCard(
+    mode: SaveMode,
+    fileAccess: Boolean,
+    icon: ImageVector,
+    onMode: (SaveMode) -> Unit,
+    onGrant: () -> Unit
+) {
+    OptionCard(
+        stringResource(R.string.opt_save_mode),
+        stringResource(R.string.opt_save_mode_hint),
+        icon = icon,
+        value = saveModeLabel(mode)
+    ) {
+        SegmentedChoice(
+            SaveMode.entries.map { it.name to saveModeLabel(it) },
+            mode.name
+        ) { onMode(SaveMode.valueOf(it)) }
+        if (mode == SaveMode.IN_PLACE) {
+            ChoiceNote(stringResource(R.string.save_mode_in_place_note))
+            ChoiceNote(stringResource(R.string.save_mode_in_place_ente))
+            ChoiceNote(stringResource(R.string.save_mode_ente_folders))
+            if (fileAccess) {
+                ChoiceNote(stringResource(R.string.file_access_granted))
+            } else {
+                ChoiceNote(stringResource(R.string.file_access_needed))
+                ChoiceNote(stringResource(R.string.file_access_safe))
+                Button(onClick = onGrant, modifier = Modifier.padding(top = 8.dp)) {
+                    Text(stringResource(R.string.file_access_grant))
+                }
+            }
+        } else {
+            ChoiceNote(stringResource(R.string.save_mode_copies_note))
+            ChoiceNote(stringResource(R.string.save_mode_copies_limit))
+        }
+        ChoiceNote(stringResource(R.string.save_mode_switch_note))
+    }
+}
+
+@Composable
+fun saveModeLabel(mode: SaveMode): String = stringResource(
+    when (mode) {
+        SaveMode.IN_PLACE -> R.string.save_mode_in_place
+        SaveMode.COPIES -> R.string.save_mode_copies
+    }
+)
 
 @Composable
 fun formatLabel(format: PhotoFormat): String = stringResource(

@@ -50,6 +50,18 @@ enum class BackupScope { ALL, PHOTOS, VIDEOS }
 
 enum class OutputMode { SINGLE, SEPARATE }
 
+/**
+ * Where an optimised file goes.
+ *
+ * IN_PLACE replaces each original where it is - same file, same name, same
+ * album - keeping the original in the phone's trash for 30 days; Ente
+ * Photos, backing that album up, uploads the smaller version over the one it
+ * holds. COPIES puts optimised copies in Ente Saver's own folder for Ente to
+ * back up, as much a day as the daily limit allows, and leaves the originals
+ * until they are freed. Installs set up before 14 stay on COPIES.
+ */
+enum class SaveMode { IN_PLACE, COPIES }
+
 /** Scheduling mode (13.G). SMART is the default. */
 enum class SpeedMode { SMART, CHARGING_ONLY, FAST }
 

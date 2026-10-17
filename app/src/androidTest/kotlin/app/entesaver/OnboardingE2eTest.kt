@@ -25,6 +25,7 @@ import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
 import app.entesaver.core.logic.OnboardingSteps
 import app.entesaver.core.logic.OnboardingSteps.Step
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.Options
 import app.entesaver.data.prefs.OptionsRepo
@@ -62,7 +63,9 @@ class OnboardingE2eTest {
     val shotOnFailure = ScreenshotOnFailure()
 
     @get:Rule
-    val permissions: GrantPermissionRule = GrantPermissionRule.grant(*TestPermissions.forThisDevice())
+    val permissions: GrantPermissionRule = GrantPermissionRule.grant(
+        *(TestPermissions.forThisDevice() + if (Build.VERSION.SDK_INT <= 29) arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) else emptyArray())
+    )
 
     @get:Rule
     val compose = createEmptyComposeRule()
@@ -118,6 +121,7 @@ class OnboardingE2eTest {
         val repo = OptionsRepo.get(context)
         repo.setBool(OptionsRepo.K.ONBOARDING_DONE, false)
         repo.setInt(OptionsRepo.K.ONBOARDING_STEP, 0)
+        repo.setString(OptionsRepo.K.SAVE_MODE, SaveMode.IN_PLACE.name)
         repo.setStringSet(OptionsRepo.K.EXCLUDED_BUCKETS, emptySet())
         repo.useDefaultFolders()
     }
@@ -146,6 +150,7 @@ class OnboardingE2eTest {
             Step.WELCOME -> R.string.onb0_title
             Step.MEDIA -> R.string.onb1_title
             Step.ALBUMS -> R.string.onb_albums_title
+            Step.SAVE_MODE -> R.string.onb_save_title
             Step.NOTIFICATIONS -> R.string.onb2_title
             Step.BATTERY -> R.string.onb3_title
             Step.USAGE -> R.string.onb4_title
@@ -154,11 +159,11 @@ class OnboardingE2eTest {
         }
     )
 
-    private fun counterOf(step: Step): String = context.getString(
-        R.string.onb_step_counter,
-        OnboardingSteps.humanNumber(step),
-        OnboardingSteps.TOTAL
-    )
+    /** Counted over the steps the stored way of saving space shows, as the header counts them. */
+    private fun counterOf(step: Step): String {
+        val visible = OnboardingSteps.visible(stored().saveMode)
+        return context.getString(R.string.onb_step_counter, visible.indexOf(step) + 1, visible.size)
+    }
 
     /**
      * Waits for [step] to be the one on screen, and checks the three things
@@ -217,6 +222,15 @@ class OnboardingE2eTest {
             }
 
             Step.ALBUMS -> tap(s(R.string.onb_albums_confirm))
+
+            // Copies for Ente keeps the walk inside the app: Replace on this
+            // phone sends the person to Android's All files access page
+            // first (anInPlaceSetupSkipsUsageAccess walks that branch).
+            Step.SAVE_MODE -> {
+                tap(s(R.string.save_mode_copies))
+                compose.waitUntil(timeoutMillis = STORE_TIMEOUT) { stored().saveMode == SaveMode.COPIES }
+                tap(s(R.string.onb_next))
+            }
 
             Step.NOTIFICATIONS -> {
                 assertTrue(
@@ -345,6 +359,37 @@ class OnboardingE2eTest {
             .assertIsDisplayed()
             .assertHasClickAction()
         assertFalse("nothing may start before the summary is confirmed", stored().onboardingDone)
+    }
+
+    /**
+     * Replace on this phone, with Android's file access already given: the
+     * step moves on with Next, and usage access - which only confirms
+     * uploads from Ente Saver's folder - is never asked for.
+     */
+    @Test
+    fun anInPlaceSetupSkipsUsageAccess() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommand("appops set ${context.packageName} MANAGE_EXTERNAL_STORAGE allow")
+                .close()
+        }
+        launch()
+        val visible = OnboardingSteps.visible(SaveMode.IN_PLACE)
+        assertFalse(Step.USAGE in visible)
+        for ((index, step) in visible.withIndex()) {
+            awaitStep(step)
+            if (index == visible.lastIndex) break
+            when (step) {
+                Step.SAVE_MODE -> {
+                    compose.waitUntil(timeoutMillis = STEP_TIMEOUT) {
+                        compose.onAllNodesWithText(s(R.string.file_access_granted)).fetchSemanticsNodes().isNotEmpty()
+                    }
+                    tap(s(R.string.onb_next))
+                }
+                else -> advanceFrom(step)
+            }
+        }
+        assertEquals(SaveMode.IN_PLACE, stored().saveMode)
     }
 
     /** Back walks the steps in reverse, one at a time, from the very last one. */

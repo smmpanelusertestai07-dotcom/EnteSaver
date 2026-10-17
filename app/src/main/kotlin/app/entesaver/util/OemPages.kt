@@ -97,4 +97,14 @@ object OemPages {
     fun openUsageAccess(context: Context): Boolean =
         go(context, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:${context.packageName}"))) ||
             go(context, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+
+    /**
+     * The page with Ente Saver's own All files access switch (Android 11
+     * and later), which Replace on this phone needs; the list of every app's
+     * switch where a phone has no page for one app.
+     */
+    fun openFileAccess(context: Context): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (
+        go(context, Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))) ||
+            go(context, Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        )
 }

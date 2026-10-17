@@ -13,6 +13,7 @@ import app.entesaver.core.logic.FgsBudget
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaProfile
 import app.entesaver.core.logic.RunDecider
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.Stops
 import app.entesaver.data.db.AppDb
@@ -25,6 +26,7 @@ import app.entesaver.engine.InFlight
 import app.entesaver.engine.MaintainEngine
 import app.entesaver.engine.ProfileBuilder
 import app.entesaver.engine.ReattachEngine
+import app.entesaver.media.InPlace
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.Stager
 import app.entesaver.media.VideoCompressor
@@ -127,6 +129,9 @@ class CompressWorker(context: Context, params: WorkerParameters) :
         Storage.cleanTemp(app)
         val scanner = MediaScanner(app, db)
         val stager = Stager(app, db)
+        // A replace in place the phone cut short is finished or undone
+        // before anything else is touched.
+        runCatching { stager.recoverInPlace() }
 
         val sessions = FgsBudget.decode(options.fgsSessions)
         val fgsLeft = FgsBudget.remaining(sessions, startAt)
@@ -196,6 +201,12 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                 plan = plan(live, power, budget, manual)
                 repo.setString(OptionsRepo.K.WAIT_REASON, plan.wait.name)
                 if (!plan.canRun) {
+                    break@loop
+                }
+                // Replacing in place needs Android's file access; without it
+                // nothing is encoded that could not be written back.
+                if (live.saveMode == SaveMode.IN_PLACE && !InPlace.canReplace(app)) {
+                    repo.setString(OptionsRepo.K.WAIT_REASON, RunDecider.Wait.NEEDS_FILE_ACCESS.name)
                     break@loop
                 }
 
@@ -287,7 +298,10 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                     // biggest files come first, and one large copy must not
                     // take the phone below the space it keeps free. A
                     // smaller file may still fit.
-                    val need = if (predicted > 0) predicted * 6 / 5 else row.sizeBytes
+                    // In place, the original is copied into the trash first,
+                    // so for a moment the phone holds it twice.
+                    val copyNeed = if (predicted > 0) predicted * 6 / 5 else row.sizeBytes
+                    val need = copyNeed + if (live.saveMode == SaveMode.IN_PLACE) row.sizeBytes else 0L
                     if (free - need < live.minFreeBytes) {
                         deferred += row.id
                         continue
@@ -375,6 +389,8 @@ class CompressWorker(context: Context, params: WorkerParameters) :
             // maintenance pass, which is what releases staged copies into the
             // upload folder.
             runCatching { MaintainEngine(app).run() }
+            // Originals replaced in place that the trash has let go of.
+            runCatching { stager.pruneKeptOriginals() }
 
             // The profile is what every estimate is derived from, so it is
             // rebuilt whenever there is new evidence to build it from.

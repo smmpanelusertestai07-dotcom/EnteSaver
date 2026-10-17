@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.SdCard
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.AlertDialog
@@ -99,6 +100,7 @@ import app.entesaver.core.logic.BackupScope
 import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputMode
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.ThemeMode
 import app.entesaver.data.EnteApp
@@ -219,6 +221,26 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
         Spacer(Modifier.height(10.dp))
 
         SectionHeader(stringResource(R.string.opt_group_backup))
+        // Saving space first: it decides what happens to the person's own
+        // files, and what every card below it means.
+        val fileAccess by vm.fileAccess.collectAsStateWithLifecycle()
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshFileAccess() }
+        val writeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+            vm.refreshFileAccess()
+        }
+        SaveModeCard(
+            mode = o.saveMode,
+            fileAccess = fileAccess,
+            icon = IconSaveMode,
+            onMode = { vm.setSaveMode(it) },
+            onGrant = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    vm.openFileAccess()
+                } else {
+                    writeLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+        )
         // Ente Photos: the one app light copies are made for. Whether it is on
         // the phone is asked again whenever Settings comes back, so someone
         // sent off to install it returns to a card that already knows.
@@ -522,7 +544,9 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                     // Z10.5: what this limit controls, and what it cannot. The upload
                     // itself belongs to the cloud app; only the feed rate is ours.
                     Text(
-                        stringResource(R.string.daily_limit_note),
+                        stringResource(
+                            if (o.saveMode == SaveMode.IN_PLACE) R.string.daily_limit_in_place else R.string.daily_limit_note
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp)
@@ -1253,6 +1277,7 @@ private val IconScope = Icons.Outlined.PhotoLibrary
 private val IconAlbums = Icons.Outlined.Folder
 private val IconLayout = Icons.Outlined.CreateNewFolder
 private val IconCloud = Icons.Outlined.CloudUpload
+private val IconSaveMode = Icons.Outlined.SwapHoriz
 private val IconSpeed = Icons.Outlined.Bolt
 private val IconLimit = Icons.Outlined.DataUsage
 private val IconFree = Icons.Outlined.PhoneAndroid

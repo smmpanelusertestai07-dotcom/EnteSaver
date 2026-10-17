@@ -1229,6 +1229,53 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
 
+        // Originals replaced in place wait 30 days in the trash; until then
+        // they still take their space, which is the one thing worth knowing
+        // and the one thing a person can do something about.
+        val keptOriginals by vm.keptOriginals.collectAsStateWithLifecycle()
+        var confirmTrash by remember { mutableStateOf(false) }
+        AnimatedVisibility(
+            visible = keptOriginals.count > 0,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            AppCard(modifier = Modifier.padding(top = 12.dp)) {
+                Text(
+                    pluralStringResource(R.plurals.trash_card_title, keptOriginals.count, keptOriginals.count),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    stringResource(R.string.trash_card_body, Formats.bytes(keptOriginals.bytes)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+                TextButton(onClick = { confirmTrash = true }) {
+                    Text(stringResource(R.string.trash_card_empty))
+                }
+            }
+        }
+        if (confirmTrash) {
+            AlertDialog(
+                onDismissRequest = { confirmTrash = false },
+                title = { Text(stringResource(R.string.trash_confirm_title)) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        Text(stringResource(R.string.trash_confirm_body))
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmTrash = false
+                        vm.deleteKeptOriginals { _, _ -> }
+                    }) { Text(stringResource(R.string.trash_confirm_yes)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmTrash = false }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
+        }
+
         AnimatedVisibility(
             visible = leftoverUris.isNotEmpty() && !tampered,
             enter = fadeIn() + expandVertically(),
@@ -1432,6 +1479,7 @@ private fun statusLine(
             RunDecider.Wait.NEXT_TOO_BIG -> stringResource(R.string.wait_next_too_big)
             RunDecider.Wait.VIDEOS_CHARGING -> stringResource(R.string.wait_videos_charging)
             RunDecider.Wait.EARLIER_APP -> stringResource(R.string.wait_earlier_app)
+            RunDecider.Wait.NEEDS_FILE_ACCESS -> stringResource(R.string.wait_file_access)
         }
         return reason ?: pluralStringResource(R.plurals.status_working, waiting, waiting)
     }

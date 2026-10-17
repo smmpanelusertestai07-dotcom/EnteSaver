@@ -22,6 +22,7 @@ import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputLayout
 import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.OutputRoots
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.ThemeMode
 import kotlinx.coroutines.NonCancellable
@@ -76,6 +77,8 @@ data class Options(
      */
     val cloudSingle: String = "ente",
     val speed: SpeedMode = SpeedMode.SMART,
+    /** Where optimised files go ([SaveMode]); an install set up before 14 reads as COPIES. */
+    val saveMode: SaveMode = SaveMode.IN_PLACE,
     /**
      * The three space limits below follow the phone's storage (the default),
      * or hold the person's own figures. An install from before 11.1 that never
@@ -244,6 +247,7 @@ class OptionsRepo(private val context: Context) {
         val NEW_FOLDER_PENDING = booleanPreferencesKey("newFolderPending")
         val CLOUD_SINGLE = stringPreferencesKey("cloudSingle")
         val SPEED = stringPreferencesKey("speed")
+        val SAVE_MODE = stringPreferencesKey("saveMode")
         val SPACE_AUTO = booleanPreferencesKey("spaceAuto")
         /** What Automatic worked out last; the three keys below stay the person's own (Custom). */
         val AUTO_DAILY_CAP_MB = intPreferencesKey("autoDailyCapMb")
@@ -319,6 +323,11 @@ class OptionsRepo(private val context: Context) {
             newFolderPending = p[K.NEW_FOLDER_PENDING] ?: false,
             cloudSingle = p[K.CLOUD_SINGLE] ?: "ente",
             speed = enumOr(p[K.SPEED], SpeedMode.SMART),
+            // Nothing stored and set up already: an install from before 14,
+            // which keeps making copies until its owner chooses otherwise.
+            saveMode = enumOr(
+                p[K.SAVE_MODE], if (p[K.ONBOARDING_DONE] == true) SaveMode.COPIES else SaveMode.IN_PLACE
+            ),
             spaceAuto = spaceAutoOf(p),
             // Snapped, so a limit stored by an older build still lands on one
             // of the chips instead of leaving the control looking unset.
@@ -650,6 +659,7 @@ class OptionsRepo(private val context: Context) {
             "folderPhotos" to o.folderPhotos,
             "folderVideos" to o.folderVideos,
             "speed" to o.speed.name,
+            "saveMode" to o.saveMode.name,
             "spaceAuto" to o.spaceAuto.toString(),
             "dailyCapMb" to o.dailyCapMb.toString(),
             "minFreeMb" to o.minFreeMb.toString(),
@@ -691,6 +701,7 @@ class OptionsRepo(private val context: Context) {
             // "cloud*" keys from backups made before 11 are ignored: Ente
             // Saver works with Ente Photos only.
             map["speed"]?.let { p[K.SPEED] = it }
+            map["saveMode"]?.takeIf { v -> SaveMode.entries.any { it.name == v } }?.let { p[K.SAVE_MODE] = it }
             // Only values the UI itself offers. A hand-edited backup could
             // otherwise set an absurd minimum-free figure, which makes the
             // resource gate refuse to run for good.

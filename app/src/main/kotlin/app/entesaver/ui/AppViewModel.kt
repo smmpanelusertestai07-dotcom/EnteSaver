@@ -35,6 +35,7 @@ import app.entesaver.core.logic.Pacing
 import app.entesaver.core.logic.Projection
 import app.entesaver.core.logic.QualityKept
 import app.entesaver.core.logic.ReclaimRules
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.ScanSources
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.StallAlert
@@ -46,6 +47,7 @@ import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ActivityRow
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
+import app.entesaver.data.db.KeptOriginals
 import app.entesaver.data.db.RatioSample
 import app.entesaver.data.db.Search
 import app.entesaver.data.db.leftFolderAtAfter
@@ -60,6 +62,7 @@ import app.entesaver.engine.SnapshotStore
 import app.entesaver.engine.UsageVerifier
 import app.entesaver.media.EncoderCaps
 import app.entesaver.media.HeicSupport
+import app.entesaver.media.InPlace
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.OutputInventory
 import app.entesaver.media.PlannedEncode
@@ -70,6 +73,7 @@ import app.entesaver.util.Errand
 import app.entesaver.util.FirstFrame
 import app.entesaver.util.Formats
 import app.entesaver.util.Locks
+import app.entesaver.util.OemPages
 import app.entesaver.util.Permissions
 import app.entesaver.util.PowerPages
 import app.entesaver.util.SpaceLimits
@@ -1026,6 +1030,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val keptBytes: StateFlow<Long> =
         db.items().keptBytesFlow().stateIn(viewModelScope, screenLocal, 0L)
 
+    /** Originals replaced in place that still wait in the trash. */
+    val keptOriginals: StateFlow<KeptOriginals> =
+        db.items().keptOriginalsFlow().stateIn(viewModelScope, screenLocal, KeptOriginals(0, 0L))
+
+    /** Deletes those originals for good, after the person confirmed it; the result goes to [message]. */
+    fun deleteKeptOriginals(done: (count: Int, bytes: Long) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val (count, bytes) = Stager(ctx, db).deleteKeptOriginals()
+            withContext(Dispatchers.Main) { done(count, bytes) }
+        }
+    }
+
     val neverOptimiseCount: StateFlow<Int> = db.items().neverOptimiseCountFlow()
         .stateIn(viewModelScope, screenLocal, 0)
 
@@ -1534,6 +1550,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Where optimised files go from now on; files already done stay as they are. */
+    fun setSaveMode(mode: SaveMode, note: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (repo.current().saveMode == mode && note) return@launch
+            repo.setString(OptionsRepo.K.SAVE_MODE, mode.name)
+            // A choice made during setup is where it starts, not a change.
+            if (note) noteSettingChange(detail = ActivityWording.encode(ActivityWording.Setting.SAVE_MODE, mode.name))
+        }
+    }
+
+    /** Whether Android lets Ente Saver replace files in place; asked again on every resume. */
+    val fileAccess = MutableStateFlow(false)
+
+    fun refreshFileAccess() {
+        fileAccess.value = InPlace.canReplace(ctx)
+    }
+
+    fun openFileAccess() {
+        OemPages.openFileAccess(ctx)
+    }
+
     fun setTheme(v: ThemeMode) {
         setStr(OptionsRepo.K.THEME, v.name)
         // Mirrored for the next process start, so the first frame is this colour.
@@ -1689,6 +1726,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun installEnte(source: EnteApp.Source): Boolean = EnteApp.openInstallPage(ctx, source)
 
+    fun openEnteHelp(url: String): Boolean = EnteApp.openHelp(ctx, url)
+
     /**
      * Everything about the link that can actually be checked, checked.
      *
@@ -1755,6 +1794,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun finishOnboarding() {
         viewModelScope.launch {
+            // Written down before setup counts as done: with nothing stored,
+            // a finished setup reads as an install from before 14.
+            repo.setString(OptionsRepo.K.SAVE_MODE, repo.current().saveMode.name)
             repo.setBool(OptionsRepo.K.ONBOARDING_DONE, true)
             Scheduler.ensure(ctx, repo.current())
             Scheduler.runNow(ctx)

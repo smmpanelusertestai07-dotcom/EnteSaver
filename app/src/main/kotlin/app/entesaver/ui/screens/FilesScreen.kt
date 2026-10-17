@@ -588,7 +588,7 @@ fun stateLabel(row: ItemRow): String {
         )
         ItemState.SKIP -> stringResource(R.string.state_skip)
         ItemState.FREED -> stringResource(R.string.state_freed)
-        ItemState.FREED_KEPT -> stringResource(R.string.state_freed_kept)
+        ItemState.FREED_KEPT -> stringResource(if (row.backupUri != null) R.string.state_in_place else R.string.state_freed_kept)
         ItemState.UNKNOWN -> stringResource(R.string.state_unknown)
     }
 }

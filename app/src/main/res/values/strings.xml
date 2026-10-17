@@ -87,7 +87,8 @@
     <string name="chain_stalled_body">Two likely causes: %1$s is not backing up Ente Saver\u2019s folder, or it has not run yet. Open it and check Settings \u203a Backup \u203a Backed up folders.</string>
     <string name="chain_open_checklist">Open Ente Photos</string>
     <string name="detail_holding_app">Stored in</string>
-    <string name="daily_limit_note">This limits how much Ente Saver adds to the upload folder each day, which is what Ente Photos then uploads. When and on which network it uploads is set inside Ente Photos.</string>
+    <string name="daily_limit_note">Ente Photos has no daily data limit of its own, only a switch for mobile data. This limit decides how much reaches the upload folder each day, and so how much Ente uploads. When and on which network it uploads is set inside Ente Photos.</string>
+    <string name="daily_limit_in_place">With Replace on this phone there is no upload folder: Ente uploads each smaller version as it backs the album up. To keep it off mobile data, leave Backup over mobile data off in Ente Photos \u203a Settings \u203a Backup \u203a Backup settings.</string>
     <string name="chip_space">Storage low</string>
     <string name="problem_volume_fallback">The SD card would not accept new files, so this run’s copies went to the phone’s own storage instead.</string>
     <string name="problem_release_invisible">%1$s was added to the upload folder but did not become visible to other apps. Ente Saver will try again.</string>
@@ -120,6 +121,19 @@
     </plurals>
     <string name="asis_card_body">Each of these holds something a smaller copy cannot carry, so the original was copied across whole instead. Nothing was lost \u2014 the reason is listed beside each one.</string>
     <string name="asis_card_line">%1$d · %2$s</string>
+    <plurals name="trash_card_title">
+        <item quantity="one">%1$d replaced original is in the trash</item>
+        <item quantity="other">%1$d replaced originals are in the trash</item>
+    </plurals>
+    <string name="trash_card_body">Kept 30 days in case you want one back, then Android removes them. Until then they still take %1$s.</string>
+    <string name="trash_card_empty">Delete them now</string>
+    <string name="trash_confirm_title">Delete the originals for good?</string>
+    <string name="trash_confirm_body">Their smaller versions stay where they are. This cannot be undone.</string>
+    <string name="trash_confirm_yes">Delete for good</string>
+    <plurals name="trash_emptied">
+        <item quantity="one">%1$d original deleted, %2$s freed</item>
+        <item quantity="other">%1$d originals deleted, %2$s freed</item>
+    </plurals>
     <string name="section_attention">Needs attention</string>
     <string name="section_progress">Backup progress</string>
     <string name="last_run">Last checked %1$s</string>
@@ -176,6 +190,7 @@
     <string name="state_skip">Skipped</string>
     <string name="state_freed">Original removed</string>
     <string name="state_freed_kept">Replaced with light copy</string>
+    <string name="state_in_place">Optimised in place</string>
     <string name="state_unknown">Not confirmed (restored)</string>
     <string name="evidence_confirmed_exact">Confirmed \u2014 Ente collected it</string>
     <string name="evidence_confirmed_paced">Confirmed \u2014 sent and accounted for</string>
@@ -433,6 +448,30 @@
     <!-- Same line, for when what can be freed does not change the figure -->
     <string name="hub_volume_line_only">Cleaning %1$s \u00b7 %2$s free now</string>
     <string name="hub_clean_now">Clear</string>
+    <string name="hub_ente_title">In Ente Photos</string>
+    <string name="hub_ente_intro">Ente Photos keeps every file as it is. Its own tools for space are here, by the names Ente uses, with where each one acts.</string>
+    <string name="hub_ente_where">Ente Photos \u203a Settings \u203a Free up space \u203a %1$s</string>
+    <string name="hub_ente_where_review">Ente Photos \u203a Settings \u203a Free up space \u203a Review \u203a %1$s</string>
+    <string name="hub_ente_on_phone">On this phone</string>
+    <string name="hub_ente_on_ente">In Ente</string>
+    <string name="hub_ente_on_both">In Ente, on this phone, or both</string>
+    <string name="hub_ente_guide">Ente\u2019s guide</string>
+    <string name="ente_tool_free_device">Free up device space</string>
+    <string name="ente_tool_free_device_what">Deletes from this phone the files Ente has backed up \u2014 for good, not to the trash. Ente keeps them.</string>
+    <string name="ente_tool_free_device_in_place">With Replace on this phone, use it once Ente has uploaded the smaller versions.</string>
+    <string name="ente_tool_free_device_copies">It also removes Ente Saver\u2019s copies from Pictures/EnteSaver. That is expected: Ente has them.</string>
+    <string name="ente_tool_similar">Similar images</string>
+    <string name="ente_tool_similar_what">Groups photos in Ente that look alike, once Machine learning is on. Deleting moves them to Ente\u2019s trash.</string>
+    <string name="ente_tool_duplicates">Duplicates</string>
+    <string name="ente_tool_duplicates_what">Exact copies in Ente. One is kept, in every album the others were in.</string>
+    <string name="ente_tool_large">Large files</string>
+    <string name="ente_tool_large_what">Files in Ente over 10 MB, largest first. Delete each from Ente, from this phone, or both.</string>
+    <string name="ente_tool_suggestions">Delete suggestions</string>
+    <string name="ente_tool_suggestions_what">Your photos that a shared album\u2019s owner suggested deleting. Delete them, or reject the suggestion.</string>
+    <string name="ente_tool_cache">Manage device cache</string>
+    <string name="ente_tool_cache_what">Ente\u2019s own cache on this phone. Clearing it never touches your photos.</string>
+    <string name="ente_tool_trash">Trash</string>
+    <string name="ente_tool_trash_what">Ente\u2019s trash keeps files 30 days and counts them in your storage until it is emptied. Its Device tab is this phone\u2019s trash.</string>
     <string name="warn_phone_only">This removes files from this phone only.</string>
     <string name="warn_cloud_untouched">Your Ente account is never touched. Ente Saver has no internet permission.</string>
     <string name="warn_trash_30">Removed files go to your gallery\u2019s trash for 30 days.</string>
@@ -637,6 +676,7 @@
     <string name="wait_videos_charging">Waiting for charger: on this phone videos are made only while charging</string>
     <string name="wait_volume_missing">Waiting: the storage location you chose is not available right now</string>
     <string name="wait_earlier_app">Waiting: the earlier Ente Saver is still on this phone \u2014 remove it first, as the card above says</string>
+    <string name="wait_file_access">Waiting for All files access, which Replace on this phone needs</string>
     <string name="opt_daily_cap">Daily limit for new copies</string>
     <string name="opt_daily_cap_hint">How much Ente Saver adds to the upload folder each day.</string>
     <string name="unlimited">Unlimited</string>
@@ -653,6 +693,23 @@
     <string name="opt_photos">Photos</string>
     <string name="opt_videos">Videos</string>
     <string name="opt_optimise">Optimisation</string>
+    <string name="opt_save_mode">Saving space</string>
+    <string name="opt_save_mode_hint">Where the smaller version of each file goes</string>
+    <string name="save_mode_in_place">Replace on this phone</string>
+    <string name="save_mode_copies">Copies for Ente</string>
+    <string name="save_mode_recommended">Recommended</string>
+    <string name="save_mode_in_place_note">Each photo and video is replaced by its smaller version, with the same name, album and date. The original stays in the phone\u2019s trash for 30 days.</string>
+    <string name="save_mode_in_place_ente">If Ente Photos backs that album up, it uploads the smaller version in place of the old one. No duplicate is made, and your Ente storage shrinks too.</string>
+    <string name="save_mode_copies_note">Smaller copies go to Pictures/EnteSaver for Ente Photos to back up. Your originals stay until you free them.</string>
+    <string name="save_mode_copies_limit">Ente Photos has no daily data limit of its own. Here, the daily limit decides how much reaches the folder each day \u2014 and so how much Ente uploads.</string>
+    <string name="save_mode_switch_note">Files already done stay as they are.</string>
+    <string name="save_mode_ente_folders">In Ente Photos, back up the albums themselves: Settings \u203a Backup \u203a Backed up folders.</string>
+    <string name="file_access_needed">Android asks once for All files access, so the smaller version can be written into the same file.</string>
+    <string name="file_access_safe">Ente Saver has no internet access, so nothing can ever leave your phone.</string>
+    <string name="file_access_grant">Allow All files access</string>
+    <string name="file_access_granted">All files access is on.</string>
+    <string name="onb_save_title">How should Ente Saver save space?</string>
+    <string name="onb_save_text">Choose one. You can change it later in Settings.</string>
     <string name="opt_optimise_hint">One way, the same on every phone. Each file gets only the bytes its picture needs.</string>
     <string name="optimise_value">Automatic</string>
     <string name="optimise_photos">Photos: %1$s, each in its own format — a JPEG stays a JPEG. Each gets the lowest quality that still measures like its original.</string>
@@ -774,6 +831,9 @@
     <string name="perm_purpose_wake">So a file being written is finished before the phone sleeps. Held by the scheduling library that runs the work.</string>
     <string name="perm_name_boot">Notice a restart</string>
     <string name="perm_purpose_boot">So the schedule comes back after the phone restarts. Nothing runs at boot; the next run is simply put back on the calendar.</string>
+    <string name="perm_name_all_files">All files access</string>
+    <string name="perm_name_write_storage">Write storage (Android 10)</string>
+    <string name="perm_purpose_all_files">Only for Replace on this phone, and off until you turn it on: it lets the smaller version be written into the original\u2019s own file. The app has no internet access, so nothing it reads can leave the phone.</string>
     <string name="never_internet">Internet</string>
     <string name="never_internet_why">Not held, and removed on purpose from every library that would add it. Nothing can leave this phone.</string>
     <string name="never_camera">Camera</string>
@@ -784,8 +844,6 @@
     <string name="never_microphone_why">Never asked for.</string>
     <string name="never_contacts">Contacts, calls, messages, calendar</string>
     <string name="never_contacts_why">Never read.</string>
-    <string name="never_all_files">All files access</string>
-    <string name="never_all_files_why">The app sees the gallery through Android\u2019s media index only, never the whole storage.</string>
     <string name="never_other_apps">Data from other apps</string>
     <string name="never_other_apps_why">Android\u2019s own sandbox stops it, and so does this app. Ente Photos is only ever asked whether it is installed and how much it uploaded.</string>
     <string name="chip_background_restricted">Background restricted by the phone</string>
