@@ -322,16 +322,10 @@ object InPlace {
             // Read back while it is still pending - and so still openable by
             // its owner - before anything depends on it.
             resolver.openInputStream(made)!!.use { Fingerprint.sha256(it) } == originalSha &&
-                run {
-                    // Trashed while still pending, so it never shows in a
-                    // gallery - Ente's included - even for a moment.
-                    resolver.update(made, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }, null, null)
-                    resolver.update(made, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, includeTrashed())
-                    isTrashed(context, made)
-                }
+                moveToTrash(context, made)
         }.getOrDefault(false)
         if (!ok) {
-            runCatching { resolver.delete(made, includeTrashed()) }
+            runCatching { resolver.delete(made, includeAll()) }
             return null
         }
         return made.toString()
@@ -344,10 +338,49 @@ object InPlace {
         null
     }
 
-    private fun isTrashed(context: Context, item: Uri): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && runCatching {
-        context.contentResolver.query(item, arrayOf(MediaStore.MediaColumns.IS_TRASHED), includeTrashed(), null)
-            ?.use { c -> c.moveToFirst() && c.getInt(0) == 1 } ?: false
-    }.getOrDefault(false)
+    /** Pending and trashed items both, so an item can be followed through every state. */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun includeAll(): Bundle = Bundle().apply {
+        putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+        putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+    }
+
+    /**
+     * A pending copy moved into the trash: out of pending and into the trash
+     * in one update, so it never shows in a gallery - Ente's included - even
+     * for a moment; in two where a provider takes one flag at a time.
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun moveToTrash(context: Context, item: Uri): Boolean {
+        val resolver = context.contentResolver
+        runCatching {
+            resolver.update(
+                item,
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    put(MediaStore.MediaColumns.IS_TRASHED, 1)
+                },
+                includeAll()
+            )
+        }
+        if (isKeptInTrash(context, item)) return true
+        runCatching {
+            resolver.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }, includeAll())
+            resolver.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, includeAll())
+        }
+        return isKeptInTrash(context, item)
+    }
+
+    /** In the trash, and out of pending: where the original is kept. */
+    private fun isKeptInTrash(context: Context, item: Uri): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+        runCatching {
+            context.contentResolver.query(
+                item,
+                arrayOf(MediaStore.MediaColumns.IS_TRASHED, MediaStore.MediaColumns.IS_PENDING),
+                includeAll(),
+                null
+            )?.use { c -> c.moveToFirst() && c.getInt(0) == 1 && c.getInt(1) == 0 } ?: false
+        }.getOrDefault(false)
 
     /** [source]'s bytes into the item at [uri], the old ones dropped. */
     private fun writeInto(context: Context, uri: Uri, source: File): Boolean {

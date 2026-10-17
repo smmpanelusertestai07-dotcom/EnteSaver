@@ -473,7 +473,7 @@ class OnboardingE2eTest {
         }
 
         advanceFrom(Step.ALBUMS)
-        walkThroughRemainingStepsFrom(Step.NOTIFICATIONS)
+        walkThroughRemainingStepsFrom(OnboardingSteps.next(Step.ALBUMS))
         awaitStep(Step.READY)
 
         // The summary says the setup would do nothing, and offers the fix.
@@ -531,7 +531,7 @@ class OnboardingE2eTest {
             stored().excludedBuckets.containsAll(albums)
         }
         advanceFrom(Step.ALBUMS)
-        walkThroughRemainingStepsFrom(Step.NOTIFICATIONS)
+        walkThroughRemainingStepsFrom(OnboardingSteps.next(Step.ALBUMS))
         awaitStep(Step.READY)
         compose.onAllNodesWithText(s(R.string.onb_ready_pick_albums))[0]
             .performScrollTo()

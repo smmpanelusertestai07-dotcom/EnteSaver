@@ -1,10 +1,12 @@
 package app.entesaver
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -19,6 +21,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -168,6 +171,94 @@ class InPlaceE2eTest {
         assertTrue(InPlace.deleteBackup(context, outcome.backup))
         assertEquals(InPlace.PutBack.NOT_KEPT, InPlace.putBack(context, outcome.backup, uri))
         assertEquals("the smaller version is untouched", outcome.sha256, sha(uri))
+    }
+
+    /**
+     * Android's own ways of moving a pending copy into the trash, one at a
+     * time, with the item's state after each step - written to the log, so a
+     * run on every Android level says which of them that level accepts. One
+     * of them must end with the copy trashed and out of pending, or Replace
+     * on this phone has nowhere safe to keep an original.
+     */
+    @Test
+    fun aPendingCopyCanBeMovedIntoTheTrash() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val r = context.contentResolver
+        val source = MediaFixtures.insertPhoto(context, "in_place_diag_source.jpg", width = 800, height = 600, seed = 21)
+        val bytes = r.openInputStream(source)!!.use { it.readBytes() }
+        val all = Bundle().apply {
+            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+        }
+        fun state(item: Uri): String = runCatching {
+            r.query(
+                item,
+                arrayOf(
+                    MediaStore.MediaColumns.IS_PENDING,
+                    MediaStore.MediaColumns.IS_TRASHED,
+                    MediaStore.MediaColumns.DATE_EXPIRES,
+                    MediaStore.MediaColumns.DISPLAY_NAME
+                ),
+                all,
+                null
+            )?.use { c ->
+                if (!c.moveToFirst()) "no row" else "pending=${c.getInt(0)} trashed=${c.getInt(1)} expires=${c.getLong(2)} name=${c.getString(3)}"
+            } ?: "null cursor"
+        }.getOrElse { "query threw ${it.javaClass.simpleName}: ${it.message}" }
+        fun kept(item: Uri) = state(item).startsWith("pending=0 trashed=1")
+        val ways: List<Pair<String, (Uri) -> Unit>> = listOf(
+            "one update" to { item ->
+                r.update(
+                    item,
+                    ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        put(MediaStore.MediaColumns.IS_TRASHED, 1)
+                    },
+                    all
+                )
+            },
+            "trash then publish" to { item ->
+                r.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }, all)
+                r.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, all)
+            },
+            "publish then trash" to { item ->
+                r.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, all)
+                r.update(item, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }, all)
+            }
+        )
+        val trace = StringBuilder("API ${Build.VERSION.SDK_INT}. ")
+        val worked = mutableListOf<String>()
+        for ((i, way) in ways.withIndex()) {
+            val (label, move) = way
+            val item = r.insert(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "in_place_diag_$i.original.jpg")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${MediaFixtures.TEST_ALBUM}/")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            )
+            if (item == null) {
+                trace.append("[$label] insert refused. ")
+                continue
+            }
+            r.openOutputStream(item, "w")!!.use { it.write(bytes) }
+            val readBack = r.openInputStream(item)!!.use { it.readBytes() }.contentEquals(bytes)
+            trace.append("[$label] read back ${if (readBack) "equal" else "DIFFERENT"}, ${state(item)}; ")
+            val outcome = runCatching { move(item) }
+            trace.append(
+                outcome.exceptionOrNull()?.let { "threw ${it.javaClass.simpleName}: ${it.message}; " } ?: "moved; "
+            )
+            trace.append("now ${state(item)}. ")
+            if (kept(item)) worked += label
+            runCatching { r.delete(item, all) }
+        }
+        Log.i("InPlaceDiag", trace.toString())
+        assertTrue("no way kept a copy in the trash: $trace", worked.isNotEmpty())
+        // The way the app takes first is one this Android accepts, or the
+        // app's fallback is.
+        assertTrue("$trace", "one update" in worked || "trash then publish" in worked)
     }
 
     @Test
