@@ -284,4 +284,24 @@ class PacingTest {
         // No cap configured means no limit at all.
         assertTrue(Pacing.compressionAllowed(stageBytes = 9_999_999, stageCapBytes = 0))
     }
+
+    @Test
+    fun `replace on this phone keeps to the daily limit, and the day's first file always fits`() {
+        val mb = 1_048_576L
+        assertTrue("unlimited", Pacing.replaceFitsToday(-1, 50_000 * mb, 900 * mb))
+        assertTrue("within the limit", Pacing.replaceFitsToday(500 * mb, 300 * mb, 150 * mb))
+        assertTrue("up to it exactly", Pacing.replaceFitsToday(500 * mb, 300 * mb, 200 * mb))
+        assertFalse("past it waits for tomorrow", Pacing.replaceFitsToday(500 * mb, 300 * mb, 201 * mb))
+        // A clip bigger than the whole limit would otherwise never be done.
+        assertTrue(Pacing.replaceFitsToday(500 * mb, 0, 2_000 * mb))
+    }
+
+    @Test
+    fun `the daily limit is counted where a file is replaced, and kept by scheduled runs`() {
+        val stager = java.io.File("src/main/kotlin/app/entesaver/media/Stager.kt").readText()
+        assertTrue(stager.contains("DayBudget(context).addReplaced(now, outcome.bytes)"))
+        val worker = java.io.File("src/main/kotlin/app/entesaver/work/CompressWorker.kt").readText()
+        assertTrue(worker.contains("live.saveMode == SaveMode.IN_PLACE && !manual &&"))
+        assertTrue(worker.contains("RunDecider.Wait.DAILY_LIMIT.name"))
+    }
 }

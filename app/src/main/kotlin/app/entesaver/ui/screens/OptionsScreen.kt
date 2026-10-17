@@ -529,9 +529,10 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
             }
             if (!o.spaceAuto) {
                 // How much new copies may add in a day
+                val inPlace = o.saveMode == SaveMode.IN_PLACE
                 OptionCard(
-                    stringResource(R.string.opt_daily_cap),
-                    stringResource(R.string.opt_daily_cap_hint),
+                    stringResource(if (inPlace) R.string.opt_daily_cap_in_place else R.string.opt_daily_cap),
+                    stringResource(if (inPlace) R.string.opt_daily_cap_hint_in_place else R.string.opt_daily_cap_hint),
                     icon = IconLimit,
                     value = capLabel(o.dailyCapMb)
                 ) {
@@ -544,9 +545,7 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                     // Z10.5: what this limit controls, and what it cannot. The upload
                     // itself belongs to the cloud app; only the feed rate is ours.
                     Text(
-                        stringResource(
-                            if (o.saveMode == SaveMode.IN_PLACE) R.string.daily_limit_in_place else R.string.daily_limit_note
-                        ),
+                        stringResource(if (inPlace) R.string.daily_limit_in_place else R.string.daily_limit_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp)
@@ -647,25 +646,30 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                 if (o.scope != BackupScope.ALL) WarningText(stringResource(R.string.scope_left_out_warning))
             }
 
-            // Upload folders
-            OptionCard(
-                stringResource(R.string.opt_output),
-                stringResource(R.string.opt_output_hint),
-                icon = IconLayout
-            ) {
-                SegmentedChoice(
-                    listOf(
-                        OutputMode.SINGLE.name to stringResource(R.string.output_single),
-                        OutputMode.SEPARATE.name to stringResource(R.string.output_separate)
-                    ),
-                    o.outputMode.name
-                ) { pendingLayout = OutputMode.valueOf(it) }
-                // The user has to pick this exact string inside another app, so it
-                // is printed rather than described - once, beside the kind of copy
-                // it is for, with the default or a folder of the person's own.
-                FolderPaths(o.layout, showPaths = false)
-                FolderChoiceRows(o.layout) { changingFolder = it }
-                CopyPathButton(o.layout)
+            // Upload folders - and below, where they live - belong to Copies
+            // for Ente. Replace on this phone writes into the albums
+            // themselves, so neither card means anything there.
+            val copies = o.saveMode == SaveMode.COPIES
+            if (copies) {
+                OptionCard(
+                    stringResource(R.string.opt_output),
+                    stringResource(R.string.opt_output_hint),
+                    icon = IconLayout
+                ) {
+                    SegmentedChoice(
+                        listOf(
+                            OutputMode.SINGLE.name to stringResource(R.string.output_single),
+                            OutputMode.SEPARATE.name to stringResource(R.string.output_separate)
+                        ),
+                        o.outputMode.name
+                    ) { pendingLayout = OutputMode.valueOf(it) }
+                    // The user has to pick this exact string inside another app, so it
+                    // is printed rather than described - once, beside the kind of copy
+                    // it is for, with the default or a folder of the person's own.
+                    FolderPaths(o.layout, showPaths = false)
+                    FolderChoiceRows(o.layout) { changingFolder = it }
+                    CopyPathButton(o.layout)
+                }
             }
             changingFolder?.let { folder ->
                 FolderDialog(vm, o.layout, folder) { changingFolder = null }
@@ -679,7 +683,7 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                 it.isPrimary || it.mediaVolumeName in writableVolumes
             }
             val sdBlocked = volumes.size > offerable.size
-            if (volumes.size > 1 || o.storageVolume.isNotEmpty()) {
+            if (copies && (volumes.size > 1 || o.storageVolume.isNotEmpty())) {
                 OptionCard(
                         stringResource(R.string.opt_volume),
                         stringResource(R.string.opt_volume_hint),

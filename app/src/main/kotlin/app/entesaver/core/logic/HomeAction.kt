@@ -31,7 +31,7 @@ object HomeAction {
     }
 
     /** A guard the user cannot override, named so the reason can be shown. */
-    enum class Blocker { NONE, TOO_HOT, BATTERY_LOW, NOT_ENOUGH_SPACE, EARLIER_APP }
+    enum class Blocker { NONE, TOO_HOT, BATTERY_LOW, NOT_ENOUGH_SPACE, EARLIER_APP, FILE_ACCESS, MODIFIED_BUILD }
 
     /** The one line under the button. */
     enum class Note {
@@ -57,6 +57,9 @@ object HomeAction {
      * wording: the button runs regardless of anything the scheduler is
      * waiting for. [earlierApp]: the earlier Ente Saver is still installed,
      * and no run starts until it is gone (Gates.resourceGate).
+     * [needsFileAccess] and [modifiedBuild]: Replace on this phone is on, and
+     * a run would stop at once - without All files access, or in a build not
+     * signed with Ente Saver's key - so the button says why instead.
      */
     fun decide(
         queued: Int,
@@ -68,7 +71,9 @@ object HomeAction {
         freeBytes: Long,
         minFreeBytes: Long,
         waitReason: RunDecider.Wait,
-        earlierApp: Boolean = false
+        earlierApp: Boolean = false,
+        needsFileAccess: Boolean = false,
+        modifiedBuild: Boolean = false
     ): State {
         if (running) {
             return State(Visibility.WORKING, enabled = false, Blocker.NONE, Note.JUST_STARTS_IT)
@@ -81,6 +86,8 @@ object HomeAction {
 
         val blocker = when {
             earlierApp -> Blocker.EARLIER_APP
+            modifiedBuild -> Blocker.MODIFIED_BUILD
+            needsFileAccess -> Blocker.FILE_ACCESS
             thermalThrottled -> Blocker.TOO_HOT
             // A charger makes a low battery a non-issue.
             !plugged && batteryPct in 1 until BATTERY_FLOOR_PCT -> Blocker.BATTERY_LOW

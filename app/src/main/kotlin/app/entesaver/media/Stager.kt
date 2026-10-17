@@ -22,6 +22,7 @@ import app.entesaver.engine.InFlight
 import app.entesaver.util.DeviceTier
 import app.entesaver.util.Locks
 import app.entesaver.util.Storage
+import app.entesaver.work.DayBudget
 import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.CancellationException
@@ -283,6 +284,9 @@ class Stager(private val context: Context, private val db: AppDb) {
                         MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
                     },
                     codecUsed = result.codec?.name,
+                    // How it was made ("compressed_tuned", "compressed_jpeg"):
+                    // which rung of the encoder ladder took it.
+                    encoderName = if (result.asIs) null else result.reason,
                     predictedBytes = predictedBytes,
                     skipReason = null,
                     lastError = if (result.asIs) result.reason else null,
@@ -366,10 +370,12 @@ class Stager(private val context: Context, private val db: AppDb) {
             val now = System.currentTimeMillis()
             if (result.asIs) {
                 // Nothing to write: already small, or a copy would lose
-                // something. The reason stays, for the file's details.
+                // something. Counted as kept whole, as a whole copy is in
+                // the other mode, and the reason stays for its details.
                 return settle(row) { cur ->
                     cur.copy(
                         state = ItemState.DONE.name,
+                        outputBytes = cur.sizeBytes,
                         lastError = result.reason,
                         skipReason = null,
                         predictedBytes = predictedBytes,
@@ -405,12 +411,16 @@ class Stager(private val context: Context, private val db: AppDb) {
                                         MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
                                     },
                                     codecUsed = result.codec?.name,
+                                    encoderName = result.reason,
                                     predictedBytes = predictedBytes
                                 )
                             )
                         }
                     }
                     InPlace.settled(context)
+                    // Counted against the daily limit: Ente uploads this
+                    // smaller version in place of the original.
+                    runCatching { DayBudget(context).addReplaced(now, outcome.bytes) }
                     true
                 }
             }
@@ -486,6 +496,28 @@ class Stager(private val context: Context, private val db: AppDb) {
         return count to bytes
     }
 
+    /**
+     * Writes the original of row [id], replaced on this phone, back into its
+     * item ([InPlace.putBack]). The file is then left alone - skipped by the
+     * person's own choice, with "Optimise again" to undo that - and still
+     * known by its address, so the scanner never reads it as a new photo.
+     */
+    suspend fun putBackOriginal(id: Long): InPlace.PutBack = Locks.stage.withLock {
+        val row = db.items().byId(id)
+        val backup = row?.backupUri?.takeIf { it.isNotEmpty() && row.state == ItemState.FREED_KEPT.name }
+            ?: return@withLock InPlace.PutBack.NOT_KEPT
+        val uri = row.contentUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+            ?: return@withLock InPlace.PutBack.FAILED
+        val outcome = InPlace.putBack(context, backup, uri)
+        val now = System.currentTimeMillis()
+        when (outcome) {
+            InPlace.PutBack.DONE -> db.items().update(putBack(row, now))
+            InPlace.PutBack.NOT_KEPT -> db.items().forgetBackup(row.id, now)
+            InPlace.PutBack.NO_SPACE, InPlace.PutBack.FAILED -> Unit
+        }
+        outcome
+    }
+
     companion object {
         /** Why a file was set aside after three tries (see [fail]). */
         const val ENCODE_FAILED = "encode_failed"
@@ -510,6 +542,33 @@ class Stager(private val context: Context, private val db: AppDb) {
             stagePath = null,
             lastError = null,
             skipReason = null,
+            updatedAt = now
+        )
+
+        /** A file whose original the person put back (see [putBackOriginal]). */
+        const val PUT_BACK = "put_back"
+
+        /**
+         * [cur] once its original is back in its item: the original's own
+         * bytes, so nothing of the copy stays on the row. keptUri stays the
+         * item's address, which keeps the scanner from reading the rewritten
+         * file as a new photo, and the empty backupUri keeps the row out of
+         * the light copies - whose Remove would delete this original.
+         */
+        fun putBack(cur: ItemRow, now: Long): ItemRow = cur.copy(
+            state = ItemState.SKIP.name,
+            skipReason = PUT_BACK,
+            neverOptimise = true,
+            keptUri = cur.contentUri,
+            backupUri = "",
+            outputBytes = null,
+            outputSha256 = null,
+            outputName = null,
+            presetUsed = null,
+            codecUsed = null,
+            srcPixels = 0,
+            outPixels = 0,
+            lastError = null,
             updatedAt = now
         )
         const val OUT_OF_MEMORY = "out_of_memory"

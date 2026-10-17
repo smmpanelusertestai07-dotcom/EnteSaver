@@ -233,7 +233,9 @@ data class MediaProfileRow(
 data class DayBudgetRow(
     @PrimaryKey val day: String,
     val videoEncodeMs: Long = 0,
-    val photosOnBattery: Int = 0
+    val photosOnBattery: Int = 0,
+    /** Bytes written by Replace on this phone today, against the daily limit (Pacing.replaceFitsToday). */
+    val replacedBytes: Long = 0
 )
 
 /**
@@ -829,11 +831,23 @@ interface ItemDao {
     )
     suspend fun largest(limit: Int): List<ItemRow>
 
-    /** Light copies the user kept, which are their files now. */
+    /**
+     * Every row that names a file on the phone as its own by address: the
+     * light copies, and the files replaced on this phone. What the scanner
+     * must never read as new photos.
+     */
     @Query("SELECT * FROM items WHERE keptUri IS NOT NULL ORDER BY captureAt DESC")
     suspend fun keptCopies(): List<ItemRow>
 
-    @Query("SELECT COALESCE(SUM(outputBytes), 0) FROM items WHERE keptUri IS NOT NULL")
+    /**
+     * Light copies the user kept, which are their files now. Not a file
+     * replaced on this phone (backupUri set): there the file at the address
+     * is the only one the phone has, and Remove would delete it.
+     */
+    @Query("SELECT * FROM items WHERE keptUri IS NOT NULL AND backupUri IS NULL ORDER BY captureAt DESC")
+    suspend fun keptLightCopies(): List<ItemRow>
+
+    @Query("SELECT COALESCE(SUM(outputBytes), 0) FROM items WHERE keptUri IS NOT NULL AND backupUri IS NULL")
     fun keptBytesFlow(): Flow<Long>
 
     /**
@@ -1094,6 +1108,9 @@ interface DayBudgetDao {
 
     @Query("UPDATE day_budget SET photosOnBattery = photosOnBattery + :n WHERE day = :day")
     suspend fun addPhotos(day: String, n: Int)
+
+    @Query("UPDATE day_budget SET replacedBytes = replacedBytes + :bytes WHERE day = :day")
+    suspend fun addReplaced(day: String, bytes: Long)
 
     /** Yesterday and older are useless; keep the table at one row. */
     @Query("DELETE FROM day_budget WHERE day <> :day")
@@ -1494,6 +1511,9 @@ abstract class AppDb : RoomDatabase() {
         private val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("ALTER TABLE `items` ADD COLUMN `backupUri` TEXT")
+                connection.execSQL(
+                    "ALTER TABLE `day_budget` ADD COLUMN `replacedBytes` INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
 

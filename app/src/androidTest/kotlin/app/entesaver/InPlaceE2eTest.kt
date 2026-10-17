@@ -126,7 +126,7 @@ class InPlaceE2eTest {
         }
 
         // And it goes back into the very same item.
-        assertTrue(InPlace.putBack(context, outcome.backup, uri))
+        assertEquals(InPlace.PutBack.DONE, InPlace.putBack(context, outcome.backup, uri))
         assertEquals("the original is back", originalSha, sha(uri))
         assertEquals("in the same item", before.id, rowOf(uri).id)
         assertFalse("and is no longer kept twice", InPlace.backupExists(context, outcome.backup))
@@ -152,6 +152,22 @@ class InPlaceE2eTest {
         val outcome = InPlace.replace(context, uri, isVideo = false, expectedBytes = before.size, copy = bigger, rowId = 3L)
         assertEquals(InPlace.Result.Failed("not_smaller"), outcome)
         assertEquals(before.size, rowOf(uri).size)
+    }
+
+    @Test
+    fun anOriginalNoLongerKeptCannotBePutBackAndTheCopyStays() {
+        val name = "in_place_gone.jpg"
+        val uri = MediaFixtures.insertPhoto(context, name, seed = 11)
+        val before = rowOf(uri)
+        val copy = optimised(uri, name)
+        val outcome = InPlace.replace(context, uri, isVideo = false, expectedBytes = before.size, copy = copy, rowId = 4L)
+        assertTrue("the replace must happen, got $outcome", outcome is InPlace.Result.Replaced)
+        outcome as InPlace.Result.Replaced
+        InPlace.settled(context)
+        // The trash emptied, as Android does after 30 days.
+        assertTrue(InPlace.deleteBackup(context, outcome.backup))
+        assertEquals(InPlace.PutBack.NOT_KEPT, InPlace.putBack(context, outcome.backup, uri))
+        assertEquals("the smaller version is untouched", outcome.sha256, sha(uri))
     }
 
     @Test

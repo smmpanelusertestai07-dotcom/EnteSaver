@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import app.entesaver.core.logic.Fingerprint
 import java.io.File
 import java.io.FileInputStream
@@ -42,6 +43,9 @@ object InPlace {
     private const val HIDDEN_PREFIX = ".entesaver-original-"
 
     private const val JOURNAL = "in-place.json"
+
+    /** Room left over when an original goes back, so the phone is never filled to the byte. */
+    private const val SPACE_MARGIN = 16L * 1024 * 1024
 
     /**
      * Whether this phone lets Ente Saver write into photos other apps made
@@ -142,14 +146,50 @@ object InPlace {
 
     /**
      * Puts the original kept at [backup] back into [uri], the item it was
-     * replaced in, and removes the kept copy of it. False when the original
-     * is no longer kept (the trash was emptied, or 30 days passed).
+     * replaced in - the same id, name and date, so Ente takes the original
+     * back the way it took the copy - and removes the kept one.
      */
-    fun putBack(context: Context, backup: String, uri: Uri): Boolean {
-        if (!restoreFrom(context, backup, uri)) return false
-        infoOf(context, uri)?.let { rescan(context, it.path) }
+    fun putBack(context: Context, backup: String, uri: Uri): PutBack {
+        val keptSha = runCatching { openBackup(context, backup).use { Fingerprint.sha256(it) } }.getOrNull()
+            ?: return PutBack.NOT_KEPT
+        val info = infoOf(context, uri) ?: return PutBack.FAILED
+        // The original is the larger file, so writing it back needs the
+        // difference free - asked first, never found out halfway.
+        val keptBytes = keptSize(context, backup)
+        val free = info.path?.let { File(it).parentFile?.usableSpace } ?: Long.MAX_VALUE
+        if (keptBytes > 0 && free < keptBytes - info.size + SPACE_MARGIN) return PutBack.NO_SPACE
+        // Written again once if the first read-back disagrees; the kept
+        // original is removed only after the item reads back as it.
+        val ok = (1..2).any { restoreFrom(context, backup, uri) && sha(context, uri) == keptSha }
+        if (!ok) return PutBack.FAILED
+        rescan(context, info.path)
+        keepDateTaken(context, uri, info.dateTaken)
         deleteBackup(context, backup)
-        return true
+        return PutBack.DONE
+    }
+
+    /** What [putBack] came to. */
+    enum class PutBack {
+        /** The item holds the original again, and the kept one is gone. */
+        DONE,
+
+        /** The original is no longer kept: the trash was emptied, or 30 days passed. */
+        NOT_KEPT,
+
+        /** Too little free space for the larger original. Nothing was written. */
+        NO_SPACE,
+
+        /** It could not be written back; the original is still kept. */
+        FAILED
+    }
+
+    private fun keptSize(context: Context, backup: String): Long = if (backup.startsWith("file:")) {
+        File(Uri.parse(backup).path.orEmpty()).length()
+    } else {
+        runCatching {
+            context.contentResolver.query(Uri.parse(backup), arrayOf(MediaStore.MediaColumns.SIZE), includeTrashed(), null)
+                ?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L } ?: 0L
+        }.getOrDefault(0L)
     }
 
     /** Whether the original kept at [backup] is still there. */
@@ -253,6 +293,7 @@ object InPlace {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.R)
     private fun trashedCopy(
         context: Context,
         uri: Uri,

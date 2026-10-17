@@ -12,6 +12,7 @@ import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.FgsBudget
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaProfile
+import app.entesaver.core.logic.Pacing
 import app.entesaver.core.logic.RunDecider
 import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
@@ -36,6 +37,7 @@ import app.entesaver.util.Notifications
 import app.entesaver.util.Permissions
 import app.entesaver.util.SpaceLimits
 import app.entesaver.util.Storage
+import app.entesaver.util.TamperCheck
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.min
 import kotlinx.coroutines.NonCancellable
@@ -204,10 +206,19 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                     break@loop
                 }
                 // Replacing in place needs Android's file access; without it
-                // nothing is encoded that could not be written back.
-                if (live.saveMode == SaveMode.IN_PLACE && !InPlace.canReplace(app)) {
-                    repo.setString(OptionsRepo.K.WAIT_REASON, RunDecider.Wait.NEEDS_FILE_ACCESS.name)
-                    break@loop
+                // nothing is encoded that could not be written back. And a
+                // modified build deletes nothing, which a replace does once
+                // the original's 30 days are up.
+                if (live.saveMode == SaveMode.IN_PLACE) {
+                    val wait = when {
+                        TamperCheck.isModified(app) -> RunDecider.Wait.MODIFIED_BUILD
+                        !InPlace.canReplace(app) -> RunDecider.Wait.NEEDS_FILE_ACCESS
+                        else -> null
+                    }
+                    if (wait != null) {
+                        repo.setString(OptionsRepo.K.WAIT_REASON, wait.name)
+                        break@loop
+                    }
                 }
 
                 val resource = Gates.resourceGate(
@@ -294,6 +305,20 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                     }
                     val ratio = if (row.isVideo) profile.videos.ratio else profile.photos.ratio
                     val predicted = if (ratio > 0) (row.sizeBytes * ratio).toLong() else 0L
+                    // In place there is no upload folder to pace: Ente uploads
+                    // what is replaced, so the day's limit is kept here.
+                    // "Optimise now" goes past it, as it does past the
+                    // battery budget, and says so.
+                    if (live.saveMode == SaveMode.IN_PLACE && !manual &&
+                        !Pacing.replaceFitsToday(
+                            live.dailyCapBytes,
+                            dayBudget.replacedToday(itemStart),
+                            if (predicted > 0) predicted else row.sizeBytes
+                        )
+                    ) {
+                        repo.setString(OptionsRepo.K.WAIT_REASON, RunDecider.Wait.DAILY_LIMIT.name)
+                        break@loop
+                    }
                     // Checked for every file, not once per batch: the
                     // biggest files come first, and one large copy must not
                     // take the phone below the space it keeps free. A

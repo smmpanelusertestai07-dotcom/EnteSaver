@@ -5,6 +5,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkQuery
 import app.entesaver.core.logic.OutFolder
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.work.Scheduler
 import java.util.concurrent.TimeUnit
@@ -67,8 +68,14 @@ object TestPipeline {
  * time options are read (OptionsRepo.pinLegacyFolders). The suites mark
  * setup done straight away, so whichever happened to read options first
  * would otherwise decide which folder every later test saw.
+ *
+ * And Copies for Ente, the mode those folders belong to. Setup stores the
+ * mode it was given, so a suite that went through Replace on this phone
+ * would otherwise hand it to every suite after it; the ones that test
+ * Replace on this phone set it themselves, after this.
  */
 suspend fun OptionsRepo.useDefaultFolders() {
+    setString(OptionsRepo.K.SAVE_MODE, SaveMode.COPIES.name)
     setBool(OptionsRepo.K.FOLDERS_PINNED, true)
     setFolders(mapOf(OutFolder.SINGLE to "", OutFolder.PHOTOS to "", OutFolder.VIDEOS to ""))
     setStringSet(OptionsRepo.K.PAST_OUTPUT_ROOTS, emptySet())

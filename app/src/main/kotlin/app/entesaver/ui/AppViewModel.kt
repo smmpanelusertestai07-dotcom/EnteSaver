@@ -1034,8 +1034,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val keptOriginals: StateFlow<KeptOriginals> =
         db.items().keptOriginalsFlow().stateIn(viewModelScope, screenLocal, KeptOriginals(0, 0L))
 
+    /**
+     * Writes the original of [row], replaced on this phone, back in its
+     * place; [done] hears how it went, on the main thread.
+     */
+    fun putBackOriginal(row: ItemRow, done: (InPlace.PutBack) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = runCatching { Stager(ctx, db).putBackOriginal(row.id) }.getOrDefault(InPlace.PutBack.FAILED)
+            withContext(Dispatchers.Main) { done(outcome) }
+        }
+    }
+
     /** Deletes those originals for good, after the person confirmed it; the result goes to [message]. */
     fun deleteKeptOriginals(done: (count: Int, bytes: Long) -> Unit) {
+        // A modified build deletes nothing (TamperCheck).
+        if (TamperCheck.isModified(ctx)) return
         viewModelScope.launch(Dispatchers.IO) {
             val (count, bytes) = Stager(ctx, db).deleteKeptOriginals()
             withContext(Dispatchers.Main) { done(count, bytes) }
@@ -1104,7 +1117,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadKeptCopies() {
         viewModelScope.launch(Dispatchers.IO) {
-            keptCopies.value = db.items().keptCopies()
+            keptCopies.value = db.items().keptLightCopies()
         }
     }
 
@@ -1561,7 +1574,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Whether Android lets Ente Saver replace files in place; asked again on every resume. */
-    val fileAccess = MutableStateFlow(false)
+    val fileAccess = MutableStateFlow(InPlace.canReplace(ctx))
 
     fun refreshFileAccess() {
         fileAccess.value = InPlace.canReplace(ctx)

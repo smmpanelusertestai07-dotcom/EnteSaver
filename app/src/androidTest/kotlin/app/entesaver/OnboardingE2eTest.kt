@@ -113,17 +113,22 @@ class OnboardingE2eTest {
         clearOutputFolder()
         runBlocking {
             AppDb.get(context).clearAllTables()
-            resetSetupState()
+            resetSetupState(SaveMode.COPIES)
         }
     }
 
-    private suspend fun resetSetupState() {
+    /**
+     * A new install's setup state: Replace on this phone, as a new install
+     * starts - and, after the suite, Copies for Ente, which every other
+     * suite is written against.
+     */
+    private suspend fun resetSetupState(mode: SaveMode = SaveMode.IN_PLACE) {
         val repo = OptionsRepo.get(context)
+        repo.useDefaultFolders()
         repo.setBool(OptionsRepo.K.ONBOARDING_DONE, false)
         repo.setInt(OptionsRepo.K.ONBOARDING_STEP, 0)
-        repo.setString(OptionsRepo.K.SAVE_MODE, SaveMode.IN_PLACE.name)
+        repo.setString(OptionsRepo.K.SAVE_MODE, mode.name)
         repo.setStringSet(OptionsRepo.K.EXCLUDED_BUCKETS, emptySet())
-        repo.useDefaultFolders()
     }
 
     private fun clearOutputFolder() {
