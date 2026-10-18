@@ -6,8 +6,10 @@ import android.media.MediaCodecInfo
 import android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.os.Build
 import app.entesaver.BuildConfig
 import app.entesaver.core.logic.MediaSettings
+import app.entesaver.core.logic.QualityFloor
 
 /**
  * What this phone's own encoder chips can do.
@@ -41,6 +43,20 @@ object EncoderCaps {
      */
     @Volatile
     var softwareHevcForBenchmark: Boolean = false
+
+    /**
+     * The savings benchmark only: its emulator runs with Android's quality
+     * floor switched off (debug.stagefright.enableshaping), and with this the
+     * app judges its copies as a phone does whose encoder writes in CBR,
+     * which the floor never touches. A release build ignores it entirely.
+     */
+    @Volatile
+    var qualityFloorOffForBenchmark: Boolean = false
+
+    /** Whether Android's quality floor holds up a VBR encode of this size on this phone (QualityFloor). */
+    fun qualityFloorApplies(context: Context, width: Int, height: Int): Boolean =
+        !(BuildConfig.DEBUG && qualityFloorOffForBenchmark) &&
+            QualityFloor.applies(Build.VERSION.SDK_INT, handheld(context), width, height)
 
     private fun encoders(mime: String): List<MediaCodecInfo> =
         if (BuildConfig.DEBUG && softwareHevcForBenchmark) {

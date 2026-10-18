@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -18,15 +19,17 @@ import androidx.work.WorkManager
 import app.entesaver.core.logic.BitrateCalc
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaSettings
-import app.entesaver.core.logic.QualityFloor
 import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.VideoCodec
+import app.entesaver.core.logic.VideoShare
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.EncoderCaps
 import app.entesaver.media.MediaScanner
+import app.entesaver.media.MotionProbe
 import app.entesaver.media.Stager
+import app.entesaver.media.VideoCompressor
 import app.entesaver.util.DeviceTier
 import java.io.File
 import java.util.Locale
@@ -73,6 +76,10 @@ class SavingsBenchTest {
         // software HEVC encoder stands in for a phone's chip, so the HEVC
         // path that phones take is the one measured (EncoderCaps).
         EncoderCaps.softwareHevcForBenchmark = args.getString("hevcSoftware") == "true"
+        // run-on-emulator.sh switches Android's quality floor off; told so
+        // with -e floorOff true, the app judges its copies as a phone does
+        // whose encoder writes in CBR (EncoderCaps.qualityFloorApplies).
+        EncoderCaps.qualityFloorOffForBenchmark = args.getString("floorOff") == "true"
 
         // A fresh install schedules nothing that compresses, but a run the
         // app started on its own would take files from under this loop.
@@ -113,6 +120,7 @@ class SavingsBenchTest {
         val stager = Stager(context, db)
         var kept = 0
         for ((i, row) in videos.sortedBy { it.displayName }.withIndex()) {
+            val chosen = chosenShare(row)
             val started = SystemClock.elapsedRealtime()
             val error = runCatching { stager.stageOne(row, options) }.exceptionOrNull()
             val ms = SystemClock.elapsedRealtime() - started
@@ -146,7 +154,7 @@ class SavingsBenchTest {
                 made?.channels ?: 0, made?.durationMs ?: 0L,
                 made?.let { bps(after.outputBytes ?: 0L, it.durationMs) } ?: 0L, videoBps, target,
                 if (target > 0) fmt(videoBps.toDouble() / target, 3) else "", after.presetUsed.orEmpty(),
-                after.encoderName.orEmpty()
+                after.encoderName.orEmpty(), chosen?.let { fmt(it, 3) }.orEmpty()
             ).joinToString(",") { cell(it) }
             csv.appendText(line + "\n")
             Log.i(TAG, "${i + 1}/${videos.size} $line")
@@ -262,7 +270,8 @@ class SavingsBenchTest {
             "hevc_1080p30=${EncoderCaps.hevcFits(1920, 1080, 30f)}",
             "hevc_software_stands_in=${EncoderCaps.softwareHevcForBenchmark}",
             "handheld=$handheld",
-            "quality_floor_1080p=${QualityFloor.applies(Build.VERSION.SDK_INT, handheld, 1920, 1080)}",
+            "quality_floor_off_for_benchmark=${EncoderCaps.qualityFloorOffForBenchmark}",
+            "quality_floor_1080p=${EncoderCaps.qualityFloorApplies(context, 1920, 1080)}",
             "cbr_h264_1080p30=${EncoderCaps.cbrFits(MediaFormat.MIMETYPE_VIDEO_AVC, 1920, 1080, 30f)}",
             "cbr_hevc_1080p30=${EncoderCaps.cbrFits(MediaFormat.MIMETYPE_VIDEO_HEVC, 1920, 1080, 30f)}",
             "video_encoders=${videoEncoders()}",
@@ -274,6 +283,19 @@ class SavingsBenchTest {
             "keep_asked=$keep"
         ).joinToString("\n", postfix = "\n")
     }
+
+    /**
+     * The share of the standard rate the app chooses for [row] (VideoShare),
+     * read from its frames the way the compressor reads them: what the app
+     * asked for, apart from how close the encoder then kept to it.
+     */
+    private fun chosenShare(row: ItemRow): Double? = runCatching {
+        val uri = Uri.parse(row.contentUri ?: return null)
+        val probe = VideoCompressor.probe(context, uri) ?: return null
+        val fps = MediaSettings.outputFps(probe.fps, MediaSettings.VIDEO.fpsCap) ?: probe.fps
+        val reading = MotionProbe.read(context, uri, probe.durationMs, fps)
+        VideoShare.of(reading?.ti, reading?.meanLuma, VideoShare.isScreenRecording(row.displayName, row.bucket))
+    }.getOrNull()
 
     /** Every video encoder this device lists, hardware ones marked, for the report. */
     private fun videoEncoders(): String =
@@ -294,6 +316,6 @@ class SavingsBenchTest {
             "codec,src_pixels,out_pixels,ms,error," +
             "kept_file,out_width,out_height,out_rotation,out_fps,out_video_mime,out_video_bytes,out_audio_mime," +
             "out_audio_bytes,out_audio_channels,out_duration_ms,out_bps,out_video_bps,target_bps,share,preset_key," +
-            "encoder"
+            "encoder,chosen_share"
     }
 }

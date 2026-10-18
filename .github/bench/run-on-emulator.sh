@@ -86,7 +86,13 @@ fi
 adb shell setprop debug.stagefright.enableshaping 0
 shaping=$(adb shell getprop debug.stagefright.enableshaping | tr -d '\r')
 echo "Android's quality floor: debug.stagefright.enableshaping=$shaping"
-[ "$shaping" = "0" ] || echo "::warning::Android's quality floor stayed on; VBR copies come out at its floor."
+# Told so, the app judges its copies as such a phone does (-e floorOff).
+floor=()
+if [ "$shaping" = "0" ]; then
+  floor=(-e floorOff true)
+else
+  echo "::warning::Android's quality floor stayed on; VBR copies come out at its floor."
+fi
 
 echo "::group::Run the benchmark"
 adb logcat -c || true
@@ -101,6 +107,7 @@ timeout 7200 adb shell am instrument -w -r \
   -e class app.entesaver.SavingsBenchTest \
   -e savingsBench true \
   -e hevcSoftware true \
+  ${floor[@]+"${floor[@]}"} \
   -e expected "$expected" \
   ${keep[@]+"${keep[@]}"} \
   "$PKG.test/androidx.test.runner.AndroidJUnitRunner" | tee "$OUT/instrument-shard$SHARD.txt"

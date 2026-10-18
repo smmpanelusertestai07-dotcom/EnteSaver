@@ -259,9 +259,10 @@ def main():
             landed = out_bps / target_used if target_used else None
             share = num(m, "share", None) if m.get("share") else None
         q = quality.get(name, {})
+        chosen = num(m, "chosen_share", None) if m and m.get("chosen_share") else None
         files.append(dict(row=row, name=name, real_s=real_s, before=before, after=after, outcome=outcome,
                           reencoded=reencoded, landed=landed, audio_bps=audio_bps, share=share, measured=bool(m),
-                          codec=codec,
+                          codec=codec, chosen=chosen,
                           src_bps=src_bps, gen_s=gen_s, ms=int(m["ms"]) if m else 0, quality=q,
                           compressed=row.get("already_compressed") == "1", scene=row.get("scene", "")))
 
@@ -285,6 +286,18 @@ def main():
         else:
             est = (target * (f["landed"] or landed_typ) + f["audio_bps"]) * f["real_s"] / 8
             f["after_hevc"] = est if est < f["before"] else f["before"]
+        # HEVC at the rate the app asked for - the share it chose for this
+        # clip, read from its frames - which a chip writing in CBR holds to.
+        # The emulator's software encoder could not always come down to it;
+        # this leaves out how far it overshot. A clip kept for any reason but
+        # being lean already is kept here too.
+        lean_or_made = f["reencoded"] or f["outcome"] == "kept as it was (already_efficient)"
+        if f["chosen"] is None or not lean_or_made:
+            f["after_hevc_asked"] = f["after_hevc"] if f["chosen"] is None else f["before"]
+        else:
+            as_is_a, target_a = plan(row, "HEVC", f["src_bps"], f["chosen"])
+            est = (target_a * f["chosen"] + f["audio_bps"]) * f["real_s"] / 8
+            f["after_hevc_asked"] = f["before"] if as_is_a or est >= f["before"] else est
 
     def totals(sel, key="after"):
         before = sum(f["before"] for f in sel)
@@ -298,6 +311,8 @@ def main():
     lines = []
     b, af = totals(files)
     _, ah = totals(files, "after_hevc")
+    _, aa = totals(files, "after_hevc_asked")
+    n_chosen = sum(1 for f in files if f["chosen"] is not None)
     n_measured = sum(1 for f in files if f["measured"])
     n_kept = sum(1 for f in files if f["measured"] and not f["reencoded"])
     received = [f for f in files if f["compressed"]]
@@ -306,25 +321,37 @@ def main():
     lines.append(f"## Ente Saver savings benchmark v3 (measured with {mc}, the codec the app picks on a phone with "
                  f"an HEVC chip)")
     lines.append("")
-    # The verdict is for the HEVC path, a Realme 11 Pro 5G's: measured when
-    # the run measured HEVC, worked out from the same copies when it did not.
-    hevc_after = af if measured_codec == "HEVC" else ah
+    # The verdict is for the path a Realme 11 Pro 5G takes: HEVC, written in
+    # CBR (the Dimensity 7050's HEVC encoder lists it), which holds the rate
+    # the app asks for. Measured when the run measured HEVC; otherwise worked
+    # out from the share the app chose for each clip.
+    if measured_codec == "HEVC":
+        hevc_after, how = af, "measured"
+    elif n_chosen:
+        hevc_after, how = aa, "an estimate at the rates the app asks for, from the share it chose for each clip"
+    else:
+        hevc_after, how = ah, f"an estimate worked out from the {mc} copies"
     met = hevc_after <= TARGET_GB * GB
-    how = "measured" if measured_codec == "HEVC" else f"worked out from the {mc} copies"
     lines.append(
         f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_LOW_GB:.0f}-{TARGET_GB:.0f} GB - "
-        f"{'met' if met else 'not met'} on a phone with an HEVC chip ({hevc_after / GB:.1f} GB, {how}).** "
-        f"Measured ({mc}), the library went from {b / GB:.1f} GB to "
-        f"{af / GB:.1f} GB ({100 * (b - af) / b:.0f}% smaller, {b / af:.1f} times smaller); on {other_phone} "
-        f"({oc}), an estimate, to {ah / GB:.1f} GB. Of what is left, {ra / GB:.1f} GB are downloads and forwards "
-        f"that WhatsApp, Instagram, YouTube or Telegram had already compressed ({rb / GB:.1f} GB before); the rest, "
-        f"{(af - ra) / GB:.1f} GB, is camera videos, screen recordings and other phones' originals.")
+        f"{'met' if met else 'not met'} on a phone whose HEVC chip writes in CBR: {hevc_after / GB:.1f} GB "
+        f"({b / hevc_after:.1f} times smaller; {how}).** "
+        f"Measured on the emulator ({mc}), the library went from {b / GB:.1f} GB to "
+        f"{af / GB:.1f} GB ({100 * (b - af) / b:.0f}% smaller, {b / af:.1f} times smaller); in {oc}, carrying over "
+        f"how far the emulator's software encoder overshot the rate it was asked for, {ah / GB:.1f} GB. Of what is "
+        f"left after the measured run, {ra / GB:.1f} GB are downloads and forwards that WhatsApp, Instagram, YouTube "
+        f"or Telegram had already compressed ({rb / GB:.1f} GB before); the rest, {(af - ra) / GB:.1f} GB, is "
+        f"camera videos, screen recordings and other phones' originals.")
     lines.append("")
     lines.append(f"- Library: {len(files)} videos, {b / GB:.2f} GB (measured: {n_measured})")
     lines.append(f"- Measured ({mc}): {af / GB:.2f} GB after, **{(b - af) / GB:.2f} GB saved "
                  f"({100 * (b - af) / b:.1f}%)**")
     lines.append(f"- On {other_phone} ({oc}, estimate): {ah / GB:.2f} GB after, {(b - ah) / GB:.2f} GB saved "
                  f"({100 * (b - ah) / b:.1f}%)")
+    if n_chosen:
+        lines.append(f"- HEVC at the rates the app asks for (a chip writing in CBR holds them; estimate): "
+                     f"{aa / GB:.2f} GB after, {(b - aa) / GB:.2f} GB saved ({100 * (b - aa) / b:.1f}%); "
+                     f"the app's chosen share is known for {n_chosen} videos")
     lines.append(f"- Kept as they were (nothing to gain, or failed): {n_kept} videos")
     lines.append(f"- Encoder landed at {landed_typ:.2f} x the standard bitrate for its size (median; "
                  f"the app's per-video choice included)")
@@ -353,16 +380,18 @@ def main():
         lines.append("")
         lines.append(f"### {title}")
         lines.append("")
-        lines.append(f"| Kind of video | Videos | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) | Saved |")
-        lines.append("|---|---:|---:|---:|---:|---:|---:|")
+        lines.append(f"| Kind of video | Videos | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) | Saved | "
+                     f"After GB (HEVC at the asked rate, est.) | Saved |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
         for label, sel in table.items():
             gb, ga = totals(sel)
             _, gh = totals(sel, "after_hevc")
+            _, gq = totals(sel, "after_hevc_asked")
             pct = lambda x: f"{100 * (gb - x) / gb:.0f}%" if gb else "-"
             lines.append(f"| {label} | {len(sel)} | {gb / GB:.2f} | {ga / GB:.2f} | {pct(ga)} | {gh / GB:.2f} | "
-                         f"{pct(gh)} |")
+                         f"{pct(gh)} | {gq / GB:.2f} | {pct(gq)} |")
         lines.append(f"| **All** | {len(files)} | {b / GB:.2f} | {af / GB:.2f} | {100 * (b - af) / b:.0f}% | "
-                     f"{ah / GB:.2f} | {100 * (b - ah) / b:.0f}% |")
+                     f"{ah / GB:.2f} | {100 * (b - ah) / b:.0f}% | {aa / GB:.2f} | {100 * (b - aa) / b:.0f}% |")
 
     # The library's pictures: what the scene column says, and what the app
     # saved on each.
@@ -485,7 +514,7 @@ def main():
         w.writerow(["name", "group", "kind", "folder", "real_minutes", "width", "height", "fps", "codec", "video_kbps",
                     "before_mb", "after_mb_measured", "codec_used", "after_mb_other_codec_estimate", "outcome", "scene",
                     "already_compressed", "share", "graded", "app_ssim_y", "ref_ssim_y", "app_vmaf", "ref_vmaf",
-                    "app_vmaf_phone", "ref_vmaf_phone"])
+                    "app_vmaf_phone", "ref_vmaf_phone", "chosen_share", "after_mb_hevc_at_asked_rate"])
         for f in files:
             r, q = f["row"], f["quality"]
             w.writerow([f["name"], r["group"], r["label"], r["folder"], f"{f['real_s'] / 60:.2f}", r["width"], r["height"],
@@ -493,10 +522,12 @@ def main():
                         f["codec"] if f["reencoded"] else "", f"{f['after_hevc'] / 1e6:.1f}", f["outcome"], f["scene"],
                         int(f["compressed"]), f"{f['share']:.3f}" if f["share"] else "", q.get("status", ""),
                         q.get("app_ssim_y", ""), q.get("ref_ssim_y", ""), q.get("app_vmaf", ""), q.get("ref_vmaf", ""),
-                        q.get("app_vmaf_phone", ""), q.get("ref_vmaf_phone", "")])
+                        q.get("app_vmaf_phone", ""), q.get("ref_vmaf_phone", ""),
+                        f"{f['chosen']:.3f}" if f["chosen"] is not None else "", f"{f['after_hevc_asked'] / 1e6:.1f}"])
     with open(os.path.join(a.out, "summary.json"), "w") as fh:
         json.dump(dict(videos=len(files), measured=n_measured, measured_codec=measured_codec, before_bytes=b,
-                       after_bytes_measured=af, after_bytes_other_codec_estimate=ah, landed_median=landed_typ,
+                       after_bytes_measured=af, after_bytes_other_codec_estimate=ah,
+                       after_bytes_hevc_at_asked_rate=aa, verdict_bytes=hevc_after, landed_median=landed_typ,
                        target=dict(gb=TARGET_GB, low_gb=TARGET_LOW_GB, met=met, already_compressed_before=rb,
                                    already_compressed_after_measured=ra, already_compressed_after_other=rh),
                        by_kind={label: dict(zip(("before", "after_measured"), totals(sel))) | dict(

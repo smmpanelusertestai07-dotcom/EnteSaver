@@ -231,7 +231,7 @@ object VideoCompressor {
         // applies the clip is written in CBR - if the chip has CBR for this
         // codec. Where it has not, a VBR copy at the floor is the least this
         // phone can make, and every check below judges it as that.
-        val floored = QualityFloor.applies(Build.VERSION.SDK_INT, EncoderCaps.handheld(context), outW, outH)
+        val floored = EncoderCaps.qualityFloorApplies(context, outW, outH)
         val cbrFirst = floored && EncoderCaps.cbrFits(mimeOf(codec), outW, outH, outFps)
         val heldTo = { rate: Int, c: VideoCodec, cbr: Boolean ->
             if (floored && !cbr) QualityFloor.vbrBps(rate, outW, outH, c) else rate
