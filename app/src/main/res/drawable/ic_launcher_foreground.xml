@@ -1,19 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Ente Saver launcher foreground: a cloud, compressed - the compress mark,
-    two arrows pressing in on a bar, cut out of one white cloud: Ente Saver
-    makes your photos and videos lighter, so they take less of Ente's cloud
-    and of the phone. One white even-odd shape on Ente's flat #08C225
-    (ic_launcher_background); every white wall and every stroke at least
-    3 dp.
+    Ente Saver launcher foreground: a leaf - lighter, saving - drawn the
+    way Ente Photos draws its own icon: white shapes in a #1C1C1C outline on
+    Ente's flat #08C225 (ic_launcher_background), with Ente's green heart
+    on the leaf's shoulder and the same soft shade beneath it. Everything
+    sits inside the 66 dp circle every launcher mask keeps.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M36.63,48.24L36.30,48.68L35.90,49.06L35.43,49.35L34.91,49.54L33.45,49.74L32.36,49.96L31.61,50.17L30.89,50.44L29.83,50.91L29.12,51.29L28.19,51.91L27.54,52.42L26.70,53.20L25.95,54.02L25.45,54.67L24.85,55.61L24.46,56.32L24.01,57.34L23.75,58.11L23.46,59.19L23.28,60.32L23.20,61.48L23.23,62.65L23.33,63.45L23.54,64.55L23.86,65.66L24.16,66.42L24.66,67.46L25.23,68.41L25.92,69.34L26.70,70.20L27.54,70.98L28.47,71.69L29.46,72.29L30.49,72.80L31.25,73.11L32.32,73.43L33.11,73.60L34.22,73.76L35.04,73.80L70.59,73.80L71.78,73.75L72.92,73.59L74.01,73.36L74.76,73.15L75.52,72.89L76.55,72.46L77.28,72.09L78.23,71.52L78.90,71.07L79.78,70.38L80.39,69.83L81.16,69.03L81.69,68.41L82.35,67.51L82.78,66.83L83.32,65.85L83.66,65.11L84.05,64.06L84.28,63.29L84.55,62.21L84.76,60.63L84.80,59.86L84.78,58.75L84.71,57.94L84.55,56.84L84.37,56.05L84.06,54.97L83.79,54.21L83.34,53.19L82.56,51.81L81.92,50.90L81.41,50.26L80.39,49.17L79.49,48.38L78.27,47.50L76.93,46.73L75.85,46.23L74.76,45.85L73.26,45.46L71.61,45.22L71.07,45.06L70.57,44.78L70.14,44.42L69.77,43.97L68.82,42.30L68.18,41.37L67.71,40.77L66.69,39.61L65.57,38.54L64.35,37.57L63.71,37.13L62.76,36.53L61.36,35.82L60.33,35.38L59.60,35.11L58.83,34.88L57.74,34.61L56.96,34.45L55.84,34.30L55.05,34.23L53.92,34.20L52.35,34.28L51.24,34.42L50.45,34.56L49.70,34.74L48.61,35.05L47.14,35.60L46.11,36.06L45.41,36.44L44.44,37.02L43.78,37.47L43.16,37.93L42.31,38.65L41.17,39.74L39.93,41.22L38.88,42.79L38.14,44.18L37.69,45.21L37.41,45.93L36.86,47.73ZM66.48,67.38L59.20,60.32L58.98,59.99L58.90,59.60L58.98,59.21L59.20,58.88L66.40,51.88L66.73,51.67L67.11,51.60L67.40,51.65L67.74,51.83L67.98,52.13L68.08,52.41L68.10,57L73.50,57L74.01,57.05L74.25,57.11L74.73,57.31L74.94,57.44L75.15,57.59L75.51,57.95L75.79,58.37L75.99,58.85L76.05,59.09L76.10,59.60L76.05,60.11L75.99,60.35L75.79,60.83L75.51,61.25L75.15,61.61L74.94,61.76L74.73,61.89L74.25,62.09L74.01,62.15L73.50,62.20L68.10,62.20L68.10,66.60L68.06,66.89L67.98,67.07L67.81,67.30L67.58,67.48L67.40,67.55L67.21,67.59L66.92,67.58L66.73,67.53ZM55.60,53.62L55.58,65.73L55.51,66.04L55.37,66.32L55.19,66.57L54.95,66.79L54.68,66.95L54.39,67.05L54.08,67.10L53.77,67.08L53.46,67.01L53.25,66.91L52.98,66.74L52.81,66.57L52.63,66.32L52.52,66.11L52.41,65.66L52.42,53.47L52.49,53.16L52.63,52.88L52.81,52.63L52.98,52.46L53.25,52.29L53.54,52.17L53.84,52.11L54.08,52.10L54.39,52.15L54.68,52.25L54.89,52.37L55.13,52.57L55.33,52.81L55.45,53.02L55.55,53.31ZM48.87,60.24L41.60,67.32L41.27,67.53L40.89,67.60L40.51,67.52L40.26,67.37L40.02,67.07L39.92,66.79L39.90,62.20L34.50,62.20L33.99,62.15L33.75,62.09L33.51,62L33.06,61.76L32.66,61.44L32.49,61.25L32.21,60.83L32.10,60.59L31.95,60.11L31.90,59.60L31.95,59.09L32.10,58.61L32.21,58.37L32.49,57.95L32.66,57.76L33.06,57.44L33.51,57.20L33.75,57.11L34.25,57.01L34.50,57L39.90,57L39.92,52.41L40.07,52.05L40.26,51.83L40.60,51.65L40.89,51.60L41.27,51.67L41.60,51.88L48.87,58.96L49.06,59.30L49.10,59.60L49.02,59.99Z" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.78"
+        android:scaleY="0.78"
+        android:translateX="1"
+        android:translateY="1">
+        <path
+            android:pathData="M33.5,76.5 L30,80"
+            android:strokeColor="#FF1C1C1C"
+            android:strokeWidth="11.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M33.5,76.5 L30,80"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="4.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M33,77 C24,52 44,28 81,25 C85,55 62,85 33,77 Z"
+            android:fillColor="#FFFFFFFF" />
+        <group>
+            <clip-path android:pathData="M33,77 C24,52 44,28 81,25 C85,55 62,85 33,77 Z" />
+            <path
+                android:pathData="M22.333,38.769a13.513,13.513 0 1,0 27.026,0a13.513,13.513 0 1,0 -27.026,0Z"
+                android:fillColor="#FFE8E8E8" />
+        </group>
+        <path
+            android:pathData="M33,77 C24,52 44,28 81,25 C85,55 62,85 33,77 Z"
+            android:strokeColor="#FF1C1C1C"
+            android:strokeWidth="4.5"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M38,72 C50,60 61,48 73,34"
+            android:strokeColor="#FF1C1C1C"
+            android:strokeWidth="4.725"
+            android:strokeLineCap="round" />
+    </group>
+    <group
+        android:pivotX="10"
+        android:pivotY="9"
+        android:rotation="-14"
+        android:scaleX="0.85"
+        android:scaleY="0.85"
+        android:translateX="28.5"
+        android:translateY="31">
+        <path
+            android:pathData="M10,17.2 C7.5,14.6 0.8,10.6 0.8,5.6 C0.8,2.6 3.2,0.6 5.9,0.6 C7.8,0.6 9.2,1.7 10,3.2 C10.8,1.7 12.2,0.6 14.1,0.6 C16.8,0.6 19.2,2.6 19.2,5.6 C19.2,10.6 12.5,14.6 10,17.2 Z"
+            android:fillColor="#FF20D34F"
+            android:strokeColor="#FF1C1C1C"
+            android:strokeWidth="3.6"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M3.900,5.200a1.700,1.700 0 1,0 3.400,0a1.700,1.700 0 1,0 -3.400,0Z"
+            android:fillColor="#FF7CF09B" />
+    </group>
 </vector>
