@@ -3,19 +3,20 @@ package app.entesaver.core.logic
 import kotlin.math.abs
 
 /**
- * How hard a file is compressed: found per file, by measuring.
+ * How hard a photo is compressed: found per photo, by measuring.
  *
- * One fixed setting is wrong for nearly every file. A still scene - a
- * speech, a sleeping baby, a sky - looks perfect on half the bits, and a
- * night-time crowd in motion needs all of them and more. So before the real
- * encode, a piece of the file is encoded at a candidate setting and compared
- * with the original ([Ssim]); the file gets the cheapest rung that still
- * looks like the original, and only a picture that needs more gets more.
+ * One fixed setting is wrong for nearly every photo. A plain one - a sky, a
+ * wall, a document - looks perfect at a low quality, and a detailed one -
+ * leaves, a crowd, fabric - needs more. So before the real encode, a mosaic
+ * of the photo is encoded at a candidate setting and compared with the
+ * original ([Ssim]); the photo gets the cheapest rung that still looks like
+ * the original, and only a picture that needs more gets more.
  *
  * The walk starts at [first], goes down while the rungs pass and up while
- * they fail, and stops after [maxProbes] measurements. [VIDEO]'s rungs are
- * shares of a codec's standard rate (BitrateCalc.bppFor); a photo's
- * ([forPhoto]) are encoder qualities.
+ * they fail, and stops after [maxProbes] measurements. A photo's rungs
+ * ([forPhoto]) are encoder qualities. A video's share is read from its
+ * motion instead (VideoShare): measured this way, a still scene's grain
+ * looked like a loss and a dark scene's crushed shadows like detail kept.
  */
 class QualityLadder(rungs: List<Double>, first: Double, val maxProbes: Int, private val unmeasured: Double) {
 
@@ -80,18 +81,6 @@ class QualityLadder(rungs: List<Double>, first: Double, val maxProbes: Int, priv
 
     companion object {
         private const val EPSILON = 1e-9
-
-        /**
-         * Videos: shares of the standard rate, measured from the standard
-         * rate itself in up to three short probes; a clip that is not
-         * measured gets the standard rate. Calibrated against VMAF on real
-         * camera footage: a still street scene passes at half the rate, a
-         * river or leaves in the wind need twice it.
-         */
-        val VIDEO = QualityLadder(listOf(0.5, 0.7, 1.0, 1.4, 2.0), first = 1.0, maxProbes = 3, unmeasured = 1.0)
-
-        /** Shorter than this, a video's probes cost more than they could save. */
-        const val MIN_PROBE_DURATION_MS = 15_000L
 
         /** Encoder qualities a photo is tried at. */
         val PHOTO_QUALITIES = listOf(62.0, 70.0, 78.0, 85.0, 92.0)

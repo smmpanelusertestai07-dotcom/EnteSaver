@@ -3,6 +3,7 @@ package app.entesaver.media
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import app.entesaver.BuildConfig
 import app.entesaver.core.logic.MediaSettings
 
 /**
@@ -30,12 +31,28 @@ object EncoderCaps {
     }
 
     /**
+     * The savings benchmark only, on an emulator, which has no hardware
+     * encoder at all: let its software HEVC encoder stand in for a phone's
+     * chip, so the HEVC path phones take is the one measured. A release
+     * build ignores it entirely.
+     */
+    @Volatile
+    var softwareHevcForBenchmark: Boolean = false
+
+    private fun encoders(mime: String): List<MediaCodecInfo> =
+        if (BuildConfig.DEBUG && softwareHevcForBenchmark) {
+            codecs.filter { info -> info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) } }
+        } else {
+            hardwareEncoders(mime)
+        }
+
+    /**
      * True when a hardware HEVC encoder takes a video of this size and frame
      * rate. Either orientation is accepted: encoders often state limits for
      * landscape only and rotate a portrait frame themselves.
      */
     fun hevcFits(width: Int, height: Int, fps: Float): Boolean =
-        hardwareEncoders(MIME_HEVC).any { info ->
+        encoders(MIME_HEVC).any { info ->
             runCatching {
                 val video = info.getCapabilitiesForType(MIME_HEVC).videoCapabilities
                 val rate = fps.toDouble().coerceAtLeast(1.0)

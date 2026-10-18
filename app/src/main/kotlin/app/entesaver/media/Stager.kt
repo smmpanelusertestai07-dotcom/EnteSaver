@@ -15,6 +15,7 @@ import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.PhotoFormat
 import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.StageRules
+import app.entesaver.core.logic.VideoShare
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
 import app.entesaver.data.prefs.Options
@@ -214,7 +215,8 @@ class Stager(private val context: Context, private val db: AppDb) {
             if (row.isVideo) {
                 VideoCompressor.compress(
                     context, uri, row.displayName, row.mimeType, row.sizeBytes, videoSpec, tempDir,
-                    maxTotalMs = VideoCompressor.budgetFor(runRemainingMs)
+                    maxTotalMs = VideoCompressor.budgetFor(runRemainingMs),
+                    screenRecording = VideoShare.isScreenRecording(row.displayName, row.bucket)
                 )
             } else {
                 PhotoCompressor.compress(

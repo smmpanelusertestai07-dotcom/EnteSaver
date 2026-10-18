@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The savings benchmark's video library (v2): one ordinary phone's worth of videos.
+"""The savings benchmark's video library (v3): one ordinary phone's worth of videos.
 
 Every kind of video is described once, in PROFILES: where Android keeps it,
 its resolution, rotation, frame rate, codec, bitrate and sound, how long such
@@ -32,6 +32,11 @@ What is in the picture is a scene, drawn per file from its profile's mix
           scrolled in flings, sometimes a video playing, almost no noise
   game    gameplay: a colourful world turning and zooming, sprites, sparks
           and a HUD, no sensor noise
+
+v3 keeps v2's 491 files and 46 GB and makes the pictures harder: more of
+the camera's clips and of the forwards are in motion or at night (camera:
+30% motion and 30% night, was 25% and 25%; forwards: 30% motion, was 20%),
+and the long function videos are 35% motion (was 30%).
 
 The v1 library was one test pattern under uniform noise in every file. When
 v2 was made, one file of every kind and scene was made both ways - same size,
@@ -110,8 +115,8 @@ CAMERA_TUNE = {
 
 # The camera's mixes: most clips are of people and places by day, evenings
 # and indoor functions, children and festivals in motion, and a few still.
-CAMERA_MIX = dict(day=0.35, night=0.25, motion=0.25, static=0.15)
-FORWARD_MIX = dict(day=0.30, night=0.25, static=0.25, motion=0.20)
+CAMERA_MIX = dict(day=0.25, night=0.30, motion=0.30, static=0.15)
+FORWARD_MIX = dict(day=0.25, night=0.25, static=0.20, motion=0.30)
 
 
 def P(pid, group, label, folder, count, dur, size, fps, codec, vkbps, akbps, names, scenes, rot=(), landscape=0.0,
@@ -148,7 +153,7 @@ PROFILES = [
     # Weddings, pujas, birthdays, school functions, mostly indoors and in the
     # evening [E: lengths]; the two longest run 22 and 26 minutes in one take.
     P("cam_long", CAM, "Long function videos", "DCIM/Camera", 9, (300, 560, 1100), (1920, 1080), 30, "h264",
-      20000, 256, "camera", dict(night=0.5, motion=0.3, static=0.1, day=0.1), rot=((90, 0.4),), fixed=(1320, 1560)),
+      20000, 256, "camera", dict(night=0.5, motion=0.35, static=0.1, day=0.05), rot=((90, 0.4),), fixed=(1320, 1560)),
     P("cam_4k", CAM, "Camera 4K 30fps", "DCIM/Camera", 12, (5, 40, 180), (3840, 2160), 30, "h264", 50000, 256,
       "camera", dict(day=0.6, motion=0.2, night=0.2)),
     P("cam_1080p60", CAM, "Camera 1080p 60fps", "DCIM/Camera", 10, (5, 30, 120), (1920, 1080), 60, "h264",

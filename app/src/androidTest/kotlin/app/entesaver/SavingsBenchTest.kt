@@ -2,6 +2,7 @@ package app.entesaver
 
 import android.app.ActivityManager
 import android.content.Context
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.Build
@@ -67,6 +68,10 @@ class SavingsBenchTest {
         assumeTrue("a benchmark: run with -e savingsBench true", args.getString("savingsBench") == "true")
         val expected = args.getString("expected")?.toIntOrNull() ?: 0
         val keepNames = keepList(args.getString("keep"))
+        // An emulator has no hardware encoder; with -e hevcSoftware true its
+        // software HEVC encoder stands in for a phone's chip, so the HEVC
+        // path that phones take is the one measured (EncoderCaps).
+        EncoderCaps.softwareHevcForBenchmark = args.getString("hevcSoftware") == "true"
 
         // A fresh install schedules nothing that compresses, but a run the
         // app started on its own would take files from under this loop.
@@ -252,7 +257,9 @@ class SavingsBenchTest {
             "sdk=${Build.VERSION.SDK_INT}",
             "ram_bytes=${memory.totalMem}",
             "tier=${DeviceTier.tier(context)}",
-            "hevc_hardware_1080p30=${EncoderCaps.hevcFits(1920, 1080, 30f)}",
+            "hevc_1080p30=${EncoderCaps.hevcFits(1920, 1080, 30f)}",
+            "hevc_software_stands_in=${EncoderCaps.softwareHevcForBenchmark}",
+            "video_encoders=${videoEncoders()}",
             "video_long_side=${MediaSettings.VIDEO.longSide}",
             "video_fps_cap=${MediaSettings.VIDEO.fpsCap}",
             "save_mode=${SaveMode.COPIES}",
@@ -261,6 +268,12 @@ class SavingsBenchTest {
             "keep_asked=$keep"
         ).joinToString("\n", postfix = "\n")
     }
+
+    /** Every video encoder this device lists, hardware ones marked, for the report. */
+    private fun videoEncoders(): String =
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { it.isEncoder && it.supportedTypes.any { t -> t.startsWith("video/") } }
+            .joinToString(" ") { info -> info.name + if (info.isHardwareAccelerated) "(hw)" else "" }
 
     /** A CSV cell: quoted only when it has to be, so the file reads plainly. */
     private fun cell(value: Any): String {

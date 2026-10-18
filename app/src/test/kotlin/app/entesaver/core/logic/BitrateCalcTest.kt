@@ -9,19 +9,29 @@ class BitrateCalcTest {
 
     @Test
     fun bitrateTable1080p30() {
-        // 1920x1080x30x0.10 = 6.22 Mbps H.264
-        assertEquals(6_220_800, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
-        // HEVC 0.065 => ~4.04 Mbps
-        assertEquals(4_043_520, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC))
+        // The reference: 1080p30 in HEVC, and H.264 asked for 1.45 times it.
+        assertEquals(900_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC))
+        assertEquals(1_305_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
+    }
+
+    @Test
+    fun `smaller pictures get more bits per pixel`() {
+        // 720p has 44% of 1080p's pixels and gets 54% of its rate.
+        assertEquals(489_897, BitrateCalc.targetBps(1280, 720, 30f, VideoCodec.HEVC))
+        // A WhatsApp 480p clip.
+        assertEquals(265_415, BitrateCalc.targetBps(848, 480, 30f, VideoCodec.HEVC))
+        // Slow motion keeps its frames: four times the frames, 2.8 times the rate.
+        assertEquals(2_545_584, BitrateCalc.targetBps(1920, 1080, 120f, VideoCodec.HEVC))
+        val hd = BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC).toDouble()
+        val half = BitrateCalc.targetBps(1920, 540, 30f, VideoCodec.HEVC).toDouble()
+        assertEquals(Math.pow(0.5, BitrateCalc.SCALE_EXPONENT), half / hd, 0.001)
     }
 
     @Test
     fun bitrateCapAndFloor() {
-        // 1440p60 H.264 would be ~22 Mbps -> capped at 12 Mbps.
-        assertEquals(BitrateCalc.CAP_BPS, BitrateCalc.targetBps(2560, 1440, 60f, VideoCodec.H264))
-        // 4K60 would be ~49.8 Mbps -> capped at 20 Mbps, where 12 would starve it.
-        assertEquals(BitrateCalc.CAP_BPS_UHD, BitrateCalc.targetBps(3840, 2160, 60f, VideoCodec.H264))
-        // Tiny video -> floored at 1 Mbps.
+        // 4K at 120 fps in H.264 would be 15 Mbps -> capped at 8 Mbps.
+        assertEquals(BitrateCalc.CAP_BPS, BitrateCalc.targetBps(3840, 2160, 120f, VideoCodec.H264))
+        // Tiny video -> floored.
         assertEquals(BitrateCalc.FLOOR_BPS, BitrateCalc.targetBps(320, 240, 15f, VideoCodec.H264))
     }
 

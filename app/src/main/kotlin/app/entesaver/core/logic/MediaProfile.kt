@@ -110,11 +110,12 @@ object MediaProfile {
     /**
      * What-if for a different codec, from the ratio between their bitrate
      * targets rather than a second measurement: HEVC is asked for fewer bits
-     * per pixel, so the same footage lands smaller in that proportion.
+     * for the same picture, so the same footage lands smaller in that
+     * proportion.
      */
     fun videoMbPerMinFor(current: TypeProfile, from: VideoCodec, to: VideoCodec): Double {
         if (from == to || current.outMbPerMin <= 0) return current.outMbPerMin
-        val scale = BitrateCalc.bppFor(to) / BitrateCalc.bppFor(from)
+        val scale = BitrateCalc.codecFactor(to) / BitrateCalc.codecFactor(from)
         return current.outMbPerMin * scale
     }
 

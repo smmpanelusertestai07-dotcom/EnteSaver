@@ -66,8 +66,9 @@ RATES = [(15, 1), (24000, 1001), (24, 1), (25, 1), (30000, 1001), (30, 1), (50, 
 ALIGN_S = 3.0
 FIELDS = ["name", "profile", "scene", "label", "status", "kept_file", "src_width", "src_height", "src_fps",
           "src_kbps", "app_width", "app_height", "app_fps", "app_kbps", "app_ssim_y", "app_ssim", "app_psnr_y",
-          "app_psnr", "app_vmaf", "app_vmaf_min", "ref_width", "ref_height", "ref_fps", "ref_kbps", "ref_ssim_y",
-          "ref_ssim", "ref_psnr_y", "ref_psnr", "ref_vmaf", "ref_vmaf_min", "offset", "seconds_graded", "frame",
+          "app_psnr", "app_vmaf", "app_vmaf_min", "app_vmaf_phone", "ref_width", "ref_height", "ref_fps", "ref_kbps",
+          "ref_ssim_y", "ref_ssim", "ref_psnr_y", "ref_psnr", "ref_vmaf", "ref_vmaf_min", "ref_vmaf_phone", "offset",
+          "seconds_graded", "frame",
           "vmaf_tool", "took_s"]
 
 
@@ -247,7 +248,12 @@ def measure(ffmpeg, vmaf, dist, src, d, s, work, search=True):
         log = os.path.join(work, "vmaf.json")
         if os.path.exists(log):
             os.remove(log)
-        g.append(f"[d2][r2]libvmaf=shortest=1:n_threads={os.cpu_count() or 2}:log_fmt=json:log_path=vmaf.json[o2]")
+        # Two models in one pass: VMAF's default (a TV at three times its
+        # height) and its phone model, for the screen these videos are
+        # watched on.
+        models = "version=vmaf_v0.6.1\\:name=vmaf|version=vmaf_v0.6.1\\:name=phone\\:enable_transform=true"
+        g.append(f"[d2][r2]libvmaf=shortest=1:model='{models}':n_threads={os.cpu_count() or 2}:"
+                 "log_fmt=json:log_path=vmaf.json[o2]")
     cmd = [tool, "-hide_banner", "-nostats", "-i", dist, "-i", src, "-filter_complex", ";".join(g)]
     for i in range(parts):
         cmd += ["-map", f"[o{i}]"]
@@ -258,15 +264,13 @@ def measure(ffmpeg, vmaf, dist, src, d, s, work, search=True):
     r["ssim_y"], r["ssim"] = (float(m.group(1)), float(m.group(2))) if m else ("", "")
     m = re.search(r"PSNR y:([0-9.inf]+).*average:([0-9.inf]+)", err)
     r["psnr_y"], r["psnr"] = (m.group(1), m.group(2)) if m else ("", "")
-    r["vmaf"] = r["vmaf_min"] = ""
+    r["vmaf"] = r["vmaf_min"] = r["vmaf_phone"] = ""
     if vmaf:
-        m = re.search(r"VMAF score: ([0-9.]+)", err)
-        if m:
-            r["vmaf"] = float(m.group(1))
         try:
             with open(os.path.join(work, "vmaf.json")) as fh:
-                pooled = json.load(fh)["pooled_metrics"]["vmaf"]
-            r["vmaf"], r["vmaf_min"] = pooled["mean"], pooled["min"]
+                pooled = json.load(fh)["pooled_metrics"]
+            r["vmaf"], r["vmaf_min"] = pooled["vmaf"]["mean"], pooled["vmaf"]["min"]
+            r["vmaf_phone"] = pooled["phone"]["mean"]
         except (OSError, KeyError, ValueError):
             pass
     if r["ssim_y"] == "":
@@ -380,10 +384,11 @@ def main():
                            ref_fps=f"{rate_val(rp['rate']):.3f}", ref_kbps=f"{rp['kbps']:.0f}",
                            offset=got["offset"], seconds_graded=got["seconds"])
                 for side, r in (("app", got), ("ref", want)):
-                    for k in ("ssim_y", "ssim", "psnr_y", "psnr", "vmaf", "vmaf_min"):
+                    for k in ("ssim_y", "ssim", "psnr_y", "psnr", "vmaf", "vmaf_min", "vmaf_phone"):
                         v = r[k]
                         row[f"{side}_{k}"] = f"{v:.4f}" if isinstance(v, float) else v
                 print(f"{m['name']}: app SSIM {row['app_ssim_y']} PSNR {row['app_psnr_y']} VMAF {row['app_vmaf']} "
+                      f"(phone {row['app_vmaf_phone']}) "
                       f"at {row['app_kbps']} kbps | Storage saver SSIM {row['ref_ssim_y']} PSNR {row['ref_psnr_y']} "
                       f"VMAF {row['ref_vmaf']} at {row['ref_kbps']} kbps (asked {ref_kbps})", flush=True)
             except (subprocess.CalledProcessError, RuntimeError, KeyError, ValueError, IndexError) as e:

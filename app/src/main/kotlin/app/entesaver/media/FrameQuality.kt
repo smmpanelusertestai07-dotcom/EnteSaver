@@ -1,15 +1,13 @@
 package app.entesaver.media
 
 import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import app.entesaver.core.logic.Ssim
-import java.io.File
 
 /**
- * Pictures read back for [Ssim]: the measuring half of the video quality
- * probe (VideoCompressor) and of the photo quality search (PhotoCompressor).
- * Only brightness is kept, one byte a pixel, so a 1080p frame costs 2 MB
- * while it is compared instead of the 8 MB of its colour bitmap.
+ * Pictures read back as brightness: for [Ssim] in the photo quality search
+ * (PhotoCompressor), and for a video's motion (MotionProbe). Only brightness
+ * is kept, one byte a pixel, so a 1080p frame costs 2 MB instead of the 8 MB
+ * of its colour bitmap.
  */
 internal object FrameQuality {
 
@@ -27,26 +25,6 @@ internal object FrameQuality {
             Ssim.lumaInto(row, w, out, y * w)
         }
         return Luma(out, w, h)
-    }
-
-    /** The frames of [file] closest to [timesUs], or null if any one cannot be read. */
-    fun framesOf(file: File, timesUs: LongArray): List<Luma>? {
-        val mmr = MediaMetadataRetriever()
-        return try {
-            mmr.setDataSource(file.absolutePath)
-            timesUs.map { t ->
-                val bitmap = mmr.getFrameAtTime(t, MediaMetadataRetriever.OPTION_CLOSEST) ?: return null
-                try {
-                    lumaOf(bitmap)
-                } finally {
-                    bitmap.recycle()
-                }
-            }
-        } catch (e: Exception) {
-            null
-        } finally {
-            runCatching { mmr.release() }
-        }
     }
 
     /**

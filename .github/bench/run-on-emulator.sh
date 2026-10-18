@@ -82,9 +82,13 @@ adb logcat -c || true
 # Bounded below the job's own limit: the results are written line by line,
 # so a run that is cut short still leaves everything it measured to pull,
 # and the grading after it still has time.
+# An emulator has no encoder chip: its software HEVC encoder stands in for
+# the one a phone like the Realme 11 Pro 5G has, so the HEVC path phones
+# take is what is measured (EncoderCaps.softwareHevcForBenchmark).
 timeout 7200 adb shell am instrument -w -r \
   -e class app.entesaver.SavingsBenchTest \
   -e savingsBench true \
+  -e hevcSoftware true \
   -e expected "$expected" \
   ${keep[@]+"${keep[@]}"} \
   "$PKG.test/androidx.test.runner.AndroidJUnitRunner" | tee "$OUT/instrument-shard$SHARD.txt"

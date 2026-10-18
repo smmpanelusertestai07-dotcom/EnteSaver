@@ -55,8 +55,8 @@ class MediaSettingsTest {
 
     @Test
     fun `HEVC needs fewer bits than H264 for the same look`() {
-        assertTrue(BitrateCalc.bppFor(VideoCodec.HEVC) < BitrateCalc.bppFor(VideoCodec.H264))
-        assertEquals(BitrateCalc.BPP_H264, BitrateCalc.bppFor(VideoCodec.H264), 0.0)
-        assertEquals(BitrateCalc.BPP_HEVC, BitrateCalc.bppFor(VideoCodec.HEVC), 0.0)
+        assertEquals(1.0, BitrateCalc.codecFactor(VideoCodec.HEVC), 0.0)
+        assertEquals(BitrateCalc.H264_FACTOR, BitrateCalc.codecFactor(VideoCodec.H264), 0.0)
+        assertTrue(BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC) < BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
     }
 }

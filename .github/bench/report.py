@@ -17,15 +17,17 @@ them on the shard runners - SSIM, PSNR and VMAF against the original, beside
 a Storage saver reference made from the same original - and is reported by
 kind and by scene.
 
-Two things an emulator cannot show are worked out from the app's own rules
-rather than measured, and kept apart from the measurement:
+The codec: an emulator has no encoder chip at all. Run with -e hevcSoftware
+true (savings-bench.yml does), its software HEVC encoder stands in for the
+HEVC chip a phone like the Realme 11 Pro 5G has, so the library is measured
+on the path such a phone takes. What a phone without an HEVC chip would get
+(H.264, asked for 1.45 times the bits) is worked out from the app's own rules
+and kept apart from the measurement - as is the other way round, on a run
+without the stand-in.
 
-  - HEVC: an emulator has no HEVC encoder chip, so the app writes H.264 there.
-    A phone with one (a Realme 11 Pro 5G has) gets HEVC, which needs about a
-    third fewer bits for the same picture.
-  - The 20-minute limit: the app gives one video at most 20 minutes to encode
-    and keeps a video that runs out of time as it is. How long a real phone
-    takes depends on its chip, so the effect is shown at a few speeds.
+The 20-minute limit: the app gives one video at most 20 minutes to encode and
+keeps a video that runs out of time as it is. How long a real phone takes
+depends on its chip, so the effect is shown at a few speeds.
 """
 import argparse
 import csv
@@ -36,22 +38,24 @@ import statistics
 from collections import OrderedDict
 
 # The app's one video setting (MediaSettings.VIDEO: 1920 on the long side,
-# 30 fps) and BitrateCalc's standard rates, as app/src/main/kotlin/app/
-# entesaver/core/logic/MediaSettings.kt and BitrateCalc.kt define them.
+# 30 fps), BitrateCalc's standard rates and AudioPlan's sound, as
+# app/src/main/kotlin/app/entesaver/core/logic/MediaSettings.kt,
+# BitrateCalc.kt and AudioPlan.kt define them.
 LONG_SIDE = 1920
 FPS_CAP = 30
 SLOW_MOTION_FPS = 90.0
-AUDIO_BPS = 128_000
-BPP = {"H264": 0.10, "HEVC": 0.065}
-CAP_BPS, CAP_BPS_UHD, FLOOR_BPS, UHD_LONG_SIDE = 12_000_000, 20_000_000, 1_000_000, 2560
+AUDIO_BPS = 48_000
+REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 1_600_000, 1920 * 1080 * 30, 0.75
+CODEC_FACTOR = {"HEVC": 1.0, "H264": 1.45}
+CAP_BPS, FLOOR_BPS = 8_000_000, 150_000
 COPY_FACTOR = 1.15
 BUDGET_S = 20 * 60
 # How fast a phone encodes, as a multiple of playing the video: 0.5 takes
 # twice its length (what the emulator's software encoder managed), 2 half.
 SPEEDS = (0.5, 1.0, 2.0)
 GB = 1e9
-# The owner's target: the 46 GB library down to this.
-TARGET_GB = 5.0
+# The owner's target: the 46 GB library down to 5 GB, and no more than 7.
+TARGET_GB, TARGET_LOW_GB = 7.0, 5.0
 # A copy is as good as Storage saver's when it is no more than this below it.
 VMAF_SLACK, SSIM_SLACK = 1.0, 0.002
 SCENES = OrderedDict([("day", "Daylight camera pan"), ("night", "Night / indoor"), ("motion", "High motion"),
@@ -88,8 +92,8 @@ def plan(row, codec, src_bps, share=1.0):
     capped = FPS_CAP if FPS_CAP + 0.5 < fps < SLOW_MOTION_FPS else None
     out_fps = capped or fps
     ow, oh = output_dims(w, h, LONG_SIDE)
-    cap = CAP_BPS_UHD if max(ow, oh) > UHD_LONG_SIDE else CAP_BPS
-    target = min(max(ow * oh * out_fps * BPP[codec], FLOOR_BPS), cap)
+    raw = REF_HEVC_BPS * (ow * oh * out_fps / REF_PIXEL_RATE) ** SCALE_EXPONENT * CODEC_FACTOR[codec]
+    target = min(max(raw, FLOOR_BPS), CAP_BPS)
     as_is = capped is None and max(w, h) <= LONG_SIDE and src_bps <= target * share * COPY_FACTOR
     return as_is, target
 
@@ -140,15 +144,29 @@ def verdict_of(app, ref, metric):
     return f"worse ({shown})"
 
 
+def phone_word(v):
+    """What a VMAF phone-model score means for someone watching on a phone."""
+    if v is None:
+        return "-"
+    if v >= 93:
+        return "like the original"
+    if v >= 85:
+        return "good"
+    if v >= 75:
+        return "fair"
+    return "visibly worse"
+
+
 def quality_table(lines, title, groups, first="Kind of video"):
     """One row per group of graded copies: the app's scores beside the
-    reference's, and the verdict."""
+    reference's, the verdict against Storage saver, and how it looks on a
+    phone (VMAF's phone model)."""
     lines.append("")
     lines.append(f"### {title}")
     lines.append("")
-    lines.append(f"| {first} | Graded | SSIM Y app / ref | PSNR Y app / ref | VMAF app / ref | Mbps app / ref | "
-                 "App at least as good as Storage saver? |")
-    lines.append("|---|---:|---:|---:|---:|---:|---|")
+    lines.append(f"| {first} | Graded | SSIM Y app / ref | PSNR Y app / ref | VMAF app / ref | VMAF phone app / ref | "
+                 "Mbps app / ref | App at least as good as Storage saver? | On a phone screen |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---|---|")
     out = OrderedDict()
     for label, rows in groups.items():
         graded = [q for q in rows if q.get("status") == "graded"]
@@ -157,12 +175,12 @@ def quality_table(lines, title, groups, first="Kind of video"):
             for q in rows:
                 others[q.get("status") or "not graded"] = others.get(q.get("status") or "not graded", 0) + 1
             why = ", ".join(f"{k}: {v}" for k, v in others.items()) if others else "no sample"
-            lines.append(f"| {label} | 0 | - | - | - | - | not graded ({why}) |")
+            lines.append(f"| {label} | 0 | - | - | - | - | - | not graded ({why}) | - |")
             out[label] = dict(graded=0, not_graded=others)
             continue
         m = {k: mean([num(q, k, None) if q.get(k) not in ("", None, "inf") else None for q in graded])
              for k in ("app_ssim_y", "ref_ssim_y", "app_psnr_y", "ref_psnr_y", "app_vmaf", "ref_vmaf",
-                       "app_kbps", "ref_kbps")}
+                       "app_vmaf_phone", "ref_vmaf_phone", "app_kbps", "ref_kbps")}
         vmaf_all = all(q.get("app_vmaf") and q.get("ref_vmaf") for q in graded)
         metric = "VMAF" if vmaf_all else "SSIM Y"
         app, ref = (m["app_vmaf"], m["ref_vmaf"]) if vmaf_all else (m["app_ssim_y"], m["ref_ssim_y"])
@@ -171,8 +189,10 @@ def quality_table(lines, title, groups, first="Kind of video"):
         lines.append(f"| {label} | {len(graded)} | {f(m['app_ssim_y'], 3)} / {f(m['ref_ssim_y'], 3)} | "
                      f"{f(m['app_psnr_y'], 1)} / {f(m['ref_psnr_y'], 1)} | "
                      f"{f(m['app_vmaf'], 1)} / {f(m['ref_vmaf'], 1)} | "
+                     f"{f(m['app_vmaf_phone'], 1)} / {f(m['ref_vmaf_phone'], 1)} | "
                      f"{f(m['app_kbps'] / 1000 if m['app_kbps'] else None, 2)} / "
-                     f"{f(m['ref_kbps'] / 1000 if m['ref_kbps'] else None, 2)} | {verdict} |")
+                     f"{f(m['ref_kbps'] / 1000 if m['ref_kbps'] else None, 2)} | {verdict} | "
+                     f"{phone_word(m['app_vmaf_phone'])} |")
         out[label] = dict(graded=len(graded), verdict=verdict, **{k: v for k, v in m.items()})
     return out
 
@@ -212,12 +232,15 @@ def main():
             else:
                 outcome = "failed: " + (m["skip_reason"] or m["error"] or m["kept_reason"] or state)
         reencoded = bool(m) and state == "STAGED" and not m["kept_reason"]
+        codec = (m.get("codec") or "H264").upper() if m else "H264"
+        if codec not in CODEC_FACTOR:
+            codec = "H264"
         # How far the encoder landed from the bitrate the app asked of it,
-        # measured on this file: carried over to the HEVC estimate. The test
-        # reads the copy's video and sound tracks apart; older results give
-        # the whole file, less the app's usual sound.
+        # measured on this file: carried over to the other codec's estimate.
+        # The test reads the copy's video and sound tracks apart; older
+        # results give the whole file, less the app's usual sound.
         src_bps = src * 8 / gen_s if src else (float(row["video_kbps"]) + float(row["audio_kbps"])) * 1000
-        _, target_h264 = plan(row, "H264", src_bps)
+        _, target_used = plan(row, codec, src_bps)
         landed, audio_bps, share = None, AUDIO_BPS, None
         if reencoded:
             out_s = num(m, "out_duration_ms") / 1000 or gen_s
@@ -226,23 +249,30 @@ def main():
                 audio_bps = num(m, "out_audio_bytes") * 8 / out_s
             else:
                 out_bps = int(m["out_bytes"]) * 8 / gen_s - AUDIO_BPS
-            landed = out_bps / target_h264 if target_h264 else None
+            landed = out_bps / target_used if target_used else None
             share = num(m, "share", None) if m.get("share") else None
         q = quality.get(name, {})
         files.append(dict(row=row, name=name, real_s=real_s, before=before, after=after, outcome=outcome,
                           reencoded=reencoded, landed=landed, audio_bps=audio_bps, share=share, measured=bool(m),
+                          codec=codec,
                           src_bps=src_bps, gen_s=gen_s, ms=int(m["ms"]) if m else 0, quality=q,
                           compressed=row.get("already_compressed") == "1", scene=row.get("scene", "")))
 
     landed_all = [f["landed"] for f in files if f["landed"]]
     landed_typ = statistics.median(landed_all) if landed_all else 1.0
+    used = [f["codec"] for f in files if f["reencoded"]]
+    measured_codec = max(set(used), key=used.count) if used else "H264"
+    other_codec = "H264" if measured_codec == "HEVC" else "HEVC"
+    name_of = {"HEVC": "HEVC", "H264": "H.264"}
+    mc, oc = name_of[measured_codec], name_of[other_codec]
+    other_phone = "a phone without an HEVC chip" if other_codec == "H264" else "a phone with an HEVC chip"
 
-    # HEVC: the app's own decision with an HEVC chip, at the share of the
-    # standard rate the copy came out at on the emulator (the median for a
-    # clip the emulator kept as it was).
+    # The other codec: the app's own decision on a phone that writes it, at
+    # the share of the standard rate the copy came out at here (the median
+    # for a clip kept as it was).
     for f in files:
         row = f["row"]
-        as_is, target = plan(row, "HEVC", f["src_bps"], f["landed"] or landed_typ)
+        as_is, target = plan(row, other_codec, f["src_bps"], f["landed"] or landed_typ)
         if as_is or not f["measured"]:
             f["after_hevc"] = f["before"]
         else:
@@ -266,24 +296,23 @@ def main():
     received = [f for f in files if f["compressed"]]
     rb, ra = totals(received)
     _, rh = totals(received, "after_hevc")
-    lines.append("## Ente Saver savings benchmark v2 (1080p, Google Photos Storage saver's limits)")
+    lines.append(f"## Ente Saver savings benchmark v3 (measured with {mc}, the codec the app picks on a phone with "
+                 f"an HEVC chip)")
     lines.append("")
-    met = min(af, ah) <= TARGET_GB * GB
+    met = af <= TARGET_GB * GB
     lines.append(
-        f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_GB:.0f} GB - "
-        f"{'met' if met else 'not met'}.** Measured on the emulator (H.264) the library went from "
-        f"{b / GB:.1f} GB to {af / GB:.1f} GB; on a phone with an HEVC encoder, an estimate, to {ah / GB:.1f} GB "
-        f"({af / (TARGET_GB * GB):.1f} and {ah / (TARGET_GB * GB):.1f} times the target). Of what is left, "
-        f"{ra / GB:.1f} GB (H.264) / {rh / GB:.1f} GB (HEVC) are downloads and forwards that WhatsApp, Instagram, "
-        f"YouTube or Telegram had already compressed - {rb / GB:.1f} GB before - which the app mostly keeps as "
-        f"they are; the rest, {(af - ra) / GB:.1f} / {(ah - rh) / GB:.1f} GB, is camera videos, screen recordings "
-        f"and other phones' originals as the app left them.")
+        f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_LOW_GB:.0f}-{TARGET_GB:.0f} GB - "
+        f"{'met' if met else 'not met'}.** Measured ({mc}), the library went from {b / GB:.1f} GB to "
+        f"{af / GB:.1f} GB ({100 * (b - af) / b:.0f}% smaller, {b / af:.1f} times smaller); on {other_phone} "
+        f"({oc}), an estimate, to {ah / GB:.1f} GB. Of what is left, {ra / GB:.1f} GB are downloads and forwards "
+        f"that WhatsApp, Instagram, YouTube or Telegram had already compressed ({rb / GB:.1f} GB before); the rest, "
+        f"{(af - ra) / GB:.1f} GB, is camera videos, screen recordings and other phones' originals.")
     lines.append("")
     lines.append(f"- Library: {len(files)} videos, {b / GB:.2f} GB (measured: {n_measured})")
-    lines.append(f"- Emulator (H.264, measured): {af / GB:.2f} GB after, **{(b - af) / GB:.2f} GB saved "
+    lines.append(f"- Measured ({mc}): {af / GB:.2f} GB after, **{(b - af) / GB:.2f} GB saved "
                  f"({100 * (b - af) / b:.1f}%)**")
-    lines.append(f"- Phone with an HEVC chip (estimate): {ah / GB:.2f} GB after, **{(b - ah) / GB:.2f} GB saved "
-                 f"({100 * (b - ah) / b:.1f}%)**")
+    lines.append(f"- On {other_phone} ({oc}, estimate): {ah / GB:.2f} GB after, {(b - ah) / GB:.2f} GB saved "
+                 f"({100 * (b - ah) / b:.1f}%)")
     lines.append(f"- Kept as they were (nothing to gain, or failed): {n_kept} videos")
     lines.append(f"- Encoder landed at {landed_typ:.2f} x the standard bitrate for its size (median; "
                  f"the app's per-video choice included)")
@@ -293,11 +322,12 @@ def main():
                      f"{min(shares):.2f} to {max(shares):.2f})")
     speeds = [f["gen_s"] / (f["ms"] / 1000) for f in files if f["reencoded"] and f["ms"] > 0]
     if speeds:
-        lines.append(f"- The emulator's software encoder ran at {statistics.median(speeds):.2f} x real time (median, "
-                     f"the app's own measuring of each clip included)")
+        lines.append(f"- The emulator's software {mc} encoder ran at {statistics.median(speeds):.2f} x real time "
+                     f"(median, the app's own measuring of each clip included); a phone's chip is faster")
     for d in devices[:1]:
         lines.append(f"- Emulator: {d.get('model')} API {d.get('sdk')}, RAM {int(d.get('ram_bytes', 0)) / GB:.1f} GB, "
-                     f"tier {d.get('tier')}, HEVC chip {d.get('hevc_hardware_1080p30')}")
+                     f"tier {d.get('tier')}, software HEVC standing in for a chip: "
+                     f"{d.get('hevc_software_stands_in', 'false')}")
     broad = OrderedDict()
     for f in files:
         broad.setdefault(f["row"]["group"], []).append(f)
@@ -305,7 +335,7 @@ def main():
         lines.append("")
         lines.append(f"### {title}")
         lines.append("")
-        lines.append("| Kind of video | Videos | Before GB | After GB (H.264) | Saved | After GB (HEVC est.) | Saved |")
+        lines.append(f"| Kind of video | Videos | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) | Saved |")
         lines.append("|---|---:|---:|---:|---:|---:|---:|")
         for label, sel in table.items():
             gb, ga = totals(sel)
@@ -324,7 +354,7 @@ def main():
     lines.append("")
     lines.append("### What is in the picture (the manifest's scene column)")
     lines.append("")
-    lines.append("| Scene | Videos | Real hours | Before GB | After GB (H.264) | Saved | After GB (HEVC est.) |")
+    lines.append(f"| Scene | Videos | Real hours | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|")
     scene_rows = OrderedDict()
     for s, sel in by_scene.items():
@@ -340,7 +370,7 @@ def main():
     lines.append("")
     lines.append("### The 20-minute limit (a video that cannot be encoded in 20 minutes is kept as it is)")
     lines.append("")
-    lines.append("| Encoding takes | Videos that would run out of time | Saved (H.264) | Saved (HEVC est.) |")
+    lines.append(f"| Encoding takes | Videos that would run out of time | Saved ({mc}) | Saved ({oc} est.) |")
     lines.append("|---|---:|---:|---:|")
     speed_rows = {}
     for speed in SPEEDS:
@@ -403,7 +433,8 @@ def main():
         lines.append("How: each copy's original is scaled to the copy's size (bicubic) and put on the copy's frame "
                      "rate, lined up to within one of its own frames (up to two of the copy's frames either way), "
                      "and the two are compared over the whole clip: SSIM and PSNR on brightness (Y), VMAF "
-                     "(vmaf_v0.6.1). The reference is the same "
+                     "(vmaf_v0.6.1) and VMAF's phone model (the same model for a phone held at arm's length: "
+                     "93 and up looks like the original, 85-93 good, 75-85 fair). The reference is the same "
                      "original at most 1080p and 30 fps, H.264 by libx264 -preset medium at 8 Mbps for 1080p30 and "
                      "in proportion below that. Google publishes no bitrate for Storage saver (its help page says "
                      "only that videos above 1080p are resized to 1080p), so 8 Mbps is an assumption, not a "
@@ -434,22 +465,24 @@ def main():
     with open(os.path.join(a.out, "per-file.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["name", "group", "kind", "folder", "real_minutes", "width", "height", "fps", "codec", "video_kbps",
-                    "before_mb", "after_mb_h264", "after_mb_hevc_estimate", "outcome", "scene", "already_compressed",
-                    "share", "graded", "app_ssim_y", "ref_ssim_y", "app_vmaf", "ref_vmaf"])
+                    "before_mb", "after_mb_measured", "codec_used", "after_mb_other_codec_estimate", "outcome", "scene",
+                    "already_compressed", "share", "graded", "app_ssim_y", "ref_ssim_y", "app_vmaf", "ref_vmaf",
+                    "app_vmaf_phone", "ref_vmaf_phone"])
         for f in files:
             r, q = f["row"], f["quality"]
             w.writerow([f["name"], r["group"], r["label"], r["folder"], f"{f['real_s'] / 60:.2f}", r["width"], r["height"],
                         r["fps"], r["codec"], r["video_kbps"], f"{f['before'] / 1e6:.1f}", f"{f['after'] / 1e6:.1f}",
-                        f"{f['after_hevc'] / 1e6:.1f}", f["outcome"], f["scene"], int(f["compressed"]),
-                        f"{f['share']:.3f}" if f["share"] else "", q.get("status", ""), q.get("app_ssim_y", ""),
-                        q.get("ref_ssim_y", ""), q.get("app_vmaf", ""), q.get("ref_vmaf", "")])
+                        f["codec"] if f["reencoded"] else "", f"{f['after_hevc'] / 1e6:.1f}", f["outcome"], f["scene"],
+                        int(f["compressed"]), f"{f['share']:.3f}" if f["share"] else "", q.get("status", ""),
+                        q.get("app_ssim_y", ""), q.get("ref_ssim_y", ""), q.get("app_vmaf", ""), q.get("ref_vmaf", ""),
+                        q.get("app_vmaf_phone", ""), q.get("ref_vmaf_phone", "")])
     with open(os.path.join(a.out, "summary.json"), "w") as fh:
-        json.dump(dict(videos=len(files), measured=n_measured, before_bytes=b, after_bytes_h264=af,
-                       after_bytes_hevc_estimate=ah, landed_median=landed_typ,
-                       target=dict(gb=TARGET_GB, met=met, already_compressed_before=rb,
-                                   already_compressed_after_h264=ra, already_compressed_after_hevc=rh),
-                       by_kind={label: dict(zip(("before", "after_h264"), totals(sel))) | dict(
-                           after_hevc=totals(sel, "after_hevc")[1], videos=len(sel)) for label, sel in groups.items()},
+        json.dump(dict(videos=len(files), measured=n_measured, measured_codec=measured_codec, before_bytes=b,
+                       after_bytes_measured=af, after_bytes_other_codec_estimate=ah, landed_median=landed_typ,
+                       target=dict(gb=TARGET_GB, low_gb=TARGET_LOW_GB, met=met, already_compressed_before=rb,
+                                   already_compressed_after_measured=ra, already_compressed_after_other=rh),
+                       by_kind={label: dict(zip(("before", "after_measured"), totals(sel))) | dict(
+                           after_other=totals(sel, "after_hevc")[1], videos=len(sel)) for label, sel in groups.items()},
                        by_scene=scene_rows, kept_as_they_were=kept,
                        quality=dict(by_kind=q_kind, by_scene=q_scene),
                        time_limit={str(k): v for k, v in speed_rows.items()}, devices=devices), fh, indent=2)

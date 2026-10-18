@@ -2,25 +2,39 @@ package app.entesaver.core.logic
 
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
- * Video bitrate policy: the standard rate is OUTPUT pixels x fps x
- * bits-per-pixel-per-frame by codec (H.264 0.10, HEVC 0.065), clamped to
- * [1 Mbps, 12 Mbps] - 20 Mbps above 1440p, where 12 would starve a 4K
- * picture: about 6 Mbps for 1080p30 H.264 and 4 Mbps HEVC. A clip is given a
- * measured share of it (QualityLadder.VIDEO).
+ * Video bitrate policy: the standard rate a clip's share (VideoShare, read
+ * from how much its picture moves) is taken of.
+ *
+ * It grows with the picture's pixel rate (width x height x frames a second)
+ * to the power [SCALE_EXPONENT], not in proportion: a bigger picture has
+ * more pixels alike, so each needs fewer bits - what streaming services'
+ * per-title ladders measure. 1080p30 in HEVC is [REF_HEVC_BPS]; H.264 is
+ * asked for [H264_FACTOR] times as much for the same look. So 1080p30 is
+ * 0.9 Mbps in HEVC and 1.3 Mbps in H.264, 720p30 0.49 and 0.71, a WhatsApp
+ * 480p clip 0.27 and 0.38 - and a clip gets 0.7 to 2.4 times that by what it
+ * shows. A camera writes 20 Mbps: a phone's library comes down to about a
+ * seventh, which is what it takes to last in Ente's free 10 GB.
  */
 object BitrateCalc {
 
-    const val BPP_H264 = 0.10
-    const val BPP_HEVC = 0.065
-    const val CAP_BPS = 12_000_000
-    const val CAP_BPS_UHD = 20_000_000
-    const val FLOOR_BPS = 1_000_000
+    /** 1080p at 30 frames a second, in HEVC. */
+    const val REF_HEVC_BPS = 900_000
 
-    /** Above this long side a picture is 4K-class and gets [CAP_BPS_UHD]. */
-    const val UHD_LONG_SIDE = 2560
+    /** H.264 needs this much more than HEVC for the same picture. */
+    const val H264_FACTOR = 1.45
+
+    /** The pixel rate [REF_HEVC_BPS] is for: 1080p30. */
+    const val REF_PIXEL_RATE = 1920.0 * 1080.0 * 30.0
+
+    /** How the rate grows with the pixel rate. */
+    const val SCALE_EXPONENT = 0.75
+
+    const val FLOOR_BPS = 150_000
+    const val CAP_BPS = 8_000_000
 
     /** Copy as-is when source bitrate <= 1.15 x target (and size/container fit). */
     const val COPY_BITRATE_FACTOR = 1.15
@@ -36,18 +50,17 @@ object BitrateCalc {
      */
     const val FALLBACK_MAX_RATIO = 0.9
 
-    fun bppFor(codec: VideoCodec): Double = when (codec) {
-        VideoCodec.H264 -> BPP_H264
-        VideoCodec.HEVC -> BPP_HEVC
+    /** How many times HEVC's rate a codec is asked for. */
+    fun codecFactor(codec: VideoCodec): Double = when (codec) {
+        VideoCodec.H264 -> H264_FACTOR
+        VideoCodec.HEVC -> 1.0
     }
-
-    fun capFor(outWidth: Int, outHeight: Int): Int =
-        if (maxOf(outWidth, outHeight) > UHD_LONG_SIDE) CAP_BPS_UHD else CAP_BPS
 
     fun targetBps(outWidth: Int, outHeight: Int, fps: Float, codec: VideoCodec): Int {
         val safeFps = if (fps.isFinite() && fps > 1f) fps else 30f
-        val raw = outWidth.toDouble() * outHeight.toDouble() * safeFps * bppFor(codec)
-        return raw.toLong().coerceIn(FLOOR_BPS.toLong(), capFor(outWidth, outHeight).toLong()).toInt()
+        val pixelRate = outWidth.toDouble() * outHeight.toDouble() * safeFps
+        val raw = REF_HEVC_BPS * (pixelRate / REF_PIXEL_RATE).pow(SCALE_EXPONENT) * codecFactor(codec)
+        return raw.toLong().coerceIn(FLOOR_BPS.toLong(), CAP_BPS.toLong()).toInt()
     }
 
     /** Keep aspect ratio, clamp long side, force even dimensions. */

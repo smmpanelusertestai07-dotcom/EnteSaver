@@ -7,10 +7,10 @@ import kotlin.math.min
  * How alike two pictures look: the structural similarity index (SSIM) of
  * their brightness, from 0 (nothing alike) to 1 (the same picture).
  *
- * This is the yardstick the optimiser aims by. Instead of one fixed quality
- * for every file - too much for a plain wall, too little for leaves in the
- * wind - each file is made as small as it can be while it still measures
- * above [Targets], against its own original. SSIM is used rather than plain
+ * This is the yardstick a photo is optimised by. Instead of one fixed quality
+ * for every photo - too much for a plain wall, too little for leaves in the
+ * wind - each is made as small as it can be while it still measures above
+ * [Targets], against its own original. SSIM is used rather than plain
  * pixel error because it follows what the eye notices: blur and blocking
  * lower it, invisible noise barely does.
  *
@@ -100,20 +100,15 @@ object Ssim {
     }
 
     /**
-     * The scores a copy must reach.
+     * The score a photo copy must reach.
      *
      * Chosen to sit at or above what Google Photos' Storage saver keeps, and
      * measured, not guessed. A photo is compared with its own decoded
      * original, on a mosaic of full-size squares where blocking shows first:
      * 0.965 is where JPEG quality 85 - about Storage saver's - lands on the
      * Kodak test photos, so a detailed photo gets that and a plain one less.
-     * A video is compared with a near-lossless encode of the same frames:
-     * on real 1080p camera footage, 0.965 there is a VMAF of about 90 to 96
-     * (Netflix's scale, 93 and up looking like the source), and the hardest
-     * scenes, which never reach it, get the top rung.
      */
     object Targets {
         const val PHOTO = 0.965
-        const val VIDEO = 0.965
     }
 }

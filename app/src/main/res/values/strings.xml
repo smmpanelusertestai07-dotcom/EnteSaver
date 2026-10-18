@@ -734,7 +734,7 @@
     <string name="opt_optimise_hint">One way, the same on every phone. Each file gets only the bytes its picture needs.</string>
     <string name="optimise_value">Automatic</string>
     <string name="optimise_photos">Photos: %1$s, each in its own format — a JPEG stays a JPEG. Each gets the lowest quality that still measures like its original.</string>
-    <string name="optimise_videos">Videos: up to 1080p as %1$s, 30 fps at most; slow motion keeps every frame. Two short pieces are test-encoded first, so each gets the bitrate its picture needs. Sound that is already small is kept as it is.</string>
+    <string name="optimise_videos">Videos: up to 1080p as %1$s, 30 fps at most; slow motion keeps every frame. Each gets the bits its motion needs: a still scene few, fast motion and night more. Sound is written as HE-AAC, which keeps voices and music clear at a fraction of the size.</string>
     <string name="optimise_kept_whole">Motion, portrait and HDR photos, and anything a copy would lose something from, are kept whole. A file is never optimised twice.</string>
     <string name="preset_best">Best</string>
     <string name="preset_balanced">Balanced</string>
@@ -1096,9 +1096,9 @@
     <string name="quality_table_title">What to expect</string>
     <string name="quality_table_note">Typical results. Each file gets the quality its own picture needs, so its saving is its own.</string>
     <string name="quality_row1_k">1080p video</string>
-    <string name="quality_row1_v" formatted="false">60\u201375% smaller, looks the same</string>
+    <string name="quality_row1_v" formatted="false">About 90% smaller, looks right on a phone</string>
     <string name="quality_row2_k">4K video saved as 1080p</string>
-    <string name="quality_row2_v" formatted="false">75\u201385% smaller</string>
+    <string name="quality_row2_v" formatted="false">About 95% smaller</string>
     <string name="quality_row3_k">12 MP photo</string>
     <string name="quality_row3_v" formatted="false">About 30% smaller, no visible difference</string>
     <string name="quality_row4_k">Photo over 16 MP</string>
@@ -1305,7 +1305,7 @@
     <string name="faq_a3">Only if you choose Replace on this phone, and then safely. Before a file is replaced, a copy of the original is put in the phone\u2019s trash and checked byte for byte; only then is the smaller version written, and it is checked too. The original stays in the trash for 30 days, and Files \u203a the file \u203a Put the original back returns it to the same file. On Android 10, which has no trash, it waits as a hidden file beside the photo for the same 30 days. Home shows how much space the kept originals hold, with Delete them now if you want it back sooner. With Copies for Ente, originals are never edited, moved or deleted by the app: one is removed only if you open Free up space, select files yourself, and confirm Android\'s own deletion dialog. On Android 11 and newer it goes to your gallery trash first, where it stays about 30 days; on Android 10 Android removes it straight away and says so in its own dialog.</string>
 
     <string name="faq_q4">How much quality is lost?</string>
-    <string name="faq_a4" formatted="false">As little as can be measured. Every file is measured on the phone and given the smallest size that still looks like the original to the eye. The limits are the ones Google Photos\u2019 Storage saver uses: photos above 16 megapixels come down to 16, and videos above 1080p come down to 1080p at up to 30 frames a second, while slow-motion clips keep their frame rate. Files that are already small, and anything a smaller version would damage, are left exactly as they are. Settings \u203a Optimisation shows what this phone will do, and Files shows the result for every file.</string>
+    <string name="faq_a4" formatted="false">Videos come out about seven times smaller, so a phone\u2019s videos fit Ente\u2019s free 10 GB for far longer. On a phone screen, still and daylight scenes look like the original; night and fast motion come out a little softer, and on a large screen, side by side, you will see the difference. Photos keep what Google Photos\u2019 Storage saver keeps: above 16 megapixels they come down to 16. Videos come down to 1080p at up to 30 frames a second, while slow-motion clips keep their frame rate. Files that are already small, and anything a smaller version would damage, are left exactly as they are. With Replace on this phone the original waits 30 days, and Files can put it back.</string>
 
     <string name="faq_q5">Are dates, locations and file names kept?</string>
     <string name="faq_a5">Yes. A smaller version keeps the original\u2019s shooting date, camera details and format, and its location too, as long as you allowed the location request during setup \u2014 Android hands apps a copy with the location removed unless that one is granted. With Replace on this phone the file also keeps its name, album and date in the gallery, so nothing moves in your timeline or in Ente. With Copies for Ente the copy\u2019s name is the original\u2019s with a short code added, so it can always be matched back to its original, and its file date is set to match.</string>
@@ -1376,7 +1376,7 @@
     <string name="quality_what_title">What happens</string>
     <string name="quality_what">Each file is made smaller at the quality its picture needs, and keeps its format, name and dates. With Copies for Ente the smaller copy goes to your upload folder, and the original is not touched. With Replace on this phone it takes the original\u2019s place, and the original waits in the trash for 30 days. A file that is already small is left exactly as it is.</string>
     <string name="quality_look_title">How it looks</string>
-    <string name="quality_look">Photos look the same on a phone screen. Videos keep close to the original at 1080p. On a large monitor, side by side, you may spot a difference in fine detail.</string>
+    <string name="quality_look">Photos look the same on a phone screen. On a phone, still and daylight videos look like the original, and night and fast motion a little softer. On a large screen, side by side, you will see the difference.</string>
     <string name="volume_switch_title">Change where files are kept?</string>
     <string name="volume_switch_body">This applies to new files only. Files already written stay where they are and are still uploaded.</string>
     <string name="volume_switch_confirm">Change location</string>
@@ -1409,7 +1409,7 @@
     <string name="quality_current_title">How files are optimised</string>
     <string name="quality_current_limits">Photos %1$s, each in its own format. Videos %2$s as %3$s, 30 fps at most; slow motion keeps every frame.</string>
     <string name="quality_looks_photo">Every photo is checked against its original before it is written. It gets the lowest quality at which it still looks the same.</string>
-    <string name="quality_looks_video">Every video longer than 15 seconds has two short pieces test-encoded first. It gets the bitrate at which they still look like the original.</string>
+    <string name="quality_looks_video">Every video is read first for how much it moves and how dark it is. A still scene gets few bits, fast motion and night more.</string>
     <string name="quality_looks_note">Detail kept counts pixels; these lines describe how it looks.</string>
     <string name="quality_current_headroom">That is about %1$s times more detail than a phone screen can display.</string>
     <string name="about_quality_title">Optimisation</string>
