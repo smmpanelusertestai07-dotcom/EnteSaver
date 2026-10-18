@@ -59,6 +59,13 @@ object RunDecider {
         /** Replace on this phone is on, and Android's file access for it is not. */
         NEEDS_FILE_ACCESS,
 
+        /**
+         * Replace on this phone is on, and media-location access is not:
+         * without it every photo is handed over with its location blanked
+         * out, and a replace would lose it.
+         */
+        NEEDS_MEDIA_LOCATION,
+
         /** Replace on this phone has written today's daily limit; Ente uploads no more than that a day. */
         DAILY_LIMIT,
 

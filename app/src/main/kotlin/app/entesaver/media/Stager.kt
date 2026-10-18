@@ -136,6 +136,10 @@ class Stager(private val context: Context, private val db: AppDb) {
         ) {
             StageRules.Verdict.TAKEN -> return false
             StageRules.Verdict.CHANGED -> {
+                // A row an original is kept for is the only record of where
+                // that original waits: never retired, whatever the file at
+                // its address looks like now. Put back is its way out.
+                if (!fresh.backupUri.isNullOrEmpty()) return false
                 // Edited in place while it waited. The bytes this row
                 // describes are gone, and the edited file has a row of its
                 // own (or will at the next scan), so this one is retired the
@@ -391,9 +395,18 @@ class Stager(private val context: Context, private val db: AppDb) {
             ) {
                 return false
             }
+            // A replace the phone cut short is settled first: its journal is
+            // the only record of where that original is kept, and a new
+            // replace never writes over it.
+            recoverLocked()
             return when (val outcome = InPlace.replace(context, uri, row.isVideo, row.sizeBytes, result.file, row.id)) {
                 is InPlace.Result.Failed -> {
-                    fail(row, IN_PLACE_FAILED, outcome.reason)
+                    // Not this file's try: an earlier replace is still to be
+                    // settled, or this one is left for recovery, which
+                    // counts it once it knows how it ended.
+                    if (outcome.reason != InPlace.JOURNAL_PENDING && outcome.reason != InPlace.WRITE_FAILED_KEPT) {
+                        fail(row, IN_PLACE_FAILED, outcome.reason)
+                    }
                     false
                 }
                 is InPlace.Result.Replaced -> {
@@ -402,7 +415,7 @@ class Stager(private val context: Context, private val db: AppDb) {
                     db.withTransaction {
                         db.items().byId(row.id)?.let { latest ->
                             db.items().update(
-                                replaced(latest, outcome.backup, outcome.bytes, outcome.sha256, now).copy(
+                                replaced(latest, outcome.backup, outcome.bytes, outcome.sha256, outcome.originalSha256, now).copy(
                                     srcPixels = result.srcPixels,
                                     outPixels = result.outPixels,
                                     presetUsed = if (row.isVideo) {
@@ -430,31 +443,40 @@ class Stager(private val context: Context, private val db: AppDb) {
     }
 
     /**
-     * Finishes or undoes a replace the phone cut short (see [InPlace.recover]),
-     * before a run takes any other file.
+     * Finishes or undoes a replace or put back the phone cut short (see
+     * [InPlace.recover]) - at start-up, and before a run or the trial reads
+     * the gallery or takes any other file.
      */
-    suspend fun recoverInPlace() = Locks.stage.withLock {
+    suspend fun recoverInPlace() = Locks.stage.withLock { recoverLocked() }
+
+    /** [recoverInPlace] for a caller that already holds [Locks.stage]. */
+    suspend fun recoverLocked() {
+        check(Locks.stage.isLocked) { "Locks.stage must be held" }
         val now = System.currentTimeMillis()
-        when (val found = InPlace.recover(context)) {
-            null, is InPlace.Recovered.Undone -> Unit
+        when (val found = InPlace.recover(context, now)) {
+            // Nothing on record, or not now: the journal stays, and nothing
+            // else is replaced until it is settled.
+            null, is InPlace.Recovered.Later -> Unit
             is InPlace.Recovered.Finished -> {
                 db.items().byId(found.rowId)?.let { cur ->
-                    db.items().update(replaced(cur, found.backup, found.bytes, found.sha256, now))
+                    db.items().update(replaced(cur, found.backup, found.bytes, found.sha256, found.originalSha256, now))
                 }
                 InPlace.settled(context)
             }
+            // The original is back as it was. The try that was cut short
+            // counts, so a file whose replace always dies is set aside after
+            // three instead of being tried first on every run.
+            is InPlace.Recovered.Undone -> db.items().byId(found.rowId)?.let { cur ->
+                db.items().update(struck(cur, IN_PLACE_FAILED, "interrupted", now))
+            }
+            is InPlace.Recovered.PutBackDone -> db.items().byId(found.rowId)?.let { cur ->
+                db.items().update(putBack(cur, now))
+            }
             is InPlace.Recovered.Stuck -> db.items().byId(found.rowId)?.let { cur ->
-                // The file is not what either side was; the original waits in
-                // the trash, named on the row, and nothing touches it again.
-                db.items().update(
-                    cur.copy(
-                        state = ItemState.SKIP.name,
-                        skipReason = IN_PLACE_FAILED,
-                        lastError = "restore_failed",
-                        backupUri = found.backup,
-                        updatedAt = now
-                    )
-                )
+                // The file is not what either side was, or cannot be reached;
+                // the original waits in the trash, named on the row with its
+                // hash, and Put back is offered for it.
+                db.items().update(stuck(cur, found.backup, found.originalSha256, found.reason, now))
             }
         }
     }
@@ -466,28 +488,46 @@ class Stager(private val context: Context, private val db: AppDb) {
      */
     suspend fun pruneKeptOriginals(limit: Int = 500) {
         val now = System.currentTimeMillis()
-        val kept = db.items().keptOriginals().sortedBy { it.updatedAt }.take(limit)
+        val kept = db.items().allKeptOriginals().sortedBy { it.updatedAt }.take(limit)
         for (row in kept) {
             val backup = row.backupUri ?: continue
             if (backup.startsWith("file:")) {
                 val path = Uri.parse(backup).path ?: continue
-                if (InPlace.purgeExpired(listOf(path), now) > 0 || !File(path).exists()) {
-                    db.items().forgetBackup(row.id, now)
-                }
-            } else if (!InPlace.backupExists(context, backup)) {
-                db.items().forgetBackup(row.id, now)
+                InPlace.purgeExpired(listOf(path), now)
+            }
+            // Forgotten only on Android's own answer that it is gone, or
+            // that the person took it back out of the trash. An unmounted
+            // card or a media store that cannot answer forgets nothing.
+            when (InPlace.backupState(context, backup)) {
+                InPlace.Kept.GONE, InPlace.Kept.LEFT_TRASH -> db.items().forgetBackup(row.id, now)
+                InPlace.Kept.KEPT, InPlace.Kept.UNKNOWN -> Unit
             }
         }
     }
 
-    /** Deletes every original still kept after a replace, now; how many and the bytes they held. */
+    /**
+     * Deletes every original still kept after a finished replace, now; how
+     * many and the bytes they held. Never one whose replace recovery gave up
+     * on - the file at its address may not be whole - and never one taken
+     * back out of the trash.
+     */
     suspend fun deleteKeptOriginals(): Pair<Int, Long> {
         val now = System.currentTimeMillis()
         var count = 0
         var bytes = 0L
         for (row in db.items().keptOriginals()) {
             val backup = row.backupUri ?: continue
-            if (InPlace.deleteBackup(context, backup) || !InPlace.backupExists(context, backup)) {
+            val gone = when (InPlace.backupState(context, backup)) {
+                InPlace.Kept.KEPT -> InPlace.deleteBackup(context, backup)
+                InPlace.Kept.GONE -> true
+                // Not ours to delete any more, and not deleted: just forgotten.
+                InPlace.Kept.LEFT_TRASH -> {
+                    db.items().forgetBackup(row.id, now)
+                    false
+                }
+                InPlace.Kept.UNKNOWN -> false
+            }
+            if (gone) {
                 db.items().forgetBackup(row.id, now)
                 count++
                 bytes += row.sizeBytes
@@ -503,17 +543,23 @@ class Stager(private val context: Context, private val db: AppDb) {
      * known by its address, so the scanner never reads it as a new photo.
      */
     suspend fun putBackOriginal(id: Long): InPlace.PutBack = Locks.stage.withLock {
+        // Whatever the phone cut short is settled first; it may be this very row.
+        recoverLocked()
         val row = db.items().byId(id)
-        val backup = row?.backupUri?.takeIf { it.isNotEmpty() && row.state == ItemState.FREED_KEPT.name }
-            ?: return@withLock InPlace.PutBack.NOT_KEPT
-        val uri = row.contentUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+        // Any row an original is kept for - a replace recovery gave up on
+        // included, where this is the only way back.
+        val backup = row?.backupUri?.takeIf { it.isNotEmpty() } ?: return@withLock InPlace.PutBack.NOT_KEPT
+        val uri = (row.contentUri ?: row.keptUri)?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: return@withLock InPlace.PutBack.FAILED
-        val outcome = InPlace.putBack(context, backup, uri)
+        // A finished replace is checked against the copy it wrote; one
+        // recovery gave up on holds no known bytes, and is checked by name.
+        val copySha = row.outputSha256.takeIf { row.state == ItemState.FREED_KEPT.name }
+        val outcome = InPlace.putBack(context, backup, uri, row.originalSha256, row.displayName, copySha, row.id)
         val now = System.currentTimeMillis()
         when (outcome) {
             InPlace.PutBack.DONE -> db.items().update(putBack(row, now))
             InPlace.PutBack.NOT_KEPT -> db.items().forgetBackup(row.id, now)
-            InPlace.PutBack.NO_SPACE, InPlace.PutBack.FAILED -> Unit
+            InPlace.PutBack.NO_SPACE, InPlace.PutBack.CHANGED, InPlace.PutBack.FAILED -> Unit
         }
         outcome
     }
@@ -526,16 +572,18 @@ class Stager(private val context: Context, private val db: AppDb) {
         const val IN_PLACE_FAILED = "in_place_failed"
 
         /**
-         * [cur] once its original was replaced in place by [bytes] of copy
-         * hashing to [sha256], with the original kept at [backup]. FREED_KEPT
+         * [cur] once its original, hashing to [originalSha256], was replaced
+         * in place by [bytes] of copy hashing to [sha256], with the original
+         * kept at [backup]. FREED_KEPT
          * with the item's own address as its kept copy: the scanner then
          * knows the smaller file as this row's, never as a new photo, and
          * the original's size stays on the row so the saving counts.
          */
-        fun replaced(cur: ItemRow, backup: String, bytes: Long, sha256: String, now: Long): ItemRow = cur.copy(
+        fun replaced(cur: ItemRow, backup: String, bytes: Long, sha256: String, originalSha256: String, now: Long): ItemRow = cur.copy(
             state = ItemState.FREED_KEPT.name,
-            keptUri = cur.contentUri,
+            keptUri = cur.contentUri ?: cur.keptUri,
             backupUri = backup,
+            originalSha256 = originalSha256,
             outputBytes = bytes,
             outputSha256 = sha256,
             outputName = cur.displayName,
@@ -545,8 +593,57 @@ class Stager(private val context: Context, private val db: AppDb) {
             updatedAt = now
         )
 
+        /**
+         * [cur] once recovery gave its replace up (see [recoverLocked]): set
+         * aside, and still the record of where its original waits - the
+         * one way back for the file, which Put back offers.
+         */
+        fun stuck(cur: ItemRow, backup: String, originalSha256: String, reason: String, now: Long): ItemRow = cur.copy(
+            state = ItemState.SKIP.name,
+            skipReason = IN_PLACE_FAILED,
+            lastError = reason,
+            keptUri = cur.contentUri ?: cur.keptUri,
+            backupUri = backup,
+            originalSha256 = originalSha256,
+            updatedAt = now
+        )
+
+        /**
+         * [cur] with its staged copy dropped, waiting again - as the trial's
+         * discard leaves its copies: what a copy staged for Copies for Ente
+         * comes to once Replace on this phone is on, where no copy is ever
+         * published.
+         */
+        fun unstaged(cur: ItemRow, now: Long): ItemRow = cur.copy(
+            state = ItemState.NEW.name,
+            stagePath = null,
+            outputName = null,
+            outputBytes = null,
+            outputSha256 = null,
+            outputFolder = null,
+            srcPixels = 0,
+            outPixels = 0,
+            presetUsed = null,
+            codecUsed = null,
+            predictedBytes = 0,
+            lastError = null,
+            updatedAt = now
+        )
+
         /** A file whose original the person put back (see [putBackOriginal]). */
         const val PUT_BACK = "put_back"
+
+        /** How long a file changed in place is left alone before it is replaced (see [tooFresh]). */
+        const val FRESH_MS = 60 * 60_000L
+
+        /**
+         * Whether a file last changed at [dateModifiedSec] (MediaStore's
+         * seconds) is too new at [now] to be replaced: a camera may still be
+         * finishing it, or Ente uploading it. A date ahead of now is a clock
+         * that was wrong, not a fresh file.
+         */
+        fun tooFresh(dateModifiedSec: Long, now: Long): Boolean =
+            dateModifiedSec > 0 && now - dateModifiedSec * 1000 in 0 until FRESH_MS
 
         /**
          * [cur] once its original is back in its item: the original's own
@@ -559,7 +656,7 @@ class Stager(private val context: Context, private val db: AppDb) {
             state = ItemState.SKIP.name,
             skipReason = PUT_BACK,
             neverOptimise = true,
-            keptUri = cur.contentUri,
+            keptUri = cur.contentUri ?: cur.keptUri,
             backupUri = "",
             outputBytes = null,
             outputSha256 = null,

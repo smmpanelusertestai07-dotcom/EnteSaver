@@ -9,11 +9,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.system.Os
+import android.system.OsConstants
 import androidx.annotation.RequiresApi
 import app.entesaver.core.logic.Fingerprint
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import org.json.JSONObject
 
 /**
@@ -27,17 +30,26 @@ import org.json.JSONObject
  * the same item, it is the same photo with new bytes, and Ente swaps the
  * original it holds for the smaller one.
  *
- * Every step is proved before the next. The original is copied into the
- * trash and read back; only then is it overwritten, and the overwrite is
- * read back too. A journal written before the overwrite lets the next run
- * finish or undo a replace the phone cut short, and the original stays in
- * the trash the whole time. Android 10 has no trash, so there the original
- * waits as a hidden file beside it, removed after the same 30 days.
+ * Every step is proved before the next, and every step is on record before
+ * it starts. A journal is written before the original is copied, again once
+ * the copy is proved and before the item is overwritten, and before an
+ * original is put back - so whatever the phone cuts short, the next run
+ * finishes it or undoes it, and the original is never referenced by
+ * nothing. A step that cannot be finished now (the file unreadable, the
+ * card out) is tried again later rather than given up. Android 10 has no
+ * trash, so there the original waits as a hidden file beside it, under a
+ * name no other file has, removed after the same 30 days.
  */
 object InPlace {
 
     /** How long a replaced original is kept, as Android keeps its trash. */
     const val KEEP_DAYS = 30
+
+    /** Why [replace] refused: a replace or put back the phone cut short is not settled yet. */
+    const val JOURNAL_PENDING = "journal_pending"
+
+    /** The write failed and the original could not be written back yet; recovery tries again. */
+    const val WRITE_FAILED_KEPT = "write_failed_kept"
 
     /** The hidden name an original waits under on Android 10. */
     private const val HIDDEN_PREFIX = ".entesaver-original-"
@@ -46,6 +58,21 @@ object InPlace {
 
     /** Room left over when an original goes back, so the phone is never filled to the byte. */
     private const val SPACE_MARGIN = 16L * 1024 * 1024
+
+    /** Recovery gives a journal up only after this many tries, and [GIVE_UP_AFTER_MS] at least. */
+    private const val GIVE_UP_TRIES = 5
+    private const val GIVE_UP_AFTER_MS = 24L * 60 * 60_000L
+
+    /**
+     * A file last changed this long after a write into it began was changed
+     * by someone else since - not by the write the phone cut short.
+     */
+    private const val EDIT_MARGIN_MS = 15L * 60_000L
+
+    private const val REPLACE = "replace"
+    private const val PUT_BACK = "putback"
+    private const val KEEPING = "keeping"
+    private const val WRITING = "writing"
 
     /**
      * Whether this phone lets Ente Saver write into photos other apps made
@@ -60,12 +87,18 @@ object InPlace {
             context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
     }
 
+    /** Whether a replace or put back is on record, waiting to be finished or undone ([recover]). */
+    fun pending(context: Context): Boolean = journalFile(context).exists()
+
     /** What one replace came to. */
     sealed interface Result {
-        /** The item now holds the copy; the original is kept at [backup]. */
-        data class Replaced(val backup: String, val bytes: Long, val sha256: String) : Result
+        /**
+         * The item now holds the copy ([bytes], hashing to [sha256]); the
+         * original, hashing to [originalSha256], is kept at [backup].
+         */
+        data class Replaced(val backup: String, val bytes: Long, val sha256: String, val originalSha256: String) : Result
 
-        /** Nothing changed on the phone; [reason] says why. */
+        /** Nothing changed on the phone, or recovery will finish it; [reason] says why. */
         data class Failed(val reason: String) : Result
     }
 
@@ -74,6 +107,10 @@ object InPlace {
      * [expectedBytes] the copy was made from. [rowId] goes into the journal.
      */
     fun replace(context: Context, uri: Uri, isVideo: Boolean, expectedBytes: Long, copy: File, rowId: Long): Result {
+        // One on record at a time: a journal still here belongs to a replace
+        // the phone cut short, and writing over it would lose where that
+        // original is kept.
+        if (pending(context)) return Result.Failed(JOURNAL_PENDING)
         val info = infoOf(context, uri) ?: return Result.Failed("original_unreadable")
         if (info.size != expectedBytes) return Result.Failed("original_changed")
         val originalSha = sha(context, uri) ?: return Result.Failed("original_unreadable")
@@ -82,89 +119,198 @@ object InPlace {
         val copyBytes = copy.length()
         if (copyBytes <= 0 || copyBytes >= info.size) return Result.Failed("not_smaller")
 
-        val backup = keepOriginal(context, uri, info, isVideo, originalSha) ?: return Result.Failed("backup_failed")
-        val journal = Journal(rowId, uri.toString(), originalSha, info.size, copySha, copyBytes, backup)
-        if (!writeJournal(context, journal)) {
+        // On record before the original is copied, and again the moment the
+        // copy exists: a run cut short while copying leaves a half-made
+        // backup the next run knows to remove.
+        val keeping = Journal(
+            REPLACE, KEEPING, rowId, uri.toString(), originalSha, info.size, copySha, copyBytes,
+            backup = "", startedAt = System.currentTimeMillis()
+        )
+        if (!writeJournal(context, keeping)) return Result.Failed("journal_failed")
+        val backup = keepOriginal(context, uri, info, isVideo, originalSha, rowId) { made ->
+            writeJournal(context, keeping.copy(backup = made))
+        }
+        if (backup == null) {
+            clearJournal(context)
+            return Result.Failed("backup_failed")
+        }
+        val writing = keeping.copy(stage = WRITING, backup = backup, startedAt = System.currentTimeMillis())
+        if (!writeJournal(context, writing)) {
             deleteBackup(context, backup)
+            clearJournal(context)
             return Result.Failed("journal_failed")
         }
         val written = runCatching { writeInto(context, uri, copy) }.getOrDefault(false)
         val nowSha = if (written) sha(context, uri) else null
         if (nowSha != copySha) {
             // Half written, or written wrong: the original goes back in.
-            val restored = restoreFrom(context, backup, uri) && sha(context, uri) == originalSha
-            if (restored) {
+            if (restoreFrom(context, backup, uri) && sha(context, uri) == originalSha) {
+                rescan(context, info.path)
                 deleteBackup(context, backup)
                 clearJournal(context)
                 return Result.Failed("write_failed")
             }
-            // Left for the next run's recovery, original safe in the trash.
-            return Result.Failed("write_failed_kept")
+            // On record for recovery, which writes it back later; the
+            // original stays kept the whole time.
+            return Result.Failed(WRITE_FAILED_KEPT)
         }
         rescan(context, info.path)
-        keepDateTaken(context, uri, info.dateTaken)
-        return Result.Replaced(backup, copyBytes, copySha)
+        return Result.Replaced(backup, copyBytes, copySha, originalSha)
     }
 
     /** The journal of a replace whose row has now been written: nothing is left to recover. */
     fun settled(context: Context) = clearJournal(context)
 
-    /** What [recover] found from a replace the phone cut short. */
+    /** What [recover] found from a replace or put back the phone cut short. */
     sealed interface Recovered {
-        /** The copy is in place: row [rowId] is to be finished as replaced. */
-        data class Finished(val rowId: Long, val backup: String, val bytes: Long, val sha256: String) : Recovered
+        val rowId: Long
 
-        /** The original is in place, as before: row [rowId] waits for a new try. */
-        data class Undone(val rowId: Long) : Recovered
+        /**
+         * The copy is in place: row [rowId] is to be finished as replaced.
+         * The journal stays until it is ([settled]).
+         */
+        data class Finished(
+            override val rowId: Long,
+            val backup: String,
+            val bytes: Long,
+            val sha256: String,
+            val originalSha256: String
+        ) : Recovered
 
-        /** The original could not be put back; it is still in the trash at [backup]. */
-        data class Stuck(val rowId: Long, val backup: String) : Recovered
+        /** The original is in place, as before: the replace counts as a try that failed. */
+        data class Undone(override val rowId: Long) : Recovered
+
+        /** A put back is finished: the original is in its item and no longer kept apart. */
+        data class PutBackDone(override val rowId: Long) : Recovered
+
+        /** Not now - the file or the kept original could not be reached; tried again next time. */
+        data class Later(override val rowId: Long) : Recovered
+
+        /**
+         * Given up: the file is left as it is, and the original stays kept
+         * at [backup] - for Put back, and for Android's 30 days.
+         */
+        data class Stuck(
+            override val rowId: Long,
+            val backup: String,
+            val originalSha256: String,
+            val reason: String
+        ) : Recovered
     }
 
-    /** Finishes or undoes the one replace a journal may describe; null when there is none. */
-    fun recover(context: Context): Recovered? {
-        val j = readJournal(context) ?: return null
-        val uri = Uri.parse(j.uri)
-        val now = sha(context, uri)
-        val outcome = when (now) {
-            j.copySha -> Recovered.Finished(j.rowId, j.backup, j.copyBytes, j.copySha)
-            j.originalSha -> {
-                deleteBackup(context, j.backup)
-                Recovered.Undone(j.rowId)
-            }
-            else -> if (restoreFrom(context, j.backup, uri) && sha(context, uri) == j.originalSha) {
-                deleteBackup(context, j.backup)
-                Recovered.Undone(j.rowId)
-            } else {
-                Recovered.Stuck(j.rowId, j.backup)
-            }
+    /** Finishes, undoes or puts off the one step a journal may describe; null when there is none. */
+    fun recover(context: Context, now: Long = System.currentTimeMillis()): Recovered? {
+        if (!pending(context)) return null
+        // A file that cannot be read now is read next time. One that reads
+        // but makes no sense can never be acted on - and left in place it
+        // would hold every replace back for good.
+        val text = runCatching { journalFile(context).readText(Charsets.UTF_8) }.getOrNull() ?: return null
+        val j = parseJournal(text, journalFile(context).lastModified()) ?: return null.also { clearJournal(context) }
+        if (j.kind == REPLACE && j.stage == KEEPING) {
+            // Cut short while the original was being copied: the item itself
+            // was never written. What was begun of the copy goes.
+            if (j.backup.isNotEmpty()) deleteBackup(context, j.backup)
+            clearJournal(context)
+            return Recovered.Undone(j.rowId)
         }
-        // A finished replace keeps its journal until its row is written.
-        if (outcome !is Recovered.Finished) clearJournal(context)
+        val uri = Uri.parse(j.uri)
+        val current = sha(context, uri)
+        if (current == null && itemGone(context, uri)) {
+            // Deleted since: there is nothing to write into. The original
+            // stays kept, for Android's 30 days.
+            clearJournal(context)
+            return Recovered.Stuck(j.rowId, j.backup, j.originalSha, "item_gone")
+        }
+        val outcome: Recovered? = when {
+            current == null -> null
+            j.kind == REPLACE && current == j.copySha ->
+                return Recovered.Finished(j.rowId, j.backup, j.copyBytes, j.copySha, j.originalSha)
+            current == j.originalSha -> {
+                deleteBackup(context, j.backup)
+                if (j.kind == PUT_BACK) Recovered.PutBackDone(j.rowId) else Recovered.Undone(j.rowId)
+            }
+            editedSince(context, uri, j) -> {
+                // Neither the copy nor the original, and changed long after
+                // the write began: someone else's edit, which is never
+                // written over. The original stays kept for Put back.
+                clearJournal(context)
+                return Recovered.Stuck(j.rowId, j.backup, j.originalSha, "edited_since")
+            }
+            restoreFrom(context, j.backup, uri) && sha(context, uri) == j.originalSha -> {
+                rescan(context, infoOf(context, uri)?.path)
+                deleteBackup(context, j.backup)
+                if (j.kind == PUT_BACK) Recovered.PutBackDone(j.rowId) else Recovered.Undone(j.rowId)
+            }
+            else -> null
+        }
+        if (outcome == null) {
+            val next = j.copy(tries = j.tries + 1)
+            if (next.tries >= GIVE_UP_TRIES && now - j.startedAt >= GIVE_UP_AFTER_MS) {
+                clearJournal(context)
+                return Recovered.Stuck(j.rowId, j.backup, j.originalSha, if (current == null) "unreadable" else "restore_failed")
+            }
+            writeJournal(context, next)
+            return Recovered.Later(j.rowId)
+        }
+        clearJournal(context)
         return outcome
     }
 
     /**
      * Puts the original kept at [backup] back into [uri], the item it was
-     * replaced in - the same id, name and date, so Ente takes the original
-     * back the way it took the copy - and removes the kept one.
+     * replaced in - the same id and name, so Ente takes the original back
+     * the way it took the copy - and removes the kept one.
+     *
+     * Only the original row [rowId] kept, and only into the file it was
+     * replaced in: the original must still be in the trash and, when
+     * [originalSha] is known, still hash to it; the item must still be
+     * called [name] and, when [copySha] is known, still hold exactly that
+     * copy - an edit made since, or another photo at an address a re-index
+     * handed on, is never written over. On record before a byte is written,
+     * so a put back the phone cuts short is finished by the next run
+     * ([recover]).
      */
-    fun putBack(context: Context, backup: String, uri: Uri): PutBack {
+    fun putBack(
+        context: Context,
+        backup: String,
+        uri: Uri,
+        originalSha: String?,
+        name: String,
+        copySha: String?,
+        rowId: Long
+    ): PutBack {
+        if (pending(context)) return PutBack.FAILED
+        when (backupState(context, backup)) {
+            Kept.KEPT -> Unit
+            Kept.GONE, Kept.LEFT_TRASH -> return PutBack.NOT_KEPT
+            Kept.UNKNOWN -> return PutBack.FAILED
+        }
         val keptSha = runCatching { openBackup(context, backup).use { Fingerprint.sha256(it) } }.getOrNull()
-            ?: return PutBack.NOT_KEPT
+            ?: return PutBack.FAILED
+        if (originalSha != null && keptSha != originalSha) return PutBack.NOT_KEPT
         val info = infoOf(context, uri) ?: return PutBack.FAILED
+        val currentSha = sha(context, uri) ?: return PutBack.FAILED
+        if (info.name != name || (copySha != null && currentSha != copySha)) return PutBack.CHANGED
         // The original is the larger file, so writing it back needs the
         // difference free - asked first, never found out halfway.
         val keptBytes = keptSize(context, backup)
         val free = info.path?.let { File(it).parentFile?.usableSpace } ?: Long.MAX_VALUE
         if (keptBytes > 0 && free < keptBytes - info.size + SPACE_MARGIN) return PutBack.NO_SPACE
+        val journal = Journal(
+            PUT_BACK, WRITING, rowId, uri.toString(), keptSha, keptBytes, currentSha, info.size,
+            backup = backup, startedAt = System.currentTimeMillis()
+        )
+        if (!writeJournal(context, journal)) return PutBack.FAILED
         // Written again once if the first read-back disagrees; the kept
         // original is removed only after the item reads back as it.
         val ok = (1..2).any { restoreFrom(context, backup, uri) && sha(context, uri) == keptSha }
-        if (!ok) return PutBack.FAILED
+        if (!ok) {
+            // Still on record: the next run writes it again.
+            return PutBack.FAILED
+        }
         rescan(context, info.path)
-        keepDateTaken(context, uri, info.dateTaken)
         deleteBackup(context, backup)
+        clearJournal(context)
         return PutBack.DONE
     }
 
@@ -173,44 +319,84 @@ object InPlace {
         /** The item holds the original again, and the kept one is gone. */
         DONE,
 
-        /** The original is no longer kept: the trash was emptied, or 30 days passed. */
+        /** The original is no longer kept: the trash was emptied, 30 days passed, or it was taken out. */
         NOT_KEPT,
 
         /** Too little free space for the larger original. Nothing was written. */
         NO_SPACE,
 
-        /** It could not be written back; the original is still kept. */
+        /** The file is no longer the one replaced - edited since, or another file. Nothing was written. */
+        CHANGED,
+
+        /** It could not be written back now; the original is still kept. */
         FAILED
     }
 
-    private fun keptSize(context: Context, backup: String): Long = if (backup.startsWith("file:")) {
-        File(Uri.parse(backup).path.orEmpty()).length()
-    } else {
-        runCatching {
-            context.contentResolver.query(Uri.parse(backup), arrayOf(MediaStore.MediaColumns.SIZE), includeTrashed(), null)
-                ?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L } ?: 0L
-        }.getOrDefault(0L)
+    /** Where an original kept after a replace stands now (see [backupState]). */
+    enum class Kept {
+        /** Still Ente Saver's: in the trash, or Android 10's hidden file. */
+        KEPT,
+
+        /** No longer there: the trash was emptied, or 30 days passed. */
+        GONE,
+
+        /** Taken back out of the trash - a photo of the person's own now, never touched again. */
+        LEFT_TRASH,
+
+        /** Android could not say: an unmounted card, a busy media store. Nothing is decided on it. */
+        UNKNOWN
     }
 
-    /** Whether the original kept at [backup] is still there. */
-    fun backupExists(context: Context, backup: String): Boolean = if (backup.startsWith("file:")) {
-        File(Uri.parse(backup).path.orEmpty()).exists()
-    } else {
-        runCatching {
-            context.contentResolver.query(Uri.parse(backup), arrayOf(MediaStore.MediaColumns._ID), includeTrashed(), null)
-                ?.use { it.moveToFirst() } ?: false
-        }.getOrDefault(false)
-    }
-
-    /** Removes the original kept at [backup] for good. */
-    fun deleteBackup(context: Context, backup: String): Boolean = runCatching {
+    /**
+     * Where the original kept at [backup] stands. Only an answer Android
+     * actually gave is GONE: a failed or unmounted read is UNKNOWN, so an
+     * original is never forgotten while it may still be there.
+     */
+    fun backupState(context: Context, backup: String): Kept {
+        if (backup.isEmpty()) return Kept.GONE
         if (backup.startsWith("file:")) {
-            File(Uri.parse(backup).path.orEmpty()).delete()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.contentResolver.delete(Uri.parse(backup), includeTrashed()) > 0
-        } else {
-            context.contentResolver.delete(Uri.parse(backup), null, null) > 0
+            val file = File(Uri.parse(backup).path.orEmpty())
+            if (file.exists()) return Kept.KEPT
+            val mounted = runCatching { Environment.getExternalStorageState(file) == Environment.MEDIA_MOUNTED }
+                .getOrDefault(false)
+            return if (mounted && file.parentFile?.exists() == true) Kept.GONE else Kept.UNKNOWN
         }
+        // Kept in the trash only from Android 11, which has one.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return Kept.UNKNOWN
+        return runCatching {
+            context.contentResolver.query(
+                Uri.parse(backup),
+                arrayOf(MediaStore.MediaColumns.IS_TRASHED, MediaStore.MediaColumns.IS_PENDING),
+                includeAll(),
+                null
+            )?.use { c ->
+                when {
+                    !c.moveToFirst() -> Kept.GONE
+                    c.getInt(1) == 1 -> Kept.UNKNOWN
+                    c.getInt(0) == 1 -> Kept.KEPT
+                    else -> Kept.LEFT_TRASH
+                }
+            } ?: Kept.UNKNOWN
+        }.getOrDefault(Kept.UNKNOWN)
+    }
+
+    /**
+     * Removes the original kept at [backup] for good - only while it is
+     * still Ente Saver's: in the trash, or still being made. One the person
+     * took back out of the trash is theirs, and is left alone.
+     */
+    fun deleteBackup(context: Context, backup: String): Boolean = runCatching {
+        if (backup.isEmpty()) return@runCatching false
+        if (backup.startsWith("file:")) return@runCatching File(Uri.parse(backup).path.orEmpty()).delete()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@runCatching false
+        val item = Uri.parse(backup)
+        val ours = context.contentResolver.query(
+            item,
+            arrayOf(MediaStore.MediaColumns.IS_TRASHED, MediaStore.MediaColumns.IS_PENDING),
+            includeAll(),
+            null
+        )?.use { c -> c.moveToFirst() && (c.getInt(0) == 1 || c.getInt(1) == 1) } ?: false
+        ours && context.contentResolver.delete(item, includeAll()) > 0
     }.getOrDefault(false)
 
     /** Android 10's hidden originals older than [KEEP_DAYS], removed as the trash would. */
@@ -256,37 +442,78 @@ object InPlace {
         }
     }.getOrNull()
 
+    /** True only when Android answered that the item is no longer there. */
+    private fun itemGone(context: Context, uri: Uri): Boolean = runCatching {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+            ?.use { !it.moveToFirst() } ?: false
+    }.getOrDefault(false)
+
+    /**
+     * The item's bytes as they are on disk, where it was taken included.
+     * Read without asking for the original, another app's photo comes back
+     * with its location blanked out; hashed, kept or put back from that, the
+     * original would lose it. Without media-location access this throws, and
+     * nothing is replaced (the run waits for that access).
+     */
+    private fun openOriginal(context: Context, uri: Uri): InputStream? =
+        context.contentResolver.openInputStream(MediaStore.setRequireOriginal(uri))
+
     private fun sha(context: Context, uri: Uri): String? = runCatching {
-        context.contentResolver.openInputStream(uri)?.use { Fingerprint.sha256(it) }
+        openOriginal(context, uri)?.use { Fingerprint.sha256(it) }
     }.getOrNull()
+
+    /** When the file at [uri] last changed, by its file; null when that cannot be read. */
+    private fun modifiedAt(context: Context, uri: Uri): Long? =
+        infoOf(context, uri)?.path?.let { path -> File(path).lastModified().takeIf { it > 0 } }
+
+    private fun editedSince(context: Context, uri: Uri, j: Journal): Boolean {
+        val modified = modifiedAt(context, uri) ?: return false
+        return modified > j.startedAt + EDIT_MARGIN_MS
+    }
 
     /**
      * The original copied somewhere it survives the overwrite, and read back:
      * a trashed item of Ente Saver's own (Android 11 and later), else a
-     * hidden file beside it. Null when no copy could be made and proved.
+     * hidden file beside it. [onMade] puts the backup on record the moment
+     * it exists, before a byte is in it; false there abandons it. Null when
+     * no copy could be made and proved.
      */
-    private fun keepOriginal(context: Context, uri: Uri, info: Info, isVideo: Boolean, originalSha: String): String? {
+    private fun keepOriginal(
+        context: Context,
+        uri: Uri,
+        info: Info,
+        isVideo: Boolean,
+        originalSha: String,
+        rowId: Long,
+        onMade: (String) -> Boolean
+    ): String? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // In its own album where Android allows it, so the trash puts it
             // back beside its replacement; DCIM, which takes both, otherwise.
             val places = listOfNotNull(info.relativePath, Environment.DIRECTORY_DCIM + "/").distinct()
             for (place in places) {
-                trashedCopy(context, uri, info, isVideo, place, originalSha)?.let { return it }
+                trashedCopy(context, uri, info, isVideo, place, originalSha, onMade)?.let { return it }
             }
             return null
         }
         val path = info.path ?: return null
-        val source = File(path)
-        val hidden = File(source.parentFile ?: return null, HIDDEN_PREFIX + info.name)
+        val folder = File(path).parentFile ?: return null
+        // A name no other file has - this row's, at this moment - made new,
+        // never opened over a file already there: an original still kept
+        // for another replace is never written over.
+        val hidden = File(folder, "$HIDDEN_PREFIX$rowId-${System.currentTimeMillis()}-${info.name}")
+        val made = Uri.fromFile(hidden).toString()
+        if (!onMade(made)) return null
         return runCatching {
-            context.contentResolver.openInputStream(uri)!!.use { input ->
+            if (!hidden.createNewFile()) return@runCatching null
+            openOriginal(context, uri)!!.use { input ->
                 FileOutputStream(hidden).use { output ->
                     input.copyTo(output, 64 * 1024)
                     output.fd.sync()
                 }
             }
             val ok = FileInputStream(hidden).use { Fingerprint.sha256(it) } == originalSha
-            if (ok) Uri.fromFile(hidden).toString() else null.also { hidden.delete() }
+            if (ok) made else null.also { hidden.delete() }
         }.getOrElse {
             hidden.delete()
             null
@@ -300,7 +527,8 @@ object InPlace {
         info: Info,
         isVideo: Boolean,
         place: String,
-        originalSha: String
+        originalSha: String,
+        onMade: (String) -> Boolean
     ): String? {
         val resolver = context.contentResolver
         val volume = runCatching { MediaStore.getVolumeName(uri) }.getOrDefault(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -315,8 +543,8 @@ object InPlace {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val made = runCatching { resolver.insert(collection, values) }.getOrNull() ?: return null
-        val ok = runCatching {
-            resolver.openInputStream(uri)!!.use { input ->
+        val ok = onMade(made.toString()) && runCatching {
+            openOriginal(context, uri)!!.use { input ->
                 resolver.openOutputStream(made, "w")!!.use { output -> input.copyTo(output, 64 * 1024) }
             }
             // Read back while it is still pending - and so still openable by
@@ -364,19 +592,8 @@ object InPlace {
                 includeAll()
             )
         }
-        return isKeptInTrash(context, item)
+        return backupState(context, item.toString()) == Kept.KEPT
     }
-
-    /** In the trash, and out of pending: where the original is kept. */
-    private fun isKeptInTrash(context: Context, item: Uri): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-        runCatching {
-            context.contentResolver.query(
-                item,
-                arrayOf(MediaStore.MediaColumns.IS_TRASHED, MediaStore.MediaColumns.IS_PENDING),
-                includeAll(),
-                null
-            )?.use { c -> c.moveToFirst() && c.getInt(0) == 1 && c.getInt(1) == 0 } ?: false
-        }.getOrDefault(false)
 
     /** [source]'s bytes into the item at [uri], the old ones dropped. */
     private fun writeInto(context: Context, uri: Uri, source: File): Boolean {
@@ -392,13 +609,23 @@ object InPlace {
         return true
     }
 
+    private fun keptSize(context: Context, backup: String): Long = if (backup.startsWith("file:")) {
+        File(Uri.parse(backup).path.orEmpty()).length()
+    } else {
+        runCatching {
+            context.contentResolver.query(Uri.parse(backup), arrayOf(MediaStore.MediaColumns.SIZE), includeTrashed(), null)
+                ?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L } ?: 0L
+        }.getOrDefault(0L)
+    }
+
     /**
-     * The bytes of the original kept at [backup]. A trashed item is read
-     * through MediaStore where Android allows it, and from its file - which
-     * All files access may read - where it does not.
+     * The bytes of the original kept at [backup]. Ente Saver's own item, so
+     * nothing of it is held back; read through MediaStore where Android
+     * allows it, and from its file - which All files access may read -
+     * where it does not.
      */
     @Suppress("DEPRECATION")
-    private fun openBackup(context: Context, backup: String): java.io.InputStream {
+    private fun openBackup(context: Context, backup: String): InputStream {
         if (backup.startsWith("file:")) return FileInputStream(File(Uri.parse(backup).path!!))
         val item = Uri.parse(backup)
         runCatching { context.contentResolver.openInputStream(item) }.getOrNull()?.let { return it }
@@ -423,7 +650,11 @@ object InPlace {
         true
     }.getOrDefault(false)
 
-    /** Android re-reads the file, so its size, dimensions and date are the new file's. */
+    /**
+     * Android re-reads the file, so its size, dimensions and dates are the
+     * new file's. The date it was taken comes from the file's own metadata,
+     * which every copy carries over; Android takes no other word for it.
+     */
     private fun rescan(context: Context, path: String?) {
         if (path == null) return
         val done = java.util.concurrent.CountDownLatch(1)
@@ -433,66 +664,86 @@ object InPlace {
         }
     }
 
-    /**
-     * The date the photo was taken stays the date it was taken. A copy
-     * carries it in its own metadata, which Android reads back; where the
-     * new file says otherwise, the old date is written back.
-     */
-    private fun keepDateTaken(context: Context, uri: Uri, dateTaken: Long) {
-        if (dateTaken <= 0) return
-        val now = runCatching {
-            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null)
-                ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
-        }.getOrNull()
-        if (now != null && now != dateTaken) {
-            runCatching {
-                context.contentResolver.update(
-                    uri, ContentValues().apply { put(MediaStore.MediaColumns.DATE_TAKEN, dateTaken) }, null, null
-                )
-            }
-        }
-    }
-
     // ---- the journal ---------------------------------------------------------
 
     private data class Journal(
+        /** [REPLACE] or [PUT_BACK]. */
+        val kind: String,
+        /** A replace is [KEEPING] while its original is copied, [WRITING] once it is kept; a put back is [WRITING]. */
+        val stage: String,
         val rowId: Long,
         val uri: String,
+        /** What the item is to hold if the step is undone - or, for a put back, finished. */
         val originalSha: String,
         val originalBytes: Long,
+        /** What the item holds once a replace is done - or, for a put back, before it began. */
         val copySha: String,
         val copyBytes: Long,
-        val backup: String
+        /** Where the original is kept; empty until it exists. */
+        val backup: String,
+        /** When the step began writing. */
+        val startedAt: Long,
+        /** Recovery runs that could not finish it ([recover]). */
+        val tries: Int = 0
     )
 
     private fun journalFile(context: Context) = File(context.noBackupFilesDir, JOURNAL)
 
-    /** Written whole or not at all: a temp file renamed into place. */
+    /**
+     * Written whole or not at all, and still there after a power cut: a temp
+     * file synced and renamed into place, then the folder synced, so the
+     * rename itself is on disk.
+     */
     private fun writeJournal(context: Context, j: Journal): Boolean = runCatching {
         val json = JSONObject()
+            .put("kind", j.kind).put("stage", j.stage)
             .put("rowId", j.rowId).put("uri", j.uri)
             .put("originalSha", j.originalSha).put("originalBytes", j.originalBytes)
             .put("copySha", j.copySha).put("copyBytes", j.copyBytes)
-            .put("backup", j.backup)
-        val tmp = File(context.noBackupFilesDir, "$JOURNAL.tmp")
+            .put("backup", j.backup).put("startedAt", j.startedAt).put("tries", j.tries)
+        val dir = context.noBackupFilesDir
+        val tmp = File(dir, "$JOURNAL.tmp")
         FileOutputStream(tmp).use {
             it.write(json.toString().toByteArray(Charsets.UTF_8))
             it.fd.sync()
         }
-        tmp.renameTo(journalFile(context))
+        val moved = tmp.renameTo(journalFile(context))
+        if (moved) syncFolder(dir)
+        moved
     }.getOrDefault(false)
 
-    private fun readJournal(context: Context): Journal? = runCatching {
-        val f = journalFile(context)
-        if (!f.exists()) return null
-        val o = JSONObject(f.readText(Charsets.UTF_8))
+    private fun syncFolder(dir: File) {
+        runCatching {
+            val fd = Os.open(dir.path, OsConstants.O_RDONLY, 0)
+            try {
+                Os.fsync(fd)
+            } finally {
+                Os.close(fd)
+            }
+        }
+    }
+
+    private fun parseJournal(text: String, writtenAt: Long): Journal? = runCatching {
+        val o = JSONObject(text)
         Journal(
-            o.getLong("rowId"), o.getString("uri"), o.getString("originalSha"), o.getLong("originalBytes"),
-            o.getString("copySha"), o.getLong("copyBytes"), o.getString("backup")
+            kind = o.optString("kind", REPLACE),
+            // A journal from before the stages were recorded was written
+            // only once the original was kept.
+            stage = o.optString("stage", WRITING),
+            rowId = o.getLong("rowId"),
+            uri = o.getString("uri"),
+            originalSha = o.getString("originalSha"),
+            originalBytes = o.getLong("originalBytes"),
+            copySha = o.getString("copySha"),
+            copyBytes = o.getLong("copyBytes"),
+            backup = o.getString("backup"),
+            startedAt = o.optLong("startedAt", writtenAt),
+            tries = o.optInt("tries", 0)
         )
     }.getOrNull()
 
     private fun clearJournal(context: Context) {
         journalFile(context).delete()
+        syncFolder(context.noBackupFilesDir)
     }
 }

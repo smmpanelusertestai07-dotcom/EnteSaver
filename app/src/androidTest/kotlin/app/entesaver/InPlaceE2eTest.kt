@@ -57,10 +57,13 @@ class InPlaceE2eTest {
             deleteRecursively()
             mkdirs()
         }
+        // Each test starts with nothing on record, whatever one before left.
+        InPlace.settled(context)
     }
 
     @After
     fun tearDown() {
+        InPlace.settled(context)
         backups.forEach { InPlace.deleteBackup(context, it) }
         MediaFixtures.cleanUp(context)
         tempDir.deleteRecursively()
@@ -118,7 +121,8 @@ class InPlaceE2eTest {
         assertTrue(OptimisedMark.isMarked(head))
 
         // The original waits - in the trash from Android 11 - byte for byte.
-        assertTrue("the original must be kept", InPlace.backupExists(context, outcome.backup))
+        assertEquals("the original must be kept", InPlace.Kept.KEPT, InPlace.backupState(context, outcome.backup))
+        assertEquals("with the hash it had", originalSha, outcome.originalSha256)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val trashed = context.contentResolver.query(
                 Uri.parse(outcome.backup),
@@ -130,10 +134,14 @@ class InPlaceE2eTest {
         }
 
         // And it goes back into the very same item.
-        assertEquals(InPlace.PutBack.DONE, InPlace.putBack(context, outcome.backup, uri))
+        assertEquals(
+            InPlace.PutBack.DONE,
+            InPlace.putBack(context, outcome.backup, uri, originalSha, name, outcome.sha256, rowId = 1L)
+        )
         assertEquals("the original is back", originalSha, sha(uri))
         assertEquals("in the same item", before.id, rowOf(uri).id)
-        assertFalse("and is no longer kept twice", InPlace.backupExists(context, outcome.backup))
+        assertEquals("and is no longer kept twice", InPlace.Kept.GONE, InPlace.backupState(context, outcome.backup))
+        assertFalse("with nothing left on record", InPlace.pending(context))
     }
 
     @Test
@@ -170,8 +178,106 @@ class InPlaceE2eTest {
         InPlace.settled(context)
         // The trash emptied, as Android does after 30 days.
         assertTrue(InPlace.deleteBackup(context, outcome.backup))
-        assertEquals(InPlace.PutBack.NOT_KEPT, InPlace.putBack(context, outcome.backup, uri))
+        assertEquals(
+            InPlace.PutBack.NOT_KEPT,
+            InPlace.putBack(context, outcome.backup, uri, outcome.originalSha256, name, outcome.sha256, rowId = 4L)
+        )
         assertEquals("the smaller version is untouched", outcome.sha256, sha(uri))
+    }
+
+    /**
+     * A replace whose row was never written - the phone stopped the app
+     * right after - is on record, so no other replace may start over it,
+     * and recovery finishes it with everything the row needs.
+     */
+    @Test
+    fun aReplaceLeftOnRecordHoldsTheNextOneBackAndRecoveryFinishesIt() {
+        val name = "in_place_unsettled.jpg"
+        val uri = MediaFixtures.insertPhoto(context, name, seed = 13)
+        val before = rowOf(uri)
+        val copy = optimised(uri, name)
+        val outcome = InPlace.replace(context, uri, isVideo = false, expectedBytes = before.size, copy = copy, rowId = 5L)
+        assertTrue("the replace must happen, got $outcome", outcome is InPlace.Result.Replaced)
+        outcome as InPlace.Result.Replaced
+        backups += outcome.backup
+        assertTrue("on record until its row is written", InPlace.pending(context))
+
+        val other = MediaFixtures.insertPhoto(context, "in_place_next.jpg", seed = 14)
+        val otherCopy = optimised(other, "in_place_next.jpg")
+        assertEquals(
+            "never a second replace over one not settled",
+            InPlace.Result.Failed(InPlace.JOURNAL_PENDING),
+            InPlace.replace(context, other, isVideo = false, expectedBytes = rowOf(other).size, copy = otherCopy, rowId = 6L)
+        )
+
+        val found = InPlace.recover(context)
+        assertEquals(
+            InPlace.Recovered.Finished(5L, outcome.backup, outcome.bytes, outcome.sha256, outcome.originalSha256),
+            found
+        )
+        assertTrue("kept on record until the row is written", InPlace.pending(context))
+        InPlace.settled(context)
+        assertFalse(InPlace.pending(context))
+        assertEquals(null, InPlace.recover(context))
+    }
+
+    /**
+     * An original goes back only into the file it was replaced in, as that
+     * file was left: one edited since is never written over.
+     */
+    @Test
+    fun anOriginalIsNeverPutBackOverAFileChangedSince() {
+        val name = "in_place_edited.jpg"
+        val uri = MediaFixtures.insertPhoto(context, name, seed = 15)
+        val before = rowOf(uri)
+        val copy = optimised(uri, name)
+        val outcome = InPlace.replace(context, uri, isVideo = false, expectedBytes = before.size, copy = copy, rowId = 7L)
+        assertTrue("the replace must happen, got $outcome", outcome is InPlace.Result.Replaced)
+        outcome as InPlace.Result.Replaced
+        backups += outcome.backup
+        InPlace.settled(context)
+
+        // Edited since: other bytes in the same item.
+        val edit = File(tempDir, "edit.jpg").apply { writeBytes(copy.readBytes().reversedArray()) }
+        context.contentResolver.openOutputStream(uri, "wt")!!.use { out -> edit.inputStream().use { it.copyTo(out) } }
+        val edited = sha(uri)
+
+        assertEquals(
+            InPlace.PutBack.CHANGED,
+            InPlace.putBack(context, outcome.backup, uri, outcome.originalSha256, name, outcome.sha256, rowId = 7L)
+        )
+        assertEquals("the edit stays", edited, sha(uri))
+        assertEquals("and the original is still kept", InPlace.Kept.KEPT, InPlace.backupState(context, outcome.backup))
+    }
+
+    /**
+     * An original the person took back out of the trash is theirs: never
+     * deleted, and no longer counted as kept.
+     */
+    @Test
+    fun anOriginalTakenOutOfTheTrashIsNeverDeleted() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val name = "in_place_restored.jpg"
+        val uri = MediaFixtures.insertPhoto(context, name, seed = 17)
+        val before = rowOf(uri)
+        val copy = optimised(uri, name)
+        val outcome = InPlace.replace(context, uri, isVideo = false, expectedBytes = before.size, copy = copy, rowId = 8L)
+        assertTrue("the replace must happen, got $outcome", outcome is InPlace.Result.Replaced)
+        outcome as InPlace.Result.Replaced
+        InPlace.settled(context)
+        val all = Bundle().apply {
+            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+        }
+        val kept = Uri.parse(outcome.backup)
+        try {
+            context.contentResolver.update(kept, ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 0) }, all)
+            assertEquals(InPlace.Kept.LEFT_TRASH, InPlace.backupState(context, outcome.backup))
+            assertFalse("never deleted", InPlace.deleteBackup(context, outcome.backup))
+            assertEquals(InPlace.Kept.LEFT_TRASH, InPlace.backupState(context, outcome.backup))
+        } finally {
+            runCatching { context.contentResolver.delete(kept, all) }
+        }
     }
 
     /**

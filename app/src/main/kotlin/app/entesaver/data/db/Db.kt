@@ -122,6 +122,10 @@ data class ItemRow(
      * SHA-256 of the ORIGINAL file, computed lazily and only where a size
      * collision makes it worth the read. This is what makes duplicate
      * detection a fact rather than a guess.
+     *
+     * For a file replaced on this phone it is written by the replace itself:
+     * the hash of the original kept at [backupUri], which Put back and the
+     * kept original's checks compare against.
      */
     val originalSha256: String? = null,
     /**
@@ -785,6 +789,9 @@ interface ItemDao {
      */
     @Query(
         "SELECT * FROM items WHERE originalSha256 IS NULL AND originalMissing = 0 " +
+            // Freed, the file at the address is a light copy or the version
+            // written in place - never the original whose hash this is.
+            "AND state != 'FREED' AND state != 'FREED_KEPT' " +
             "AND sizeBytes IN (" +
             "SELECT sizeBytes FROM items WHERE originalMissing = 0 " +
             "GROUP BY sizeBytes HAVING COUNT(*) > 1) " +
@@ -864,6 +871,15 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE state = 'FREED_KEPT' AND backupUri IS NOT NULL AND backupUri != ''")
     suspend fun keptOriginals(): List<ItemRow>
 
+    /**
+     * Every row an original is kept for, whatever its state - a replace the
+     * phone cut short and recovery gave up on included. What the trash's 30
+     * days are checked against; never what "Delete now" deletes, since the
+     * file at such a row's address may be the one that is not whole.
+     */
+    @Query("SELECT * FROM items WHERE backupUri IS NOT NULL AND backupUri != ''")
+    suspend fun allKeptOriginals(): List<ItemRow>
+
     /** An original no longer kept: deleted for good, or gone with the trash's 30 days. */
     @Query("UPDATE items SET backupUri = '', updatedAt = :now WHERE id = :id")
     suspend fun forgetBackup(id: Long, now: Long)
@@ -914,7 +930,11 @@ interface ItemDao {
      * twin - not a problem, and counting it as one made a tidy gallery look
      * broken.
      */
-    @Query("SELECT COUNT(*) FROM items WHERE state = 'SKIP' AND duplicateOf IS NULL")
+    @Query(
+        "SELECT COUNT(*) FROM items WHERE state = 'SKIP' AND duplicateOf IS NULL " +
+            // An original put back is the person's own choice, not a problem.
+            "AND (skipReason IS NULL OR skipReason != 'put_back')"
+    )
     fun problemSkippedCountFlow(): Flow<Int>
 
     /** Files whose identical twin was optimised instead. */

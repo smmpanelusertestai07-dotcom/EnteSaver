@@ -106,7 +106,11 @@ class SnapshotStore(
                 neverOptimise = row.neverOptimise,
                 outputRelPath = row.outputRelPath,
                 duplicateOf = row.duplicateOf,
-                leftFolderAt = row.leftFolderAt
+                leftFolderAt = row.leftFolderAt,
+                backupUri = row.backupUri,
+                // The hash a kept original is checked against; only rows
+                // replaced on this phone carry one in the file.
+                originalSha256 = row.originalSha256.takeIf { row.backupUri != null }
             )
         }
         val batches = db.batches().all().map { b ->
@@ -546,6 +550,10 @@ class SnapshotStore(
                     confirmedAt = mapped.confirmedAt,
                     leftFolderAt = ImportMerge.leftAtOnImport(raw, now),
                     keptUri = mapped.keptUri,
+                    // Replaced on this phone: never a light copy to remove,
+                    // and Put back stays possible while the original is kept.
+                    backupUri = raw.backupUri,
+                    originalSha256 = raw.originalSha256,
                     neverOptimise = mapped.neverOptimise,
                     duplicateOf = mapped.duplicateOf,
                     fromImport = true,

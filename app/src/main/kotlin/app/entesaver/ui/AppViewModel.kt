@@ -1945,9 +1945,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The trial itself; the caller holds [Locks.stage]. */
     private suspend fun runTrial() {
-        val o = repo.current()
-        MediaScanner(ctx, db).scan(stageHeld = true)
         val stager = Stager(ctx, db)
+        // A replace the phone cut short is settled before the gallery is
+        // read: half written, its file would read as a new photo. One that
+        // cannot be settled yet leaves the gallery alone.
+        stager.recoverLocked()
+        if (InPlace.pending(ctx)) return
+        // Copies only, in either mode: the trial shows what a file would
+        // come to and touches no original, as its card says. With Replace
+        // on this phone, the first real run replaces from the original.
+        val o = repo.current().copy(saveMode = SaveMode.COPIES)
+        MediaScanner(ctx, db).scan(stageHeld = true)
         // The card promises photos "from the albums you chose". The scan
         // above just inventoried the whole phone, so the pick must not read
         // from beyond the ticked albums.

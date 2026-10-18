@@ -245,6 +245,26 @@ class CiRuntimeTest {
         assertTrue("and removed after signing", build.contains("trap 'rm -f \"\$KS\""))
     }
 
+    /**
+     * The step that holds the key runs on a runner the build never touched.
+     * Gradle, its plugins and every dependency run as the same user as any
+     * later step of their job, and could leave a changed script, tool or
+     * environment line behind for the step that has the key in reach.
+     */
+    @Test
+    fun `the release key is opened on a runner that never ran the build`() {
+        val build = File(workflows, "build.yml").readText()
+        val buildJob = build.substringAfter("\n  build:\n").substringBefore("\n  sign:\n")
+        val signJob = build.substringAfter("\n  sign:\n").substringBefore("\n  emulator:\n")
+        assertTrue("there is a sign job after the build", signJob.contains("needs: build"))
+        assertTrue("the sign job signs", signJob.contains("- name: Sign APK"))
+        assertFalse("the build job signs nothing", buildJob.contains("- name: Sign APK"))
+        assertFalse("the build job opens no key", buildJob.contains("keytool"))
+        assertFalse("the sign job runs no Gradle", signJob.contains("gradlew") || signJob.contains("setup-gradle"))
+        assertTrue("the emulator legs test the signed APK", build.contains("needs: [build, sign]"))
+        assertTrue("and the release publishes it", build.contains("needs: [build, sign, emulator]"))
+    }
+
     @Test
     fun `a run's artifacts expire`() {
         for (file in workflows.listFiles { f -> f.extension == "yml" || f.extension == "yaml" }.orEmpty()) {

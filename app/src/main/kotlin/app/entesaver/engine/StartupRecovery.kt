@@ -10,6 +10,7 @@ import app.entesaver.core.logic.ScanSources
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.MediaScanner
+import app.entesaver.media.Stager
 import app.entesaver.util.Locks
 import app.entesaver.util.Permissions
 import java.io.File
@@ -32,6 +33,11 @@ class StartupRecovery(private val context: Context) {
     )
 
     suspend fun run(): Result {
+        // A replace or put back the phone cut short is finished or undone
+        // first, at every start: until it is, a half-written file sits in
+        // the gallery, and in Ente's upload queue. Background runs may wait
+        // days for their conditions; opening the app does not.
+        runCatching { Stager(context, AppDb.get(context)).recoverInPlace() }
         // Read the old visible snapshot before deleting it: on an upgrade it
         // may be the only state left.
         val restored = restoreIfEmpty()

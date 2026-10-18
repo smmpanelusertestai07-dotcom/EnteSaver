@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.room.withTransaction
 import app.entesaver.R
 import app.entesaver.core.logic.CloudCapability
 import app.entesaver.core.logic.Defaults
@@ -20,6 +21,7 @@ import app.entesaver.core.logic.OutputLayout
 import app.entesaver.core.logic.OutputRoots
 import app.entesaver.core.logic.Pacing
 import app.entesaver.core.logic.ReclaimRules
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.ScanSources
 import app.entesaver.core.logic.StallAlert
 import app.entesaver.core.logic.StateMachine
@@ -33,6 +35,7 @@ import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.OutputInventory
 import app.entesaver.media.Releaser
+import app.entesaver.media.Stager
 import app.entesaver.util.Formats
 import app.entesaver.util.Locks
 import app.entesaver.util.Notifications
@@ -181,10 +184,18 @@ class MaintainEngine(private val context: Context) {
         var pauseDeletions = false
         step { pauseDeletions = cloudHealth(o, now, entries) }
         if (!o.pauseAll) {
-            step { pacedRelease(o, now, summary) }
-            // Again straight after releasing: a row that failed to finalise
-            // in this very pass should not wait an hour to be noticed.
-            step { repairStalePending(now) }
+            if (o.saveMode == SaveMode.IN_PLACE) {
+                // Replace on this phone publishes nothing - no folder of
+                // Ente Saver's own, no anchor file. A copy staged before it
+                // was on, or by the trial, is dropped, and its original is
+                // replaced in place instead.
+                step { unstageForInPlace(now) }
+            } else {
+                step { pacedRelease(o, now, summary) }
+                // Again straight after releasing: a row that failed to finalise
+                // in this very pass should not wait an hour to be noticed.
+                step { repairStalePending(now) }
+            }
         }
         if (!pauseDeletions) {
             step { lazyDelete(o, now, summary) }
@@ -1044,6 +1055,25 @@ class MaintainEngine(private val context: Context) {
                     summary.healed++
                 }
             }
+        }
+    }
+
+    /** Staged copies dropped and their files put back in the queue (see [runLocked]). */
+    private suspend fun unstageForInPlace(now: Long) {
+        for (row in db.items().staged()) {
+            // Only a row still staged with this very file, checked and
+            // written in one transaction: this pass takes no other lock, and
+            // the trial or its discard may be writing the same rows.
+            val dropped = db.withTransaction {
+                val cur = db.items().byId(row.id)
+                if (cur != null && cur.state == ItemState.STAGED.name && cur.stagePath == row.stagePath) {
+                    db.items().update(Stager.unstaged(cur, now))
+                    true
+                } else {
+                    false
+                }
+            }
+            if (dropped) row.stagePath?.let { runCatching { File(it).delete() } }
         }
     }
 

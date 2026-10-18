@@ -19,10 +19,11 @@ class HomeActionTest {
         waitReason: RunDecider.Wait = RunDecider.Wait.NONE,
         earlierApp: Boolean = false,
         needsFileAccess: Boolean = false,
-        modifiedBuild: Boolean = false
+        modifiedBuild: Boolean = false,
+        needsMediaLocation: Boolean = false
     ) = HomeAction.decide(
         queued, running, paused, thermalThrottled, batteryPct, plugged,
-        freeBytes, minFreeBytes, waitReason, earlierApp, needsFileAccess, modifiedBuild
+        freeBytes, minFreeBytes, waitReason, earlierApp, needsFileAccess, modifiedBuild, needsMediaLocation
     )
 
     @Test
@@ -35,6 +36,16 @@ class HomeActionTest {
         assertFalse(modified.enabled)
         assertEquals("the reason no access can fix comes first", HomeAction.Blocker.MODIFIED_BUILD, modified.blocker)
         assertTrue("granted, it starts", decide(needsFileAccess = false).enabled)
+        // Without media-location access every photo comes with its place
+        // blanked out, so nothing is replaced until it is allowed.
+        val location = decide(needsMediaLocation = true)
+        assertFalse(location.enabled)
+        assertEquals(HomeAction.Blocker.MEDIA_LOCATION, location.blocker)
+        assertEquals(
+            "file access is asked for first",
+            HomeAction.Blocker.FILE_ACCESS,
+            decide(needsFileAccess = true, needsMediaLocation = true).blocker
+        )
     }
 
     @Test

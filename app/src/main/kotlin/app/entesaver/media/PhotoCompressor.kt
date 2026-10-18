@@ -558,7 +558,8 @@ object PhotoCompressor {
             val marked = when (format) {
                 PhotoFormat.JPEG -> OptimisedMark.markJpeg(outFile.readBytes())
                 PhotoFormat.PNG -> OptimisedMark.markPng(outFile.readBytes())
-                else -> null
+                PhotoFormat.HEIC -> OptimisedMark.markHeif(outFile.readBytes())
+                PhotoFormat.WEBP -> OptimisedMark.markWebp(outFile.readBytes())
             }
             if (marked != null) outFile.writeBytes(marked)
         } catch (e: Exception) {

@@ -62,6 +62,7 @@
     <string name="skip_out_of_time">Too long to make smaller in the time Android gives</string>
     <string name="skip_user_excluded_one">You chose to skip this file</string>
     <string name="skip_put_back">You put the original back, so it is not optimised again</string>
+    <string name="skip_in_place_failed">Could not be replaced on this phone</string>
     <string name="skip_other">Skipped to be safe</string>
     <string name="skip_user_excluded">You chose to skip these</string>
     <string name="skip_duplicate">Already handled once</string>
@@ -208,6 +209,7 @@
     <string name="put_back_done">The original is back.</string>
     <string name="put_back_not_kept">The original is no longer kept: the phone\u2019s trash was emptied, or its 30 days passed.</string>
     <string name="put_back_no_space">Not enough free space for the original. Free some space and try again.</string>
+    <string name="put_back_changed">This file was changed after it was replaced, so the original was not written over it. The original is still kept in the phone\u2019s trash.</string>
     <string name="put_back_failed">The original could not be put back. It is still kept, so you can try again.</string>
     <string name="detail_optimise_first">Optimise this first</string>
     <string name="detail_try_again">Try again</string>
@@ -692,6 +694,7 @@
     <string name="wait_earlier_app">Waiting: the earlier Ente Saver is still on this phone \u2014 remove it first, as the card above says</string>
     <string name="wait_file_access">Waiting for All files access, which Replace on this phone needs</string>
     <string name="wait_daily_limit">Today\u2019s limit is reached. The rest is replaced tomorrow, so Ente uploads no more than that a day</string>
+    <string name="wait_media_location">Waiting for Location inside photos, which Replace on this phone needs so a file keeps where it was taken</string>
     <string name="wait_modified_build">Not replacing files: this is not an official build of Ente Saver</string>
     <string name="opt_daily_cap">Daily limit for new copies</string>
     <string name="opt_daily_cap_hint">How much Ente Saver adds to the upload folder each day.</string>
@@ -834,7 +837,7 @@
     <string name="perm_name_read_storage">Read storage (Android 12 and earlier)</string>
     <string name="perm_purpose_read_storage">The same gallery access as Photos and Videos, on the Android versions that had one permission for both.</string>
     <string name="perm_name_media_location">Location inside photos</string>
-    <string name="perm_purpose_media_location">So a copy keeps the place a photo was taken. Nothing reads where you are now; refused, copies simply lose their place.</string>
+    <string name="perm_purpose_media_location">So a copy keeps the place a photo was taken. Nothing reads where you are now. Refused, copies lose their place, and Replace on this phone waits for it, since a replaced file would lose it for good.</string>
     <string name="perm_name_notifications">Notifications</string>
     <string name="perm_purpose_notifications">A quiet note while files are being optimised, and a rare alert when something needs you \u2014 once a day at most, less often each time it is left, and one tap mutes them for a week.</string>
     <string name="perm_name_foreground">Run while the screen is off</string>
@@ -1187,6 +1190,7 @@
     <string name="optimise_blocked_battery">Waiting for the battery to reach %1$d%%, or a charger.</string>
     <string name="optimise_blocked_space">Not enough free space on the phone right now.</string>
     <string name="optimise_blocked_earlier">Remove the earlier Ente Saver first, as the card above says.</string>
+    <string name="optimise_blocked_media_location">Replace on this phone needs Location inside photos first. A replaced file then keeps where it was taken: Settings \u203a Permissions and battery.</string>
     <string name="optimise_blocked_file_access">Replace on this phone needs All files access first: Settings \u203a Saving space \u203a Allow All files access.</string>
     <string name="optimise_blocked_modified">This is not an official build, so it does not replace files on this phone.</string>
     <string name="optimise_working">Working\u2026</string>
@@ -1333,7 +1337,7 @@
     <string name="faq_q15">Where do the “Recommended for this phone” figures come from?</string>
     <string name="faq_a15">From this phone, measured on the spot: how much storage it has in total, and how much of it is free right now. A 64 GB phone and a 512 GB phone should not hold back the same headroom. So Ente Saver keeps about a twentieth of the phone free (at least 1.5 GB), lowers its daily limit on a small or nearly full phone, and uses at most a tenth of the free space for its own work, up to 5 GB. Nothing is measured off the phone and no usage is sent anywhere. It is only ever an offer: the figure sits under the setting with a Use recommended button, your own value is never overwritten, and the line turns into a warning only when what is stored has drifted more than three times away from it.</string>
     <string name="faq_q16">Can the smaller version stay in the same album instead of a new folder?</string>
-    <string name="faq_a16">Yes \u2014 that is Replace on this phone, the default, in Settings \u203a Saving space. Each smaller version is written into the original\u2019s own file: the same name, album and date, and the same format, so your gallery timeline does not move and no extra folder appears. If Ente Photos backs up that album, it uploads the smaller version in place of the one it holds, and no duplicate is made. Android asks once for All files access, which is what lets Ente Saver write into photos other apps made. The original waits in the phone\u2019s trash for 30 days, and Files can put it back. Ente Saver recognises a file it made smaller, so it is never optimised a second time.</string>
+    <string name="faq_a16">Yes \u2014 that is Replace on this phone, the default, in Settings \u203a Saving space. Each smaller version is written into the original\u2019s own file: the same name, album and date, and the same format, so your gallery timeline does not move and no extra folder appears. If Ente Photos backs up that album, it uploads the smaller version in place of the one it holds, and no duplicate is made. Android asks once for All files access, which is what lets Ente Saver write into photos other apps made, and it needs Location inside photos, so every file keeps where it was taken. A photo or video changed in the last hour waits for a later run, so a camera still finishing it, or Ente still uploading it, never meets a file being rewritten. The original waits in the phone\u2019s trash for 30 days, and Files can put it back. Ente Saver recognises a file it made smaller, so it is never optimised a second time.</string>
     <string name="faq_q17">Why only Ente Photos, and what if it isn\'t installed?</string>
     <string name="faq_a17">Ente Photos is end-to-end encrypted and keeps every file exactly as it was sent, so the space Ente Saver saved is the space you keep. When it frees up device space it removes its own uploads from the folder, which is how Ente Saver proves a copy arrived. It checks duplicates by content, so a file sent twice is stored once. And if Ente downloads a copy back to your phone \u2014 into Download or any album \u2014 Ente Saver recognises its own copies by their names and never optimises or re-sends them. You also get one recovery key and one timeline, with Ente\'s on-device face recognition and magic search. If Ente Photos is not installed yet, copies are still made and wait in the folder, using the space you allowed. Nothing is ever freed until Ente has them. Install it from the Play Store, F-Droid or ente.com, turn on the Ente Saver folder in it, and the waiting copies go up on its next backup.</string>
     <string name="faq_q18">Why does the Files list look empty when Free up space still finds things?</string>
@@ -1465,5 +1469,5 @@
     <!-- About: requirements and technical facts, stated plainly -->
     <string name="about_requires_min">Needs Android 10 or newer. Built and tested against Android 16.</string>
     <string name="about_permissions_title">What it may access</string>
-    <string name="about_permissions_body">Your photos and videos, to make them smaller, including the location stored inside them so it is kept. With Replace on this phone: All files access (storage write access on Android 10), to write each smaller version into the original\u2019s own file. With Usage access on: how many bytes Ente Photos sent, which is how an upload gets confirmed \u2014 never what it sent. Notifications, and leave to keep working while the screen is off. Nothing leaves the phone: the app holds no internet permission at all.</string>
+    <string name="about_permissions_body">Your photos and videos, to make them smaller, including the location stored inside them so it is kept. With Replace on this phone: All files access (storage write access on Android 10), to write each smaller version into the original\u2019s own file, and the location inside photos, which a replaced file must keep. With Usage access on: how many bytes Ente Photos sent, which is how an upload gets confirmed \u2014 never what it sent. Notifications, and leave to keep working while the screen is off. Nothing leaves the phone: the app holds no internet permission at all.</string>
 </resources>

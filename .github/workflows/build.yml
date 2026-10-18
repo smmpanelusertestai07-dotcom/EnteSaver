@@ -49,15 +49,18 @@ jobs:
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       # The certificate first: its SHA-256 is embedded into the APK (tamper
-      # evidence), so it must be known before the build. The release key
-      # itself is not opened here: the build runs Gradle, its plugins and
-      # every dependency, and none of that needs the key or its passwords.
+      # evidence), so it must be known before the build. No key is opened
+      # in this job at all: it runs Gradle, its plugins and every
+      # dependency, and none of that needs the key or its passwords. The
+      # sign job, on a runner of its own, signs.
       #
-      # - release: the four signing secrets are set, and the APK will carry
-      #   RELEASE_CERT_SHA256. The sign step checks the key really is that
+      # - release: the signing secrets are set, and the APK will carry
+      #   RELEASE_CERT_SHA256. The sign job checks the key really is that
       #   one before it signs anything.
-      # - throwaway: no secrets (a fork). A key that lives for this run only,
-      #   in the runner's temporary folder; the release job refuses it.
+      # - throwaway: no secrets (a fork). The sign job signs with a key that
+      #   lives for that job only, and the release job refuses the result.
+      #   The APK carries no certificate to check itself against, as a
+      #   developer build does not.
       - name: Choose the signing certificate
         id: keystore
         env:
@@ -65,34 +68,16 @@ jobs:
         run: |
           set -eu
           if [ "$HAS_RELEASE_KEY" = "true" ]; then
-            CERT_SHA="$RELEASE_CERT_SHA256"
-            MODE=release
+            echo "CERT_SHA256=$RELEASE_CERT_SHA256" >> "$GITHUB_ENV"
+            echo "mode=release" >> "$GITHUB_OUTPUT"
             echo "generated=false" >> "$GITHUB_OUTPUT"
-            echo "The release key is in repository secrets; it is opened only to sign."
+            echo "The release key is in repository secrets; only the sign job opens it."
           else
-            umask 077
-            KS_PASS=$(openssl rand -hex 16)
-            echo "::add-mask::$KS_PASS"
-            printf '%s' "$KS_PASS" > "$RUNNER_TEMP/throwaway.pass"
-            keytool -genkeypair -keystore "$RUNNER_TEMP/throwaway.p12" -storetype PKCS12 -alias entesaver \
-              -keyalg RSA -keysize 4096 -validity 9125 \
-              -storepass:file "$RUNNER_TEMP/throwaway.pass" -keypass:file "$RUNNER_TEMP/throwaway.pass" \
-              -dname "CN=Ente Saver Release, OU=Ente Saver, O=Ente Saver"
-            CERT_SHA=$(keytool -exportcert -keystore "$RUNNER_TEMP/throwaway.p12" -alias entesaver \
-                -storepass:file "$RUNNER_TEMP/throwaway.pass" -rfc \
-              | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
-            MODE=throwaway
+            echo "CERT_SHA256=" >> "$GITHUB_ENV"
+            echo "mode=throwaway" >> "$GITHUB_OUTPUT"
             echo "generated=true" >> "$GITHUB_OUTPUT"
-            echo "No signing secrets found - minted a throwaway key for THIS RUN only."
-            echo "It is not written anywhere but this runner, and the release job will refuse to publish with it."
+            echo "No signing secrets found - the sign job will use a key that exists for that job only."
           fi
-          {
-            echo "SIGN_MODE=$MODE"
-            echo "CERT_SHA256=$CERT_SHA"
-          } >> "$GITHUB_ENV"
-          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "Signing mode: $MODE"
-          echo "Signing cert SHA-256: $CERT_SHA"
 
       - name: Lint, unit tests, release build
         run: >
@@ -104,7 +89,86 @@ jobs:
           set -eu
           VERSION=$(./gradlew -q printVersionName --no-daemon | tail -1)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "APK_NAME=EnteSaver-v$VERSION-release.apk" >> "$GITHUB_ENV"
+
+      # Aligned here, where the build tools are already in use; signing
+      # rewrites the archive's signature block, not its entries.
+      - name: Align the unsigned APK
+        run: |
+          set -eu
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
+          [ -f "$UNSIGNED" ] || UNSIGNED=app/build/outputs/apk/release/app-release.apk
+          # -P 16, not -p: -p is the old 4 KiB rule, and Android 16 runs an
+          # app whose .so files are not 16 KiB aligned in a compatibility
+          # mode with a launch-time system dialog rather than refusing to
+          # install it - so a wrong answer here ships and looks fine in CI.
+          # -P <kb> is a flag; <align> stays a positional argument, so the 4
+          # is still required. Writing "-P 16 in out" prints the usage text
+          # and produces no file - caught by signing a real APK by hand
+          # rather than by reading the flag name and assuming.
+          "$BT/zipalign" -f -P 16 4 "$UNSIGNED" EnteSaver-unsigned.apk
+
+      - name: Publish version for later jobs
+        id: meta
+        run: echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the unsigned APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: EnteSaver-unsigned.apk
+          path: EnteSaver-unsigned.apk
+          if-no-files-found: error
+          # Only the sign job of this run reads it.
+          retention-days: 3
+
+  sign:
+    # On a runner of its own, which never runs the build. Gradle, its
+    # plugins and every dependency ran on the build's runner as the same
+    # user, where they could have left something behind for the step that
+    # holds the key - a changed script, a changed tool, a line in
+    # GITHUB_ENV. Here nothing runs before the signing but a fresh checkout
+    # and the download of the unsigned APK.
+    name: sign
+    needs: build
+    runs-on: ubuntu-26.04  # the build's image (see there)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config.
+          persist-credentials: false
+
+      # keytool and apksigner run on Java; GitHub's own action, no Gradle.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download the unsigned APK
+        uses: actions/download-artifact@v7
+        with:
+          name: EnteSaver-unsigned.apk
+
+      # What the build reported, checked before it names any file: a version
+      # is digits and dots, and the mode is one of the two.
+      - name: Name the APK
+        env:
+          BUILT_VERSION: ${{ needs.build.outputs.version }}
+          BUILT_MODE: ${{ needs.build.outputs.sign_mode }}
+        run: |
+          set -eu
+          if ! printf '%s' "$BUILT_VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}$'; then
+            echo "::error::The build reported version '$BUILT_VERSION'"
+            exit 1
+          fi
+          case "$BUILT_MODE" in release|throwaway) ;; *) echo "::error::Unknown signing mode '$BUILT_MODE'"; exit 1 ;; esac
+          VERSION="$BUILT_VERSION"
+          {
+            echo "VERSION=$VERSION"
+            echo "SIGN_MODE=$BUILT_MODE"
+            echo "APK_NAME=EnteSaver-v$VERSION-release.apk"
+          } >> "$GITHUB_ENV"
 
       # The key and its passwords exist in this step alone: decoded into the
       # runner's temporary folder, checked, used and removed again.
@@ -118,8 +182,12 @@ jobs:
           set -eu
           umask 077
           KS="$RUNNER_TEMP/release.p12"
-          trap 'rm -f "$KS" "$RUNNER_TEMP/throwaway.p12" "$RUNNER_TEMP/throwaway.pass"' EXIT
+          trap 'rm -f "$KS"' EXIT
           if [ "$SIGN_MODE" = release ]; then
+            if [ -z "$KEYSTORE_B64" ]; then
+              echo "::error::The build embedded the release certificate, but no signing key reached this job"
+              exit 1
+            fi
             printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
             export KEYSTORE_PASSWORD="$SECRET_KEYSTORE_PASSWORD"
             export KEY_PASSWORD="${SECRET_KEY_PASSWORD:-$SECRET_KEYSTORE_PASSWORD}"
@@ -131,26 +199,24 @@ jobs:
               exit 1
             fi
           else
-            cp "$RUNNER_TEMP/throwaway.p12" "$KS"
-            KEYSTORE_PASSWORD=$(cat "$RUNNER_TEMP/throwaway.pass")
+            # A key for this job only: it is never written anywhere but
+            # this runner's temporary folder, and goes with it.
+            KEYSTORE_PASSWORD=$(openssl rand -hex 16)
+            echo "::add-mask::$KEYSTORE_PASSWORD"
             export KEYSTORE_PASSWORD
             export KEY_PASSWORD="$KEYSTORE_PASSWORD"
             ALIAS=entesaver
+            keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias "$ALIAS" \
+              -keyalg RSA -keysize 4096 -validity 9125 \
+              -storepass:env KEYSTORE_PASSWORD -keypass:env KEY_PASSWORD \
+              -dname "CN=Ente Saver Release, OU=Ente Saver, O=Ente Saver"
+            CERT_SHA=$(keytool -exportcert -keystore "$KS" -alias "$ALIAS" -storepass:env KEYSTORE_PASSWORD -rfc \
+              | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
           fi
+          echo "CERT_SHA256=$CERT_SHA" >> "$GITHUB_ENV"
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
-          [ -f "$UNSIGNED" ] || UNSIGNED=app/build/outputs/apk/release/app-release.apk
-          # -P 16, not -p: -p is the old 4 KiB rule, and Android 16 runs an
-          # app whose .so files are not 16 KiB aligned in a compatibility
-          # mode with a launch-time system dialog rather than refusing to
-          # install it - so a wrong answer here ships and looks fine in CI.
-          # -P <kb> is a flag; <align> stays a positional argument, so the 4
-          # is still required. Writing "-P 16 in out" prints the usage text
-          # and produces no file - caught by signing a real APK by hand
-          # rather than by reading the flag name and assuming.
-          "$BT/zipalign" -f -P 16 4 "$UNSIGNED" EnteSaver-aligned.apk
           # The one signing recipe (sign-apk.sh).
-          SIGN_KS="$KS" SIGN_KS_ALIAS="$ALIAS" bash .github/scripts/sign-apk.sh EnteSaver-aligned.apk "$APK_NAME"
+          SIGN_KS="$KS" SIGN_KS_ALIAS="$ALIAS" bash .github/scripts/sign-apk.sh EnteSaver-unsigned.apk "$APK_NAME"
           "$BT/apksigner" verify --print-certs "$APK_NAME"
           # The emulator job installs a fixed name, so keep one alongside it.
           cp "$APK_NAME" EnteSaver-release.apk
@@ -159,7 +225,7 @@ jobs:
       # it would not install over the Ente Saver already on phones. (A
       # throwaway-key build never publishes; the release job refuses it.)
       - name: The APK is signed by the release key
-        if: steps.keystore.outputs.mode != 'throwaway'
+        if: needs.build.outputs.sign_mode != 'throwaway'
         run: bash .github/scripts/check-signer.sh "$APK_NAME" "$RELEASE_CERT_SHA256"
 
       - name: Alignment gate (16 KiB pages, Android 16)
@@ -199,7 +265,7 @@ jobs:
         run: |
           set -eu
           KEYSTORE_NOTE=""
-          if [ "${{ steps.keystore.outputs.generated }}" = "true" ]; then
+          if [ "${{ needs.build.outputs.throwaway_key }}" = "true" ]; then
             KEYSTORE_NOTE="This build was signed with a throwaway key that existed only inside its CI run, because no signing secrets are configured. It therefore CANNOT be installed over any other Ente Saver build. The release step refuses to publish it until the four signing secrets are set."
           fi
           cat > RELEASE_NOTES.md <<EOF
@@ -246,7 +312,7 @@ jobs:
             echo "- APK SHA-256: \`${APK_SHA256}\`"
             echo "- Signing cert SHA-256: \`${CERT_SHA256}\`"
             echo "- Signing: ${SIGN_MODE}"
-            if [ "${{ steps.keystore.outputs.generated }}" = "true" ]; then
+            if [ "${{ needs.build.outputs.throwaway_key }}" = "true" ]; then
               echo ""
               echo "### No signing key is configured, so this build cannot be published"
               echo ""
@@ -258,16 +324,13 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish version for later jobs
-        id: meta
-        run: echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
           name: EnteSaver-release.apk
           path: |
-            EnteSaver-*.apk
+            ${{ env.APK_NAME }}
+            EnteSaver-release.apk
             RELEASE_NOTES.md
           if-no-files-found: error
           # The release is the lasting copy; a run's own copy need not outlive a fortnight.
@@ -281,7 +344,7 @@ jobs:
     # notification permission. A suite that only ever runs on one level says
     # nothing about the phones the other rows describe.
     name: end-to-end on Android ${{ matrix.api }}
-    needs: build
+    needs: [build, sign]
     runs-on: ubuntu-26.04  # the build's image (see there)
     timeout-minutes: 75
     # Android 17 (API 37) runs ahead of the target, to see early what the
@@ -414,7 +477,7 @@ jobs:
 
   release:
     name: publish release
-    needs: [build, emulator]
+    needs: [build, sign, emulator]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04  # the build's image (see there)
     # The one job that writes: it creates the tag and the release.

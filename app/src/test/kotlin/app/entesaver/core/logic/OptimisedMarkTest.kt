@@ -65,6 +65,54 @@ class OptimisedMarkTest {
         assertFalse(OptimisedMark.isMarked(ByteArray(64), ByteArray(64)))
     }
 
+    @Test
+    fun `a HEIC gets an ignorable free box after its last box`() {
+        val heif = int(16) + "ftyp".toByteArray() + "heic".toByteArray() + b(0, 0, 0, 0) +
+            int(12) + "mdat".toByteArray() + b(1, 2, 3, 4)
+        val marked = OptimisedMark.markHeif(heif)!!
+        assertArrayEquals("everything before is untouched", heif, marked.copyOfRange(0, heif.size))
+        assertEquals(8 + OptimisedMark.TEXT.length, readInt(marked, heif.size))
+        assertEquals("free", String(marked, heif.size + 4, 4, Charsets.US_ASCII))
+        assertEquals(heif.size + 8 + OptimisedMark.TEXT.length, marked.size)
+        assertTrue(OptimisedMark.isMarked(marked))
+    }
+
+    @Test
+    fun `a HEIC whose last box runs to the end of the file is left unmarked`() {
+        // Size 0 means "to the end of the file": anything appended would be inside it.
+        val open = int(16) + "ftyp".toByteArray() + "heic".toByteArray() + b(0, 0, 0, 0) +
+            int(0) + "mdat".toByteArray() + b(1, 2, 3, 4)
+        assertNull(OptimisedMark.markHeif(open))
+        assertNull("not HEIF at all", OptimisedMark.markHeif(ByteArray(32)))
+    }
+
+    @Test
+    fun `an extended WebP gets a chunk of its own, and the RIFF size grows to match`() {
+        val vp8x = "VP8X".toByteArray() + le(10) + ByteArray(10)
+        val body = "WEBP".toByteArray() + vp8x + "VP8 ".toByteArray() + le(4) + b(1, 2, 3, 4)
+        val webp = "RIFF".toByteArray() + le(body.size) + body
+        val marked = OptimisedMark.markWebp(webp)!!
+        assertEquals("the RIFF size counts the new chunk", marked.size - 8, readLe(marked, 4))
+        assertArrayEquals(webp.copyOfRange(8, webp.size), marked.copyOfRange(8, webp.size))
+        assertEquals("ENTS", String(marked, webp.size, 4, Charsets.US_ASCII))
+        assertEquals(OptimisedMark.TEXT.length, readLe(marked, webp.size + 4))
+        assertEquals("chunks are padded to an even size", 0, (marked.size - webp.size) % 2)
+        assertTrue(OptimisedMark.isMarked(marked))
+    }
+
+    @Test
+    fun `a simple WebP, which allows no other chunk, is left unmarked`() {
+        val body = "WEBP".toByteArray() + "VP8 ".toByteArray() + le(18) + ByteArray(18)
+        val simple = "RIFF".toByteArray() + le(body.size) + body
+        assertNull(OptimisedMark.markWebp(simple))
+    }
+
+    private fun le(v: Int) = b(v and 0xFF, v ushr 8 and 0xFF, v ushr 16 and 0xFF, v ushr 24 and 0xFF)
+
+    private fun readLe(a: ByteArray, at: Int) =
+        (a[at].toInt() and 0xFF) or ((a[at + 1].toInt() and 0xFF) shl 8) or
+            ((a[at + 2].toInt() and 0xFF) shl 16) or ((a[at + 3].toInt() and 0xFF) shl 24)
+
     private fun int(v: Int) = b(v ushr 24 and 0xFF, v ushr 16 and 0xFF, v ushr 8 and 0xFF, v and 0xFF)
 
     private fun readInt(a: ByteArray, at: Int) =

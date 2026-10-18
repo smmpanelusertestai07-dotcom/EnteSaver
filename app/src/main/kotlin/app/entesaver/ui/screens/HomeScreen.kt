@@ -91,6 +91,7 @@ import app.entesaver.data.EarlierInstall
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ItemRow
 import app.entesaver.data.prefs.Options
+import app.entesaver.media.Stager
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.Routes
 import app.entesaver.ui.components.AccessNotice
@@ -1030,6 +1031,7 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                 .getOrDefault(RunDecider.Wait.NONE),
             earlierApp = health.earlierInstall,
             needsFileAccess = options.saveMode == SaveMode.IN_PLACE && !fileAccess,
+            needsMediaLocation = options.saveMode == SaveMode.IN_PLACE && !Permissions.hasMediaLocation(context),
             modifiedBuild = options.saveMode == SaveMode.IN_PLACE && tampered
         )
 
@@ -1090,6 +1092,8 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                             stringResource(R.string.optimise_blocked_earlier)
                         HomeAction.Blocker.FILE_ACCESS ->
                             stringResource(R.string.optimise_blocked_file_access)
+                        HomeAction.Blocker.MEDIA_LOCATION ->
+                            stringResource(R.string.optimise_blocked_media_location)
                         HomeAction.Blocker.MODIFIED_BUILD ->
                             stringResource(R.string.optimise_blocked_modified)
                         // CC7.2: when the button bypasses a scheduling rule,
@@ -1433,6 +1437,8 @@ fun skipReasonLabel(reason: String): String = when (reason) {
     "user_excluded" -> stringResource(R.string.skip_user_excluded)
     "duplicate" -> stringResource(R.string.skip_duplicate)
     "returned_copy" -> stringResource(R.string.skip_returned_copy)
+    Stager.IN_PLACE_FAILED -> stringResource(R.string.skip_in_place_failed)
+    Stager.PUT_BACK -> stringResource(R.string.skip_put_back)
     else -> stringResource(R.string.skip_other)
 }
 
@@ -1493,6 +1499,7 @@ private fun statusLine(
             RunDecider.Wait.VIDEOS_CHARGING -> stringResource(R.string.wait_videos_charging)
             RunDecider.Wait.EARLIER_APP -> stringResource(R.string.wait_earlier_app)
             RunDecider.Wait.NEEDS_FILE_ACCESS -> stringResource(R.string.wait_file_access)
+            RunDecider.Wait.NEEDS_MEDIA_LOCATION -> stringResource(R.string.wait_media_location)
             RunDecider.Wait.MODIFIED_BUILD -> stringResource(R.string.wait_modified_build)
             RunDecider.Wait.DAILY_LIMIT -> stringResource(R.string.wait_daily_limit)
         }

@@ -110,10 +110,19 @@ class RowActionsTest {
             listOf(Action.OPEN),
             RowActions.forItem(row(ItemState.FREED_KEPT, originalMissing = true, originalKept = true))
         )
-        // Nor, by a stray flag, for any other state.
-        for (state in ItemState.entries - ItemState.FREED_KEPT) {
-            assertFalse("$state", Action.PUT_BACK in RowActions.forItem(row(state, originalKept = true)))
+    }
+
+    @Test
+    fun `while an original is kept, putting it back is the only thing offered`() {
+        // A replace recovery gave up on is a SKIP that still keeps its
+        // original: Put back is its way out, and Try again would read the
+        // replaced file as changed and drop the row with the only record of
+        // where the original waits.
+        for (state in ItemState.entries) {
+            assertEquals("$state", listOf(Action.OPEN, Action.PUT_BACK), RowActions.forItem(row(state, originalKept = true)))
         }
+        assertFalse(Action.TRY_AGAIN in RowActions.forItem(row(ItemState.SKIP, originalKept = true)))
+        assertTrue(Action.TRY_AGAIN in RowActions.forItem(row(ItemState.SKIP, originalKept = false)))
     }
 
     @Test

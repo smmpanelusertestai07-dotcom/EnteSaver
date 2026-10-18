@@ -46,7 +46,10 @@ object RowActions {
         val evidence: Evidence,
         val neverOptimise: Boolean,
         val originalMissing: Boolean,
-        /** Replaced on this phone, with the original still kept in the trash. */
+        /**
+         * An original is kept for this file after a replace on this phone -
+         * in the trash, or Android 10's hidden file - whatever its state.
+         */
         val originalKept: Boolean = false
     )
 
@@ -65,6 +68,15 @@ object RowActions {
         // An original that is no longer in the gallery can only be looked at.
         if (row.originalMissing) return@buildList
 
+        // While an original is kept apart, putting it back is the one way
+        // forward - a replace the phone cut short included. Trying again
+        // would read the replaced file as changed and drop the row, and
+        // with it the only record of where that original waits.
+        if (row.originalKept) {
+            add(Action.PUT_BACK)
+            return@buildList
+        }
+
         when (row.state) {
             ItemState.NEW -> {
                 if (!row.neverOptimise) add(Action.OPTIMISE_FIRST)
@@ -82,12 +94,9 @@ object RowActions {
                 if (row.evidence.isPerFile) add(Action.REMOVE_FROM_PHONE)
             }
 
-            // Replaced on this phone: while the trash keeps the original,
-            // it can go back into the same item.
-            ItemState.FREED_KEPT -> if (row.originalKept) add(Action.PUT_BACK)
-
-            // Already reclaimed, or never understood. Nothing to offer.
-            ItemState.FREED, ItemState.UNKNOWN -> Unit
+            // Already reclaimed, a light copy kept, or never understood.
+            // Nothing to offer.
+            ItemState.FREED, ItemState.FREED_KEPT, ItemState.UNKNOWN -> Unit
         }
     }
 

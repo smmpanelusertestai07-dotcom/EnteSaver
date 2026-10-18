@@ -342,6 +342,7 @@ fun FilesScreen(vm: AppViewModel) {
             InPlace.PutBack.DONE to stringResource(R.string.put_back_done),
             InPlace.PutBack.NOT_KEPT to stringResource(R.string.put_back_not_kept),
             InPlace.PutBack.NO_SPACE to stringResource(R.string.put_back_no_space),
+            InPlace.PutBack.CHANGED to stringResource(R.string.put_back_changed),
             InPlace.PutBack.FAILED to stringResource(R.string.put_back_failed)
         )
         AlertDialog(
