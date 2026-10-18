@@ -1,6 +1,9 @@
 package app.entesaver.media
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaCodecInfo
+import android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import app.entesaver.BuildConfig
@@ -87,6 +90,38 @@ object EncoderCaps {
                 }.getOrDefault(false)
             }
         }
+
+    /**
+     * True when an encoder for [mime] takes a video of this size and frame
+     * rate in CBR - the mode Android's quality floor (QualityFloor) leaves
+     * alone. Many chips have it for HEVC and not for H.264.
+     */
+    fun cbrFits(mime: String, width: Int, height: Int, fps: Float): Boolean =
+        encoders(mime).any { info ->
+            runCatching {
+                val caps = info.getCapabilitiesForType(mime)
+                val video = caps.videoCapabilities
+                val rate = fps.toDouble().coerceAtLeast(1.0)
+                caps.encoderCapabilities.isBitrateModeSupported(BITRATE_MODE_CBR) &&
+                    (video.areSizeAndRateSupported(width, height, rate) ||
+                        video.areSizeAndRateSupported(height, width, rate))
+            }.getOrDefault(false)
+        }
+
+    /**
+     * Whether Android counts this as a handheld device, the kind its quality
+     * floor is for: a touchscreen, and not a car, a TV or a watch - the test
+     * MediaCodec itself makes.
+     */
+    fun handheld(context: Context): Boolean {
+        val pm = context.packageManager
+        val others = listOf(
+            PackageManager.FEATURE_AUTOMOTIVE,
+            "android.hardware.type.television",
+            PackageManager.FEATURE_WATCH
+        )
+        return pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) && others.none { pm.hasSystemFeature(it) }
+    }
 
     /** A hardware encoder HEIC can be written with: a HEIC one, or HEVC. */
     fun hasHardwareHeic(): Boolean =

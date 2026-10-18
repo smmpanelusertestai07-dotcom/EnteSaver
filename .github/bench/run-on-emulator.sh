@@ -77,14 +77,26 @@ if [ -s "$LIB-keep.txt" ]; then
   echo "Keeping the copies of $(wc -l < "$LIB-keep.txt") videos for grading"
 fi
 
+# Android's quality floor (QualityFloor in the app) raises any VBR encode
+# below its own table - 3.9 Mbps for 1080p H.264 - and the emulator's
+# software H.264 encoder offers no CBR, the mode the app writes in on a phone
+# whose chip has it, as a Realme 11 Pro 5G's HEVC chip does. With the floor
+# off, the copies come out at the rates the app asks for, as they do from
+# such a chip. This is the framework's own switch for it.
+adb shell setprop debug.stagefright.enableshaping 0
+shaping=$(adb shell getprop debug.stagefright.enableshaping | tr -d '\r')
+echo "Android's quality floor: debug.stagefright.enableshaping=$shaping"
+[ "$shaping" = "0" ] || echo "::warning::Android's quality floor stayed on; VBR copies come out at its floor."
+
 echo "::group::Run the benchmark"
 adb logcat -c || true
 # Bounded below the job's own limit: the results are written line by line,
 # so a run that is cut short still leaves everything it measured to pull,
 # and the grading after it still has time.
 # An emulator has no encoder chip: its software HEVC encoder stands in for
-# the one a phone like the Realme 11 Pro 5G has, so the HEVC path phones
-# take is what is measured (EncoderCaps.softwareHevcForBenchmark).
+# the one a phone like the Realme 11 Pro 5G has, for the clips it takes
+# (512x512 at most); everything bigger is measured in H.264, and the report
+# works the HEVC sizes out from it (EncoderCaps.softwareHevcForBenchmark).
 timeout 7200 adb shell am instrument -w -r \
   -e class app.entesaver.SavingsBenchTest \
   -e savingsBench true \
@@ -96,6 +108,7 @@ echo "::endgroup::"
 
 adb exec-out run-as "$PKG" cat files/savings/savings.csv > "$OUT/savings-shard$SHARD.csv"
 adb exec-out run-as "$PKG" cat files/savings/device.txt > "$OUT/device-shard$SHARD.txt"
+echo "quality_floor_shaping=${shaping:-unknown}" >> "$OUT/device-shard$SHARD.txt"
 adb logcat -d > "$OUT/logcat-shard$SHARD.txt" 2> /dev/null || true
 
 # The kept copies, out of the app's private files the same way (the debug

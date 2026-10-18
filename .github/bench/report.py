@@ -19,11 +19,18 @@ kind and by scene.
 
 The codec: an emulator has no encoder chip at all. Run with -e hevcSoftware
 true (savings-bench.yml does), its software HEVC encoder stands in for the
-HEVC chip a phone like the Realme 11 Pro 5G has, so the library is measured
-on the path such a phone takes. What a phone without an HEVC chip would get
-(H.264, asked for 1.45 times the bits) is worked out from the app's own rules
-and kept apart from the measurement - as is the other way round, on a run
-without the stand-in.
+HEVC chip a phone like the Realme 11 Pro 5G has - but it takes 512x512 at
+most, so nearly every clip is measured in H.264, asked for 1.45 times the
+bits. What the same copies come to in the other codec is worked out from the
+app's own rules and kept apart from the measurement, and the verdict is
+given for the HEVC path, the one a Realme 11 Pro 5G takes.
+
+Android's quality floor: from Android 12 a phone raises any VBR encode below
+its own table (QualityFloor in the app), and the emulator's H.264 encoder has
+no CBR, the mode the app writes in to stay clear of it on a chip that has it.
+run-on-emulator.sh switches the floor off, so the copies come out at the
+rates the app asks for, as they do from such a chip; the device lines say
+whether that took.
 
 The 20-minute limit: the app gives one video at most 20 minutes to encode and
 keeps a video that runs out of time as it is. How long a real phone takes
@@ -45,7 +52,7 @@ LONG_SIDE = 1920
 FPS_CAP = 30
 SLOW_MOTION_FPS = 90.0
 AUDIO_BPS = 48_000
-REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 1_600_000, 1920 * 1080 * 30, 0.75
+REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 900_000, 1920 * 1080 * 30, 0.75
 CODEC_FACTOR = {"HEVC": 1.0, "H264": 1.45}
 CAP_BPS, FLOOR_BPS = 8_000_000, 150_000
 COPY_FACTOR = 1.15
@@ -299,10 +306,15 @@ def main():
     lines.append(f"## Ente Saver savings benchmark v3 (measured with {mc}, the codec the app picks on a phone with "
                  f"an HEVC chip)")
     lines.append("")
-    met = af <= TARGET_GB * GB
+    # The verdict is for the HEVC path, a Realme 11 Pro 5G's: measured when
+    # the run measured HEVC, worked out from the same copies when it did not.
+    hevc_after = af if measured_codec == "HEVC" else ah
+    met = hevc_after <= TARGET_GB * GB
+    how = "measured" if measured_codec == "HEVC" else f"worked out from the {mc} copies"
     lines.append(
         f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_LOW_GB:.0f}-{TARGET_GB:.0f} GB - "
-        f"{'met' if met else 'not met'}.** Measured ({mc}), the library went from {b / GB:.1f} GB to "
+        f"{'met' if met else 'not met'} on a phone with an HEVC chip ({hevc_after / GB:.1f} GB, {how}).** "
+        f"Measured ({mc}), the library went from {b / GB:.1f} GB to "
         f"{af / GB:.1f} GB ({100 * (b - af) / b:.0f}% smaller, {b / af:.1f} times smaller); on {other_phone} "
         f"({oc}), an estimate, to {ah / GB:.1f} GB. Of what is left, {ra / GB:.1f} GB are downloads and forwards "
         f"that WhatsApp, Instagram, YouTube or Telegram had already compressed ({rb / GB:.1f} GB before); the rest, "
@@ -327,7 +339,13 @@ def main():
     for d in devices[:1]:
         lines.append(f"- Emulator: {d.get('model')} API {d.get('sdk')}, RAM {int(d.get('ram_bytes', 0)) / GB:.1f} GB, "
                      f"tier {d.get('tier')}, software HEVC standing in for a chip: "
-                     f"{d.get('hevc_software_stands_in', 'false')}")
+                     f"{d.get('hevc_software_stands_in', 'false')} (HEVC at 1080p30: "
+                     f"{d.get('hevc_1080p30', 'unknown')})")
+        shaping = sorted({x.get("quality_floor_shaping", "unknown") for x in devices})
+        lines.append(f"- Android's quality floor: applies on this emulator at 1080p: "
+                     f"{d.get('quality_floor_1080p', 'unknown')}; CBR at 1080p30, H.264: "
+                     f"{d.get('cbr_h264_1080p30', 'unknown')}, HEVC: {d.get('cbr_hevc_1080p30', 'unknown')}; "
+                     f"switched off for the run (debug.stagefright.enableshaping={', '.join(shaping)}; 0 is off)")
     broad = OrderedDict()
     for f in files:
         broad.setdefault(f["row"]["group"], []).append(f)

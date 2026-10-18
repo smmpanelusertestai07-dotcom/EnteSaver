@@ -18,6 +18,7 @@ import androidx.work.WorkManager
 import app.entesaver.core.logic.BitrateCalc
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaSettings
+import app.entesaver.core.logic.QualityFloor
 import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.data.db.AppDb
@@ -252,6 +253,7 @@ class SavingsBenchTest {
     private fun deviceReport(expected: Int, found: Int, keep: Int): String {
         val memory = ActivityManager.MemoryInfo()
         context.getSystemService(ActivityManager::class.java).getMemoryInfo(memory)
+        val handheld = EncoderCaps.handheld(context)
         return listOf(
             "model=${Build.MANUFACTURER} ${Build.MODEL}",
             "sdk=${Build.VERSION.SDK_INT}",
@@ -259,6 +261,10 @@ class SavingsBenchTest {
             "tier=${DeviceTier.tier(context)}",
             "hevc_1080p30=${EncoderCaps.hevcFits(1920, 1080, 30f)}",
             "hevc_software_stands_in=${EncoderCaps.softwareHevcForBenchmark}",
+            "handheld=$handheld",
+            "quality_floor_1080p=${QualityFloor.applies(Build.VERSION.SDK_INT, handheld, 1920, 1080)}",
+            "cbr_h264_1080p30=${EncoderCaps.cbrFits(MediaFormat.MIMETYPE_VIDEO_AVC, 1920, 1080, 30f)}",
+            "cbr_hevc_1080p30=${EncoderCaps.cbrFits(MediaFormat.MIMETYPE_VIDEO_HEVC, 1920, 1080, 30f)}",
             "video_encoders=${videoEncoders()}",
             "video_long_side=${MediaSettings.VIDEO.longSide}",
             "video_fps_cap=${MediaSettings.VIDEO.fpsCap}",

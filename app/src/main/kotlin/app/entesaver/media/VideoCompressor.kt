@@ -35,6 +35,7 @@ import app.entesaver.core.logic.AudioPlan
 import app.entesaver.core.logic.BitrateCalc
 import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OptimisedMark
+import app.entesaver.core.logic.QualityFloor
 import app.entesaver.core.logic.RunDecider
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.core.logic.VideoCodecResolver
@@ -67,8 +68,9 @@ import kotlinx.coroutines.withTimeout
  *
  * Known Media3 pitfalls are handled with a mandatory result check and a
  * retry ladder: VBR with B-frames -> VBR -> CBR -> H.264 (on its hardware
- * for an HEVC clip, in software for an H.264 one) -> copy as-is. An item is
- * never lost.
+ * for an HEVC clip, in software for an H.264 one) -> copy as-is. Where
+ * Android's quality floor would raise a VBR encode (QualityFloor), CBR comes
+ * first. An item is never lost.
  */
 @OptIn(UnstableApi::class)
 object VideoCompressor {
@@ -102,21 +104,32 @@ object VideoCompressor {
     )
 
     /**
-     * The rungs for a clip encoded as [codec]. HEVC is never handed to a
-     * software encoder - on a budget phone that is many times the clip's own
-     * length, running hot - so its last rung is H.264 on the hardware every
-     * phone has.
+     * The rungs for a clip encoded as [codec]. VBR spends a clip's bits where
+     * its motion is, but where Android's quality floor holds a VBR encode far
+     * above the rate asked for (QualityFloor) the clip is written in CBR
+     * first ([cbrFirst]), which the floor leaves alone: one encode at the
+     * size the app chose instead of two thrown away. HEVC is never handed to
+     * a software encoder - on a budget phone that is many times the clip's
+     * own length, running hot - so its last rung is H.264 on the hardware
+     * every phone has.
      */
-    private fun attemptsFor(codec: VideoCodec): List<Attempt> = listOf(
-        Attempt(cbr = false, software = false, label = "tuned", codec = codec, tuned = true, heAudio = true),
-        Attempt(cbr = false, software = false, label = "vbr", codec = codec),
-        Attempt(cbr = true, software = false, label = "cbr", codec = codec),
-        if (codec == VideoCodec.HEVC) {
+    private fun attemptsFor(codec: VideoCodec, cbrFirst: Boolean): List<Attempt> {
+        val vbr = Attempt(cbr = false, software = false, label = "vbr", codec = codec)
+        val cbr = Attempt(cbr = true, software = false, label = "cbr", codec = codec)
+        val last = if (codec == VideoCodec.HEVC) {
             Attempt(cbr = false, software = false, label = "h264", codec = VideoCodec.H264)
         } else {
             Attempt(cbr = false, software = true, label = "sw", codec = VideoCodec.H264)
         }
-    )
+        return if (cbrFirst) {
+            listOf(cbr.copy(label = "tuned_cbr", tuned = true, heAudio = true), cbr, vbr, last)
+        } else {
+            listOf(vbr.copy(label = "tuned", tuned = true, heAudio = true), vbr, cbr, last)
+        }
+    }
+
+    private fun mimeOf(codec: VideoCodec): String =
+        if (codec == VideoCodec.H264) MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
 
     private val COPY_OK_CONTAINERS = setOf("video/mp4", "video/quicktime", "video/3gpp")
 
@@ -213,6 +226,16 @@ object VideoCompressor {
         }
         val (outW, outH) = dims
         val codec = VideoCodecResolver.resolve(VideoCodecResolver.Hardware(hevcFits = EncoderCaps.hevcFits(outW, outH, outFps)))
+        // Android's quality floor holds a VBR encode of this picture to its
+        // own table, far above these rates (QualityFloor), so where it
+        // applies the clip is written in CBR - if the chip has CBR for this
+        // codec. Where it has not, a VBR copy at the floor is the least this
+        // phone can make, and every check below judges it as that.
+        val floored = QualityFloor.applies(Build.VERSION.SDK_INT, EncoderCaps.handheld(context), outW, outH)
+        val cbrFirst = floored && EncoderCaps.cbrFits(mimeOf(codec), outW, outH, outFps)
+        val heldTo = { rate: Int, c: VideoCodec, cbr: Boolean ->
+            if (floored && !cbr) QualityFloor.vbrBps(rate, outW, outH, c) else rate
+        }
         // The standard rate for this picture; what the clip is given is a
         // share of it read from its frames (VideoShare).
         val base = BitrateCalc.targetBps(outW, outH, outFps, codec)
@@ -221,7 +244,8 @@ object VideoCompressor {
 
         // Leaner already than the least any clip is given: nothing to win.
         if (cappedFps == null && BitrateCalc.shouldCopyAsIs(
-                srcLongSide, spec.longSideLimit, probe.bitrateBps, (base * VideoShare.MIN).toInt(), containerOk
+                srcLongSide, spec.longSideLimit, probe.bitrateBps,
+                heldTo((base * VideoShare.MIN).toInt(), codec, cbrFirst), containerOk
             )
         ) {
             return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
@@ -257,8 +281,9 @@ object VideoCompressor {
         val share = VideoShare.of(motion?.ti, motion?.meanLuma, screenRecording)
         val rateFor = { c: VideoCodec -> (BitrateCalc.targetBps(outW, outH, outFps, c) * share).toInt() }
         // Measured, the clip needs no fewer bits than it already has.
-        if (cappedFps == null &&
-            BitrateCalc.shouldCopyAsIs(srcLongSide, spec.longSideLimit, probe.bitrateBps, rateFor(codec), containerOk)
+        if (cappedFps == null && BitrateCalc.shouldCopyAsIs(
+                srcLongSide, spec.longSideLimit, probe.bitrateBps, heldTo(rateFor(codec), codec, cbrFirst), containerOk
+            )
         ) {
             return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
         }
@@ -269,17 +294,20 @@ object VideoCompressor {
         // The smallest copy that only missed its bitrate target, kept in case
         // no rung meets it (BitrateCalc.worthKeeping).
         var fallback: CompressResult? = null
-        val attempts = attemptsFor(codec)
+        val attempts = attemptsFor(codec, cbrFirst)
         var rung = 0
         while (rung < attempts.size) {
             val attempt = attempts[rung]
+            // Under the floor a VBR rung comes out at the floor, never smaller
+            // than a copy already made that only missed its own target.
+            if (fallback != null && floored && !attempt.cbr) break
             // Keeping HDR is a promise about HEVC; the H.264 rung tone-maps.
             val hdrMode = when {
                 hdr == MediaTraits.Hdr.NONE -> Composition.HDR_MODE_KEEP_HDR
                 keepHdr && attempt.codec == VideoCodec.HEVC -> Composition.HDR_MODE_KEEP_HDR
                 else -> toneMap
             }
-            val codecMime = if (attempt.codec == VideoCodec.H264) MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
+            val codecMime = mimeOf(attempt.codec)
             // Each rung gets what is left of the budget, not a fresh twenty
             // minutes of its own, so three attempts can never cost three times
             // the number the caller asked for.
@@ -325,9 +353,19 @@ object VideoCompressor {
                 val outBps = if (outDur > 0) outBytes * 8000L / outDur else Long.MAX_VALUE
                 // The file's bitrate counts its sound too, and at these picture
                 // rates a kept 64 kbps track is a quarter of a small clip: the
-                // check allows for the sound this rung writes.
-                val rungTarget = rateFor(attempt.codec) + soundBps(audio, plainAudio, sound?.bitrateBps, attempt)
+                // check allows for the sound this rung writes, and for the
+                // floor a VBR rung is held to.
+                val rungTarget = heldTo(rateFor(attempt.codec), attempt.codec, attempt.cbr) +
+                    soundBps(audio, plainAudio, sound?.bitrateBps, attempt)
                 if (BitrateCalc.resultAcceptable(srcBytes, outBytes, outBps, rungTarget, probe.durationMs, outDur)) {
+                    // A later rung can pass at a higher target - the floor's, or
+                    // H.264's - and still be the bigger copy.
+                    val earlier = fallback
+                    if (earlier != null && earlier.bytes <= outBytes) {
+                        outFile.delete()
+                        return earlier
+                    }
+                    earlier?.file?.delete()
                     return CompressResult(
                         outFile,
                         outBytes,
