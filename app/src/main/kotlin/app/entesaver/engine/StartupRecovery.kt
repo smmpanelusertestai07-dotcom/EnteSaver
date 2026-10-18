@@ -36,8 +36,16 @@ class StartupRecovery(private val context: Context) {
         // A replace or put back the phone cut short is finished or undone
         // first, at every start: until it is, a half-written file sits in
         // the gallery, and in Ente's upload queue. Background runs may wait
-        // days for their conditions; opening the app does not.
-        runCatching { Stager(context, AppDb.get(context)).recoverInPlace() }
+        // days for their conditions; opening the app does not. Not waited
+        // for while a run holds the encoder: that run settled it before it
+        // took a file, and the rest of start-up must not wait on a video.
+        if (Locks.stage.tryLock()) {
+            try {
+                runCatching { Stager(context, AppDb.get(context)).recoverLocked() }
+            } finally {
+                Locks.stage.unlock()
+            }
+        }
         // Read the old visible snapshot before deleting it: on an upgrade it
         // may be the only state left.
         val restored = restoreIfEmpty()
