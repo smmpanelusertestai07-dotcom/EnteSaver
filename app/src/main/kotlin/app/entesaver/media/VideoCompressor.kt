@@ -323,7 +323,10 @@ object VideoCompressor {
                     probeDurationMs(outFile)
                 }
                 val outBps = if (outDur > 0) outBytes * 8000L / outDur else Long.MAX_VALUE
-                val rungTarget = rateFor(attempt.codec)
+                // The file's bitrate counts its sound too, and at these picture
+                // rates a kept 64 kbps track is a quarter of a small clip: the
+                // check allows for the sound this rung writes.
+                val rungTarget = rateFor(attempt.codec) + soundBps(audio, plainAudio, sound?.bitrateBps, attempt)
                 if (BitrateCalc.resultAcceptable(srcBytes, outBytes, outBps, rungTarget, probe.durationMs, outDur)) {
                     return CompressResult(
                         outFile,
@@ -532,6 +535,18 @@ object VideoCompressor {
         } finally {
             handler.post { thread.quitSafely() }
         }
+    }
+
+    /** The sound a rung's copy carries, in bits a second: what the result check allows for it. */
+    private fun soundBps(
+        audio: AudioPlan.Decision?,
+        plainAudio: AudioPlan.Decision.Encode?,
+        sourceBps: Int?,
+        attempt: Attempt
+    ): Int = when (audio) {
+        null -> 0
+        AudioPlan.Decision.Keep -> sourceBps?.takeIf { it > 0 } ?: AudioPlan.KEEP_STEREO_BPS
+        is AudioPlan.Decision.Encode -> if (audio.he && !attempt.heAudio) plainAudio?.bps ?: audio.bps else audio.bps
     }
 
     /** The original's sound track; null when it has none (or cannot be read). */
