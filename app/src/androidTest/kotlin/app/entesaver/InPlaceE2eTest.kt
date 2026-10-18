@@ -1,5 +1,6 @@
 package app.entesaver
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -233,8 +234,16 @@ class InPlaceE2eTest {
             val after = state(item)
             Log.i("InPlaceDiag", "API ${Build.VERSION.SDK_INT}: before $before; after $after")
             assertTrue("API ${Build.VERSION.SDK_INT}: before $before; after $after", kept(item))
-            // Trashed items stay out of every ordinary query - a gallery's too.
-            val visible = r.query(item, arrayOf(MediaStore.MediaColumns._ID), null, null)?.use { it.count } ?: 0
+            // Trashed items stay out of every ordinary query of the
+            // collection - a gallery's too. (A query by the item's own
+            // address always includes them, whatever it asks for.)
+            val visible = r.query(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                arrayOf(MediaStore.MediaColumns._ID),
+                "${MediaStore.MediaColumns._ID} = ?",
+                arrayOf(ContentUris.parseId(item).toString()),
+                null
+            )?.use { it.count } ?: 0
             assertEquals("a trashed copy shows in an ordinary query", 0, visible)
         } finally {
             runCatching { r.delete(item, all) }
