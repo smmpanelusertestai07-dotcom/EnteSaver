@@ -10,18 +10,18 @@ class BitrateCalcTest {
     @Test
     fun bitrateTable1080p30() {
         // The reference: 1080p30 in HEVC, and H.264 asked for 1.45 times it.
-        assertEquals(900_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC))
-        assertEquals(1_305_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
+        assertEquals(950_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC))
+        assertEquals(1_377_500, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
     }
 
     @Test
     fun `smaller pictures get more bits per pixel`() {
         // 720p has 44% of 1080p's pixels and gets 54% of its rate.
-        assertEquals(489_897, BitrateCalc.targetBps(1280, 720, 30f, VideoCodec.HEVC))
+        assertEquals(517_114, BitrateCalc.targetBps(1280, 720, 30f, VideoCodec.HEVC))
         // A WhatsApp 480p clip.
-        assertEquals(265_415, BitrateCalc.targetBps(848, 480, 30f, VideoCodec.HEVC))
+        assertEquals(280_161, BitrateCalc.targetBps(848, 480, 30f, VideoCodec.HEVC))
         // Slow motion keeps its frames: four times the frames, 2.8 times the rate.
-        assertEquals(2_545_584, BitrateCalc.targetBps(1920, 1080, 120f, VideoCodec.HEVC))
+        assertEquals(2_687_005, BitrateCalc.targetBps(1920, 1080, 120f, VideoCodec.HEVC))
         val hd = BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC).toDouble()
         val half = BitrateCalc.targetBps(1920, 540, 30f, VideoCodec.HEVC).toDouble()
         assertEquals(Math.pow(0.5, BitrateCalc.SCALE_EXPONENT), half / hd, 0.001)
@@ -121,5 +121,45 @@ class BitrateCalcTest {
         assertFalse(BitrateCalc.worthKeeping(1_000_000, 0, 2_000, 2_000))
         // A clip that came out the wrong length is broken, however small.
         assertFalse(BitrateCalc.worthKeeping(10_000_000, 2_000_000, 60_000, 50_000))
+    }
+
+    /** The source cap for a copy at the source's own size and frame rate, unless given. */
+    private fun cap(
+        bps: Long,
+        mime: String?,
+        w: Int,
+        h: Int,
+        fps: Float,
+        codec: VideoCodec = VideoCodec.HEVC,
+        out: Triple<Int, Int, Float> = Triple(w, h, fps)
+    ) = BitrateCalc.sourceCapBps(bps, mime, w, h, fps, out.first, out.second, out.third, codec)
+
+    @Test
+    fun `a copy is asked for at most a part of what its source's picture holds`() {
+        val share = BitrateCalc.SOURCE_SHARE
+        // A Telegram episode: 720p H.264 at 980 kbps holds what HEVC keeps at
+        // 980 / 1.45 = 676 kbps; an H.264 copy of it, the same 980.
+        assertEquals((980_000 / 1.45 * share).toInt(), cap(980_000, "video/avc", 1280, 720, 30f))
+        assertEquals((980_000 * share).toInt(), cap(980_000, "video/avc", 1280, 720, 30f, VideoCodec.H264))
+        // An HEVC source holds its own rate in HEVC.
+        assertEquals((900_000 * share).toInt(), cap(900_000, "video/hevc", 1280, 536, 24f))
+        // Made smaller, a picture holds less: 4K30 at 20 Mbps down to 1080p30
+        // holds a quarter of the pixels, to the power 0.75.
+        val fourK = cap(20_000_000, "video/avc", 3840, 2160, 30f, out = Triple(1920, 1080, 30f))!!
+        assertEquals(20_000_000 * Math.pow(0.25, 0.75) / 1.45 * share, fourK.toDouble(), 1.0)
+        // A camera original is far above what the app asks for: the cap does not bind.
+        val camera = cap(20_000_000, "video/avc", 1920, 1080, 30f)!!
+        assertTrue(camera > BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC) * VideoShare.MAX)
+        // Whatever the source, a copy at the cap is a real saving.
+        assertTrue(share <= 0.7)
+    }
+
+    @Test
+    fun `the cap stays inside the floor and the ceiling, and needs a known source`() {
+        assertEquals(BitrateCalc.FLOOR_BPS, cap(50_000, "video/avc", 480, 270, 25f))
+        assertEquals(BitrateCalc.CAP_BPS, cap(90_000_000, "video/hevc", 1920, 1080, 30f))
+        assertEquals(null, cap(980_000, null, 1280, 720, 30f))
+        assertEquals(null, cap(980_000, "video/x-unknown", 1280, 720, 30f))
+        assertEquals(null, cap(0, "video/avc", 1280, 720, 30f))
     }
 }

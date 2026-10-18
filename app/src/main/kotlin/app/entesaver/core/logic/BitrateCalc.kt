@@ -14,15 +14,17 @@ import kotlin.math.roundToInt
  * more pixels alike, so each needs fewer bits - what streaming services'
  * per-title ladders measure. 1080p30 in HEVC is [REF_HEVC_BPS]; H.264 is
  * asked for [H264_FACTOR] times as much for the same look. So 1080p30 is
- * 0.9 Mbps in HEVC and 1.3 Mbps in H.264, 720p30 0.49 and 0.71, a WhatsApp
- * 480p clip 0.27 and 0.38 - and a clip gets 0.7 to 2.4 times that by what it
- * shows. A camera writes 20 Mbps: a phone's library comes down to about a
- * seventh, which is what it takes to last in Ente's free 10 GB.
+ * 0.95 Mbps in HEVC and 1.38 Mbps in H.264, 720p30 0.52 and 0.75, a
+ * WhatsApp 480p clip 0.28 and 0.41 - and a clip gets 0.7 to 2.4 times that
+ * by what it shows, never more than [SOURCE_SHARE] of what its source holds.
+ * A camera writes 20 Mbps: the savings benchmark's 46 GB library comes down
+ * to about a seventh (6.5 GB), which is what it takes to last in Ente's free
+ * 10 GB.
  */
 object BitrateCalc {
 
     /** 1080p at 30 frames a second, in HEVC. */
-    const val REF_HEVC_BPS = 900_000
+    const val REF_HEVC_BPS = 950_000
 
     /** H.264 needs this much more than HEVC for the same picture. */
     const val H264_FACTOR = 1.45
@@ -35,6 +37,16 @@ object BitrateCalc {
 
     const val FLOOR_BPS = 150_000
     const val CAP_BPS = 8_000_000
+
+    /**
+     * The most of what its source's own picture holds a copy is asked for
+     * ([sourceCapBps]): a file another app already compressed - a Telegram
+     * episode, a YouTube download - still comes down by two fifths at least,
+     * instead of being written again for next to nothing. Set with the
+     * standard rate on the savings benchmark: the 46 GB library lands at
+     * 6.5 GB, and a camera's own videos keep their full rate.
+     */
+    const val SOURCE_SHARE = 0.6
 
     /** Copy as-is when source bitrate <= 1.15 x target (and size/container fit). */
     const val COPY_BITRATE_FACTOR = 1.15
@@ -61,6 +73,44 @@ object BitrateCalc {
         val pixelRate = outWidth.toDouble() * outHeight.toDouble() * safeFps
         val raw = REF_HEVC_BPS * (pixelRate / REF_PIXEL_RATE).pow(SCALE_EXPONENT) * codecFactor(codec)
         return raw.toLong().coerceIn(FLOOR_BPS.toLong(), CAP_BPS.toLong()).toInt()
+    }
+
+    /**
+     * The most a copy is asked for: [SOURCE_SHARE] of what its source's own
+     * picture holds, in the copy's codec and at the copy's size and frame
+     * rate. A Telegram episode in H.264 at 1 Mbps holds about what HEVC keeps
+     * at 0.69; asked for more, the extra bits would carry nothing the source
+     * had, and the episode would be kept whole for want of a saving. Null when
+     * the source's codec or bitrate is not known.
+     */
+    fun sourceCapBps(
+        sourceVideoBps: Long,
+        sourceMime: String?,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcFps: Float,
+        outWidth: Int,
+        outHeight: Int,
+        outFps: Float,
+        codec: VideoCodec
+    ): Int? {
+        val factor = sourceFactor(sourceMime) ?: return null
+        if (sourceVideoBps <= 0) return null
+        val src = srcWidth.toDouble() * srcHeight * (if (srcFps.isFinite() && srcFps > 1f) srcFps else 30f)
+        val out = outWidth.toDouble() * outHeight * (if (outFps.isFinite() && outFps > 1f) outFps else 30f)
+        if (src <= 0 || out <= 0) return null
+        val scale = (out / src).coerceAtMost(1.0).pow(SCALE_EXPONENT)
+        return (sourceVideoBps * scale * codecFactor(codec) / factor * SOURCE_SHARE)
+            .coerceIn(FLOOR_BPS.toDouble(), CAP_BPS.toDouble()).toInt()
+    }
+
+    /** How many times HEVC's rate a source codec spends on the same picture. */
+    private fun sourceFactor(mime: String?): Double? = when (mime?.lowercase()) {
+        "video/hevc", "video/x-vnd.on2.vp9" -> 1.0
+        "video/avc" -> H264_FACTOR
+        "video/av01" -> 0.8
+        "video/mp4v-es", "video/3gpp" -> 2.0
+        else -> null
     }
 
     /** Keep aspect ratio, clamp long side, force even dimensions. */

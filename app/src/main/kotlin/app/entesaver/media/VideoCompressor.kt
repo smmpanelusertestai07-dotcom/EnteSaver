@@ -81,7 +81,10 @@ object VideoCompressor {
         val rotation: Int,
         val durationMs: Long,
         val bitrateBps: Long,
-        val fps: Float
+        val fps: Float,
+        /** The picture's codec and its own bitrate, when the file says. */
+        val videoMime: String? = null,
+        val videoBps: Long? = null
     )
 
     private data class Attempt(
@@ -279,7 +282,19 @@ object VideoCompressor {
 
         val motion = MotionProbe.read(context, uri, probe.durationMs, outFps)
         val share = VideoShare.of(motion?.ti, motion?.meanLuma, screenRecording)
-        val rateFor = { c: VideoCodec -> (BitrateCalc.targetBps(outW, outH, outFps, c) * share).toInt() }
+        // Never more than the source's own picture holds, in the copy's codec
+        // and size (BitrateCalc.sourceCapBps): the file's own figure for its
+        // picture, or the whole file less its sound.
+        val sourceVideoBps = probe.videoBps ?: (probe.bitrateBps - (sound?.bitrateBps ?: 0)).takeIf { it > 0 }
+        val rateFor = { c: VideoCodec ->
+            val asked = (BitrateCalc.targetBps(outW, outH, outFps, c) * share).toInt()
+            val cap = sourceVideoBps?.let {
+                BitrateCalc.sourceCapBps(
+                    it, probe.videoMime, upright.first, upright.second, probe.fps, outW, outH, outFps, c
+                )
+            }
+            if (cap != null) minOf(asked, cap) else asked
+        }
         // Measured, the clip needs no fewer bits than it already has.
         if (cappedFps == null && BitrateCalc.shouldCopyAsIs(
                 srcLongSide, spec.longSideLimit, probe.bitrateBps, heldTo(rateFor(codec), codec, cbrFirst), containerOk
@@ -647,6 +662,7 @@ object VideoCompressor {
             val w = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
             val h = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
             if (w == null || h == null || w <= 0 || h <= 0) return null
+            val track = videoTrackOf(context, uri)
             Probe(
                 width = w,
                 height = h,
@@ -656,7 +672,9 @@ object VideoCompressor {
                     ?.toLongOrNull() ?: 0L,
                 bitrateBps = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
                     ?.toLongOrNull() ?: 0L,
-                fps = extractFps(context, uri) ?: 30f
+                fps = track?.fps ?: 30f,
+                videoMime = track?.mime,
+                videoBps = track?.bitrateBps
             )
         } catch (e: Exception) {
             null
@@ -665,7 +683,9 @@ object VideoCompressor {
         }
     }
 
-    private fun extractFps(context: Context, uri: Uri): Float? {
+    private data class SourceVideo(val mime: String, val fps: Float?, val bitrateBps: Long?)
+
+    private fun videoTrackOf(context: Context, uri: Uri): SourceVideo? {
         val extractor = MediaExtractor()
         return try {
             extractor.setDataSource(context, uri, null)
@@ -673,7 +693,7 @@ object VideoCompressor {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
                 if (mime.startsWith("video/")) {
-                    return try {
+                    val fps = try {
                         format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
                     } catch (e: Exception) {
                         try {
@@ -682,6 +702,15 @@ object VideoCompressor {
                             null
                         }
                     }
+                    // Often missing; never worth losing the frame rate over.
+                    val bps = runCatching {
+                        if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                            format.getInteger(MediaFormat.KEY_BIT_RATE).toLong()
+                        } else {
+                            null
+                        }
+                    }.getOrNull()?.takeIf { it > 0 }
+                    return SourceVideo(mime, fps, bps)
                 }
             }
             null

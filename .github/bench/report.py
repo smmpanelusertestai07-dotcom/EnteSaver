@@ -52,7 +52,7 @@ LONG_SIDE = 1920
 FPS_CAP = 30
 SLOW_MOTION_FPS = 90.0
 AUDIO_BPS = 48_000
-REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 900_000, 1920 * 1080 * 30, 0.75
+REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 950_000, 1920 * 1080 * 30, 0.75
 CODEC_FACTOR = {"HEVC": 1.0, "H264": 1.45}
 CAP_BPS, FLOOR_BPS = 8_000_000, 150_000
 COPY_FACTOR = 1.15
@@ -101,8 +101,35 @@ def plan(row, codec, src_bps, share=1.0):
     ow, oh = output_dims(w, h, LONG_SIDE)
     raw = REF_HEVC_BPS * (ow * oh * out_fps / REF_PIXEL_RATE) ** SCALE_EXPONENT * CODEC_FACTOR[codec]
     target = min(max(raw, FLOOR_BPS), CAP_BPS)
-    as_is = capped is None and max(w, h) <= LONG_SIDE and src_bps <= target * share * COPY_FACTOR
+    cap = source_cap(row, codec)
+    asked = min(target * share, cap) if cap else target * share
+    as_is = capped is None and max(w, h) <= LONG_SIDE and src_bps <= asked * COPY_FACTOR
     return as_is, target
+
+
+# How many times HEVC's rate a source codec spends on the same picture
+# (BitrateCalc.sourceFactor), by the manifest's codec names.
+SOURCE_FACTOR = {"hevc": 1.0, "h264": CODEC_FACTOR["H264"]}
+# BitrateCalc.SOURCE_SHARE: the most of what its source holds a copy is asked for.
+SOURCE_SHARE = 0.6
+
+
+def source_cap(row, codec):
+    """The most the app asks for this video in `codec`: SOURCE_SHARE of what
+    its source's own picture holds at the copy's size and frame rate
+    (BitrateCalc.sourceCapBps). None when the source's codec or bitrate is not
+    known."""
+    factor = SOURCE_FACTOR.get(str(row.get("codec", "")).lower())
+    video_bps = float(row.get("video_kbps") or 0) * 1000
+    if not factor or video_bps <= 0:
+        return None
+    w, h, fps = int(row["width"]), int(row["height"]), float(row["fps"])
+    if int(row["rotation"]) in (90, 270):
+        w, h = h, w
+    capped = FPS_CAP if FPS_CAP + 0.5 < fps < SLOW_MOTION_FPS else None
+    ow, oh = output_dims(w, h, LONG_SIDE)
+    scale = min(1.0, (ow * oh * (capped or fps)) / (w * h * fps)) ** SCALE_EXPONENT
+    return min(max(video_bps * scale * CODEC_FACTOR[codec] / factor * SOURCE_SHARE, FLOOR_BPS), CAP_BPS)
 
 
 def num(row, key, default=0.0):
@@ -296,7 +323,9 @@ def main():
             f["after_hevc_asked"] = f["after_hevc"] if f["chosen"] is None else f["before"]
         else:
             as_is_a, target_a = plan(row, "HEVC", f["src_bps"], f["chosen"])
-            est = (target_a * f["chosen"] + f["audio_bps"]) * f["real_s"] / 8
+            cap_a = source_cap(row, "HEVC")
+            asked_a = min(target_a * f["chosen"], cap_a) if cap_a else target_a * f["chosen"]
+            est = (asked_a + f["audio_bps"]) * f["real_s"] / 8
             f["after_hevc_asked"] = f["before"] if as_is_a or est >= f["before"] else est
 
     def totals(sel, key="after"):
@@ -335,9 +364,10 @@ def main():
     lines.append(
         f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_LOW_GB:.0f}-{TARGET_GB:.0f} GB - "
         f"{'met' if met else 'not met'} on a phone whose HEVC chip writes in CBR: {hevc_after / GB:.1f} GB "
-        f"({b / hevc_after:.1f} times smaller; {how}).** "
+        f"({b / max(hevc_after, 1):.1f} times smaller; {how}).** "
         f"Measured on the emulator ({mc}), the library went from {b / GB:.1f} GB to "
-        f"{af / GB:.1f} GB ({100 * (b - af) / b:.0f}% smaller, {b / af:.1f} times smaller); in {oc}, carrying over "
+        f"{af / GB:.1f} GB ({100 * (b - af) / max(b, 1):.0f}% smaller, {b / max(af, 1):.1f} times smaller); in {oc}, "
+        f"carrying over "
         f"how far the emulator's software encoder overshot the rate it was asked for, {ah / GB:.1f} GB. Of what is "
         f"left after the measured run, {ra / GB:.1f} GB are downloads and forwards that WhatsApp, Instagram, YouTube "
         f"or Telegram had already compressed ({rb / GB:.1f} GB before); the rest, {(af - ra) / GB:.1f} GB, is "
@@ -401,18 +431,21 @@ def main():
     lines.append("")
     lines.append("### What is in the picture (the manifest's scene column)")
     lines.append("")
-    lines.append(f"| Scene | Videos | Real hours | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    lines.append(f"| Scene | Videos | Real hours | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) | "
+                 f"After GB (HEVC at the asked rate, est.) |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     scene_rows = OrderedDict()
     for s, sel in by_scene.items():
         if not sel:
             continue
         gb, ga = totals(sel)
         _, gh = totals(sel, "after_hevc")
+        _, gq = totals(sel, "after_hevc_asked")
         hours = sum(f["real_s"] for f in sel) / 3600
-        scene_rows[s] = dict(videos=len(sel), hours=hours, before=gb, after_h264=ga, after_hevc=gh)
+        scene_rows[s] = dict(videos=len(sel), hours=hours, before=gb, after_h264=ga, after_hevc=gh, after_hevc_asked=gq)
+        saved = f"{100 * (gb - ga) / gb:.0f}%" if gb else "-"
         lines.append(f"| {SCENES.get(s, s)} | {len(sel)} | {hours:.1f} | {gb / GB:.2f} | {ga / GB:.2f} | "
-                     f"{100 * (gb - ga) / gb:.0f}% | {gh / GB:.2f} |")
+                     f"{saved} | {gh / GB:.2f} | {gq / GB:.2f} |")
 
     lines.append("")
     lines.append("### The 20-minute limit (a video that cannot be encoded in 20 minutes is kept as it is)")
