@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
+import app.entesaver.media.LegacyMedia
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -234,7 +235,10 @@ object MediaFixtures {
      * under shared storage, handed to the media scanner, and its uri given
      * back. [captureMillis], when there is one, is stamped as DATE_TAKEN
      * once the scanner has read the file, as the pending flow does from
-     * Android 10.
+     * Android 10. A [name] already in the folder gets " (1)", as
+     * MediaProvider names it from Android 10 and the app does on Android 9:
+     * written over, a second fixture of the same name was the first one,
+     * under the same entry.
      */
     @Suppress("DEPRECATION")
     fun publishFile(
@@ -247,7 +251,8 @@ object MediaFixtures {
     ): Uri {
         val dir = File(Environment.getExternalStorageDirectory(), relativeDir.trim('/'))
         dir.mkdirs()
-        val file = File(dir, name)
+        val file = LegacyMedia.claimName(dir, name)
+            ?: throw AssertionError("no free name for the fixture $name")
         FileOutputStream(file).use(write)
         val uri = scan(context, file, mime)
             ?: throw AssertionError("the media scanner never added the fixture $name")
