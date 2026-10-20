@@ -2,6 +2,7 @@ package app.entesaver.core.logic
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -121,6 +122,26 @@ class BitrateCalcTest {
         assertFalse(BitrateCalc.worthKeeping(1_000_000, 0, 2_000, 2_000))
         // A clip that came out the wrong length is broken, however small.
         assertFalse(BitrateCalc.worthKeeping(10_000_000, 2_000_000, 60_000, 50_000))
+    }
+
+    @Test
+    fun `after an overshoot the next encode is asked for less by as far as it went over`() {
+        // Asked for 658 kbps, wrote 1.0 Mbps: next time 658 x 658 / 1000, a little under.
+        assertEquals(411_315, BitrateCalc.correctedRequestBps(658_000, 1_000_000, 658_000))
+        // A second correction starts from what the first one asked for.
+        assertEquals(362_641, BitrateCalc.correctedRequestBps(411_315, 709_000, 658_000))
+    }
+
+    @Test
+    fun `an encoder that kept to its target is not corrected, and a correction has a floor`() {
+        assertNull(BitrateCalc.correctedRequestBps(658_000, 640_000, 658_000))
+        assertNull(BitrateCalc.correctedRequestBps(658_000, 658_000, 658_000))
+        // Five times over: never under a third of the target.
+        assertEquals(219_333, BitrateCalc.correctedRequestBps(658_000, 3_290_000, 658_000))
+        // Already at the floor: nothing lower to ask for.
+        assertNull(BitrateCalc.correctedRequestBps(219_333, 3_290_000, 658_000))
+        assertNull(BitrateCalc.correctedRequestBps(0, 1_000_000, 658_000))
+        assertNull(BitrateCalc.correctedRequestBps(658_000, 0, 658_000))
     }
 
     /** The source cap for a copy at the source's own size and frame rate, unless given. */

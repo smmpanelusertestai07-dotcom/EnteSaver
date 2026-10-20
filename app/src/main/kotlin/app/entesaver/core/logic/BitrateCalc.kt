@@ -164,6 +164,31 @@ object BitrateCalc {
         return true
     }
 
+    /** How far under the target the next encode aims, after one that overshot. */
+    const val CORRECTION_MARGIN = 0.95
+
+    /** The least the next encode is asked for, as a share of the target. */
+    const val MIN_CORRECTION = 1.0 / 3
+
+    /**
+     * What to ask the next encode for, after one asked for [askedBps] wrote
+     * [measuredVideoBps] of picture when the clip needs [targetBps].
+     *
+     * An encoder that overshoots does it by much the same factor at a lower
+     * request - the emulator's software H.264 by half again on a lean
+     * WhatsApp forward, which is why such files were kept whole. Lowered by
+     * that factor, the next encode lands near the target instead of over it
+     * a second time. Null when the encoder kept to the target, so there is
+     * nothing to correct. Never under a third of the target: an encoder that
+     * overshoots by more than that is not keeping to a rate at all.
+     */
+    fun correctedRequestBps(askedBps: Int, measuredVideoBps: Long, targetBps: Int): Int? {
+        if (askedBps <= 0 || measuredVideoBps <= 0 || targetBps <= 0) return null
+        if (measuredVideoBps <= targetBps) return null
+        val next = askedBps.toDouble() * targetBps / measuredVideoBps * CORRECTION_MARGIN
+        return maxOf(next, targetBps * MIN_CORRECTION).toInt().takeIf { it < askedBps }
+    }
+
     /**
      * Power-of-two BitmapFactory inSampleSize: decode within 2x of the pixel
      * budget (memory safety), the exact downscale then lands on the budget.

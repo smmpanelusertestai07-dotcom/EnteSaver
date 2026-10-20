@@ -70,7 +70,8 @@ import kotlinx.coroutines.withTimeout
  * retry ladder: VBR with B-frames -> VBR -> CBR -> H.264 (on its hardware
  * for an HEVC clip, in software for an H.264 one) -> copy as-is. Where
  * Android's quality floor would raise a VBR encode (QualityFloor), CBR comes
- * first. An item is never lost.
+ * first. A rung that overshoots its target has the next one asked for less,
+ * by as far as it went over. An item is never lost.
  */
 @OptIn(UnstableApi::class)
 object VideoCompressor {
@@ -309,10 +310,15 @@ object VideoCompressor {
         // The smallest copy that only missed its bitrate target, kept in case
         // no rung meets it (BitrateCalc.worthKeeping).
         var fallback: CompressResult? = null
+        // After an encode that overshot, what the next one in that codec asks
+        // for: lowered by as far as it went over (BitrateCalc.correctedRequestBps).
+        var request: Pair<VideoCodec, Int>? = null
         val attempts = attemptsFor(codec, cbrFirst)
         var rung = 0
         while (rung < attempts.size) {
             val attempt = attempts[rung]
+            val target = rateFor(attempt.codec)
+            val asked = request?.takeIf { it.first == attempt.codec }?.second ?: target
             // Under the floor a VBR rung comes out at the floor, never smaller
             // than a copy already made that only missed its own target.
             if (fallback != null && floored && !attempt.cbr) break
@@ -334,7 +340,7 @@ object VideoCompressor {
             val outFile = File(tempDir, "video_${System.nanoTime()}_${attempt.label}.mp4")
             val export = try {
                 runTransform(
-                    context, uri, outFile, outW, outH, rateFor(attempt.codec),
+                    context, uri, outFile, outW, outH, asked,
                     codecMime, attempt, hdrMode, leftMs,
                     audio = audio,
                     plainAudio = plainAudio,
@@ -370,8 +376,8 @@ object VideoCompressor {
                 // rates a kept 64 kbps track is a quarter of a small clip: the
                 // check allows for the sound this rung writes, and for the
                 // floor a VBR rung is held to.
-                val rungTarget = heldTo(rateFor(attempt.codec), attempt.codec, attempt.cbr) +
-                    soundBps(audio, plainAudio, sound?.bitrateBps, attempt)
+                val rungSound = soundBps(audio, plainAudio, sound?.bitrateBps, attempt)
+                val rungTarget = heldTo(target, attempt.codec, attempt.cbr) + rungSound
                 if (BitrateCalc.resultAcceptable(srcBytes, outBytes, outBps, rungTarget, probe.durationMs, outDur)) {
                     // A later rung can pass at a higher target - the floor's, or
                     // H.264's - and still be the bigger copy.
@@ -392,8 +398,16 @@ object VideoCompressor {
                         codec = attempt.codec
                     )
                 }
-                detail = "${attempt.label}: $outBytes of $srcBytes bytes, $outBps of $rungTarget bps, " +
-                    "$outDur of ${probe.durationMs} ms"
+                detail = "${attempt.label}: $outBytes of $srcBytes bytes, $outBps of $rungTarget bps " +
+                    "(asked $asked), $outDur of ${probe.durationMs} ms"
+                // Judged against the target, asked for less: the next encode
+                // in this codec lands near the target instead of over it a
+                // second time. Not under the floor, where a VBR rung is
+                // raised whatever it asks and the floor is what overshot.
+                if (outDur > 0 && !(floored && !attempt.cbr)) {
+                    request = BitrateCalc.correctedRequestBps(asked, outBps - rungSound, target)
+                        ?.let { attempt.codec to it } ?: request
+                }
                 if (BitrateCalc.worthKeeping(srcBytes, outBytes, probe.durationMs, outDur) &&
                     outBytes < (fallback?.bytes ?: Long.MAX_VALUE)
                 ) {
