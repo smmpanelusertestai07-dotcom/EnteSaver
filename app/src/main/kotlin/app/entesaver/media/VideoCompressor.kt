@@ -340,6 +340,11 @@ object VideoCompressor {
         // ("frames" below). The rung is then made again, and every rung after
         // it, with Android's own software decoder, which hands over every one.
         var softwareDecoding = false
+        // A picture stored upright with no rotation - most screen recordings,
+        // reels and forwards - is written upright too, where the encoder takes
+        // it that way round. Otherwise Media3 lays it on its side and marks
+        // the file to turn it back: shown the same, stored the other way.
+        val storedUpright = probe.rotation == 0 && probe.height > probe.width
         val attempts = ArrayDeque(attemptsFor(codec, cbrFirst, chip, software))
         while (attempts.isNotEmpty()) {
             val attempt = attempts.removeFirst()
@@ -363,6 +368,8 @@ object VideoCompressor {
                     muxer = same.muxerFactory(),
                     operatingRate = operatingRateFor(outFps),
                     softwareDecoding = softwareDecoding,
+                    upright = storedUpright &&
+                        EncoderCaps.takesAsStored(codecMime, probe.width, probe.height, outFps, attempt.software),
                     onError = { detail = "${attempt.label}: $it" }
                 )
             } catch (ce: CancellationException) {
@@ -488,6 +495,7 @@ object VideoCompressor {
         muxer: Muxer.Factory,
         operatingRate: Int,
         softwareDecoding: Boolean,
+        upright: Boolean,
         onError: (String) -> Unit
     ): ExportResult? = withContext(Dispatchers.Default) {
         // Background priority: encoding must never make the phone feel slow.
@@ -561,6 +569,7 @@ object VideoCompressor {
                     .apply { if (encode != null) setAudioMimeType(MimeTypes.AUDIO_AAC) }
                     .setEncoderFactory(encoderFactory)
                     .setMuxerFactory(muxer)
+                    .setPortraitEncodingEnabled(upright)
                     .apply {
                         if (softwareDecoding) {
                             val decoders = DefaultDecoderFactory.Builder(context).setMediaCodecSelector(SOFTWARE_DECODERS).build()

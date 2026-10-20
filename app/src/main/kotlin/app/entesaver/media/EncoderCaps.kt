@@ -123,6 +123,20 @@ object EncoderCaps {
         anyTakes(encoders(mime), mime, width, height, fps)
 
     /**
+     * True when an encoder for [mime] - a chip's, or Android's own when
+     * [software] - takes a picture of exactly this width and height, the way
+     * round it is stored. Writing a portrait video upright, as its phone
+     * stored it, needs that; many chips state their limits for landscape only.
+     */
+    fun takesAsStored(mime: String, width: Int, height: Int, fps: Float, software: Boolean): Boolean =
+        (if (software) softwareEncoders(mime) else encoders(mime)).any { info ->
+            runCatching {
+                info.getCapabilitiesForType(mime).videoCapabilities
+                    .areSizeAndRateSupported(width, height, fps.toDouble().coerceAtLeast(1.0))
+            }.getOrDefault(false)
+        }
+
+    /**
      * True when Android's own software encoder for [mime] takes this size and
      * frame rate: H.264's last resort, for a clip no chip rung could write. Never
      * above 1080p, which in software would take hours on a budget phone.

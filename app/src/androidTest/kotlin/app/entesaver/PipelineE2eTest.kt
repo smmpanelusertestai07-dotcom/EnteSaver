@@ -334,6 +334,32 @@ class PipelineE2eTest {
     }
 
     /**
+     * A clip stored upright with no rotation - a screen recording, a reel -
+     * is written upright too: the same stored size and the same rotation tag,
+     * not laid on its side and marked to be turned back.
+     */
+    @Test
+    fun aPortraitClipIsStoredUprightAsItWas() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_upright.mp4", width = 360, height = 640, frames = 60, fps = 30, textured = true
+        )
+        assertNotNull("the device must be able to produce a portrait clip", uri)
+        val out = File(context.cacheDir, "upright_out").apply { mkdirs() }
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_upright.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
+        try {
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            val was = meta { setDataSource(context, uri) }
+            val now = meta { setDataSource(result.file.absolutePath) }
+            assertEquals("stored the same way round", was.width to was.height, now.width to now.height)
+            assertEquals("with the same rotation tag", was.rotation, now.rotation)
+        } finally {
+            result.file.delete()
+        }
+    }
+
+    /**
      * An HEVC clip is never written as H.264: a copy keeps its codec, so on
      * a phone without an HEVC chip - every emulator - it stays as it is.
      */
