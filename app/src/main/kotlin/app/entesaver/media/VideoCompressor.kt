@@ -12,10 +12,15 @@ import android.os.Process
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.muxer.Muxer
 import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultAssetLoaderFactory
+import androidx.media3.transformer.DefaultDecoderFactory
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
@@ -330,8 +335,14 @@ object VideoCompressor {
         // by as far as it went over (BitrateCalc.correctedRequestBps).
         var request: Int? = null
         val ext = displayName.substringAfterLast('.', "mp4").lowercase().ifEmpty { "mp4" }
-        val attempts = attemptsFor(codec, cbrFirst, chip, software)
-        for (attempt in attempts) {
+        // Some hardware decoders - an emulator's, a few chips' - never hand
+        // Media3 the last frames of a clip, and it ends the copy without them
+        // ("frames" below). The rung is then made again, and every rung after
+        // it, with Android's own software decoder, which hands over every one.
+        var softwareDecoding = false
+        val attempts = ArrayDeque(attemptsFor(codec, cbrFirst, chip, software))
+        while (attempts.isNotEmpty()) {
+            val attempt = attempts.removeFirst()
             val asked = request ?: target
             // Under the floor a VBR rung comes out at the floor, never smaller
             // than a copy already made that only missed its own target.
@@ -351,6 +362,7 @@ object VideoCompressor {
                     audio = audio,
                     muxer = same.muxerFactory(),
                     operatingRate = operatingRateFor(outFps),
+                    softwareDecoding = softwareDecoding,
                     onError = { detail = "${attempt.label}: $it" }
                 )
             } catch (ce: CancellationException) {
@@ -376,6 +388,10 @@ object VideoCompressor {
             if (changed.isNotEmpty()) {
                 detail = "${attempt.label}: changed ${changed.joinToString(" ")}"
                 outFile.delete()
+                if (changed == listOf("frames") && !softwareDecoding) {
+                    softwareDecoding = true
+                    attempts.addFirst(attempt)
+                }
                 continue
             }
             val outBytes = outFile.length()
@@ -471,6 +487,7 @@ object VideoCompressor {
         audio: AudioPlan.Decision?,
         muxer: Muxer.Factory,
         operatingRate: Int,
+        softwareDecoding: Boolean,
         onError: (String) -> Unit
     ): ExportResult? = withContext(Dispatchers.Default) {
         // Background priority: encoding must never make the phone feel slow.
@@ -544,6 +561,12 @@ object VideoCompressor {
                     .apply { if (encode != null) setAudioMimeType(MimeTypes.AUDIO_AAC) }
                     .setEncoderFactory(encoderFactory)
                     .setMuxerFactory(muxer)
+                    .apply {
+                        if (softwareDecoding) {
+                            val decoders = DefaultDecoderFactory.Builder(context).setMediaCodecSelector(SOFTWARE_DECODERS).build()
+                            setAssetLoaderFactory(DefaultAssetLoaderFactory(context, decoders, Clock.DEFAULT, null))
+                        }
+                    }
                     .addListener(listener)
                     .build()
                 transformerRef.set(transformer)
@@ -624,6 +647,11 @@ object VideoCompressor {
         } finally {
             runCatching { extractor.release() }
         }
+    }
+
+    /** Android's own software decoders only: none of them leaves a clip's last frames out. */
+    private val SOFTWARE_DECODERS = MediaCodecSelector { mimeType, secure, tunneling ->
+        MediaCodecUtil.getDecoderInfos(mimeType, secure, tunneling).filter { !it.hardwareAccelerated }
     }
 
     private val SOFTWARE_SELECTOR = EncoderSelector { mimeType ->
