@@ -128,6 +128,26 @@ class EncoderChoiceTest {
     }
 
     @Test
+    fun `a copy keeps the date and place it was filmed`() {
+        val src = KeptRules.Picture(
+            "video/avc", 1920, 1080, 90, 900, date = "20261020T184855.000Z", place = "+28.6139+077.2090/"
+        )
+        assertEquals(emptyList<String>(), KeptRules.changes(src, "video/avc", src))
+        // Media3's wording of the same point is the same place.
+        assertEquals(emptyList<String>(), KeptRules.changes(src, "video/avc", src.copy(place = "+28.6139+77.2090/")))
+        assertEquals(listOf("date"), KeptRules.changes(src, "video/avc", src.copy(date = "20261021T090000.000Z")))
+        assertEquals(listOf("date"), KeptRules.changes(src, "video/avc", src.copy(date = null)))
+        assertEquals(listOf("place"), KeptRules.changes(src, "video/avc", src.copy(place = null)))
+        assertEquals(listOf("place"), KeptRules.changes(src, "video/avc", src.copy(place = "+28.6150+077.2090/")))
+        // A video with no date or place has none to lose.
+        val bare = src.copy(date = null, place = null)
+        assertEquals(emptyList<String>(), KeptRules.changes(bare, "video/avc", src))
+        assertTrue(KeptRules.samePlace("+28.6139+077.2090+215.000/", "+28.6139+77.2090/"))
+        assertFalse(KeptRules.samePlace("+28.6139+077.2090/", "-28.6139+077.2090/"))
+        assertFalse(KeptRules.samePlace("somewhere", "+28.6139+077.2090/"))
+    }
+
+    @Test
     fun `the EXIF block is lifted whole from a JPEG's APP1 segment`() {
         val tiff = byteArrayOf(0x4D, 0x4D, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08)
         val exif = byteArrayOf(0x45, 0x78, 0x69, 0x66, 0, 0) + tiff

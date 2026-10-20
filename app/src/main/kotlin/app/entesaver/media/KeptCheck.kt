@@ -11,9 +11,9 @@ import java.io.File
 /**
  * What a video copy changed about its original, read back from the file the
  * encoder wrote and from the original itself: its codec, the size it is
- * shown at, how many frames it holds, its colour and its sound
- * ([KeptRules]). A copy that changed any of them is not a copy of the video,
- * however small, and is thrown away.
+ * shown at, how many frames it holds, its colour, its sound, and the date and
+ * place it was filmed ([KeptRules]). A copy that changed any of them is not a
+ * copy of the video, however small, and is thrown away.
  */
 internal object KeptCheck {
 
@@ -59,7 +59,9 @@ internal object KeptCheck {
                         it.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: 0,
                         it.intOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: 0
                     )
-                }
+                },
+                date = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE)?.takeIf { it.isNotBlank() },
+                place = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)?.takeIf { it.isNotBlank() }
             )
         } catch (e: Exception) {
             null

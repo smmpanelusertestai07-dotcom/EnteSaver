@@ -53,9 +53,18 @@ object EncoderCaps {
             !CodecNames.looksSoftware(info.name)
         }
 
-    /** Whether [info] is a software codec, by the same reading as [isHardware]. */
+    /**
+     * Whether [info] is a software codec, by the same reading as [isHardware].
+     * Android 10 sets isSoftwareOnly for its Codec2 codecs ("c2.android.")
+     * only: its OMX ones ("OMX.google.") carry neither flag, so a codec not
+     * on a chip is read by its name there.
+     */
     fun isSoftware(info: MediaCodecInfo): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isSoftwareOnly else CodecNames.looksSoftware(info.name)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.isSoftwareOnly || (!info.isHardwareAccelerated && CodecNames.looksSoftware(info.name))
+        } else {
+            CodecNames.looksSoftware(info.name)
+        }
 
     /**
      * The savings benchmark only, on an emulator, which has no hardware

@@ -365,17 +365,19 @@ object VideoCompressor {
                 outFile.delete()
                 continue
             }
+            // A MOV says it is a MOV again, a 3GP a 3GP, and the place reads
+            // as the camera wrote it.
+            same.restoreType(outFile)
+            same.restorePlace(outFile)
             // Read back before anything else: a copy in another codec, at
-            // another size or rotation, or with frames missing is not a copy
-            // of this video, however small.
+            // another size or rotation, with frames missing, or dated or
+            // placed otherwise is not a copy of this video, however small.
             val changed = KeptCheck.changes(context, uri, probe, codecMime, outFile)
             if (changed.isNotEmpty()) {
                 detail = "${attempt.label}: changed ${changed.joinToString(" ")}"
                 outFile.delete()
                 continue
             }
-            // A MOV says it is a MOV again, a 3GP a 3GP.
-            same.restoreType(outFile)
             val outBytes = outFile.length()
             // Media3 renamed this to say what it always was: the muxer's
             // own figure, close but not exact. The name changed, the

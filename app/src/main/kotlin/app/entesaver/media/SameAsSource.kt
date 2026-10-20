@@ -17,6 +17,7 @@ import androidx.media3.muxer.Muxer
 import androidx.media3.muxer.MuxerUtil
 import androidx.media3.transformer.InAppMp4Muxer
 import app.entesaver.core.logic.OptimisedMark
+import app.entesaver.core.logic.PlaceBox
 import java.io.File
 import java.io.FileInputStream
 import java.io.RandomAccessFile
@@ -27,11 +28,11 @@ import java.nio.channels.FileChannel
  * What of a video's file Media3 does not carry into a re-encoded copy, read
  * from the original and put back.
  *
- * Media3 carries the date, an Android camera's place, the rotation and the
- * camera's own notes (com.android.*, com.apple.quicktime.*) by itself. It
- * does not carry XMP, a place written with its altitude, the language of
- * each track, or the file type a MOV or 3GP file says it is: the copy gets
- * those from here. What no copy can keep - a third track (a Live Photo's
+ * Media3 carries the date, the rotation and the camera's own notes
+ * (com.android.*, com.apple.quicktime.*) by itself, and the place in its own
+ * wording. It does not carry XMP, the place as the camera wrote it (with its
+ * altitude, if it has one), the language of each track, or the file type a
+ * MOV or 3GP file says it is: the copy gets those from here. What no copy can keep - a third track (a Live Photo's
  * still-image track, a timecode, a second sound track) or a Samsung camera's
  * trailer, which holds its slow-motion and editing data - keeps the whole
  * video as it is ([keepsWhole]).
@@ -43,6 +44,8 @@ internal class SameAsSource private constructor(
     private val xmp: ByteArray?,
     /** The place, as the original's ©xyz box writes it. */
     private val xyz: String?,
+    /** That ©xyz box whole, to go into the copy as it is ([restorePlace]). */
+    private val xyzBox: ByteArray?,
     private val videoLanguage: String?,
     private val audioLanguage: String?,
     /** The picture's colour: its transfer is what says whether it is HDR. */
@@ -123,7 +126,21 @@ internal class SameAsSource private constructor(
         }
     }
 
+    /**
+     * The place written into the copy's index as the original wrote it, to
+     * the byte ([PlaceBox]): Media3 writes "+28.6139+077.2090/" as
+     * "+28.6139+77.2090/". Left in Media3's wording - the same point - when
+     * the copy has no room for it.
+     */
+    fun restorePlace(copy: File) {
+        val box = xyzBox ?: return
+        runCatching { RandomAccessFile(copy, "rw").use { PlaceBox.restore(it.channel, box, MAX_INDEX) } }
+    }
+
     companion object {
+
+        /** The largest index read whole: a phone's is a few hundred KB, an hour's a few MB. */
+        private const val MAX_INDEX = 16 shl 20
 
         /** Free bytes left after the copy's file-type box, for the original's. */
         private const val TYPE_ROOM = 64
@@ -169,6 +186,7 @@ internal class SameAsSource private constructor(
                     ftyp = boxes.ftyp?.takeIf { brandOf(it) != "isom" },
                     xmp = boxes.xmp,
                     xyz = boxes.xyz,
+                    xyzBox = boxes.xyzBox,
                     videoLanguage = video.firstOrNull()?.let(::languageOf),
                     audioLanguage = audio.firstOrNull()?.let(::languageOf),
                     colorInfo = video.firstOrNull()?.let { runCatching { MediaFormatUtil.getColorInfo(it) }.getOrNull() },
@@ -207,14 +225,12 @@ internal class SameAsSource private constructor(
         val ftyp: ByteArray? = null,
         val xmp: ByteArray? = null,
         val xyz: String? = null,
+        val xyzBox: ByteArray? = null,
         val dolbyVision: Boolean = false
     ) {
         companion object {
             /** The most of a box this reads whole: a file type, an XMP packet, a place. */
             private const val MAX_READ = 1 shl 20
-
-            /** The largest index searched for Dolby Vision; a phone's is a few hundred KB. */
-            private const val MAX_MOOV = 16 shl 20
 
             private val DOLBY = listOf("dvcC", "dvvC", "dvwC").map { it.toByteArray(Charsets.ISO_8859_1) }
 
@@ -229,6 +245,7 @@ internal class SameAsSource private constructor(
                 var ftyp: ByteArray? = null
                 var xmp: ByteArray? = null
                 var xyz: String? = null
+                var xyzBox: ByteArray? = null
                 var dolby = false
                 fun bytes(at: Long, n: Int): ByteArray =
                     ByteBuffer.allocate(n).also { ch.read(it, at) }.array()
@@ -253,7 +270,7 @@ internal class SameAsSource private constructor(
                             depth == 0 && type == "uuid" && len in 17..MAX_READ.toLong() &&
                                 bytes(body, 16).contentEquals(XMP_UUID) -> xmp = bytes(body + 16, len.toInt() - 16)
                             depth == 0 && type == "moov" -> {
-                                if (size <= MAX_MOOV) {
+                                if (size <= MAX_INDEX) {
                                     val moov = bytes(pos, size.toInt())
                                     dolby = DOLBY.any { moov.hasBox(it) }
                                 }
@@ -262,14 +279,16 @@ internal class SameAsSource private constructor(
                             depth == 1 && type == "udta" -> walk(body, pos + size, 2)
                             depth == 2 && type == "XMP_" && xmp == null && len in 1..MAX_READ.toLong() ->
                                 xmp = bytes(body, len.toInt())
-                            depth == 2 && type == "©xyz" && len in 5..256L ->
+                            depth == 2 && type == PlaceBox.XYZ && len in 5..256L -> {
                                 xyz = String(bytes(body + 4, len.toInt() - 4), Charsets.UTF_8)
+                                xyzBox = bytes(pos, size.toInt())
+                            }
                         }
                         pos += size
                     }
                 }
                 walk(0, ch.size(), 0)
-                return Boxes(ftyp, xmp, xyz, dolby)
+                return Boxes(ftyp, xmp, xyz, xyzBox, dolby)
             }
         }
     }
