@@ -137,6 +137,23 @@ class CiRuntimeTest {
     }
 
     @Test
+    fun `every install in the emulator harness is streamed, and a broken stream is tried once more`() {
+        // Run 593's API 30 leg passed all 183 tests and then lost the update
+        // check to adb: its incremental install hung for a minute, and both it
+        // and the streamed fallback broke off with "Failure calling service
+        // package: Broken pipe" before the package manager had answered.
+        val root = repoRoot()
+        assertTrue("repository root not found from app/", root != null)
+        val script = File(root, ".github/scripts/emulator-e2e.sh").readText()
+        val helper = script.substringAfter("install_apk() {").substringBefore("\n}\n")
+        assertTrue("installs are streamed", helper.contains("adb install --no-incremental"))
+        assertTrue("a broken stream is tried again", helper.contains("Broken pipe"))
+        assertTrue("once the package service answers", helper.contains("pm path android"))
+        val elsewhere = script.replace(helper, "").lines().filterNot { it.trimStart().startsWith("#") }
+        assertTrue("every other install goes through install_apk", elsewhere.none { it.contains("adb install") })
+    }
+
+    @Test
     fun `a release is tagged at the commit its APK was built from`() {
         // Without --target GitHub creates a missing tag at the branch head at
         // the moment of the call. The release job waits for every emulator
@@ -164,7 +181,7 @@ class CiRuntimeTest {
         // The install the walk runs on, in its own group: the update checks
         // before it install the same file and then remove it again.
         val group = script.indexOf("::group::Install the signed release APK and launch it")
-        val install = script.indexOf("adb install -r -g EnteSaver-release.apk", group)
+        val install = script.indexOf("install_apk \"\$LIVE_LOG\" -r -g EnteSaver-release.apk", group)
         val walk = script.indexOf("python3 .github/scripts/release-tab-walk.py")
         val promises = script.indexOf("android.permission.INTERNET")
         assertTrue("the release install must have its own group", group >= 0)
