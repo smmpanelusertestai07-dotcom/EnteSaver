@@ -18,15 +18,18 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -254,7 +257,9 @@ fun OnboardingScreen(vm: AppViewModel) {
     val testBusy by vm.testBusy.collectAsStateWithLifecycle()
     val trialSize by vm.trialSize.collectAsStateWithLifecycle()
 
-    Column(
+    // How tall the page shows, for the one thing on it that needs a ceiling
+    // inside its scroll: the album grid.
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             // Setup is drawn outside the Scaffold, so nothing was applying the
@@ -266,797 +271,807 @@ fun OnboardingScreen(vm: AppViewModel) {
             // glass while every screen after it stopped at a column. The first
             // screen anyone sees was the one screen not following the rules.
             .safeDrawingPadding()
-            .wrapContentWidth()
-            .widthIn(max = Dimens.ContentMaxWidth)
-            .verticalScroll(rememberScrollState())
-            .padding(Dimens.Screen)
     ) {
-        // No spacer here any more. The 28 dp that used to sit at the top was
-        // standing in for the status bar before safeDrawingPadding was
-        // applied above, and with the real inset in place it was simply 28 dp
-        // of nothing - which on a phone turned sideways, where the whole card
-        // has 480 dp of height to live in, is a line of text's worth of the
-        // screen spent on a gap that no longer holds anything back.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            BrandMark(size = 44.dp)
+        val pageHeight = maxHeight
+        Column(
+            Modifier
+                .fillMaxSize()
+                .wrapContentWidth()
+                .widthIn(max = Dimens.ContentMaxWidth)
+                .verticalScroll(rememberScrollState())
+                .padding(Dimens.Screen)
+        ) {
+            // No spacer here any more. The 28 dp that used to sit at the top was
+            // standing in for the status bar before safeDrawingPadding was
+            // applied above, and with the real inset in place it was simply 28 dp
+            // of nothing - which on a phone turned sideways, where the whole card
+            // has 480 dp of height to live in, is a line of text's worth of the
+            // screen spent on a gap that no longer holds anything back.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BrandMark(size = 44.dp)
+                Text(
+                    stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    // The name is set in the largest style the app owns, so at
+                    // the biggest accessibility font on a 320 dp phone it needs
+                    // most of the line. Weighted, it wraps inside what is left
+                    // beside the mark instead of measuring itself first and
+                    // pushing the row wider than the screen.
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp)
+                )
+            }
             Text(
-                stringResource(R.string.app_name),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                // The name is set in the largest style the app owns, so at
-                // the biggest accessibility font on a 320 dp phone it needs
-                // most of the line. Weighted, it wraps inside what is left
-                // beside the mark instead of measuring itself first and
-                // pushing the row wider than the screen.
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp)
+                stringResource(R.string.app_tagline),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp)
             )
-        }
-        Text(
-            stringResource(R.string.app_tagline),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 6.dp)
-        )
-        Spacer(Modifier.height(12.dp))
-        // Setup was abandoned partway last time. Say so, and say the thing
-        // that actually matters: nothing ran while they were away.
-        if (resumedAt > 0) {
-            AppCard(modifier = Modifier.padding(top = 16.dp), tonal = true) {
-                Text(
-                    stringResource(R.string.onb_resume_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    stringResource(R.string.onb_resume_text),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        // Counted over the steps this way of saving space shows.
-        val visible = OnboardingSteps.visible(options.saveMode)
-        val position = visible.indexOf(OnboardingSteps.at(step)).coerceAtLeast(0)
-        Text(
-            stringResource(R.string.onb_step_counter, position + 1, visible.size),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 18.dp)
-        )
-        StepDots(current = position, total = visible.size)
-
-        AnimatedContent(
-            targetState = step,
-            transitionSpec = {
-                // Slide the way the user is travelling through the steps.
-                val forward = targetState > initialState
-                val width = if (forward) 1 else -1
-                (slideInHorizontally(tween(260)) { it * width / 3 } + fadeIn(tween(260)))
-                    .togetherWith(
-                        slideOutHorizontally(tween(200)) { -it * width / 3 } + fadeOut(tween(160))
+            Spacer(Modifier.height(12.dp))
+            // Setup was abandoned partway last time. Say so, and say the thing
+            // that actually matters: nothing ran while they were away.
+            if (resumedAt > 0) {
+                AppCard(modifier = Modifier.padding(top = 16.dp), tonal = true) {
+                    Text(
+                        stringResource(R.string.onb_resume_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
                     )
-                    .using(SizeTransform(clip = false))
-            },
-            label = "onboardingStep"
-        ) { shown ->
-        when (OnboardingSteps.at(shown)) {
-            Step.WELCOME -> StepCard(
-                title = stringResource(R.string.onb0_title),
-                text = stringResource(R.string.onb0_text),
-                buttonLabel = stringResource(R.string.onb_start),
-                onButton = { go(Step.MEDIA) }
-            ) {
-                TextButton(onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) }) {
-                    Text(stringResource(R.string.onb0_import))
-                }
-                // What it is, before it is tapped: "Restore from a backup
-                // file" on a first-run screen reads like a step everyone is
-                // supposed to take, and picking the wrong file is the only
-                // way this screen can go wrong.
-                Text(
-                    stringResource(R.string.onb0_import_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                transferMessage?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        stringResource(R.string.onb_resume_text),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
+            // Counted over the steps this way of saving space shows.
+            val visible = OnboardingSteps.visible(options.saveMode)
+            val position = visible.indexOf(OnboardingSteps.at(step)).coerceAtLeast(0)
+            Text(
+                stringResource(R.string.onb_step_counter, position + 1, visible.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 18.dp)
+            )
+            StepDots(current = position, total = visible.size)
 
-            Step.MEDIA -> {
-                LaunchedEffect(Unit) { vm.refreshHealth() }
-                val access = mediaAccess
-                val blocked = access == Permissions.MediaAccess.NONE && mediaPromptBlocked
-                StepCard(
-                    title = stringResource(R.string.onb1_title),
-                    text = stringResource(R.string.onb1_text),
-                    buttonLabel = when {
-                        access == Permissions.MediaAccess.FULL -> stringResource(R.string.onb_next)
-                        access == Permissions.MediaAccess.PARTIAL ->
-                            stringResource(R.string.partial_action)
-                        blocked -> stringResource(R.string.perm_app_info)
-                        else -> stringResource(R.string.onb1_grant)
-                    },
-                    onButton = {
-                        when {
-                            access == Permissions.MediaAccess.FULL -> go(Step.ALBUMS)
-                            // "Select photos" was chosen. Asking again shows
-                            // the same picker; only the app's settings page
-                            // can raise the level to full. The same page is
-                            // the only way left once Android stops asking.
-                            access == Permissions.MediaAccess.PARTIAL || blocked ->
-                                OemPages.openAppInfo(context)
-                            else -> {
-                                mediaRationaleBefore = mediaRationale()
-                                permissionLauncher.launch(Permissions.mediaPermissionsToRequest())
+            AnimatedContent(
+                targetState = step,
+                transitionSpec = {
+                    // Slide the way the user is travelling through the steps.
+                    val forward = targetState > initialState
+                    val width = if (forward) 1 else -1
+                    (slideInHorizontally(tween(260)) { it * width / 3 } + fadeIn(tween(260)))
+                        .togetherWith(
+                            slideOutHorizontally(tween(200)) { -it * width / 3 } + fadeOut(tween(160))
+                        )
+                        .using(SizeTransform(clip = false))
+                },
+                label = "onboardingStep"
+            ) { shown ->
+            when (OnboardingSteps.at(shown)) {
+                Step.WELCOME -> StepCard(
+                    title = stringResource(R.string.onb0_title),
+                    text = stringResource(R.string.onb0_text),
+                    buttonLabel = stringResource(R.string.onb_start),
+                    onButton = { go(Step.MEDIA) }
+                ) {
+                    TextButton(onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) }) {
+                        Text(stringResource(R.string.onb0_import))
+                    }
+                    // What it is, before it is tapped: "Restore from a backup
+                    // file" on a first-run screen reads like a step everyone is
+                    // supposed to take, and picking the wrong file is the only
+                    // way this screen can go wrong.
+                    Text(
+                        stringResource(R.string.onb0_import_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    transferMessage?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
+                Step.MEDIA -> {
+                    LaunchedEffect(Unit) { vm.refreshHealth() }
+                    val access = mediaAccess
+                    val blocked = access == Permissions.MediaAccess.NONE && mediaPromptBlocked
+                    StepCard(
+                        title = stringResource(R.string.onb1_title),
+                        text = stringResource(R.string.onb1_text),
+                        buttonLabel = when {
+                            access == Permissions.MediaAccess.FULL -> stringResource(R.string.onb_next)
+                            access == Permissions.MediaAccess.PARTIAL ->
+                                stringResource(R.string.partial_action)
+                            blocked -> stringResource(R.string.perm_app_info)
+                            else -> stringResource(R.string.onb1_grant)
+                        },
+                        onButton = {
+                            when {
+                                access == Permissions.MediaAccess.FULL -> go(Step.ALBUMS)
+                                // "Select photos" was chosen. Asking again shows
+                                // the same picker; only the app's settings page
+                                // can raise the level to full. The same page is
+                                // the only way left once Android stops asking.
+                                access == Permissions.MediaAccess.PARTIAL || blocked ->
+                                    OemPages.openAppInfo(context)
+                                else -> {
+                                    mediaRationaleBefore = mediaRationale()
+                                    permissionLauncher.launch(Permissions.mediaPermissionsToRequest())
+                                }
                             }
                         }
-                    }
-                ) {
-                    if (access == Permissions.MediaAccess.PARTIAL) {
-                        Text(
-                            stringResource(R.string.partial_body),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    if (blocked) {
-                        // Why the button now leads out of the app, and what
-                        // to do once there. The "not asking?" link below
-                        // would only repeat the button, so it goes.
-                        Text(
-                            stringResource(R.string.onb1_blocked),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    } else {
-                        TextButton(onClick = { OemPages.openAppInfo(context) }) {
-                            Text(stringResource(R.string.onb1_appinfo))
+                    ) {
+                        if (access == Permissions.MediaAccess.PARTIAL) {
+                            Text(
+                                stringResource(R.string.partial_body),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
-                    }
-                }
-            }
-
-            Step.ALBUMS -> {
-                LaunchedEffect(Unit) { vm.loadBuckets() }
-                val buckets by vm.buckets.collectAsStateWithLifecycle()
-                val albums by vm.albums.collectAsStateWithLifecycle()
-                val bucketsLoaded by vm.bucketsLoaded.collectAsStateWithLifecycle()
-                val locked by vm.lockedBuckets.collectAsStateWithLifecycle()
-                val included = buckets.count { it !in options.excludedBuckets }
-                // How much this choice actually involves. Re-measured on every
-                // tick, off the main thread, and simply absent until it has
-                // been measured - a zero would read as an empty gallery.
-                val ticked by vm.selectedAlbumBytes.collectAsStateWithLifecycle()
-                LaunchedEffect(options.excludedBuckets, buckets) {
-                    vm.refreshSelectedAlbumBytes()
-                }
-                StepCard(
-                    title = stringResource(R.string.onb_albums_title),
-                    text = stringResource(R.string.onb_albums_text),
-                    // No Skip. Everything else here is a permission the app can
-                    // work without; this is the list of someone's photos.
-                    buttonLabel = stringResource(R.string.onb_albums_confirm),
-                    onButton = { go(Step.SAVE_MODE) },
-                    buttonAtEnd = true
-                ) {
-                    // Empty has two meanings and they are not the same
-                    // sentence. Until the scan has answered, this is a wait.
-                    // Once it has answered with nothing, the phone genuinely
-                    // has no photos on it - and saying "Loading albums..."
-                    // then is a wait that never ends.
-                    if (buckets.isEmpty()) {
-                        if (bucketsLoaded) {
-                            EmptyState(
-                                title = stringResource(R.string.folders_none_title),
-                                body = stringResource(R.string.folders_none_body)
+                        if (blocked) {
+                            // Why the button now leads out of the app, and what
+                            // to do once there. The "not asking?" link below
+                            // would only repeat the button, so it goes.
+                            Text(
+                                stringResource(R.string.onb1_blocked),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
                             )
                         } else {
-                            Text(
-                                stringResource(R.string.folders_loading),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            TextButton(onClick = { OemPages.openAppInfo(context) }) {
+                                Text(stringResource(R.string.onb1_appinfo))
+                            }
                         }
                     }
-                    // The running count and the select-all control cannot
-                    // share a line on a narrow phone at a large font: the
-                    // button carries no weight, so in a plain Row it was
-                    // measured first and left "12 albums selected" a word
-                    // wide down the left edge. Flowing, the button drops
-                    // underneath the count and both are readable in full.
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                }
+
+                Step.ALBUMS -> {
+                    LaunchedEffect(Unit) { vm.loadBuckets() }
+                    val buckets by vm.buckets.collectAsStateWithLifecycle()
+                    val albums by vm.albums.collectAsStateWithLifecycle()
+                    val bucketsLoaded by vm.bucketsLoaded.collectAsStateWithLifecycle()
+                    val locked by vm.lockedBuckets.collectAsStateWithLifecycle()
+                    val included = buckets.count { it !in options.excludedBuckets }
+                    // How much this choice actually involves. Re-measured on every
+                    // tick, off the main thread, and simply absent until it has
+                    // been measured - a zero would read as an empty gallery.
+                    val ticked by vm.selectedAlbumBytes.collectAsStateWithLifecycle()
+                    LaunchedEffect(options.excludedBuckets, buckets) {
+                        vm.refreshSelectedAlbumBytes()
+                    }
+                    StepCard(
+                        title = stringResource(R.string.onb_albums_title),
+                        text = stringResource(R.string.onb_albums_text),
+                        // No Skip. Everything else here is a permission the app can
+                        // work without; this is the list of someone's photos.
+                        buttonLabel = stringResource(R.string.onb_albums_confirm),
+                        onButton = { go(Step.SAVE_MODE) },
+                        buttonAtEnd = true
                     ) {
-                        Text(
-                            // "0 albums selected" is a zero standing where a
-                            // sentence should be; before anything is ticked
-                            // the state has a name instead.
-                            if (included == 0) {
-                                stringResource(R.string.onb_albums_none_yet)
-                            } else {
-                                pluralStringResource(
-                                    R.plurals.onb_albums_selected, included, included
+                        // Empty has two meanings and they are not the same
+                        // sentence. Until the scan has answered, this is a wait.
+                        // Once it has answered with nothing, the phone genuinely
+                        // has no photos on it - and saying "Loading albums..."
+                        // then is a wait that never ends.
+                        if (buckets.isEmpty()) {
+                            if (bucketsLoaded) {
+                                EmptyState(
+                                    title = stringResource(R.string.folders_none_title),
+                                    body = stringResource(R.string.folders_none_body)
                                 )
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        TextButton(
-                            enabled = buckets.isNotEmpty(),
-                            onClick = {
-                                vm.setExcludedBuckets(
-                                    if (included == 0) emptySet() else buckets.toSet()
+                            } else {
+                                Text(
+                                    stringResource(R.string.folders_loading),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+                        // The running count and the select-all control cannot
+                        // share a line on a narrow phone at a large font: the
+                        // button carries no weight, so in a plain Row it was
+                        // measured first and left "12 albums selected" a word
+                        // wide down the left edge. Flowing, the button drops
+                        // underneath the count and both are readable in full.
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                stringResource(
-                                    if (included == 0) R.string.onb_albums_all
-                                    else R.string.onb_albums_none
-                                ),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                // "0 albums selected" is a zero standing where a
+                                // sentence should be; before anything is ticked
+                                // the state has a name instead.
+                                if (included == 0) {
+                                    stringResource(R.string.onb_albums_none_yet)
+                                } else {
+                                    pluralStringResource(
+                                        R.plurals.onb_albums_selected, included, included
+                                    )
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
                             )
-                        }
-                    }
-                    // Absent until something is ticked: "0 MB in the ticked
-                    // albums" under "Nothing ticked yet" said the same nothing
-                    // twice, once as a figure.
-                    if (included > 0) ticked?.let { bytes ->
-                        Text(
-                            stringResource(R.string.onb_albums_size, Formats.bytes(bytes)),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    // The gallery, drawn as a gallery: covers with the tick on
-                    // the photo, through the same grid Settings uses. Lazy and
-                    // capped for the same reasons the old list was - hundreds
-                    // of albums are an ordinary gallery, and a lazy container
-                    // inside this page's own scroll needs a ceiling to measure
-                    // against at all.
-                    AlbumGrid(
-                        albums = albums,
-                        excluded = options.excludedBuckets,
-                        onToggle = { name, include ->
-                            vm.setAlbumIncluded(name, include)
-                        },
-                        testTag = ListTags.ROWS
-                    )
-                    // Folders that already hold another app's compressed
-                    // copies. Named so the absence is explained rather than
-                    // looking like the scan missed them.
-                    if (locked.isNotEmpty()) {
-                        Text(
-                            stringResource(R.string.folders_auto_excluded),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 12.dp)
-                        )
-                        for ((bucket, _) in locked) {
-                            Text(
-                                bucket,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.MiddleEllipsis
-                            )
-                        }
-                    }
-                    Text(
-                        stringResource(R.string.onb_albums_changeable),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 10.dp)
-                    )
-                }
-            }
-
-            Step.SAVE_MODE -> {
-                val fileAccess by vm.fileAccess.collectAsStateWithLifecycle()
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshFileAccess() }
-                val mode = options.saveMode
-                // Replace on this phone cannot start without Android's file
-                // access, so the button asks for it first and moves on after.
-                val ready = mode == SaveMode.COPIES || fileAccess
-                StepCard(
-                    title = stringResource(R.string.onb_save_title),
-                    text = stringResource(R.string.onb_save_text),
-                    buttonLabel = stringResource(if (ready) R.string.onb_next else R.string.file_access_grant),
-                    onButton = {
-                        when {
-                            ready -> go(Step.NOTIFICATIONS)
-                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> vm.openFileAccess()
-                            else -> writeLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        }
-                    },
-                    buttonAtEnd = true
-                ) {
-                    SaveModeOption(
-                        selected = mode == SaveMode.IN_PLACE,
-                        title = stringResource(R.string.save_mode_in_place),
-                        badge = stringResource(R.string.save_mode_recommended),
-                        lines = listOf(
-                            stringResource(R.string.save_mode_in_place_note),
-                            stringResource(R.string.save_mode_in_place_ente)
-                        )
-                    ) { vm.setSaveMode(SaveMode.IN_PLACE, note = false) }
-                    SaveModeOption(
-                        selected = mode == SaveMode.COPIES,
-                        title = stringResource(R.string.save_mode_copies),
-                        badge = null,
-                        lines = listOf(
-                            stringResource(R.string.save_mode_copies_note),
-                            stringResource(R.string.save_mode_copies_limit)
-                        )
-                    ) { vm.setSaveMode(SaveMode.COPIES, note = false) }
-                    if (mode == SaveMode.IN_PLACE) {
-                        Text(
-                            if (fileAccess) {
-                                stringResource(R.string.file_access_granted)
-                            } else {
-                                stringResource(R.string.file_access_needed) + " " + stringResource(R.string.file_access_safe)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 10.dp)
-                        )
-                    }
-                }
-            }
-
-            Step.NOTIFICATIONS -> {
-                // Asked again on every return, so coming back from the
-                // system's notification page shows what was chosen there.
-                var notifOn by remember { mutableStateOf(Permissions.hasNotifications(context)) }
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                    notifOn = Permissions.hasNotifications(context)
-                }
-                // "Allow" only where there is something to allow. Already
-                // allowed, the button is plain "Next". Blocked below Android
-                // 13, where no app may ask, it opens the app's notification
-                // page - it used to say "Allow" and quietly move on, leaving
-                // every alert switched off behind a button that claimed to
-                // have switched them on.
-                StepCard(
-                    title = stringResource(R.string.onb2_title),
-                    text = stringResource(R.string.onb2_text),
-                    buttonLabel = stringResource(if (notifOn) R.string.onb_next else R.string.onb2_grant),
-                    onButton = {
-                        when {
-                            notifOn -> go(Step.BATTERY)
-                            Build.VERSION.SDK_INT >= 33 ->
-                                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            else -> OemPages.openNotificationSettings(context)
-                        }
-                    },
-                    onSkip = if (notifOn) null else ({ go(Step.BATTERY) })
-                )
-            }
-
-            Step.BATTERY -> {
-                LaunchedEffect(Unit) { vm.refreshPowerRequirements() }
-                val requirements by vm.powerRequirements.collectAsStateWithLifecycle()
-                // One way on. "Done, next" and "Skip" sat side by side here
-                // and both did exactly the same thing; every row below is
-                // optional, and the button says only where it goes.
-                StepCard(
-                    title = stringResource(R.string.onb3_title),
-                    text = stringResource(R.string.onb3_text),
-                    buttonLabel = stringResource(R.string.onb_next),
-                    onButton = { go(if (Step.USAGE in OnboardingSteps.visible(options.saveMode)) Step.USAGE else Step.CLOUD) }
-                ) {
-                    // One row per thing this particular phone can break, each
-                    // opening the page that holds that switch.
-                    for (requirement in requirements) {
-                        PowerRow(requirement) {
-                            vm.openPowerPage(requirement.id)
-                            vm.refreshPowerRequirements()
-                        }
-                    }
-                    // Nobody has to get this right now: the same rows, with
-                    // the phone-specific path to each switch, live in
-                    // Settings for as long as the app is installed.
-                    Text(
-                        stringResource(R.string.onb3_later),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 10.dp)
-                    )
-                }
-            }
-
-            // The only step whose primary action leaves the app instead of
-            // moving on, because usage access can only be granted on the
-            // system page. The same pair as every other optional step: one
-            // filled button for the thing to do, and "Skip" as a text button
-            // for carrying on without it. It used to be an outlined "Done,
-            // next" here and a text "Skip" everywhere else - one action in
-            // two costumes, and a "Done" on a step nobody had done.
-            Step.USAGE -> {
-                // Resumed onto a step this way of saving space does not use.
-                if (Step.USAGE !in OnboardingSteps.visible(options.saveMode)) {
-                    LaunchedEffect(Unit) { go(Step.CLOUD) }
-                }
-                // The step knows whether it has been done. It used to offer
-                // "Grant usage access" forever, even to someone who had just
-                // granted it on the system page and come back. Granted, the
-                // one filled button is "Next".
-                var usageOn by remember {
-                    mutableStateOf(UsageVerifier.hasUsageAccess(context))
-                }
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                    usageOn = UsageVerifier.hasUsageAccess(context)
-                }
-                if (usageOn) {
-                    StepCard(
-                        title = stringResource(R.string.onb4_title),
-                        text = stringResource(R.string.onb4_granted),
-                        buttonLabel = stringResource(R.string.onb_next),
-                        onButton = { go(Step.CLOUD) }
-                    )
-                } else {
-                    // Android 15 greys the switch out for an app installed
-                    // from a file, which is how Ente Saver arrives.
-                    val text = stringResource(R.string.onb4_text)
-                    StepCard(
-                        title = stringResource(R.string.onb4_title),
-                        text = if (Build.VERSION.SDK_INT >= 35) {
-                            text + "\n\n" + stringResource(R.string.usage_restricted)
-                        } else {
-                            text
-                        },
-                        buttonLabel = stringResource(R.string.onb4_grant),
-                        onButton = { OemPages.openUsageAccess(context) },
-                        onSkip = { go(Step.CLOUD) }
-                    )
-                }
-            }
-
-            Step.CLOUD -> {
-                val installed by vm.enteInstalled.collectAsStateWithLifecycle()
-                val link by vm.linkState.collectAsStateWithLifecycle()
-                // Asked again every time the app comes back: the person this
-                // step sends off to install Ente returns to a step that
-                // already knows, without having to go back and forth.
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshEnte() }
-                // Replacing in place leaves Ente as it is: it backs the
-                // albums up and takes each smaller version over the old one.
-                // Everything about Ente Saver's own folder is for copies.
-                val copies = options.saveMode == SaveMode.COPIES
-                StepCard(
-                    title = stringResource(R.string.onb5_title),
-                    text = stringResource(if (copies) R.string.cloud_intended else R.string.save_mode_in_place_ente),
-                    // The primary action is last, after everything the user
-                    // has to read and do. Continuing past the double-backup
-                    // card is the acknowledgement Z5.2 asks to record - the
-                    // card was on screen, unconditionally, before this button.
-                    // Setup is not blocked without Ente: light copies are
-                    // still made, they just wait until Ente is there.
-                    buttonLabel = stringResource(R.string.onb_done_next),
-                    onButton = {
-                        vm.acknowledgeDoubleBackup()
-                        go(Step.READY)
-                    },
-                    // After the warning, not above it: the button stood
-                    // between the step's opening sentence and the card it is
-                    // meant to acknowledge, so it could be pressed before the
-                    // warning had even scrolled into view.
-                    buttonAtEnd = true
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        EnteIcon(installed = installed)
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            if (installed) {
-                                stringResource(R.string.onb5_found, EnteApp.LABEL)
-                            } else {
-                                stringResource(R.string.ente_missing_title)
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    if (!installed) {
-                        Text(
-                            stringResource(R.string.ente_missing_body),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp)
-                        )
-                        EnteInstallButtons(
-                            onInstall = { vm.installEnte(it) },
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
-                    if (!copies) {
-                        Text(
-                            stringResource(R.string.save_mode_ente_folders),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(top = 10.dp)
-                        )
-                        if (installed) {
-                            OutlinedButton(onClick = { vm.openEnte() }, modifier = Modifier.padding(top = 8.dp)) {
+                            TextButton(
+                                enabled = buckets.isNotEmpty(),
+                                onClick = {
+                                    vm.setExcludedBuckets(
+                                        if (included == 0) emptySet() else buckets.toSet()
+                                    )
+                                }
+                            ) {
                                 Text(
-                                    stringResource(R.string.onb5_open, EnteApp.LABEL),
+                                    stringResource(
+                                        if (included == 0) R.string.onb_albums_all
+                                        else R.string.onb_albums_none
+                                    ),
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
-                        return@StepCard
-                    }
-                    // Z5.1: the one mistake that silently doubles a cloud
-                    // bill - Ente backing up Camera AND the light copies.
-                    // Shown always, even when Ente's own folder list cannot
-                    // be read.
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        shape = RoundedCornerShape(Dimens.ControlCorner),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp)
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
+                        // Absent until something is ticked: "0 MB in the ticked
+                        // albums" under "Nothing ticked yet" said the same nothing
+                        // twice, once as a figure.
+                        if (included > 0) ticked?.let { bytes ->
                             Text(
-                                stringResource(R.string.double_backup_title),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                stringResource(R.string.onb_albums_size, Formats.bytes(bytes)),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                        // The gallery, drawn as a gallery: covers with the tick on
+                        // the photo, through the same grid Settings uses. Lazy and
+                        // capped for the same reasons the old list was - hundreds
+                        // of albums are an ordinary gallery, and a lazy container
+                        // inside this page's own scroll needs a ceiling to measure
+                        // against at all.
+                        AlbumGrid(
+                            albums = albums,
+                            excluded = options.excludedBuckets,
+                            onToggle = { name, include ->
+                                vm.setAlbumIncluded(name, include)
+                            },
+                            testTag = ListTags.ROWS,
+                            viewportHeight = pageHeight
+                        )
+                        // Folders that already hold another app's compressed
+                        // copies. Named so the absence is explained rather than
+                        // looking like the scan missed them.
+                        if (locked.isNotEmpty()) {
                             Text(
-                                stringResource(R.string.double_backup_body),
+                                stringResource(R.string.folders_auto_excluded),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 12.dp)
+                            )
+                            for ((bucket, _) in locked) {
+                                Text(
+                                    bucket,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.MiddleEllipsis
+                                )
+                            }
+                        }
+                        Text(
+                            stringResource(R.string.onb_albums_changeable),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                    }
+                }
+
+                Step.SAVE_MODE -> {
+                    val fileAccess by vm.fileAccess.collectAsStateWithLifecycle()
+                    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshFileAccess() }
+                    val mode = options.saveMode
+                    // Replace on this phone cannot start without Android's file
+                    // access, so the button asks for it first and moves on after.
+                    val ready = mode == SaveMode.COPIES || fileAccess
+                    StepCard(
+                        title = stringResource(R.string.onb_save_title),
+                        text = stringResource(R.string.onb_save_text),
+                        buttonLabel = stringResource(if (ready) R.string.onb_next else R.string.file_access_grant),
+                        onButton = {
+                            when {
+                                ready -> go(Step.NOTIFICATIONS)
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> vm.openFileAccess()
+                                else -> writeLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            }
+                        },
+                        buttonAtEnd = true
+                    ) {
+                        SaveModeOption(
+                            selected = mode == SaveMode.IN_PLACE,
+                            title = stringResource(R.string.save_mode_in_place),
+                            badge = stringResource(R.string.save_mode_recommended),
+                            lines = listOf(
+                                stringResource(R.string.save_mode_in_place_note),
+                                stringResource(R.string.save_mode_in_place_ente)
+                            )
+                        ) { vm.setSaveMode(SaveMode.IN_PLACE, note = false) }
+                        SaveModeOption(
+                            selected = mode == SaveMode.COPIES,
+                            title = stringResource(R.string.save_mode_copies),
+                            badge = null,
+                            lines = listOf(
+                                stringResource(R.string.save_mode_copies_note),
+                                stringResource(R.string.save_mode_copies_limit)
+                            )
+                        ) { vm.setSaveMode(SaveMode.COPIES, note = false) }
+                        if (mode == SaveMode.IN_PLACE) {
+                            Text(
+                                if (fileAccess) {
+                                    stringResource(R.string.file_access_granted)
+                                } else {
+                                    stringResource(R.string.file_access_needed) + " " + stringResource(R.string.file_access_safe)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 10.dp)
+                            )
+                        }
+                    }
+                }
+
+                Step.NOTIFICATIONS -> {
+                    // Asked again on every return, so coming back from the
+                    // system's notification page shows what was chosen there.
+                    var notifOn by remember { mutableStateOf(Permissions.hasNotifications(context)) }
+                    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                        notifOn = Permissions.hasNotifications(context)
+                    }
+                    // "Allow" only where there is something to allow. Already
+                    // allowed, the button is plain "Next". Blocked below Android
+                    // 13, where no app may ask, it opens the app's notification
+                    // page - it used to say "Allow" and quietly move on, leaving
+                    // every alert switched off behind a button that claimed to
+                    // have switched them on.
+                    StepCard(
+                        title = stringResource(R.string.onb2_title),
+                        text = stringResource(R.string.onb2_text),
+                        buttonLabel = stringResource(if (notifOn) R.string.onb_next else R.string.onb2_grant),
+                        onButton = {
+                            when {
+                                notifOn -> go(Step.BATTERY)
+                                Build.VERSION.SDK_INT >= 33 ->
+                                    notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                else -> OemPages.openNotificationSettings(context)
+                            }
+                        },
+                        onSkip = if (notifOn) null else ({ go(Step.BATTERY) })
+                    )
+                }
+
+                Step.BATTERY -> {
+                    LaunchedEffect(Unit) { vm.refreshPowerRequirements() }
+                    val requirements by vm.powerRequirements.collectAsStateWithLifecycle()
+                    // One way on. "Done, next" and "Skip" sat side by side here
+                    // and both did exactly the same thing; every row below is
+                    // optional, and the button says only where it goes.
+                    StepCard(
+                        title = stringResource(R.string.onb3_title),
+                        text = stringResource(R.string.onb3_text),
+                        buttonLabel = stringResource(R.string.onb_next),
+                        onButton = { go(if (Step.USAGE in OnboardingSteps.visible(options.saveMode)) Step.USAGE else Step.CLOUD) }
+                    ) {
+                        // One row per thing this particular phone can break, each
+                        // opening the page that holds that switch.
+                        for (requirement in requirements) {
+                            PowerRow(requirement) {
+                                vm.openPowerPage(requirement.id)
+                                vm.refreshPowerRequirements()
+                            }
+                        }
+                        // Nobody has to get this right now: the same rows, with
+                        // the phone-specific path to each switch, live in
+                        // Settings for as long as the app is installed.
+                        Text(
+                            stringResource(R.string.onb3_later),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                    }
+                }
+
+                // The only step whose primary action leaves the app instead of
+                // moving on, because usage access can only be granted on the
+                // system page. The same pair as every other optional step: one
+                // filled button for the thing to do, and "Skip" as a text button
+                // for carrying on without it. It used to be an outlined "Done,
+                // next" here and a text "Skip" everywhere else - one action in
+                // two costumes, and a "Done" on a step nobody had done.
+                Step.USAGE -> {
+                    // Resumed onto a step this way of saving space does not use.
+                    if (Step.USAGE !in OnboardingSteps.visible(options.saveMode)) {
+                        LaunchedEffect(Unit) { go(Step.CLOUD) }
+                    }
+                    // The step knows whether it has been done. It used to offer
+                    // "Grant usage access" forever, even to someone who had just
+                    // granted it on the system page and come back. Granted, the
+                    // one filled button is "Next".
+                    var usageOn by remember {
+                        mutableStateOf(UsageVerifier.hasUsageAccess(context))
+                    }
+                    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                        usageOn = UsageVerifier.hasUsageAccess(context)
+                    }
+                    if (usageOn) {
+                        StepCard(
+                            title = stringResource(R.string.onb4_title),
+                            text = stringResource(R.string.onb4_granted),
+                            buttonLabel = stringResource(R.string.onb_next),
+                            onButton = { go(Step.CLOUD) }
+                        )
+                    } else {
+                        // Android 15 greys the switch out for an app installed
+                        // from a file, which is how Ente Saver arrives.
+                        val text = stringResource(R.string.onb4_text)
+                        StepCard(
+                            title = stringResource(R.string.onb4_title),
+                            text = if (Build.VERSION.SDK_INT >= 35) {
+                                text + "\n\n" + stringResource(R.string.usage_restricted)
+                            } else {
+                                text
+                            },
+                            buttonLabel = stringResource(R.string.onb4_grant),
+                            onButton = { OemPages.openUsageAccess(context) },
+                            onSkip = { go(Step.CLOUD) }
+                        )
+                    }
+                }
+
+                Step.CLOUD -> {
+                    val installed by vm.enteInstalled.collectAsStateWithLifecycle()
+                    val link by vm.linkState.collectAsStateWithLifecycle()
+                    // Asked again every time the app comes back: the person this
+                    // step sends off to install Ente returns to a step that
+                    // already knows, without having to go back and forth.
+                    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshEnte() }
+                    // Replacing in place leaves Ente as it is: it backs the
+                    // albums up and takes each smaller version over the old one.
+                    // Everything about Ente Saver's own folder is for copies.
+                    val copies = options.saveMode == SaveMode.COPIES
+                    StepCard(
+                        title = stringResource(R.string.onb5_title),
+                        text = stringResource(if (copies) R.string.cloud_intended else R.string.save_mode_in_place_ente),
+                        // The primary action is last, after everything the user
+                        // has to read and do. Continuing past the double-backup
+                        // card is the acknowledgement Z5.2 asks to record - the
+                        // card was on screen, unconditionally, before this button.
+                        // Setup is not blocked without Ente: light copies are
+                        // still made, they just wait until Ente is there.
+                        buttonLabel = stringResource(R.string.onb_done_next),
+                        onButton = {
+                            vm.acknowledgeDoubleBackup()
+                            go(Step.READY)
+                        },
+                        // After the warning, not above it: the button stood
+                        // between the step's opening sentence and the card it is
+                        // meant to acknowledge, so it could be pressed before the
+                        // warning had even scrolled into view.
+                        buttonAtEnd = true
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            EnteIcon(installed = installed)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                if (installed) {
+                                    stringResource(R.string.onb5_found, EnteApp.LABEL)
+                                } else {
+                                    stringResource(R.string.ente_missing_title)
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.padding(top = 4.dp)
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        if (!installed) {
+                            Text(
+                                stringResource(R.string.ente_missing_body),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                            EnteInstallButtons(
+                                onInstall = { vm.installEnte(it) },
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                        if (!copies) {
+                            Text(
+                                stringResource(R.string.save_mode_ente_folders),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(top = 10.dp)
                             )
                             if (installed) {
-                                TextButton(onClick = { vm.openEnte() }) {
-                                    Text(stringResource(R.string.double_backup_show))
+                                OutlinedButton(onClick = { vm.openEnte() }, modifier = Modifier.padding(top = 8.dp)) {
+                                    Text(
+                                        stringResource(R.string.onb5_open, EnteApp.LABEL),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            return@StepCard
+                        }
+                        // Z5.1: the one mistake that silently doubles a cloud
+                        // bill - Ente backing up Camera AND the light copies.
+                        // Shown always, even when Ente's own folder list cannot
+                        // be read.
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(Dimens.ControlCorner),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(
+                                    stringResource(R.string.double_backup_title),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                Text(
+                                    stringResource(R.string.double_backup_body),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                                if (installed) {
+                                    TextButton(onClick = { vm.openEnte() }) {
+                                        Text(stringResource(R.string.double_backup_show))
+                                    }
+                                }
+                            }
+                        }
+                        FolderPaths(options.layout)
+                        Text(
+                            stringResource(R.string.cl_ente),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            stringResource(R.string.promise_exact),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        // Two buttons that wrap rather than run off a narrow
+                        // phone at a large font.
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (installed) {
+                                OutlinedButton(onClick = {
+                                    vm.openEnte()
+                                    vm.clearLinkState()
+                                }) {
+                                    Text(
+                                        stringResource(R.string.onb5_open, EnteApp.LABEL),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            OutlinedButton(onClick = { vm.verifyCloudLink() }) {
+                                Text(
+                                    stringResource(R.string.onb5_check),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        // Never "set up correctly" on faith: only what was checked.
+                        link?.let { state ->
+                            Text(
+                                linkStateLine(state),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (state == AppViewModel.LinkState.CONNECTED) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                    }
+                }
+
+                Step.READY -> StepCard(
+                    title = stringResource(R.string.onb_ready_title),
+                    text = stringResource(R.string.onb_ready_text),
+                    // The whole app is idle until this tap. Nothing has been
+                    // scheduled, nothing has been copied, nothing has been read
+                    // beyond the trial the user asked for.
+                    buttonLabel = stringResource(R.string.onb_ready_start),
+                    onButton = { vm.finishOnboarding() },
+                    // Under the summary it confirms, not above it. "Start backing
+                    // up" sat over the very lines that say what starting means,
+                    // including the warning that no album is ticked.
+                    buttonAtEnd = true
+                ) {
+                    val allAlbums by vm.buckets.collectAsStateWithLifecycle()
+                    LaunchedEffect(Unit) { vm.loadBuckets() }
+                    val includedAlbums = allAlbums.count { it !in options.excludedBuckets }
+                    // Correcting the albums opens the chooser here, over the
+                    // summary, as a sheet. The old way walked back to step 3 and
+                    // the page read as five steps of progress lost.
+                    var choosingAlbums by rememberSaveable { mutableStateOf(false) }
+                    SummaryLine(
+                        stringResource(R.string.onb_ready_what),
+                        scopeSummary(options.scope, includedAlbums, allAlbums.size)
+                    )
+                    // Every album excluded means "Start backing up" would do
+                    // nothing, for ever, with no error - the worst possible
+                    // outcome of a setup screen. Say it here, where it can still
+                    // be fixed in one tap.
+                    if (allAlbums.isNotEmpty() && includedAlbums == 0) {
+                        WarningText(stringResource(R.string.onb_ready_no_albums))
+                        // Outlined like "Copy folder path" below it: a text
+                        // button's own padding set its label in from the line the
+                        // warning starts on, and it read as a stray link.
+                        OutlinedButton(
+                            onClick = { choosingAlbums = true },
+                            modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                        ) {
+                            Text(stringResource(R.string.onb_ready_pick_albums))
+                        }
+                    }
+                    SummaryLine(
+                        stringResource(R.string.onb_ready_quality),
+                        qualitySummary()
+                    )
+                    SummaryLine(
+                        stringResource(R.string.onb_ready_when),
+                        speedSummary(options.speed)
+                    )
+                    val enteHere = remember { EnteApp.isInstalled(context) }
+                    SummaryLine(
+                        stringResource(R.string.onb_ready_cloud),
+                        if (enteHere) EnteApp.LABEL else stringResource(R.string.onb_ready_cloud_none)
+                    )
+                    // The summary is the last thing read before the app starts
+                    // working, so the one condition that changes what "working"
+                    // will achieve belongs on it.
+                    if (!enteHere) {
+                        Text(
+                            stringResource(R.string.cloud_none_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    // Only where there is a card to choose. On a phone without
+                    // one this question has a single possible answer, and asking
+                    // it anyway is a step that teaches nothing.
+                    val volumes by vm.volumes.collectAsStateWithLifecycle()
+                    val writableVolumes by vm.writableVolumes.collectAsStateWithLifecycle()
+                    LaunchedEffect(Unit) { vm.refreshVolumes() }
+                    val offerableVolumes = volumes.filter {
+                        it.isPrimary || it.mediaVolumeName in writableVolumes
+                    }
+                    if (offerableVolumes.size > 1) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            stringResource(R.string.onb_ready_where),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        SegmentedChoice(
+                            offerableVolumes.map { vol ->
+                                val value = if (vol.isPrimary) "" else vol.mediaVolumeName
+                                value to stringResource(
+                                    if (vol.isPrimary) R.string.volume_internal
+                                    else R.string.volume_sd
+                                )
+                            },
+                            options.storageVolume
+                        ) { vm.setStorageVolume(it) }
+                        Text(
+                            stringResource(R.string.onb_ready_sd_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    // The folder is printed, not described: this exact string is
+                    // what has to be picked inside the cloud app.
+                    FolderPaths(options.layout)
+                    CopyPathButton(options.layout)
+
+                    Spacer(Modifier.height(12.dp))
+                    var compare by remember { mutableStateOf<ItemRow?>(null) }
+                    TrialCard(
+                        size = trialSize,
+                        running = testRunning,
+                        busy = testBusy,
+                        results = testItems,
+                        onRun = { vm.startTestRun() },
+                        // Nothing has been scanned during setup, so the waiting
+                        // count is zero on a perfectly normal phone. What the
+                        // trial actually needs is an album to read.
+                        albumsChosen = includedAlbums > 0,
+                        // The warning above already offers this when no album is
+                        // ticked, next to the sentence explaining why. Two
+                        // identical buttons in one card is one too many.
+                        onChooseAlbums = if (includedAlbums == 0 && allAlbums.isNotEmpty()) {
+                            null
+                        } else {
+                            { choosingAlbums = true }
+                        },
+                        accessFull = mediaAccess == Permissions.MediaAccess.FULL,
+                        // The same as on Home: a result opens its before-and-after,
+                        // and the copies can be removed here, where they were made.
+                        onOpen = { item -> compare = item.row },
+                        onDiscard = { vm.discardTrial() }
+                    )
+                    compare?.let { row ->
+                        CompareSheet(row = row, onDismiss = { compare = null })
+                    }
+
+                    if (choosingAlbums) {
+                        ModalBottomSheet(
+                            onDismissRequest = { choosingAlbums = false },
+                            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                            // Its Done sits against the end: on a phone turned
+                            // sideways that was under the navigation buttons.
+                            contentWindowInsets = { WindowInsets.safeDrawing }
+                        ) {
+                            Column {
+                                // The grid takes what the button leaves. Done sat
+                                // inside the grid's footer once, which on a short
+                                // screen put it below the fold of the grid's own
+                                // scroll - a finish button that had to be found.
+                                // Pinned here it is always on screen, and the
+                                // weight is the ceiling the lazy grid measures
+                                // against when the screen is shorter than it is.
+                                AlbumChooserSheetBody(
+                                    vm,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Button(
+                                    onClick = { choosingAlbums = false },
+                                    modifier = Modifier
+                                        .align(Alignment.End)
+                                        .padding(horizontal = Dimens.Screen)
+                                        .padding(top = 4.dp, bottom = 20.dp)
+                                ) {
+                                    Text(
+                                        stringResource(R.string.albums_sheet_done),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
                     }
-                    FolderPaths(options.layout)
-                    Text(
-                        stringResource(R.string.cl_ente),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    Text(
-                        stringResource(R.string.promise_exact),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    // Two buttons that wrap rather than run off a narrow
-                    // phone at a large font.
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (installed) {
-                            OutlinedButton(onClick = {
-                                vm.openEnte()
-                                vm.clearLinkState()
-                            }) {
-                                Text(
-                                    stringResource(R.string.onb5_open, EnteApp.LABEL),
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        OutlinedButton(onClick = { vm.verifyCloudLink() }) {
-                            Text(
-                                stringResource(R.string.onb5_check),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    // Never "set up correctly" on faith: only what was checked.
-                    link?.let { state ->
-                        Text(
-                            linkStateLine(state),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (state == AppViewModel.LinkState.CONNECTED) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
                 }
             }
+            }
 
-            Step.READY -> StepCard(
-                title = stringResource(R.string.onb_ready_title),
-                text = stringResource(R.string.onb_ready_text),
-                // The whole app is idle until this tap. Nothing has been
-                // scheduled, nothing has been copied, nothing has been read
-                // beyond the trial the user asked for.
-                buttonLabel = stringResource(R.string.onb_ready_start),
-                onButton = { vm.finishOnboarding() },
-                // Under the summary it confirms, not above it. "Start backing
-                // up" sat over the very lines that say what starting means,
-                // including the warning that no album is ticked.
-                buttonAtEnd = true
-            ) {
-                val allAlbums by vm.buckets.collectAsStateWithLifecycle()
-                LaunchedEffect(Unit) { vm.loadBuckets() }
-                val includedAlbums = allAlbums.count { it !in options.excludedBuckets }
-                // Correcting the albums opens the chooser here, over the
-                // summary, as a sheet. The old way walked back to step 3 and
-                // the page read as five steps of progress lost.
-                var choosingAlbums by rememberSaveable { mutableStateOf(false) }
-                SummaryLine(
-                    stringResource(R.string.onb_ready_what),
-                    scopeSummary(options.scope, includedAlbums, allAlbums.size)
-                )
-                // Every album excluded means "Start backing up" would do
-                // nothing, for ever, with no error - the worst possible
-                // outcome of a setup screen. Say it here, where it can still
-                // be fixed in one tap.
-                if (allAlbums.isNotEmpty() && includedAlbums == 0) {
-                    WarningText(stringResource(R.string.onb_ready_no_albums))
-                    // Outlined like "Copy folder path" below it: a text
-                    // button's own padding set its label in from the line the
-                    // warning starts on, and it read as a stray link.
-                    OutlinedButton(
-                        onClick = { choosingAlbums = true },
-                        modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
-                    ) {
-                        Text(stringResource(R.string.onb_ready_pick_albums))
-                    }
-                }
-                SummaryLine(
-                    stringResource(R.string.onb_ready_quality),
-                    qualitySummary()
-                )
-                SummaryLine(
-                    stringResource(R.string.onb_ready_when),
-                    speedSummary(options.speed)
-                )
-                val enteHere = remember { EnteApp.isInstalled(context) }
-                SummaryLine(
-                    stringResource(R.string.onb_ready_cloud),
-                    if (enteHere) EnteApp.LABEL else stringResource(R.string.onb_ready_cloud_none)
-                )
-                // The summary is the last thing read before the app starts
-                // working, so the one condition that changes what "working"
-                // will achieve belongs on it.
-                if (!enteHere) {
-                    Text(
-                        stringResource(R.string.cloud_none_body),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-                // Only where there is a card to choose. On a phone without
-                // one this question has a single possible answer, and asking
-                // it anyway is a step that teaches nothing.
-                val volumes by vm.volumes.collectAsStateWithLifecycle()
-                val writableVolumes by vm.writableVolumes.collectAsStateWithLifecycle()
-                LaunchedEffect(Unit) { vm.refreshVolumes() }
-                val offerableVolumes = volumes.filter {
-                    it.isPrimary || it.mediaVolumeName in writableVolumes
-                }
-                if (offerableVolumes.size > 1) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.onb_ready_where),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    SegmentedChoice(
-                        offerableVolumes.map { vol ->
-                            val value = if (vol.isPrimary) "" else vol.mediaVolumeName
-                            value to stringResource(
-                                if (vol.isPrimary) R.string.volume_internal
-                                else R.string.volume_sd
-                            )
-                        },
-                        options.storageVolume
-                    ) { vm.setStorageVolume(it) }
-                    Text(
-                        stringResource(R.string.onb_ready_sd_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-
-                Spacer(Modifier.height(10.dp))
-                // The folder is printed, not described: this exact string is
-                // what has to be picked inside the cloud app.
-                FolderPaths(options.layout)
-                CopyPathButton(options.layout)
-
-                Spacer(Modifier.height(12.dp))
-                var compare by remember { mutableStateOf<ItemRow?>(null) }
-                TrialCard(
-                    size = trialSize,
-                    running = testRunning,
-                    busy = testBusy,
-                    results = testItems,
-                    onRun = { vm.startTestRun() },
-                    // Nothing has been scanned during setup, so the waiting
-                    // count is zero on a perfectly normal phone. What the
-                    // trial actually needs is an album to read.
-                    albumsChosen = includedAlbums > 0,
-                    // The warning above already offers this when no album is
-                    // ticked, next to the sentence explaining why. Two
-                    // identical buttons in one card is one too many.
-                    onChooseAlbums = if (includedAlbums == 0 && allAlbums.isNotEmpty()) {
-                        null
-                    } else {
-                        { choosingAlbums = true }
-                    },
-                    accessFull = mediaAccess == Permissions.MediaAccess.FULL,
-                    // The same as on Home: a result opens its before-and-after,
-                    // and the copies can be removed here, where they were made.
-                    onOpen = { item -> compare = item.row },
-                    onDiscard = { vm.discardTrial() }
-                )
-                compare?.let { row ->
-                    CompareSheet(row = row, onDismiss = { compare = null })
-                }
-
-                if (choosingAlbums) {
-                    ModalBottomSheet(
-                        onDismissRequest = { choosingAlbums = false },
-                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                    ) {
-                        Column {
-                            // The grid takes what the button leaves. Done sat
-                            // inside the grid's footer once, which on a short
-                            // screen put it below the fold of the grid's own
-                            // scroll - a finish button that had to be found.
-                            // Pinned here it is always on screen, and the
-                            // weight is the ceiling the lazy grid measures
-                            // against when the screen is shorter than it is.
-                            AlbumChooserSheetBody(
-                                vm,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            Button(
-                                onClick = { choosingAlbums = false },
-                                modifier = Modifier
-                                    .align(Alignment.End)
-                                    .padding(horizontal = Dimens.Screen)
-                                    .padding(top = 4.dp, bottom = 20.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.albums_sheet_done),
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
+            if (step > 0) {
+                TextButton(onClick = { backOneStep() }) {
+                    Text(stringResource(R.string.back))
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
-        }
-
-        if (step > 0) {
-            TextButton(onClick = { backOneStep() }) {
-                Text(stringResource(R.string.back))
-            }
-        }
-        Spacer(Modifier.height(24.dp))
     }
 }
 

@@ -274,14 +274,13 @@ fun MetricTile(
 ) {
     val scheme = MaterialTheme.colorScheme
     val interaction = remember { MutableInteractionSource() }
-    // The floor grows with the text, because what has to fit inside a tile is
-    // text - the same reasoning, and the same 200% cap, as the width floor the
-    // grid below uses to decide how many tiles share a row. A bare 126 dp
-    // stops meaning anything at a large font: the number and its label both
-    // grow past it, the tile grows with them, and every tile in the row ends
-    // up at whatever height its own label happened to need, which is the
-    // ragged grid the floor exists to prevent.
-    val floor = TileHeight * LocalDensity.current.fontScale.coerceIn(1f, 2f)
+    // The floor does not grow with the text. The grid's rows are measured at
+    // IntrinsicSize.Min, which already lifts every tile in a row to the one
+    // whose number and label need the most, so a row is never ragged; scaled
+    // by the font as well, the floor made each tile 252 dp tall at 200% when
+    // its content needs about 145 - one row taller than everything a phone
+    // turned sideways shows above the tab bar.
+    val floor = TileHeight
     var box = modifier
         // A minimum, not a fixed height. The reason the height was pinned -
         // a count going 9 to 10 must not make the grid jump - is already
@@ -837,14 +836,17 @@ fun StateBadge(text: String, tone: BadgeTone, modifier: Modifier = Modifier) {
         // paler pill; the words on it stay readable.
         BadgeTone.MUTED -> scheme.surfaceContainerHigh to scheme.onSurfaceVariant
     }
+    // Two lines and a rounded box rather than one line in a pill: beside a
+    // file in a selection on a narrow phone, "Replaced with light copy" read
+    // "Replaced with light c...".
     Text(
         text = text,
         style = MaterialTheme.typography.labelSmall,
         color = foreground,
-        maxLines = 1,
+        maxLines = 2,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(10.dp))
             .background(background)
             .padding(horizontal = 10.dp, vertical = 4.dp)
     )

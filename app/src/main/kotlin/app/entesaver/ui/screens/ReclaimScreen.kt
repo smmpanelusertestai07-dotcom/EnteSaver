@@ -1,6 +1,7 @@
 package app.entesaver.ui.screens
 
 import android.app.Activity
+import android.os.Build
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,6 +64,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -185,7 +189,12 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
         ReclaimRules.savedBytes(selectedEntries.map { it.candidate }, mode)
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // The search field is in the list, and the decision panel under it: with
+    // no room made for the keyboard, typing a search on a phone turned
+    // sideways put both underneath it. From Android 11, as on every other
+    // list; below it the window itself shrinks for the keyboard.
+    val keyboard = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Modifier.imePadding() else Modifier
+    Column(Modifier.fillMaxSize().then(keyboard)) {
         Row(
             Modifier.padding(top = 8.dp, start = 4.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -231,22 +240,25 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
         DisposableEffect(Unit) {
             onDispose { if (hostActivity?.isChangingConfigurations != true) rvm.clearHandOver() }
         }
-        handOver?.let { note ->
-            AppCard(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                tonal = true
-            ) {
-                Text(
-                    stringResource(R.string.freeup_handover_refused, note.name, refusalLabel(note.refusal)),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                note.readyOn?.let { day ->
+        // Part of what scrolls, not pinned above it: at a large font on a
+        // small phone the card was most of the screen, and the list and the
+        // decision panel under it shared what little was left for as long as
+        // the screen stayed open.
+        val handOverCard = @Composable { modifier: Modifier ->
+            handOver?.let { note ->
+                AppCard(modifier = modifier, tonal = true) {
                     Text(
-                        stringResource(R.string.freeup_handover_ready_on, Formats.date(day)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp)
+                        stringResource(R.string.freeup_handover_refused, note.name, refusalLabel(note.refusal)),
+                        style = MaterialTheme.typography.bodyMedium
                     )
+                    note.readyOn?.let { day ->
+                        Text(
+                            stringResource(R.string.freeup_handover_ready_on, Formats.date(day)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             }
         }
@@ -261,6 +273,7 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
             ) {
+                handOverCard(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 EmptyState(
                     title = stringResource(R.string.freeup_empty_title),
                     body = stringResource(R.string.freeup_empty)
@@ -280,6 +293,9 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
                 .padding(horizontal = 16.dp)
                 .testTag(ListTags.ROWS)
         ) {
+            if (handOver != null) {
+                item("handover") { handOverCard(Modifier.padding(top = 8.dp)) }
+            }
             item("warning") {
                 RemovalWarningCard(Modifier.padding(top = 8.dp))
             }
@@ -1078,66 +1094,85 @@ private fun ReclaimRow(
                 onValueChange = { onToggle() }
             )
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = checked, onCheckedChange = null)
-            Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(
-                    entry.row.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis
-                )
-                Text(
-                    stringResource(
-                        R.string.files_size_saving,
-                        Formats.bytes(entry.row.sizeBytes),
-                        Formats.bytes(entry.row.outputBytes ?: 0L),
-                        Formats.percentOf(entry.saving, entry.row.sizeBytes)
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    stringResource(
-                        R.string.reclaim_row_meta,
-                        entry.row.bucket ?: "-",
-                        Formats.date(entry.row.confirmedAt ?: entry.row.releasedAt ?: 0)
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                // How we know, per file, in the same words every other list
-                // uses. This is the sentence the whole feature rests on.
-                Text(
-                    proofLabel(
-                        ProofLine.forItem(
-                            Evidence.parse(entry.row.evidence),
-                            isDuplicateExtra = entry.row.duplicateOf != null
-                        )
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
+        // Seeing the two versions is the only quality test that counts, and
+        // it belongs one tap from the checkbox: beside the file's lines while
+        // they keep most of the row, under them when they would not. Squeezed
+        // into a share of the row instead, "Compare" broke into "Compa / re"
+        // on every row of a 320 dp phone, and on a 360 dp one from a slightly
+        // larger font.
+        val compareLabel = stringResource(R.string.reclaim_compare)
+        val labelStyle = MaterialTheme.typography.labelLarge
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        BoxWithConstraints {
+            val buttonWidth = with(density) { measurer.measure(compareLabel, labelStyle).size.width.toDp() } +
+                TextButtonPadding
+            val stacked = LocalDensity.current.fontScale >= StackedTextScale ||
+                maxWidth - ReclaimRowChrome - buttonWidth < ReclaimTextMinWidth
+            val compare = @Composable { modifier: Modifier ->
+                TextButton(onClick = onCompare, modifier = modifier) {
+                    Text(compareLabel, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
             }
-            // Seeing the two versions is the only quality test that counts,
-            // and it belongs one tap from the checkbox. It takes a share of
-            // the row rather than whatever its label happens to want: at the
-            // largest font on a narrow phone an unbounded button swallowed
-            // the width and left the file name with nothing to be drawn in.
-            TextButton(
-                onClick = onCompare,
-                modifier = Modifier.weight(0.45f, fill = false)
-            ) {
-                Text(
-                    stringResource(R.string.reclaim_compare),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = checked, onCheckedChange = null)
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(
+                        entry.row.displayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis
+                    )
+                    Text(
+                        stringResource(
+                            R.string.files_size_saving,
+                            Formats.bytes(entry.row.sizeBytes),
+                            Formats.bytes(entry.row.outputBytes ?: 0L),
+                            Formats.percentOf(entry.saving, entry.row.sizeBytes)
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        stringResource(
+                            R.string.reclaim_row_meta,
+                            entry.row.bucket ?: "-",
+                            Formats.date(entry.row.confirmedAt ?: entry.row.releasedAt ?: 0)
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    // How we know, per file, in the same words every other list
+                    // uses. This is the sentence the whole feature rests on.
+                    Text(
+                        proofLabel(
+                            ProofLine.forItem(
+                                Evidence.parse(entry.row.evidence),
+                                isDuplicateExtra = entry.row.duplicateOf != null
+                            )
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                    // Lined up with the text it belongs to: a text button's
+                    // own padding would set its label in from the lines above.
+                    if (stacked) compare(Modifier.offset(x = -TextButtonPadding / 2))
+                }
+                if (!stacked) compare(Modifier)
             }
         }
     }
 }
+
+/** A Material text button's horizontal padding, both sides together. */
+private val TextButtonPadding = 24.dp
+
+/** The checkbox and the gap after it, beside a reclaim row's text. */
+private val ReclaimRowChrome = 36.dp
+
+/** The least the file's lines are left beside the Compare button. */
+private val ReclaimTextMinWidth = 180.dp
 
 @Composable
 private fun modeTitle(mode: ReclaimRules.Mode): String = when (mode) {

@@ -390,9 +390,12 @@ fun FilesScreen(vm: AppViewModel) {
             title = {
                 Text(
                     row.displayName,
-                    maxLines = 2,
-                    // The middle, so the extension survives: which file this
-                    // dialog is about is the one thing it must not lose.
+                    // One line, cut in the middle, so the extension survives:
+                    // which file this dialog is about is the one thing it must
+                    // not lose. Android shortens only the last line of a
+                    // longer text, so on two lines a long name was cut off
+                    // with no ellipsis at all, extension first.
+                    maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis
                 )
             },
