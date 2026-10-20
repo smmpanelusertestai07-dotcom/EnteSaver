@@ -79,6 +79,7 @@ import app.entesaver.core.logic.ReclaimRules
 import app.entesaver.core.logic.Suggestions
 import app.entesaver.data.EnteApp
 import app.entesaver.engine.ReclaimEngine
+import app.entesaver.media.InPlace
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.ReclaimViewModel
 import app.entesaver.ui.Routes
@@ -1246,6 +1247,7 @@ private fun skipReasonLabel(reason: String?): String = when (reason) {
     "original_changed" -> stringResource(R.string.skip_original_changed)
     "not_confirmed" -> stringResource(R.string.skip_not_confirmed)
     ReclaimEngine.STAGE_BUSY -> stringResource(R.string.skip_stage_busy)
+    InPlace.ON_CARD -> stringResource(R.string.skip_on_card)
     else -> stringResource(R.string.skip_generic)
 }
 

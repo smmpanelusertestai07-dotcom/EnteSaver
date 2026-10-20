@@ -91,6 +91,7 @@ import app.entesaver.data.EarlierInstall
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.ItemRow
 import app.entesaver.data.prefs.Options
+import app.entesaver.media.InPlace
 import app.entesaver.media.Stager
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.Routes
@@ -1438,6 +1439,7 @@ fun skipReasonLabel(reason: String): String = when (reason) {
     "duplicate" -> stringResource(R.string.skip_duplicate)
     "returned_copy" -> stringResource(R.string.skip_returned_copy)
     Stager.IN_PLACE_FAILED -> stringResource(R.string.skip_in_place_failed)
+    InPlace.ON_CARD -> stringResource(R.string.skip_on_card_here)
     Stager.PUT_BACK -> stringResource(R.string.skip_put_back)
     else -> stringResource(R.string.skip_other)
 }

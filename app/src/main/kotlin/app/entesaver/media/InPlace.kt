@@ -37,8 +37,9 @@ import org.json.JSONObject
  * finishes it or undoes it, and the original is never referenced by
  * nothing. A step that cannot be finished now (the file unreadable, the
  * card out) is tried again later rather than given up. Android 9 and 10
- * have no trash, so there the original waits as a hidden file beside it,
- * under a name no other file has, removed after the same 30 days.
+ * have no trash, so there the original waits in a hidden folder beside it
+ * ([LegacyMedia.workFolder]), under a name no other file has, removed after
+ * the same 30 days.
  */
 object InPlace {
 
@@ -50,6 +51,9 @@ object InPlace {
 
     /** The write failed and the original could not be written back yet; recovery tries again. */
     const val WRITE_FAILED_KEPT = "write_failed_kept"
+
+    /** The original is on a memory card, which Android 9 lets no app change. */
+    const val ON_CARD = "on_card"
 
     /** The hidden name an original waits under on Android 9 and 10. */
     private const val HIDDEN_PREFIX = ".entesaver-original-"
@@ -114,6 +118,11 @@ object InPlace {
         if (pending(context)) return Result.Failed(JOURNAL_PENDING)
         val info = infoOf(context, uri) ?: return Result.Failed("original_unreadable")
         if (info.size != expectedBytes) return Result.Failed("original_changed")
+        // Android 9 lets an app write only to the phone's own storage: an
+        // original on a memory card can be neither kept nor written over.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && info.path?.let(LegacyMedia::onPhoneStorage) == false) {
+            return Result.Failed(ON_CARD)
+        }
         val originalSha = sha(context, uri) ?: return Result.Failed("original_unreadable")
         val copySha = runCatching { FileInputStream(copy).use { Fingerprint.sha256(it) } }.getOrNull()
             ?: return Result.Failed("copy_unreadable")
@@ -360,7 +369,8 @@ object InPlace {
             if (file.exists()) return Kept.KEPT
             val mounted = runCatching { Environment.getExternalStorageState(file) == Environment.MEDIA_MOUNTED }
                 .getOrDefault(false)
-            return if (mounted && file.parentFile?.exists() == true) Kept.GONE else Kept.UNKNOWN
+            // Judged by its album: the hidden folder it waits in goes once it is empty.
+            return if (mounted && albumOf(file)?.exists() == true) Kept.GONE else Kept.UNKNOWN
         }
         // Kept in the trash only from Android 11, which has one.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return Kept.UNKNOWN
@@ -388,7 +398,7 @@ object InPlace {
      */
     fun deleteBackup(context: Context, backup: String): Boolean = runCatching {
         if (backup.isEmpty()) return@runCatching false
-        if (backup.startsWith("file:")) return@runCatching File(Uri.parse(backup).path.orEmpty()).delete()
+        if (backup.startsWith("file:")) return@runCatching removeHidden(File(Uri.parse(backup).path.orEmpty()))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@runCatching false
         val item = Uri.parse(backup)
         val ours = context.contentResolver.query(
@@ -403,8 +413,22 @@ object InPlace {
     /** The hidden originals of Android 9 and 10 older than [KEEP_DAYS], removed as the trash would. */
     fun purgeExpired(paths: List<String>, now: Long): Int = paths.count { path ->
         val f = File(path)
-        f.name.startsWith(HIDDEN_PREFIX) && now - f.lastModified() > KEEP_DAYS * 24L * 3_600_000L && f.delete()
+        f.name.startsWith(HIDDEN_PREFIX) && now - f.lastModified() > KEEP_DAYS * 24L * 3_600_000L && removeHidden(f)
     }
+
+    /** Deletes a hidden original, and the hidden folder it was in once that is empty. */
+    private fun removeHidden(file: File): Boolean {
+        val removed = file.delete()
+        if (file.parentFile?.name == LegacyMedia.WORK_DIR) albumOf(file)?.let(LegacyMedia::tidyWorkFolder)
+        return removed
+    }
+
+    /**
+     * The album a hidden original belongs to: the folder of its hidden
+     * folder, or, for one an earlier version kept beside the photo, its own.
+     */
+    private fun albumOf(file: File): File? =
+        file.parentFile?.let { if (it.name == LegacyMedia.WORK_DIR) it.parentFile else it }
 
     // ---- the steps -----------------------------------------------------------
 
@@ -500,12 +524,17 @@ object InPlace {
         }
         val path = info.path ?: return null
         val folder = File(path).parentFile ?: return null
-        // A name no other file has - this row's, at this moment - made new,
-        // never opened over a file already there: an original still kept
-        // for another replace is never written over.
-        val hidden = File(folder, "$HIDDEN_PREFIX$rowId-${System.currentTimeMillis()}-${info.name}")
+        // In the album's hidden folder, which no scan of the gallery lists,
+        // under a name no other file has - this row's, at this moment - made
+        // new, never opened over a file already there: an original still
+        // kept for another replace is never written over.
+        val work = LegacyMedia.workFolder(folder) ?: return null
+        val hidden = File(work, "$HIDDEN_PREFIX$rowId-${System.currentTimeMillis()}-${info.name}")
         val made = Uri.fromFile(hidden).toString()
-        if (!onMade(made)) return null
+        if (!onMade(made)) {
+            LegacyMedia.tidyWorkFolder(folder)
+            return null
+        }
         return runCatching {
             if (!hidden.createNewFile()) return@runCatching null
             openOriginal(context, uri)!!.use { input ->
@@ -515,9 +544,9 @@ object InPlace {
                 }
             }
             val ok = FileInputStream(hidden).use { Fingerprint.sha256(it) } == originalSha
-            if (ok) made else null.also { hidden.delete() }
+            if (ok) made else null.also { removeHidden(hidden) }
         }.getOrElse {
-            hidden.delete()
+            removeHidden(hidden)
             null
         }
     }

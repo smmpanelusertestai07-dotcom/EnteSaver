@@ -131,6 +131,12 @@ class InPlaceE2eTest {
                 null
             )!!.use { c -> c.moveToFirst() && c.getInt(0) == 1 }
             assertTrue("kept in the trash, so no gallery - Ente's included - shows it", trashed)
+        } else {
+            val kept = File(Uri.parse(outcome.backup).path!!)
+            assertTrue(
+                "kept in a hidden folder, which Android 9's scan of the whole of storage passes over: $kept",
+                kept.parentFile!!.name.startsWith(".")
+            )
         }
 
         // And it goes back into the very same item.

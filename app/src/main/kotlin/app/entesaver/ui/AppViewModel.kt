@@ -63,6 +63,7 @@ import app.entesaver.engine.UsageVerifier
 import app.entesaver.media.EncoderCaps
 import app.entesaver.media.HeicSupport
 import app.entesaver.media.InPlace
+import app.entesaver.media.LegacyMedia
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.OutputInventory
 import app.entesaver.media.PlannedEncode
@@ -2181,7 +2182,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (ok) {
                 viewModelScope.launch(Dispatchers.IO) {
                     runCatching {
-                        if (ctx.contentResolver.delete(uri, null, null) > 0) {
+                        if (LegacyMedia.delete(ctx, uri)) {
                             legacySucceeded.add(uri)
                         }
                     }
@@ -2198,7 +2199,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             while (legacyQueue.isNotEmpty()) {
                 val uri = legacyQueue.first()
                 try {
-                    if (ctx.contentResolver.delete(uri, null, null) > 0) {
+                    if (LegacyMedia.delete(ctx, uri)) {
                         legacySucceeded.add(uri)
                     }
                     legacyQueue.removeFirst()

@@ -504,8 +504,8 @@ object MediaFixtures {
 
     /**
      * [cleanUp] on Android 9: the rows, found by their path, and then what
-     * is left in the folder - a replaced photo's hidden original among it,
-     * which MediaStore never lists.
+     * is left in the folder - the hidden folder a replaced photo's original
+     * waits in among it, which MediaStore never lists.
      */
     @Suppress("DEPRECATION")
     private fun cleanUpFiles(context: Context) {
@@ -519,6 +519,6 @@ object MediaFixtures {
                 )
             }
         }
-        File(Environment.getExternalStorageDirectory(), TEST_ALBUM).listFiles()?.forEach { it.delete() }
+        File(Environment.getExternalStorageDirectory(), TEST_ALBUM).listFiles()?.forEach { it.deleteRecursively() }
     }
 }

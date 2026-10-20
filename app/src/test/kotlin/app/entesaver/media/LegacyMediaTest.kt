@@ -2,6 +2,7 @@ package app.entesaver.media
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -49,5 +50,57 @@ class LegacyMediaTest {
         assertNull(LegacyMedia.claimName(dir.root, "a.json"))
         assertEquals("0", File(dir.root, "a.json").readText())
         assertEquals("32", File(dir.root, "a (32).json").readText())
+    }
+
+    /**
+     * Android 9's scan of the whole of storage, at each start of the phone,
+     * passes over hidden folders only: a hidden file beside the photos is
+     * listed as one of them. Work in progress waits in a hidden folder.
+     */
+    @Test
+    fun `work waits in a hidden folder, which goes once it is empty`() {
+        val work = LegacyMedia.workFolder(dir.root)!!
+        assertEquals(File(dir.root, ".entesaver"), work)
+        assertTrue(work.isDirectory && work.name.startsWith("."))
+        val kept = File(work, ".entesaver-original-1-IMG_1.jpg").apply { writeText("original") }
+        LegacyMedia.tidyWorkFolder(dir.root)
+        assertTrue("a folder with an original in it stays", work.isDirectory)
+        kept.delete()
+        LegacyMedia.tidyWorkFolder(dir.root)
+        assertFalse(work.exists())
+    }
+
+    @Test
+    fun `only half-written files a day old are swept, and kept originals never`() {
+        val now = 10L * 24 * 60 * 60_000
+        val work = LegacyMedia.workFolder(dir.root)!!
+        val old = File(work, ".pending-${now - 25L * 60 * 60_000}-IMG_1.jpg").apply { writeText("x") }
+        val fresh = File(work, ".pending-${now - 60_000}-IMG_2.jpg").apply { writeText("x") }
+        val kept = File(work, ".entesaver-original-7-${now - 40L * 24 * 60 * 60_000}-IMG_3.jpg").apply { writeText("x") }
+        val theirs = File(dir.root, ".pending-photo.jpg").apply { writeText("x") }
+        assertEquals(1, LegacyMedia.sweep(work, now))
+        assertFalse(old.exists())
+        assertTrue(fresh.exists() && kept.exists())
+        assertEquals(0, LegacyMedia.sweep(dir.root, now))
+        assertTrue("a name this app does not make is not its to remove", theirs.exists())
+    }
+
+    @Test
+    fun `a kept original is removed after 30 days with its hidden folder, an earlier one beside the photo too`() {
+        val now = System.currentTimeMillis()
+        val work = LegacyMedia.workFolder(dir.root)!!
+        val expired = File(work, ".entesaver-original-1-1-IMG_1.jpg").apply {
+            writeText("x")
+            setLastModified(now - 31L * 24 * 60 * 60_000)
+        }
+        val beside = File(dir.root, ".entesaver-original-2-1-IMG_2.jpg").apply {
+            writeText("x")
+            setLastModified(now - 31L * 24 * 60 * 60_000)
+        }
+        val recent = File(dir.root, ".entesaver-original-3-1-IMG_3.jpg").apply { writeText("x") }
+        assertEquals(2, InPlace.purgeExpired(listOf(expired.path, beside.path, recent.path), now))
+        assertFalse(expired.exists() || beside.exists())
+        assertFalse("the emptied hidden folder goes too", work.exists())
+        assertTrue(recent.exists())
     }
 }

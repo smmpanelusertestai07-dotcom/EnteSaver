@@ -28,6 +28,7 @@ import app.entesaver.engine.ActivityLog
 import app.entesaver.engine.DuplicateScanner
 import app.entesaver.engine.ReclaimEligibility
 import app.entesaver.engine.ReclaimEngine
+import app.entesaver.media.LegacyMedia
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.Stager
 import app.entesaver.util.Formats
@@ -690,7 +691,7 @@ class ReclaimViewModel(
             while (legacyQueue.isNotEmpty()) {
                 val uri = legacyQueue.first()
                 try {
-                    if (ctx.contentResolver.delete(uri, null, null) > 0) {
+                    if (LegacyMedia.delete(ctx, uri)) {
                         legacyDeleted += uri.toString()
                     }
                     legacyQueue.removeFirst()
@@ -769,7 +770,7 @@ class ReclaimViewModel(
             if (granted) {
                 viewModelScope.launch(Dispatchers.IO) {
                     runCatching {
-                        if (ctx.contentResolver.delete(uri, null, null) > 0) {
+                        if (LegacyMedia.delete(ctx, uri)) {
                             legacyDeleted += uri.toString()
                         }
                     }

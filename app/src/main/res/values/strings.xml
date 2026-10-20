@@ -63,6 +63,7 @@
     <string name="skip_user_excluded_one">You chose to skip this file</string>
     <string name="skip_put_back">You put the original back, so it is not optimised again</string>
     <string name="skip_in_place_failed">Could not be replaced on this phone</string>
+    <string name="skip_on_card_here">On the memory card, which Android 9 lets no app change</string>
     <string name="skip_other">Skipped to be safe</string>
     <string name="skip_user_excluded">You chose to skip these</string>
     <string name="skip_duplicate">Already handled once</string>
@@ -373,6 +374,7 @@
     <string name="kept_in_place_warning">The copy carries the original\'s date, camera details and location. Two things do change: the copy keeps the format it was optimised to, so a HEIC photo can come back as .jpg; and the file in your album is the optimised version, not the byte-for-byte original. The copy in Ente is untouched. If you put an original back from the gallery\'s trash later, it returns beside the smaller copy rather than replacing it.</string>
     <string name="skip_integrity_failed">its copy could not be checked, so the original stays</string>
     <string name="skip_original_changed">it has changed since it was backed up, so the original stays</string>
+    <string name="skip_on_card">it is on the memory card, where Android 9 lets no app remove a file, so the original stays</string>
     <string name="skip_not_confirmed">not confirmed in Android\'s dialog</string>
     <string name="skip_generic">left alone — nothing was removed</string>
     <string name="reclaim_mode_full">Remove completely</string>

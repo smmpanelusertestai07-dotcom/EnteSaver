@@ -76,6 +76,9 @@ class SnapshotStore(
         /** Where Android 9 keeps the paths of the history files this install wrote ([ownFilesOnDisk]). */
         private const val WRITTEN_PREFS = "shared_history_files"
         private const val WRITTEN_KEY = "paths"
+
+        /** Before a path, the key its size and modified time are kept under ([stillOurs]). */
+        private const val STAMP_PREFIX = "stamp:"
     }
 
     suspend fun build(): SnapshotCodec.Snapshot {
@@ -384,7 +387,7 @@ class SnapshotStore(
         val ext = name?.substringAfterLast('.', "")
         return writtenPaths().map { File(it) }
             .filter { file ->
-                file.parentFile == dir && file.isFile && (
+                file.parentFile == dir && file.isFile && stillOurs(file) && (
                     name == null || file.name == name ||
                         (file.name.startsWith("$base (") && file.name.endsWith(").$ext"))
                     )
@@ -418,6 +421,7 @@ class SnapshotStore(
                 ?: error("no free name for $name")
             remember(target)
             if (!hidden.renameTo(target)) error("could not name the file")
+            stamp(target)
             claimed = null
             for (extra in own.drop(1)) {
                 if (extra.delete() || !extra.exists()) forget(extra)
@@ -452,8 +456,32 @@ class SnapshotStore(
 
     @SuppressLint("ApplySharedPref")
     private fun forget(file: File) {
-        written.edit().putStringSet(WRITTEN_KEY, writtenPaths() - file.absolutePath).commit()
+        written.edit()
+            .putStringSet(WRITTEN_KEY, writtenPaths() - file.absolutePath)
+            .remove(STAMP_PREFIX + file.absolutePath)
+            .commit()
     }
+
+    /** Notes the size and modified time [file] has now that this install has written it. */
+    @SuppressLint("ApplySharedPref")
+    private fun stamp(file: File) {
+        written.edit().putString(STAMP_PREFIX + file.absolutePath, stampOf(file)).commit()
+    }
+
+    /**
+     * False once a file at a path this install wrote is no longer what it
+     * wrote there: another history copied over it, say, to restore from. On
+     * Android 10 Android tells the two apart by owner; here the size and
+     * time do, so such a file is read and written over no more than another
+     * app's would be. A path written before its stamp was noted counts as
+     * this install's.
+     */
+    private fun stillOurs(file: File): Boolean {
+        val stamp = written.getString(STAMP_PREFIX + file.absolutePath, null) ?: return true
+        return stamp == stampOf(file)
+    }
+
+    private fun stampOf(file: File): String = "${file.length()}:${file.lastModified()}"
 
     /**
      * Manual export to a user-chosen location. With a password the file is

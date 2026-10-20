@@ -2,6 +2,7 @@ package app.entesaver.media
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Process
 import android.provider.MediaStore
 import androidx.room.withTransaction
@@ -186,6 +187,18 @@ class Stager(private val context: Context, private val db: AppDb) {
         runRemainingMs: Long,
         overrunCounts: Boolean
     ): Boolean {
+        // Android 9 lets an app change only the phone's own storage, so an
+        // original on a memory card cannot be replaced there: set aside
+        // before an encode is spent on it.
+        if (options.saveMode == SaveMode.IN_PLACE && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            LegacyMedia.dataPath(context, uri)?.let(LegacyMedia::onPhoneStorage) == false
+        ) {
+            val now = System.currentTimeMillis()
+            settle(row) { cur ->
+                cur.copy(state = ItemState.SKIP.name, skipReason = InPlace.ON_CARD, updatedAt = now)
+            }
+            return false
+        }
         val tempDir = Storage.tempDir(context, options.storageVolume)
         // Held to what this phone can decode without running out of memory;
         // asked only for a photo, since it reads the memory free right now.

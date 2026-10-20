@@ -390,6 +390,10 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
                 // is short-circuited here.
                 if (Defaults.isAppOwnedPath(rel)) continue
                 val name = c.getString(iName) ?: continue
+                // A hidden file is no photo of the person's: galleries pass
+                // over one, and Android 9 lists one only when it reads the
+                // whole of storage again - half-written files among them.
+                if (name.startsWith(".")) continue
                 val size = c.getLong(iSize)
                 if (size <= 0) continue
                 val id = c.getLong(iId)

@@ -27,6 +27,7 @@ import app.entesaver.data.db.leftFolderAtAfter
 import app.entesaver.data.prefs.Options
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.HeicSupport
+import app.entesaver.media.InPlace
 import app.entesaver.media.LegacyMedia
 import app.entesaver.media.MediaPaths
 import app.entesaver.media.PhotoCompressor
@@ -661,6 +662,15 @@ class ReclaimEngine(private val context: Context) {
             val original = row.contentUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
             if (original == null) {
                 skipped += Outcome(row.fingerprint, row.displayName, false, "no_original")
+                continue
+            }
+            // Android 9 takes a memory card's file out of the gallery but
+            // leaves it on the card, and counts it deleted all the same; such
+            // an original is left alone there, and gets no light copy.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                LegacyMedia.dataPath(context, original)?.let(LegacyMedia::onPhoneStorage) == false
+            ) {
+                skipped += Outcome(row.fingerprint, row.displayName, false, InPlace.ON_CARD)
                 continue
             }
             // The file behind the address must still be the original the
