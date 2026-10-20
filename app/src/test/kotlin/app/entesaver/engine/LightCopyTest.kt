@@ -48,12 +48,12 @@ class LightCopyTest {
     }
 
     @Test
-    fun `a missing local copy is remade from the original with the current preset`() {
+    fun `a missing local copy is remade from the original the one way files are optimised`() {
         val source = engine.substringAfter("private suspend fun pinSource")
             .substringBefore("private suspend fun writeVerified")
         assertTrue(
-            "the remake must use the current quality setting",
-            source.contains("options.photo.spec()") && source.contains("options.video.spec()")
+            "the remake must use the same limits as every other copy",
+            source.contains("MediaSettings.PHOTO") && source.contains("MediaSettings.VIDEO")
         )
         assertTrue(source.contains("PhotoCompressor.compress"))
         assertTrue(source.contains("VideoCompressor.compress"))
@@ -152,9 +152,11 @@ class LightCopyTest {
     fun `an in-place copy lands in the original's real folder, never the app's`() {
         val folder = engine.substringAfter("private fun originalFolder")
             .substringBefore("private fun inPlaceName")
+        // RELATIVE_PATH, or on Android 9 the path it is derived from.
         assertTrue(
             "the folder must come from the original itself",
-            folder.contains("MediaStore.MediaColumns.RELATIVE_PATH")
+            folder.contains("arrayOf(MediaPaths.FOLDER_COLUMN)") &&
+                folder.contains("MediaPaths.relativePath(c.getString(0))")
         )
         assertTrue(
             "our own folders can never be an in-place destination",
@@ -288,7 +290,7 @@ class LightCopyTest {
         )
         assertTrue(
             "the remake must be capped like Stager's encode",
-            source.contains("DeviceTier.fit(context, options.photo.spec())")
+            source.contains("DeviceTier.fit(context, MediaSettings.PHOTO)")
         )
         val skipAt = source.indexOf("if (row.id == remakeDiedOn) return null")
         val noteAt = source.indexOf("InFlight.beginRemake(")

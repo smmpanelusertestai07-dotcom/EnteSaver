@@ -14,16 +14,19 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -52,7 +55,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -276,7 +282,14 @@ fun ListFilterRow(
 
     open?.let { filter ->
         val state = rememberModalBottomSheetState()
-        ModalBottomSheet(onDismissRequest = { open = null }, sheetState = state) {
+        // Every side of the safe area, not only top and bottom: across a phone
+        // turned sideways the sheet runs the full width, and its far edge sat
+        // under the navigation buttons there.
+        ModalBottomSheet(
+            onDismissRequest = { open = null },
+            sheetState = state,
+            contentWindowInsets = { WindowInsets.safeDrawing }
+        ) {
             // Scrollable: this sheet lists every album on the phone, and a
             // gallery with a dozen folders already runs past the bottom of a
             // small screen before the font is enlarged at all.
@@ -366,7 +379,9 @@ fun SelectionTopBar(
             stringResource(R.string.list_selected_count, selectedCount),
             style = MaterialTheme.typography.titleMedium.merge(TabularFigures),
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            // Two lines, like the button beside it: on one, "12 selected" at
+            // a large font on a narrow phone read "12 sele...".
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
@@ -574,6 +589,13 @@ fun SearchEmptyState(term: String, onClear: () -> Unit, modifier: Modifier = Mod
 }
 
 /**
+ * Set by a list while a selection is running: the app's tab bar steps aside
+ * for the selection's own bars, as the gallery apps do, and gives the rows
+ * its height. Null where the list is not under a tab bar.
+ */
+val LocalSelectionHidesTabs = compositionLocalOf<MutableState<Boolean>?> { null }
+
+/**
  * A whole list screen: header, search, filters, rows, and the selection bars.
  *
  * Screens supply their rows through [content] and nothing else about layout,
@@ -606,135 +628,152 @@ fun ListScreenScaffold(
     // From Android 11 only; below it adjustResize already shrinks the window,
     // and padding as well takes the keyboard's height out twice.
     val keyboard = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Modifier.imePadding() else Modifier
-    Column(Modifier.fillMaxWidth().then(keyboard)) {
-        if (selection.active) {
-            SelectionTopBar(
-                selectedCount = selection.size,
-                matchingCount = matchingCount,
-                onSelectAll = onSelectAll,
-                onDeselectAll = { selection.clear() },
-                onClose = { selection.clear() }
-            )
-        } else {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        top = if (showBack) 4.dp else 12.dp,
-                        start = if (showBack) 4.dp else 16.dp,
-                        end = if (actionBar != null) 8.dp else 16.dp
-                    ),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // A tab has nowhere to go back to, so it gets no arrow.
-                // An arrow that pops the whole tab stack is worse than
-                // none: it looks like a way out and behaves like an exit.
-                if (showBack) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.back)
-                        )
+    val hidesTabs = LocalSelectionHidesTabs.current
+    val selecting = selection.active
+    if (hidesTabs != null) {
+        DisposableEffect(selecting) {
+            hidesTabs.value = selecting
+            onDispose { hidesTabs.value = false }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().then(keyboard)) {
+        // The bars a selection adds never take more than half the screen. In a
+        // phone turned sideways at a large font the action bar alone was taller
+        // than what the list had left, and the rows being acted on were a sliver
+        // or nothing; past half, the bar scrolls and the list keeps the rest.
+        val barLimit = maxHeight / 2
+        Column(Modifier.fillMaxWidth()) {
+            if (selection.active) {
+                SelectionTopBar(
+                    selectedCount = selection.size,
+                    matchingCount = matchingCount,
+                    onSelectAll = onSelectAll,
+                    onDeselectAll = { selection.clear() },
+                    onClose = { selection.clear() }
+                )
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = if (showBack) 4.dp else 12.dp,
+                            start = if (showBack) 4.dp else 16.dp,
+                            end = if (actionBar != null) 8.dp else 16.dp
+                        ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // A tab has nowhere to go back to, so it gets no arrow.
+                    // An arrow that pops the whole tab stack is worse than
+                    // none: it looks like a way out and behaves like an exit.
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.back)
+                            )
+                        }
+                    }
+                    // Weighted, so the Select button beside it keeps its
+                    // room and a long title wraps rather than pushing it off
+                    // the end of the row.
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics { heading() }
+                    )
+                    // The way into a selection that does not depend on
+                    // knowing about the long press. Only on a list that has
+                    // something to do with a selection, and only while there
+                    // are rows to pick from.
+                    if (actionBar != null && !loading && !isEmpty) {
+                        TextButton(onClick = { selection.begin() }) {
+                            Text(
+                                stringResource(R.string.list_select),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
-                // Weighted, so the Select button beside it keeps its
-                // room and a long title wraps rather than pushing it off
-                // the end of the row.
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
+            }
+
+            intro?.invoke()
+
+            when {
+                // The search box and the chips travel with whatever is under
+                // them rather than sitting above it. They used to be pinned,
+                // and pinned they are between 150 and 200 dp of a screen that
+                // in landscape at the largest text size has barely 300 to
+                // give: the list they belong to was left as a sliver two rows
+                // deep, and the empty state under them ran off the bottom
+                // edge with nothing to scroll - a screen that looks broken
+                // rather than empty. Nothing is lost by letting them move,
+                // because a search box is wanted at the moment a search
+                // starts, which is the moment the list is at the top anyway.
+                loading -> Column(
+                    Modifier
                         .weight(1f)
-                        .semantics { heading() }
-                )
-                // The way into a selection that does not depend on
-                // knowing about the long press. Only on a list that has
-                // something to do with a selection, and only while there
-                // are rows to pick from.
-                if (actionBar != null && !loading && !isEmpty) {
-                    TextButton(onClick = { selection.begin() }) {
-                        Text(
-                            stringResource(R.string.list_select),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    ListHeader(
+                        query, onQuery, filters, sort,
+                        Modifier.padding(horizontal = 16.dp)
+                    )
+                    ListSkeleton(modifier = Modifier.padding(16.dp))
+                }
+                isEmpty -> Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    ListHeader(
+                        query, onQuery, filters, sort,
+                        Modifier.padding(horizontal = 16.dp)
+                    )
+                    emptyContent()
+                }
+                else -> LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp)
+                        .testTag(ListTags.ROWS)
+                ) {
+                    // The list's own first row, exactly as Reclaim already
+                    // carries its search and its chips. One item ahead of the
+                    // rows rather than part of them, so anything that asks
+                    // the list where a file is still gets an answer, and
+                    // still gets them in the same order.
+                    item("header") {
+                        ListHeader(query, onQuery, filters, sort)
                     }
+                    content()
+                    item("tail") { ListTail() }
                 }
             }
-        }
 
-        intro?.invoke()
-
-        when {
-            // The search box and the chips travel with whatever is under
-            // them rather than sitting above it. They used to be pinned,
-            // and pinned they are between 150 and 200 dp of a screen that
-            // in landscape at the largest text size has barely 300 to
-            // give: the list they belong to was left as a sliver two rows
-            // deep, and the empty state under them ran off the bottom
-            // edge with nothing to scroll - a screen that looks broken
-            // rather than empty. Nothing is lost by letting them move,
-            // because a search box is wanted at the moment a search
-            // starts, which is the moment the list is at the top anyway.
-            loading -> Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
+            // Under the list, not over it. Floated over the bottom of the
+            // list, the bar covered whatever the spacer at the foot of the
+            // rows failed to make room for - and that spacer was a guess at
+            // the bar's height, which a blocked reason, a note and a button
+            // wrapped onto its own line at a large font all outgrew, so the
+            // last file in the list sat underneath the bar that acts on it.
+            // Laid out here, the list ends where the bar begins at any size.
+            //
+            // Shown once something is ticked rather than as soon as selection
+            // starts: the Select button opens selection mode with nothing
+            // chosen, and a bar offering to act on nothing is a dead button.
+            AnimatedVisibility(
+                visible = selection.size > 0 && actionBar != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
-                ListHeader(
-                    query, onQuery, filters, sort,
-                    Modifier.padding(horizontal = 16.dp)
-                )
-                ListSkeleton(modifier = Modifier.padding(16.dp))
-            }
-            isEmpty -> Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                ListHeader(
-                    query, onQuery, filters, sort,
-                    Modifier.padding(horizontal = 16.dp)
-                )
-                emptyContent()
-            }
-            else -> LazyColumn(
-                Modifier
-                    .weight(1f)
-                    .padding(horizontal = 16.dp)
-                    .testTag(ListTags.ROWS)
-            ) {
-                // The list's own first row, exactly as Reclaim already
-                // carries its search and its chips. One item ahead of the
-                // rows rather than part of them, so anything that asks
-                // the list where a file is still gets an answer, and
-                // still gets them in the same order.
-                item("header") {
-                    ListHeader(query, onQuery, filters, sort)
+                Box(Modifier.heightIn(max = barLimit).verticalScroll(rememberScrollState())) {
+                    actionBar?.invoke()
                 }
-                content()
-                item("tail") { ListTail() }
             }
-        }
-
-        // Under the list, not over it. Floated over the bottom of the
-        // list, the bar covered whatever the spacer at the foot of the
-        // rows failed to make room for - and that spacer was a guess at
-        // the bar's height, which a blocked reason, a note and a button
-        // wrapped onto its own line at a large font all outgrew, so the
-        // last file in the list sat underneath the bar that acts on it.
-        // Laid out here, the list ends where the bar begins at any size.
-        //
-        // Shown once something is ticked rather than as soon as selection
-        // starts: the Select button opens selection mode with nothing
-        // chosen, and a bar offering to act on nothing is a dead button.
-        AnimatedVisibility(
-            visible = selection.size > 0 && actionBar != null,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            actionBar?.invoke()
         }
     }
 }
@@ -873,8 +912,9 @@ fun albumFilter(
  *
  * Exactly three lines, always visible, never behind a tap: what is removed
  * from, what is never touched and why that is guaranteed, and where removed
- * files go. It explains; Android's own dialog still authorises. On Android 10
- * the third line changes because there is no gallery trash to restore from.
+ * files go. It explains; Android's own dialog still authorises - on Android 9,
+ * which has none, the app's own confirmation does. On Android 9 and 10 the
+ * third line changes because there is no gallery trash to restore from.
  */
 @Composable
 fun RemovalWarningCard(modifier: Modifier = Modifier) {

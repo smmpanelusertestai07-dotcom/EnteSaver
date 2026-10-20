@@ -196,8 +196,10 @@ fun PermissionsScreen(vm: AppViewModel, nav: NavHostController) {
             }
             // Its own row, because it fails on its own: refused, everything
             // else works and every copy quietly loses where it was taken.
-            // Shown only once there is media access for it to go with.
-            if (access != Permissions.MediaAccess.NONE) {
+            // Shown only once there is media access for it to go with, and
+            // never on Android 9, which hides no photo's location and so has
+            // no such permission to show.
+            if (access != Permissions.MediaAccess.NONE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 PermissionRow(
                     title = stringResource(R.string.perm_name_media_location),
                     status = stringResource(

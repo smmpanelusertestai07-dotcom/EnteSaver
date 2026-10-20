@@ -74,7 +74,16 @@ object SnapshotCodec {
          * above: a file without it - every one written before 12.2 - reads
          * as not recorded, which the app reads as it always did.
          */
-        val leftFolderAt: Long? = null
+        val leftFolderAt: Long? = null,
+        /**
+         * A file replaced on this phone: where its original is kept ("" once
+         * it no longer is) and that original's hash. Restored without
+         * them, such a row read as a light copy the person could remove -
+         * and Remove deleted the only version on the phone. Optional, like
+         * the keys above.
+         */
+        val backupUri: String? = null,
+        val originalSha256: String? = null
     )
 
     data class SnapBatch(
@@ -170,6 +179,8 @@ object SnapshotCodec {
             i.outputRelPath?.let { o.put("outRel", it) }
             i.duplicateOf?.let { o.put("dupOf", it) }
             i.leftFolderAt?.let { o.put("leftAt", it) }
+            i.backupUri?.let { o.put("backup", it) }
+            i.originalSha256?.let { o.put("origSha", it) }
             items.put(o)
         }
         root.put("items", items)
@@ -267,7 +278,10 @@ object SnapshotCodec {
                 neverOptimise = o.optBoolean("never", false),
                 outputRelPath = o.optString("outRel", "").ifEmpty { null },
                 duplicateOf = o.optString("dupOf", "").ifEmpty { null },
-                leftFolderAt = if (o.has("leftAt")) o.optLong("leftAt") else null
+                leftFolderAt = if (o.has("leftAt")) o.optLong("leftAt") else null,
+                // An empty address is a fact too: replaced, original no longer kept.
+                backupUri = if (o.has("backup")) o.optString("backup", "") else null,
+                originalSha256 = o.optString("origSha", "").ifEmpty { null }
             )
         }
         val batches = mutableListOf<SnapBatch>()

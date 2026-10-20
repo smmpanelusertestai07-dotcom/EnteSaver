@@ -78,6 +78,38 @@ class SnapshotCodecTest {
     }
 
     @Test
+    fun `a file replaced on this phone keeps where its original is kept`() {
+        // Restored without it, the row read as a light copy to remove, and
+        // Remove deleted the only version on the phone. An empty address is
+        // a fact too: replaced, the original no longer kept.
+        val snapshot = SnapshotCodec.Snapshot(
+            version = SnapshotCodec.VERSION,
+            exportedAt = 42,
+            options = emptyMap(),
+            items = listOf(
+                item("3333333333333333", ItemState.FREED_KEPT, Evidence.NONE).copy(
+                    keptUri = "content://media/external/images/media/42",
+                    backupUri = "content://media/external/images/media/77",
+                    originalSha256 = "ab12"
+                ),
+                item("4444444444444444", ItemState.SKIP, Evidence.NONE).copy(
+                    keptUri = "content://media/external/images/media/43",
+                    backupUri = ""
+                ),
+                item("5555555555555555", ItemState.FREED_KEPT, Evidence.CONFIRMED_EXACT)
+                    .copy(keptUri = "content://media/external/images/media/44")
+            ),
+            batches = emptyList()
+        )
+        val decoded = SnapshotCodec.decode(SnapshotCodec.encode(snapshot))
+        assertEquals(snapshot.items, decoded.items)
+        assertEquals("content://media/external/images/media/77", decoded.items[0].backupUri)
+        assertEquals("ab12", decoded.items[0].originalSha256)
+        assertEquals("", decoded.items[1].backupUri)
+        assertEquals("a light copy is not a replaced file", null, decoded.items[2].backupUri)
+    }
+
+    @Test
     fun aDuplicateKeepsTheOriginalItBelongsTo() {
         // Without the link a restored duplicate read as an unexplained skip,
         // and Home listed it as a problem for good.

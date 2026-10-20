@@ -4,7 +4,9 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
+import androidx.room.withTransaction
 import app.entesaver.R
 import app.entesaver.core.logic.CloudCapability
 import app.entesaver.core.logic.Defaults
@@ -20,6 +22,7 @@ import app.entesaver.core.logic.OutputLayout
 import app.entesaver.core.logic.OutputRoots
 import app.entesaver.core.logic.Pacing
 import app.entesaver.core.logic.ReclaimRules
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.ScanSources
 import app.entesaver.core.logic.StallAlert
 import app.entesaver.core.logic.StateMachine
@@ -30,9 +33,12 @@ import app.entesaver.data.db.ItemRow
 import app.entesaver.data.db.leftFolderAtAfter
 import app.entesaver.data.prefs.Options
 import app.entesaver.data.prefs.OptionsRepo
+import app.entesaver.media.LegacyMedia
+import app.entesaver.media.MediaPaths
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.OutputInventory
 import app.entesaver.media.Releaser
+import app.entesaver.media.Stager
 import app.entesaver.util.Formats
 import app.entesaver.util.Locks
 import app.entesaver.util.Notifications
@@ -181,10 +187,18 @@ class MaintainEngine(private val context: Context) {
         var pauseDeletions = false
         step { pauseDeletions = cloudHealth(o, now, entries) }
         if (!o.pauseAll) {
-            step { pacedRelease(o, now, summary) }
-            // Again straight after releasing: a row that failed to finalise
-            // in this very pass should not wait an hour to be noticed.
-            step { repairStalePending(now) }
+            if (o.saveMode == SaveMode.IN_PLACE) {
+                // Replace on this phone publishes nothing - no folder of
+                // Ente Saver's own, no anchor file. A copy staged before it
+                // was on, or by the trial, is dropped, and its original is
+                // replaced in place instead.
+                step { unstageForInPlace(now) }
+            } else {
+                step { pacedRelease(o, now, summary) }
+                // Again straight after releasing: a row that failed to finalise
+                // in this very pass should not wait an hour to be noticed.
+                step { repairStalePending(now) }
+            }
         }
         if (!pauseDeletions) {
             step { lazyDelete(o, now, summary) }
@@ -557,6 +571,14 @@ class MaintainEngine(private val context: Context) {
      * to Activity rather than fixed in silence.
      */
     private suspend fun repairStalePending(now: Long) {
+        // Android 9 has no pending rows: a copy there is written in full
+        // before the gallery ever hears of it. What a write cut short leaves
+        // behind is a hidden file, and those are cleared away instead.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val folders = OutputRoots.owned + Defaults.KEPT_DIR + Defaults.SNAPSHOT_TARGETS.map { it.first }
+            LegacyMedia.sweepAbandoned(folders, now)
+            return
+        }
         // CC1.2: fifteen minutes, not a day. A pending row is invisible to
         // the gallery and to every cloud app, so a whole day of it reads as
         // a backup that silently stopped - and Android eventually deletes
@@ -1047,6 +1069,25 @@ class MaintainEngine(private val context: Context) {
         }
     }
 
+    /** Staged copies dropped and their files put back in the queue (see [runLocked]). */
+    private suspend fun unstageForInPlace(now: Long) {
+        for (row in db.items().staged()) {
+            // Only a row still staged with this very file, checked and
+            // written in one transaction: this pass takes no other lock, and
+            // the trial or its discard may be writing the same rows.
+            val dropped = db.withTransaction {
+                val cur = db.items().byId(row.id)
+                if (cur != null && cur.state == ItemState.STAGED.name && cur.stagePath == row.stagePath) {
+                    db.items().update(Stager.unstaged(cur, now))
+                    true
+                } else {
+                    false
+                }
+            }
+            if (dropped) row.stagePath?.let { runCatching { File(it).delete() } }
+        }
+    }
+
     // ---- e) lazy delete ----------------------------------------------------------
 
     private suspend fun lazyDelete(o: Options, now: Long, summary: Summary) {
@@ -1286,11 +1327,11 @@ class MaintainEngine(private val context: Context) {
         return try {
             context.contentResolver.query(
                 uri,
-                arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME),
+                arrayOf(MediaPaths.FOLDER_COLUMN, MediaStore.MediaColumns.DISPLAY_NAME),
                 null, null, null
             )?.use { c ->
                 if (!c.moveToFirst()) return byNameAndSize(row)
-                val rel = c.getString(0)
+                val rel = MediaPaths.relativePath(c.getString(0))
                 val name = c.getString(1)
                 if (rel.isNullOrEmpty() || name.isNullOrEmpty()) byNameAndSize(row) else Whereabouts.Moved(rel, name)
             } ?: Whereabouts.Unknown
@@ -1311,14 +1352,14 @@ class MaintainEngine(private val context: Context) {
         val name = row.outputName ?: return Whereabouts.Gone
         val size = row.outputBytes ?: return Whereabouts.Gone
         val collection = if (row.isVideo) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            MediaStore.Video.Media.getContentUri(Volumes.EXTERNAL)
         } else {
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            MediaStore.Images.Media.getContentUri(Volumes.EXTERNAL)
         }
         return try {
             context.contentResolver.query(
                 collection,
-                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.RELATIVE_PATH),
+                arrayOf(MediaStore.MediaColumns._ID, MediaPaths.FOLDER_COLUMN),
                 "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?",
                 arrayOf(name, size.toString()),
                 null
@@ -1329,7 +1370,7 @@ class MaintainEngine(private val context: Context) {
                     // An as-is copy has the original's name and size; the
                     // original itself is never taken for the copy.
                     if (id == row.mediaStoreId) continue
-                    val rel = c.getString(1)?.takeIf { it.isNotEmpty() } ?: continue
+                    val rel = MediaPaths.relativePath(c.getString(1))?.takeIf { it.isNotEmpty() } ?: continue
                     found += Whereabouts.Moved(rel, name, ContentUris.withAppendedId(collection, id).toString())
                 }
                 when (found.size) {

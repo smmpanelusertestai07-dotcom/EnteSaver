@@ -151,7 +151,11 @@ fun FileRow(
             val chrome = ThumbnailWidth + 12.dp +
                 (if (selectable) CheckboxWidth else 0.dp) +
                 (if (actions.isNotEmpty()) OverflowWidth else 0.dp)
-            val stacked = selectable ||
+            // A note under the size ("about 459 KB after") is a phrase, and
+            // beside the name it had a share of the row that wrapped it into
+            // a ragged column against the edge: with one, the value always
+            // goes under the name.
+            val stacked = selectable || trailingNote != null ||
                 LocalDensity.current.fontScale >= StackedTextScale ||
                 maxWidth - chrome < SideBySideMinWidth
             Row(verticalAlignment = Alignment.CenterVertically) {

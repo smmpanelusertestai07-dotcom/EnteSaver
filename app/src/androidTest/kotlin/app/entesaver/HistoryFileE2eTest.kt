@@ -3,20 +3,24 @@ package app.entesaver
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.rule.GrantPermissionRule
 import app.entesaver.core.logic.Defaults
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.engine.SnapshotStore
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -25,9 +29,18 @@ import org.junit.runner.RunWith
  * pass and written over rather than beside, readable back - and the hidden
  * folders older versions filled, one file per pass, emptied of what this app
  * put there.
+ *
+ * Android 9 records no owner for a file, so there the suite looks at the
+ * folders themselves: the history file is still one file, and what is in the
+ * old hidden folders - which no build that ran on Android 9 ever wrote - is
+ * not the app's to remove, and stays.
  */
 @RunWith(AndroidJUnit4::class)
 class HistoryFileE2eTest {
+
+    /** Android 9 writes the history file with storage access. */
+    @get:Rule
+    val permissions: GrantPermissionRule = GrantPermissionRule.grant(*TestPermissions.forSharedFiles())
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val repo: OptionsRepo get() = OptionsRepo.get(context)
@@ -36,8 +49,13 @@ class HistoryFileE2eTest {
 
     private fun store() = SnapshotStore(context, AppDb.get(context), repo)
 
-    /** This install's files in [dir], by name. */
+    /** This install's files in [dir], by name; on Android 9 every file there. */
     private fun own(dir: String): List<Pair<Uri, String>> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return folder(dir).listFiles().orEmpty()
+                .filter { it.isFile && !it.name.startsWith(".") }
+                .map { Uri.fromFile(it) to it.name }
+        }
         val out = mutableListOf<Pair<Uri, String>>()
         context.contentResolver.query(
             files,
@@ -53,16 +71,28 @@ class HistoryFileE2eTest {
         return out
     }
 
+    @Suppress("DEPRECATION")
+    private fun folder(dir: String) = File(Environment.getExternalStorageDirectory(), dir)
+
     private val historyDirs = Defaults.SNAPSHOT_TARGETS.map { it.first }
 
     private fun removeAll() {
         for (dir in historyDirs + Defaults.PREVIOUS_SNAPSHOT_DIRS) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                folder(dir).listFiles()?.forEach { it.delete() }
+                continue
+            }
             for ((uri, _) in own(dir)) runCatching { context.contentResolver.delete(uri, null, null) }
         }
     }
 
     /** A file the way a build before 12.0 left it; false where this Android refuses the place. */
     private fun leaveOldFile(dir: String, name: String): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            folder(dir).mkdirs()
+            File(folder(dir), name).writeBytes("{}".toByteArray())
+            return@runCatching true
+        }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
@@ -120,7 +150,11 @@ class HistoryFileE2eTest {
         assertTrue(store().writeSafetySnapshot())
 
         for (dir in left) {
-            assertEquals("$dir must be emptied of this app's files", emptyList<Pair<Uri, String>>(), own(dir))
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                assertEquals("$dir is not this app's to empty on Android 9", 2, own(dir).size)
+            } else {
+                assertEquals("$dir must be emptied of this app's files", emptyList<Pair<Uri, String>>(), own(dir))
+            }
         }
         assertEquals(1, historyDirs.flatMap { own(it) }.size)
     }

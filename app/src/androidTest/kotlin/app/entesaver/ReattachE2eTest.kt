@@ -4,9 +4,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.rule.GrantPermissionRule
 import app.entesaver.core.logic.Evidence
 import app.entesaver.core.logic.Fingerprint
 import app.entesaver.core.logic.ItemState
@@ -22,6 +24,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -34,6 +37,10 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class ReattachE2eTest {
+
+    /** Android 9 writes the copies as files, which takes storage access. */
+    @get:Rule
+    val permissions: GrantPermissionRule = GrantPermissionRule.grant(*TestPermissions.forSharedFiles())
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val repo: OptionsRepo get() = OptionsRepo.get(context)
@@ -66,19 +73,24 @@ class ReattachE2eTest {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)
         }.toByteArray()
         bitmap.recycle()
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "$root/")
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        val uri = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            MediaFixtures.publishFile(context, "$root/", name, "image/jpeg") { it.write(bytes) }.also { made += it }
+        } else {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "$root/")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val pending = requireNotNull(context.contentResolver.insert(collection, values))
+            made += pending
+            context.contentResolver.openOutputStream(pending)!!.use { it.write(bytes) }
+            context.contentResolver.update(
+                pending, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null
+            )
+            pending
         }
-        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val uri = requireNotNull(context.contentResolver.insert(collection, values))
-        made += uri
-        context.contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
-        context.contentResolver.update(
-            uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null
-        )
         MediaFixtures.awaitIndexed(context, uri, name)
         return context.contentResolver.query(
             uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null

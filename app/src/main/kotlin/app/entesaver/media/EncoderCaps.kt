@@ -1,9 +1,16 @@
 package app.entesaver.media
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaCodecInfo
+import android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.os.Build
+import app.entesaver.BuildConfig
+import app.entesaver.core.logic.CodecNames
 import app.entesaver.core.logic.MediaSettings
+import app.entesaver.core.logic.QualityFloor
 
 /**
  * What this phone's own encoder chips can do.
@@ -26,8 +33,54 @@ object EncoderCaps {
     fun hardwareEncoders(mime: String): List<MediaCodecInfo> = codecs.filter { info ->
         info.isEncoder &&
             info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
-            runCatching { info.isHardwareAccelerated && !info.isSoftwareOnly }.getOrDefault(false)
+            runCatching { isHardware(info) }.getOrDefault(false)
     }
+
+    /**
+     * Whether [info] runs on a chip. From Android 10 the phone says so;
+     * Android 9 cannot be asked, and there the codec's name decides, by the
+     * rule Android itself filled those answers in with (CodecNames).
+     */
+    fun isHardware(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.isHardwareAccelerated && !info.isSoftwareOnly
+        } else {
+            !CodecNames.looksSoftware(info.name)
+        }
+
+    /** Whether [info] is a software codec, by the same reading as [isHardware]. */
+    fun isSoftware(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isSoftwareOnly else CodecNames.looksSoftware(info.name)
+
+    /**
+     * The savings benchmark only, on an emulator, which has no hardware
+     * encoder at all: let its software HEVC encoder stand in for a phone's
+     * chip, so the HEVC path phones take is the one measured. A release
+     * build ignores it entirely.
+     */
+    @Volatile
+    var softwareHevcForBenchmark: Boolean = false
+
+    /**
+     * The savings benchmark only: its emulator runs with Android's quality
+     * floor switched off (debug.stagefright.enableshaping), and with this the
+     * app judges its copies as a phone does whose encoder writes in CBR,
+     * which the floor never touches. A release build ignores it entirely.
+     */
+    @Volatile
+    var qualityFloorOffForBenchmark: Boolean = false
+
+    /** Whether Android's quality floor holds up a VBR encode of this size on this phone (QualityFloor). */
+    fun qualityFloorApplies(context: Context, width: Int, height: Int): Boolean =
+        !(BuildConfig.DEBUG && qualityFloorOffForBenchmark) &&
+            QualityFloor.applies(Build.VERSION.SDK_INT, handheld(context), width, height)
+
+    private fun encoders(mime: String): List<MediaCodecInfo> =
+        if (BuildConfig.DEBUG && softwareHevcForBenchmark) {
+            codecs.filter { info -> info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) } }
+        } else {
+            hardwareEncoders(mime)
+        }
 
     /**
      * True when a hardware HEVC encoder takes a video of this size and frame
@@ -35,7 +88,7 @@ object EncoderCaps {
      * landscape only and rotate a portrait frame themselves.
      */
     fun hevcFits(width: Int, height: Int, fps: Float): Boolean =
-        hardwareEncoders(MIME_HEVC).any { info ->
+        encoders(MIME_HEVC).any { info ->
             runCatching {
                 val video = info.getCapabilitiesForType(MIME_HEVC).videoCapabilities
                 val rate = fps.toDouble().coerceAtLeast(1.0)
@@ -70,6 +123,38 @@ object EncoderCaps {
                 }.getOrDefault(false)
             }
         }
+
+    /**
+     * True when an encoder for [mime] takes a video of this size and frame
+     * rate in CBR - the mode Android's quality floor (QualityFloor) leaves
+     * alone. Many chips have it for HEVC and not for H.264.
+     */
+    fun cbrFits(mime: String, width: Int, height: Int, fps: Float): Boolean =
+        encoders(mime).any { info ->
+            runCatching {
+                val caps = info.getCapabilitiesForType(mime)
+                val video = caps.videoCapabilities
+                val rate = fps.toDouble().coerceAtLeast(1.0)
+                caps.encoderCapabilities.isBitrateModeSupported(BITRATE_MODE_CBR) &&
+                    (video.areSizeAndRateSupported(width, height, rate) ||
+                        video.areSizeAndRateSupported(height, width, rate))
+            }.getOrDefault(false)
+        }
+
+    /**
+     * Whether Android counts this as a handheld device, the kind its quality
+     * floor is for: a touchscreen, and not a car, a TV or a watch - the test
+     * MediaCodec itself makes.
+     */
+    fun handheld(context: Context): Boolean {
+        val pm = context.packageManager
+        val others = listOf(
+            PackageManager.FEATURE_AUTOMOTIVE,
+            "android.hardware.type.television",
+            PackageManager.FEATURE_WATCH
+        )
+        return pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) && others.none { pm.hasSystemFeature(it) }
+    }
 
     /** A hardware encoder HEIC can be written with: a HEIC one, or HEVC. */
     fun hasHardwareHeic(): Boolean =

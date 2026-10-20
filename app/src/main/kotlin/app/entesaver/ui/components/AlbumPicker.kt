@@ -17,13 +17,16 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -74,6 +77,7 @@ import app.entesaver.R
 import app.entesaver.media.MediaScanner
 import app.entesaver.ui.theme.Dimens
 import app.entesaver.util.Errand
+import app.entesaver.util.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -85,12 +89,16 @@ import kotlinx.coroutines.withContext
  * nothing said so - it read as a glitch, and as an album that was never
  * offered. Inside a dialog the box has a height, and the grid takes most of
  * it; on the setup page, which scrolls itself, the box is unbounded and the
- * grid takes room for two rows of covers. Either way it says when there is
- * more below. The window's size is deliberately not consulted: in split
- * screen or on a folded screen the window and the box are different numbers.
+ * grid takes room for two rows of covers - but never more than about half of
+ * the page's own visible height ([viewportHeight], measured by the page). A
+ * fixed 440 dp was taller than a phone turned sideways shows, and inside the
+ * page's scroll every drag moved the albums first, so "Use these albums"
+ * could only be reached through the whole grid. Either way it says when there
+ * is more below.
  */
-private fun gridCeiling(boxMaxHeight: Dp): Dp = when {
+private fun gridCeiling(boxMaxHeight: Dp, viewportHeight: Dp): Dp = when {
     boxMaxHeight.isFinite -> maxOf(320.dp, boxMaxHeight * 0.7f)
+    viewportHeight.isFinite -> (viewportHeight * 0.55f).coerceIn(200.dp, 440.dp)
     else -> 440.dp
 }
 
@@ -118,12 +126,15 @@ fun AlbumGrid(
     // below the tiles was simply past the edge.
     header: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
-    state: LazyGridState = rememberLazyGridState()
+    state: LazyGridState = rememberLazyGridState(),
+    // How tall the page around an unbounded grid shows, where the page
+    // scrolls; unknown in a dialog or a sheet, which bound the grid instead.
+    viewportHeight: Dp = Dp.Infinity
 ) {
     // The album held down, shown in a sheet over the picker.
     var peeking by remember { mutableStateOf<MediaScanner.Album?>(null) }
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val maxHeight = gridCeiling(this.maxHeight)
+        val maxHeight = gridCeiling(this.maxHeight, viewportHeight)
         // Three across on any phone, more on a wider screen. "Adaptive at
         // 100 dp" was written for a 360 dp screen, but the grid never gets
         // the whole screen - a card's padding or a dialog's leaves it about
@@ -312,7 +323,9 @@ private fun AlbumPeekSheet(
     val context = LocalContext.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // Clear of the navigation buttons on a phone turned sideways too.
+        contentWindowInsets = { WindowInsets.safeDrawing }
     ) {
         Column(
             Modifier
@@ -337,11 +350,14 @@ private fun AlbumPeekSheet(
             }
             // Rows of three, drawn plainly: twelve thumbnails at most, inside
             // a sheet that scrolls, so a lazy grid would only add a second
-            // scroller to fight the first.
+            // scroller to fight the first. Never wider than a phone draws
+            // them: across a phone turned sideways three to a row were 200 dp
+            // each, and the buttons under them 800 dp down.
             for (row in album.recentUris.chunked(3)) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier
+                        .widthIn(max = PeekRowMaxWidth)
                         .fillMaxWidth()
                         .padding(bottom = 6.dp)
                 ) {
@@ -390,6 +406,9 @@ private fun AlbumPeekSheet(
     }
 }
 
+/** Three thumbnails across, as wide as a phone held upright draws them. */
+private val PeekRowMaxWidth = 360.dp
+
 /**
  * Opens the album's newest photo in the phone's own viewer, from the peek
  * sheet's "Open in gallery".
@@ -433,7 +452,7 @@ private fun albumCover(uri: String?): ImageBitmap? {
     val bitmap by produceState<ImageBitmap?>(initialValue = null, uri) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                resolver.loadThumbnail(Uri.parse(uri), Size(256, 256), null)
+                Thumbnails.load(resolver, Uri.parse(uri), Size(256, 256))
                     .asImageBitmap()
             }.getOrNull()
         }

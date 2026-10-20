@@ -5,6 +5,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.entesaver.R
 import app.entesaver.core.logic.BackupScope
@@ -12,7 +14,9 @@ import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.FgsBudget
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaProfile
+import app.entesaver.core.logic.Pacing
 import app.entesaver.core.logic.RunDecider
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.Stops
 import app.entesaver.data.db.AppDb
@@ -25,6 +29,7 @@ import app.entesaver.engine.InFlight
 import app.entesaver.engine.MaintainEngine
 import app.entesaver.engine.ProfileBuilder
 import app.entesaver.engine.ReattachEngine
+import app.entesaver.media.InPlace
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.Stager
 import app.entesaver.media.VideoCompressor
@@ -34,6 +39,8 @@ import app.entesaver.util.Notifications
 import app.entesaver.util.Permissions
 import app.entesaver.util.SpaceLimits
 import app.entesaver.util.Storage
+import app.entesaver.util.TamperCheck
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.min
 import kotlinx.coroutines.NonCancellable
@@ -83,6 +90,12 @@ class CompressWorker(context: Context, params: WorkerParameters) :
         var options = repo.current()
         val manual = inputData.getBoolean(KEY_MANUAL, false)
 
+        // A replace or put back the phone cut short is finished or undone
+        // before anything else - before setup or any limit is even asked
+        // about: a half-written file must not sit in the gallery, and in
+        // Ente's upload queue, until a run is next allowed to start.
+        runCatching { Stager(app, AppDb.get(app)).recoverInPlace() }
+
         if (!options.onboardingDone) return Result.success()
         // These two exits consumed the FAST content trigger without arming
         // the next one, so a phone coming back from a pause - or a
@@ -127,6 +140,10 @@ class CompressWorker(context: Context, params: WorkerParameters) :
         Storage.cleanTemp(app)
         val scanner = MediaScanner(app, db)
         val stager = Stager(app, db)
+        // Still not settled - the file or its kept original out of reach:
+        // the gallery is not read and nothing is replaced, since the file it
+        // is about would read as a new photo. Tried again next run.
+        val unsettled = InPlace.pending(app)
 
         val sessions = FgsBudget.decode(options.fgsSessions)
         val fgsLeft = FgsBudget.remaining(sessions, startAt)
@@ -172,13 +189,13 @@ class CompressWorker(context: Context, params: WorkerParameters) :
             // Each of these is wrapped because one failing step must not end
             // the run: the next pass tries again, and anything the person
             // needs to hear about is recorded by the step itself, in Activity.
-            runCatching { scanner.scan() }
+            if (!unsettled) runCatching { scanner.scan() }
 
             // Copies that outlived the database. Runs once, and only after a
             // scan, because it matches against rows the scan has just created.
             runCatching { ReattachEngine(app).run() }
 
-            loop@ while (System.currentTimeMillis() < deadline && !isStopped) {
+            loop@ while (!unsettled && System.currentTimeMillis() < deadline && !isStopped) {
                 val now = System.currentTimeMillis()
                 // Re-read options every round: Pause or a mode change must take
                 // effect during a run, not only on the next one.
@@ -197,6 +214,25 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                 repo.setString(OptionsRepo.K.WAIT_REASON, plan.wait.name)
                 if (!plan.canRun) {
                     break@loop
+                }
+                // Replacing in place needs Android's file access; without it
+                // nothing is encoded that could not be written back. And a
+                // modified build deletes nothing, which a replace does once
+                // the original's 30 days are up.
+                // Nor without media-location access: without it, Android
+                // hands over every photo with where it was taken blanked
+                // out, and a replace made from that would lose it for good.
+                if (live.saveMode == SaveMode.IN_PLACE) {
+                    val wait = when {
+                        TamperCheck.isModified(app) -> RunDecider.Wait.MODIFIED_BUILD
+                        !InPlace.canReplace(app) -> RunDecider.Wait.NEEDS_FILE_ACCESS
+                        !Permissions.hasMediaLocation(app) -> RunDecider.Wait.NEEDS_MEDIA_LOCATION
+                        else -> null
+                    }
+                    if (wait != null) {
+                        repo.setString(OptionsRepo.K.WAIT_REASON, wait.name)
+                        break@loop
+                    }
                 }
 
                 val resource = Gates.resourceGate(
@@ -281,13 +317,37 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                         later += row.id
                         continue
                     }
+                    // In place, a file changed within the last hour waits for
+                    // a later run: a camera may still be finishing it, or
+                    // Ente still uploading it.
+                    if (live.saveMode == SaveMode.IN_PLACE && Stager.tooFresh(row.dateModified, itemStart)) {
+                        later += row.id
+                        continue
+                    }
                     val ratio = if (row.isVideo) profile.videos.ratio else profile.photos.ratio
                     val predicted = if (ratio > 0) (row.sizeBytes * ratio).toLong() else 0L
+                    // In place there is no upload folder to pace: Ente uploads
+                    // what is replaced, so the day's limit is kept here.
+                    // "Optimise now" goes past it, as it does past the
+                    // battery budget, and says so.
+                    if (live.saveMode == SaveMode.IN_PLACE && !manual &&
+                        !Pacing.replaceFitsToday(
+                            live.dailyCapBytes,
+                            dayBudget.replacedToday(itemStart),
+                            if (predicted > 0) predicted else row.sizeBytes
+                        )
+                    ) {
+                        repo.setString(OptionsRepo.K.WAIT_REASON, RunDecider.Wait.DAILY_LIMIT.name)
+                        break@loop
+                    }
                     // Checked for every file, not once per batch: the
                     // biggest files come first, and one large copy must not
                     // take the phone below the space it keeps free. A
                     // smaller file may still fit.
-                    val need = if (predicted > 0) predicted * 6 / 5 else row.sizeBytes
+                    // In place, the original is copied into the trash first,
+                    // so for a moment the phone holds it twice.
+                    val copyNeed = if (predicted > 0) predicted * 6 / 5 else row.sizeBytes
+                    val need = copyNeed + if (live.saveMode == SaveMode.IN_PLACE) row.sizeBytes else 0L
                     if (free - need < live.minFreeBytes) {
                         deferred += row.id
                         continue
@@ -332,6 +392,10 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                         // even less time left; the next run takes it.
                         later += row.id
                     }
+                    // A replace left on record for recovery - its write could
+                    // not be finished or undone - stops the run: nothing else
+                    // is replaced until it is settled.
+                    if (InPlace.pending(app)) break@loop
                     // Re-check power between items, not just between batches.
                     val mid = System.currentTimeMillis()
                     power = Gates.readPower(app, repo.current().lastInteractiveAt, mid)
@@ -355,11 +419,14 @@ class CompressWorker(context: Context, params: WorkerParameters) :
             if (processed > 0) {
                 runCatching {
                     val saved = db.items().savedBytesSince(startAt)
+                    // Replaced files are FREED_KEPT, never STAGED: the entry
+                    // opens Files on the state this run left them in.
+                    val inPlace = repo.current().saveMode == SaveMode.IN_PLACE
                     ActivityLog(app).record(
                         ActivityLog.Kind.OPTIMISED,
                         count = processed,
                         bytes = saved,
-                        filterState = ItemState.STAGED.name
+                        filterState = if (inPlace) ItemState.FREED_KEPT.name else ItemState.STAGED.name
                     )
                 }
             }
@@ -375,6 +442,8 @@ class CompressWorker(context: Context, params: WorkerParameters) :
             // maintenance pass, which is what releases staged copies into the
             // upload folder.
             runCatching { MaintainEngine(app).run() }
+            // Originals replaced in place that the trash has let go of.
+            runCatching { stager.pruneKeptOriginals() }
 
             // The profile is what every estimate is derived from, so it is
             // rebuilt whenever there is new evidence to build it from.
@@ -424,7 +493,10 @@ class CompressWorker(context: Context, params: WorkerParameters) :
                 // Never leave a "working" icon in the status bar once the run
                 // is over, whatever ended it.
                 Notifications.clearWorking(app)
-                reschedule(app, repo)
+                // A run the app itself cancelled - setup reset, everything
+                // stopped - arms nothing: a trigger armed now would outlive
+                // the cancel and wake the app for the next new photo.
+                if (!cancelledByApp()) reschedule(app, repo)
             }
         }
         return Result.success()
@@ -445,6 +517,16 @@ class CompressWorker(context: Context, params: WorkerParameters) :
     } else {
         RunDecider.decide(o.speed, power, budget, paused = o.pauseAll, videosNeedCharger = smallestPhone)
     }
+
+    /**
+     * Whether this run ended because its own work was cancelled. WorkManager
+     * marks the work cancelled before it stops the run, so the state says
+     * so on every Android version, where the stop reason does only from 12.
+     */
+    private fun cancelledByApp(): Boolean = isStopped && runCatching {
+        WorkManager.getInstance(applicationContext).getWorkInfoById(id)
+            .get(5, TimeUnit.SECONDS)?.state == WorkInfo.State.CANCELLED
+    }.getOrDefault(false)
 
     /** FAST re-arms its content trigger after every run (triggers are one-shot). */
     private suspend fun reschedule(context: Context, repo: OptionsRepo) {

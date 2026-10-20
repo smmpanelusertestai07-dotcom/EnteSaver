@@ -29,9 +29,6 @@ object QualityKept {
      */
     const val PHONE_SCREEN_MP = 2.6
 
-    /** The quality factor the photo path encodes at. */
-    fun photoQuality(spec: PhotoSpec): Int = spec.quality
-
     /** The megapixel ceiling for photos; 0 keeps every pixel. */
     fun photoCapMp(spec: PhotoSpec): Int = spec.maxMp
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -42,12 +43,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isFinite
 import app.entesaver.R
 import app.entesaver.core.logic.QualityKept
 import app.entesaver.data.db.ItemRow
 import app.entesaver.ui.components.KeyValueRow
 import app.entesaver.util.Formats
+import app.entesaver.util.Thumbnails
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -109,146 +113,154 @@ fun CompareSheet(
             )
         },
         text = {
-                // Scrollable, because a dialog's text slot is not. On a
-                // 320x568 screen at font scale 2.0 the bottom of this content
-                // sits past the edge with no way to reach it, and the buttons
-                // are pushed off with it.
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                // Read once into locals rather than through the delegates a
-                // second time: a null check on a state property proves nothing
-                // about the read after it, and the two !! that followed were
-                // the only thing standing between a thumbnail arriving late
-                // and a crash on the screen that is meant to reassure people.
-                val readBefore = original
-                val readAfter = optimised
-                val loading = readBefore == null || readAfter == null
-                val before = readBefore?.bitmap
-                val after = readAfter?.bitmap
-                if (loading) {
-                    // The frame the comparison will fill, so nothing jumps
-                    // when it arrives, and a sign that it is on its way.
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                } else if (before != null && after != null) {
-                    BoxWithConstraints(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clipToBounds()
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    ) {
-                        // Optimised underneath, original clipped over it: the
-                        // slider is a wipe across one image, not two pictures
-                        // side by side at different scales.
-                        val frame = maxWidth
-                        Image(
-                            bitmap = after.asImageBitmap(),
-                            contentDescription = stringResource(R.string.compare_optimised),
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
+            // Scrollable, because a dialog's text slot is not. On a
+            // 320x568 screen at font scale 2.0 the bottom of this content
+            // sits past the edge with no way to reach it, and the buttons
+            // are pushed off with it.
+            BoxWithConstraints {
+                val slotHeight = maxHeight
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    // Read once into locals rather than through the delegates a
+                    // second time: a null check on a state property proves nothing
+                    // about the read after it, and the two !! that followed were
+                    // the only thing standing between a thumbnail arriving late
+                    // and a crash on the screen that is meant to reassure people.
+                    val readBefore = original
+                    val readAfter = optimised
+                    val loading = readBefore == null || readAfter == null
+                    val before = readBefore?.bitmap
+                    val after = readAfter?.bitmap
+                    // Never taller than about half of what the dialog has for its
+                    // text, centred. On a phone turned sideways a full-width square
+                    // was taller than the dialog itself, so the picture and the
+                    // slider under it were never on screen together; held upright
+                    // the dialog is narrower than that, and nothing changes.
+                    val frameSize = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .widthIn(max = if (slotHeight.isFinite) slotHeight * 0.6f else Dp.Infinity)
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                    if (loading) {
+                        // The frame the comparison will fill, so nothing jumps
+                        // when it arrives, and a sign that it is on its way.
                         Box(
-                            Modifier
-                                .fillMaxHeight()
-                                .width(frame * split)
-                                .clipToBounds()
+                            frameSize.background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                            contentAlignment = Alignment.Center
                         ) {
-                            // The original is laid out at the full width of the
-                            // frame and then clipped by the box around it. Left
-                            // to fill the narrow box it was cropped to that
-                            // box's shape instead, so the half being compared
-                            // was a different part of the picture at a
-                            // different scale - which is exactly the comparison
-                            // this sheet exists to avoid.
+                            CircularProgressIndicator()
+                        }
+                    } else if (before != null && after != null) {
+                        BoxWithConstraints(
+                            frameSize
+                                .clipToBounds()
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        ) {
+                            // Optimised underneath, original clipped over it: the
+                            // slider is a wipe across one image, not two pictures
+                            // side by side at different scales.
+                            val frame = maxWidth
                             Image(
-                                bitmap = before.asImageBitmap(),
-                                contentDescription = stringResource(R.string.compare_original),
+                                bitmap = after.asImageBitmap(),
+                                contentDescription = stringResource(R.string.compare_optimised),
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .requiredWidth(frame)
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Box(
+                                Modifier
                                     .fillMaxHeight()
+                                    .width(frame * split)
+                                    .clipToBounds()
+                            ) {
+                                // The original is laid out at the full width of the
+                                // frame and then clipped by the box around it. Left
+                                // to fill the narrow box it was cropped to that
+                                // box's shape instead, so the half being compared
+                                // was a different part of the picture at a
+                                // different scale - which is exactly the comparison
+                                // this sheet exists to avoid.
+                                Image(
+                                    bitmap = before.asImageBitmap(),
+                                    contentDescription = stringResource(R.string.compare_original),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .requiredWidth(frame)
+                                        .fillMaxHeight()
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Half the row each, so a long translation of either
+                            // word wraps under itself instead of pushing the other
+                            // one off the end of the dialog.
+                            Text(
+                                stringResource(R.string.compare_original),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                stringResource(R.string.compare_optimised),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 8.dp)
                             )
                         }
-                    }
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Half the row each, so a long translation of either
-                        // word wraps under itself instead of pushing the other
-                        // one off the end of the dialog.
+                        Slider(value = split, onValueChange = { split = it })
+                    } else {
+                        // Only once both reads have answered, and one came back
+                        // with nothing: then the copy really is not on the phone.
                         Text(
-                            stringResource(R.string.compare_original),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            stringResource(R.string.compare_optimised),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 8.dp)
+                            stringResource(R.string.compare_in_cloud),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
-                    Slider(value = split, onValueChange = { split = it })
-                } else {
-                    // Only once both reads have answered, and one came back
-                    // with nothing: then the copy really is not on the phone.
-                    Text(
-                        stringResource(R.string.compare_in_cloud),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-                KeyValueRow(
-                    stringResource(R.string.detail_original),
-                    Formats.bytes(row.sizeBytes)
-                )
-                row.outputBytes?.let {
-                    KeyValueRow(stringResource(R.string.detail_copy), Formats.bytes(it))
-                    val saved = (row.sizeBytes - it).coerceAtLeast(0)
-                    if (saved > 0) {
-                        KeyValueRow(
-                            stringResource(R.string.detail_saved),
-                            stringResource(
-                                R.string.detail_saved_value,
-                                Formats.bytes(saved),
-                                Formats.percentOf(saved, row.sizeBytes)
-                            )
-                        )
-                    }
-                }
-                // What the encoder really did to this file, not what the preset
-                // allows. Absent when the pixels were never recorded, because a
-                // blank is honest and an invented percentage is not.
-                QualityKept.measuredDetailKeptPercent(row.srcPixels, row.outPixels)?.let { kept ->
                     KeyValueRow(
-                        stringResource(R.string.detail_kept),
-                        if (kept >= 100) {
-                            stringResource(R.string.detail_kept_all)
-                        } else {
-                            stringResource(R.string.detail_kept_value, kept)
+                        stringResource(R.string.detail_original),
+                        Formats.bytes(row.sizeBytes)
+                    )
+                    row.outputBytes?.let {
+                        KeyValueRow(stringResource(R.string.detail_copy), Formats.bytes(it))
+                        val saved = (row.sizeBytes - it).coerceAtLeast(0)
+                        if (saved > 0) {
+                            KeyValueRow(
+                                stringResource(R.string.detail_saved),
+                                stringResource(
+                                    R.string.detail_saved_value,
+                                    Formats.bytes(saved),
+                                    Formats.percentOf(saved, row.sizeBytes)
+                                )
+                            )
                         }
+                    }
+                    // What the encoder really did to this file, not what the preset
+                    // allows. Absent when the pixels were never recorded, because a
+                    // blank is honest and an invented percentage is not.
+                    QualityKept.measuredDetailKeptPercent(row.srcPixels, row.outPixels)?.let { kept ->
+                        KeyValueRow(
+                            stringResource(R.string.detail_kept),
+                            if (kept >= 100) {
+                                stringResource(R.string.detail_kept_all)
+                            } else {
+                                stringResource(R.string.detail_kept_value, kept)
+                            }
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.compare_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
                 }
-                Text(
-                    stringResource(R.string.compare_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
             }
         }
     )
@@ -287,7 +299,7 @@ private suspend fun loadThumb(
     val uri = uriString?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return null
     return withContext(Dispatchers.IO) {
         runCatching {
-            context.contentResolver.loadThumbnail(uri, Size(1024, 1024), null)
+            Thumbnails.load(context.contentResolver, uri, Size(1024, 1024))
         }.getOrNull()
     }
 }

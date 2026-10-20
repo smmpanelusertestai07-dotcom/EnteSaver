@@ -69,7 +69,7 @@ class SetupFlowTest {
         val ready = onb.substringAfter("Step.READY ->")
         assertTrue(
             "the no-albums warning must open the sheet in place",
-            ready.contains("TextButton(onClick = { choosingAlbums = true })")
+            Regex("""OutlinedButton\(\s*onClick = \{ choosingAlbums = true \}""").containsMatchIn(ready)
         )
         assertTrue(
             "the trial card must open the same sheet",
@@ -316,7 +316,7 @@ class SetupFlowTest {
             stringsNamed("about_updates").isEmpty()
         )
         val requires = stringsNamed("about_requires_min").single().second
-        assertTrue("the minimum must be named", requires.contains("Android 10"))
+        assertTrue("the minimum must be named", requires.contains("Android 9 or newer"))
         assertTrue("and what it is tested against", requires.contains("Android 16"))
     }
 

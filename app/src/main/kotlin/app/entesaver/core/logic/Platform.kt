@@ -3,17 +3,17 @@ package app.entesaver.core.logic
 /**
  * What this Android version can and cannot do, stated in one place.
  *
- * The app runs on Android 10 through 16, but "runs on" is not the same as
- * "does everything on". Android 10 has no media trash, so a removed original
- * there is gone for good - and a button that says "Move to trash" while
- * permanently deleting would be the worst lie this app could tell. Every
- * screen that offers such an action asks here first, and the About page
- * states the same thing before anyone gets that far.
+ * The app runs on Android 9 through 16, but "runs on" is not the same as
+ * "does everything on". Android 9 and 10 have no media trash, so a removed
+ * original there is gone for good - and a button that says "Move to trash"
+ * while permanently deleting would be the worst lie this app could tell.
+ * Every screen that offers such an action asks here first, and the About
+ * page states the same thing before anyone gets that far.
  */
 object Platform {
 
     /** Oldest Android this app installs on. Matches minSdk. */
-    const val MIN_SDK = 29
+    const val MIN_SDK = 28
 
     /** The Android version this app is built and tested against. */
     const val TARGET_SDK = 36
@@ -46,6 +46,7 @@ object Platform {
      * or the number when there is none, rather than a guessed name.
      */
     fun releaseName(sdkInt: Int, release: String = ""): String = when (sdkInt) {
+        28 -> "9"
         29 -> "10"
         30 -> "11"
         31 -> "12"

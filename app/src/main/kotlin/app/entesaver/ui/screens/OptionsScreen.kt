@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.SdCard
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.AlertDialog
@@ -86,7 +87,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
@@ -99,6 +99,7 @@ import app.entesaver.core.logic.BackupScope
 import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputMode
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.ThemeMode
 import app.entesaver.data.EnteApp
@@ -119,6 +120,7 @@ import app.entesaver.ui.components.PasswordDialog
 import app.entesaver.ui.components.SectionHeader
 import app.entesaver.ui.components.SegmentedChoice
 import app.entesaver.ui.components.StackedTextScale
+import app.entesaver.ui.components.TrailingOrBelow
 import app.entesaver.ui.components.WarningNote
 import app.entesaver.ui.components.WarningText
 import app.entesaver.ui.goTo
@@ -219,6 +221,26 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
         Spacer(Modifier.height(10.dp))
 
         SectionHeader(stringResource(R.string.opt_group_backup))
+        // Saving space first: it decides what happens to the person's own
+        // files, and what every card below it means.
+        val fileAccess by vm.fileAccess.collectAsStateWithLifecycle()
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshFileAccess() }
+        val writeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+            vm.refreshFileAccess()
+        }
+        SaveModeCard(
+            mode = o.saveMode,
+            fileAccess = fileAccess,
+            icon = IconSaveMode,
+            onMode = { vm.setSaveMode(it) },
+            onGrant = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    vm.openFileAccess()
+                } else {
+                    writeLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+        )
         // Ente Photos: the one app light copies are made for. Whether it is on
         // the phone is asked again whenever Settings comes back, so someone
         // sent off to install it returns to a card that already knows.
@@ -316,25 +338,11 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
             ChoiceNote(stringResource(R.string.folders_gap_note))
         }
 
-        // Photos and videos: two settings, because they are two
-        // trade-offs. The note under each says what this phone will actually
-        // do, which depends on its encoder chips - asked once per visit.
+        // Optimisation: nothing to choose, only what this phone will do,
+        // which depends on its encoder chips - asked once per visit.
         val plan by vm.encodePlan.collectAsStateWithLifecycle()
-        LaunchedEffect(o.photo, o.video) { vm.refreshEncodePlan() }
-        PhotoSettingsCard(
-            photo = o.photo,
-            plan = plan,
-            icon = IconQuality,
-            onChange = { vm.setPhoto(it) },
-            onInfo = { nav.goTo(Routes.HELP_QUALITY) }
-        )
-        VideoSettingsCard(
-            video = o.video,
-            plan = plan,
-            icon = IconCodec,
-            onChange = { vm.setVideo(it) },
-            onInfo = { nav.goTo(Routes.HELP_QUALITY) }
-        )
+        LaunchedEffect(Unit) { vm.refreshEncodePlan() }
+        OptimisationCard(plan = plan, icon = IconQuality, onInfo = { nav.goTo(Routes.HELP_QUALITY) })
 
         // When to work
         OptionCard(
@@ -521,9 +529,10 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
             }
             if (!o.spaceAuto) {
                 // How much new copies may add in a day
+                val inPlace = o.saveMode == SaveMode.IN_PLACE
                 OptionCard(
-                    stringResource(R.string.opt_daily_cap),
-                    stringResource(R.string.opt_daily_cap_hint),
+                    stringResource(if (inPlace) R.string.opt_daily_cap_in_place else R.string.opt_daily_cap),
+                    stringResource(if (inPlace) R.string.opt_daily_cap_hint_in_place else R.string.opt_daily_cap_hint),
                     icon = IconLimit,
                     value = capLabel(o.dailyCapMb)
                 ) {
@@ -536,7 +545,7 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                     // Z10.5: what this limit controls, and what it cannot. The upload
                     // itself belongs to the cloud app; only the feed rate is ours.
                     Text(
-                        stringResource(R.string.daily_limit_note),
+                        stringResource(if (inPlace) R.string.daily_limit_in_place else R.string.daily_limit_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp)
@@ -637,25 +646,30 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                 if (o.scope != BackupScope.ALL) WarningText(stringResource(R.string.scope_left_out_warning))
             }
 
-            // Upload folders
-            OptionCard(
-                stringResource(R.string.opt_output),
-                stringResource(R.string.opt_output_hint),
-                icon = IconLayout
-            ) {
-                SegmentedChoice(
-                    listOf(
-                        OutputMode.SINGLE.name to stringResource(R.string.output_single),
-                        OutputMode.SEPARATE.name to stringResource(R.string.output_separate)
-                    ),
-                    o.outputMode.name
-                ) { pendingLayout = OutputMode.valueOf(it) }
-                // The user has to pick this exact string inside another app, so it
-                // is printed rather than described - once, beside the kind of copy
-                // it is for, with the default or a folder of the person's own.
-                FolderPaths(o.layout, showPaths = false)
-                FolderChoiceRows(o.layout) { changingFolder = it }
-                CopyPathButton(o.layout)
+            // Upload folders - and below, where they live - belong to Copies
+            // for Ente. Replace on this phone writes into the albums
+            // themselves, so neither card means anything there.
+            val copies = o.saveMode == SaveMode.COPIES
+            if (copies) {
+                OptionCard(
+                    stringResource(R.string.opt_output),
+                    stringResource(R.string.opt_output_hint),
+                    icon = IconLayout
+                ) {
+                    SegmentedChoice(
+                        listOf(
+                            OutputMode.SINGLE.name to stringResource(R.string.output_single),
+                            OutputMode.SEPARATE.name to stringResource(R.string.output_separate)
+                        ),
+                        o.outputMode.name
+                    ) { pendingLayout = OutputMode.valueOf(it) }
+                    // The user has to pick this exact string inside another app, so it
+                    // is printed rather than described - once, beside the kind of copy
+                    // it is for, with the default or a folder of the person's own.
+                    FolderPaths(o.layout, showPaths = false)
+                    FolderChoiceRows(o.layout) { changingFolder = it }
+                    CopyPathButton(o.layout)
+                }
             }
             changingFolder?.let { folder ->
                 FolderDialog(vm, o.layout, folder) { changingFolder = null }
@@ -669,7 +683,7 @@ fun OptionsScreen(vm: AppViewModel, nav: NavHostController) {
                 it.isPrimary || it.mediaVolumeName in writableVolumes
             }
             val sdBlocked = volumes.size > offerable.size
-            if (volumes.size > 1 || o.storageVolume.isNotEmpty()) {
+            if (copies && (volumes.size > 1 || o.storageVolume.isNotEmpty())) {
                 OptionCard(
                         stringResource(R.string.opt_volume),
                         stringResource(R.string.opt_volume_hint),
@@ -1267,6 +1281,7 @@ private val IconScope = Icons.Outlined.PhotoLibrary
 private val IconAlbums = Icons.Outlined.Folder
 private val IconLayout = Icons.Outlined.CreateNewFolder
 private val IconCloud = Icons.Outlined.CloudUpload
+private val IconSaveMode = Icons.Outlined.SwapHoriz
 private val IconSpeed = Icons.Outlined.Bolt
 private val IconLimit = Icons.Outlined.DataUsage
 private val IconFree = Icons.Outlined.PhoneAndroid
@@ -1326,26 +1341,26 @@ internal fun OptionCard(
                 // 320 dp phone at the largest accessibility font that left the
                 // title a word wide down the left edge and cut "Photos and
                 // videos" to "Photos a...", so neither half could be read.
-                // Flowing, each is shown in full; one of them just moves down
-                // a line to get there.
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                // Each is shown in full; one of them just moves down a line
+                // to get there, and then starts where the title starts.
+                val titleText = @Composable {
                     Text(
                         title,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
-                    value?.let {
+                }
+                if (value == null) {
+                    titleText()
+                } else {
+                    TrailingOrBelow {
+                        titleText()
                         Text(
-                            it,
+                            value,
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.padding(start = 12.dp)
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

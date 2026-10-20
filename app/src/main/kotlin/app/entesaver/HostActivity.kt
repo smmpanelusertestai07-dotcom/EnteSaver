@@ -51,9 +51,15 @@ class HostActivity : AppCompatActivity() {
         takeRoute(intent)
     }
 
-    /** Opens the screen an alert or shortcut asked for, once: the route is spent. */
+    /**
+     * Opens the screen an alert or shortcut asked for, once: the route is
+     * spent. Only those name this activity itself; another app can reach
+     * only the home-screen icon, and which screen opens is not its choice.
+     */
     private fun takeRoute(intent: Intent?) {
-        vm.consumeDeepLink(intent?.getStringExtra(Notifications.EXTRA_ROUTE))
+        if (intent?.component?.className == HostActivity::class.java.name) {
+            vm.consumeDeepLink(intent.getStringExtra(Notifications.EXTRA_ROUTE))
+        }
         intent?.removeExtra(Notifications.EXTRA_ROUTE)
     }
 

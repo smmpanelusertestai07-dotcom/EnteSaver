@@ -2,26 +2,51 @@ package app.entesaver.core.logic
 
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
- * Video bitrate policy:
- * target = OUTPUT pixels x fps x bits-per-pixel-per-frame, by codec and the
- * quality chosen (H.264 0.13 / 0.10 / 0.075, HEVC 0.085 / 0.065 / 0.05 for
- * high / standard / small), clamped to [1 Mbps, 12 Mbps] - 20 Mbps above
- * 1440p, where 12 would starve a 4K picture. Standard is ~6 Mbps for 1080p30
- * H.264 and ~4 Mbps HEVC, what every version before 11 used.
+ * Video bitrate policy: the standard rate a clip's share (VideoShare, read
+ * from how much its picture moves) is taken of.
+ *
+ * It grows with the picture's pixel rate (width x height x frames a second)
+ * to the power [SCALE_EXPONENT], not in proportion: a bigger picture has
+ * more pixels alike, so each needs fewer bits - what streaming services'
+ * per-title ladders measure. 1080p30 in HEVC is [REF_HEVC_BPS]; H.264 is
+ * asked for [H264_FACTOR] times as much for the same look. So 1080p30 is
+ * 0.95 Mbps in HEVC and 1.38 Mbps in H.264, 720p30 0.52 and 0.75, a
+ * WhatsApp 480p clip 0.28 and 0.41 - and a clip gets 0.7 to 2.4 times that
+ * by what it shows, never more than [SOURCE_SHARE] of what its source holds.
+ * A camera writes 20 Mbps: the savings benchmark's 46 GB library comes down
+ * to about a seventh (6.3 GB on a phone whose HEVC chip keeps to the rate),
+ * which is what it takes to last in Ente's free 10 GB.
  */
 object BitrateCalc {
 
-    const val BPP_H264 = 0.10
-    const val BPP_HEVC = 0.065
-    const val CAP_BPS = 12_000_000
-    const val CAP_BPS_UHD = 20_000_000
-    const val FLOOR_BPS = 1_000_000
+    /** 1080p at 30 frames a second, in HEVC. */
+    const val REF_HEVC_BPS = 950_000
 
-    /** Above this long side a picture is 4K-class and gets [CAP_BPS_UHD]. */
-    const val UHD_LONG_SIDE = 2560
+    /** H.264 needs this much more than HEVC for the same picture. */
+    const val H264_FACTOR = 1.45
+
+    /** The pixel rate [REF_HEVC_BPS] is for: 1080p30. */
+    const val REF_PIXEL_RATE = 1920.0 * 1080.0 * 30.0
+
+    /** How the rate grows with the pixel rate. */
+    const val SCALE_EXPONENT = 0.75
+
+    const val FLOOR_BPS = 150_000
+    const val CAP_BPS = 8_000_000
+
+    /**
+     * The most of what its source's own picture holds a copy is asked for
+     * ([sourceCapBps]): a file another app already compressed - a Telegram
+     * episode, a YouTube download - still comes down by two fifths at least,
+     * instead of being written again for next to nothing. Set with the
+     * standard rate on the savings benchmark: the 46 GB library lands at
+     * 6.3 GB, and a camera's own videos keep their full rate.
+     */
+    const val SOURCE_SHARE = 0.6
 
     /** Copy as-is when source bitrate <= 1.15 x target (and size/container fit). */
     const val COPY_BITRATE_FACTOR = 1.15
@@ -37,33 +62,55 @@ object BitrateCalc {
      */
     const val FALLBACK_MAX_RATIO = 0.9
 
-    fun bppFor(codec: VideoCodec, quality: VideoQuality = VideoQuality.STANDARD): Double =
-        when (codec) {
-            VideoCodec.H264 -> when (quality) {
-                VideoQuality.HIGH -> 0.13
-                VideoQuality.STANDARD -> BPP_H264
-                VideoQuality.SMALL -> 0.075
-            }
-            VideoCodec.HEVC -> when (quality) {
-                VideoQuality.HIGH -> 0.085
-                VideoQuality.STANDARD -> BPP_HEVC
-                VideoQuality.SMALL -> 0.05
-            }
-        }
+    /** How many times HEVC's rate a codec is asked for. */
+    fun codecFactor(codec: VideoCodec): Double = when (codec) {
+        VideoCodec.H264 -> H264_FACTOR
+        VideoCodec.HEVC -> 1.0
+    }
 
-    fun capFor(outWidth: Int, outHeight: Int): Int =
-        if (maxOf(outWidth, outHeight) > UHD_LONG_SIDE) CAP_BPS_UHD else CAP_BPS
+    fun targetBps(outWidth: Int, outHeight: Int, fps: Float, codec: VideoCodec): Int {
+        val safeFps = if (fps.isFinite() && fps > 1f) fps else 30f
+        val pixelRate = outWidth.toDouble() * outHeight.toDouble() * safeFps
+        val raw = REF_HEVC_BPS * (pixelRate / REF_PIXEL_RATE).pow(SCALE_EXPONENT) * codecFactor(codec)
+        return raw.toLong().coerceIn(FLOOR_BPS.toLong(), CAP_BPS.toLong()).toInt()
+    }
 
-    fun targetBps(
+    /**
+     * The most a copy is asked for: [SOURCE_SHARE] of what its source's own
+     * picture holds, in the copy's codec and at the copy's size and frame
+     * rate. A Telegram episode in H.264 at 1 Mbps holds about what HEVC keeps
+     * at 0.69; asked for more, the extra bits would carry nothing the source
+     * had, and the episode would be kept whole for want of a saving. Null when
+     * the source's codec or bitrate is not known.
+     */
+    fun sourceCapBps(
+        sourceVideoBps: Long,
+        sourceMime: String?,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcFps: Float,
         outWidth: Int,
         outHeight: Int,
-        fps: Float,
-        codec: VideoCodec,
-        quality: VideoQuality = VideoQuality.STANDARD
-    ): Int {
-        val safeFps = if (fps.isFinite() && fps > 1f) fps else 30f
-        val raw = outWidth.toDouble() * outHeight.toDouble() * safeFps * bppFor(codec, quality)
-        return raw.toLong().coerceIn(FLOOR_BPS.toLong(), capFor(outWidth, outHeight).toLong()).toInt()
+        outFps: Float,
+        codec: VideoCodec
+    ): Int? {
+        val factor = sourceFactor(sourceMime) ?: return null
+        if (sourceVideoBps <= 0) return null
+        val src = srcWidth.toDouble() * srcHeight * (if (srcFps.isFinite() && srcFps > 1f) srcFps else 30f)
+        val out = outWidth.toDouble() * outHeight * (if (outFps.isFinite() && outFps > 1f) outFps else 30f)
+        if (src <= 0 || out <= 0) return null
+        val scale = (out / src).coerceAtMost(1.0).pow(SCALE_EXPONENT)
+        return (sourceVideoBps * scale * codecFactor(codec) / factor * SOURCE_SHARE)
+            .coerceIn(FLOOR_BPS.toDouble(), CAP_BPS.toDouble()).toInt()
+    }
+
+    /** How many times HEVC's rate a source codec spends on the same picture. */
+    private fun sourceFactor(mime: String?): Double? = when (mime?.lowercase()) {
+        "video/hevc", "video/x-vnd.on2.vp9" -> 1.0
+        "video/avc" -> H264_FACTOR
+        "video/av01" -> 0.8
+        "video/mp4v-es", "video/3gpp" -> 2.0
+        else -> null
     }
 
     /** Keep aspect ratio, clamp long side, force even dimensions. */
@@ -115,6 +162,31 @@ object BitrateCalc {
         if (outBytes <= 0 || outBytes > (srcBytes * FALLBACK_MAX_RATIO).toLong()) return false
         if (srcDurationMs > 0 && abs(srcDurationMs - outDurationMs) > DURATION_TOLERANCE_MS) return false
         return true
+    }
+
+    /** How far under the target the next encode aims, after one that overshot. */
+    const val CORRECTION_MARGIN = 0.95
+
+    /** The least the next encode is asked for, as a share of the target. */
+    const val MIN_CORRECTION = 1.0 / 3
+
+    /**
+     * What to ask the next encode for, after one asked for [askedBps] wrote
+     * [measuredVideoBps] of picture when the clip needs [targetBps].
+     *
+     * An encoder that overshoots does it by much the same factor at a lower
+     * request - the emulator's software H.264 by half again on a lean
+     * WhatsApp forward, which is why such files were kept whole. Lowered by
+     * that factor, the next encode lands near the target instead of over it
+     * a second time. Null when the encoder kept to the target, so there is
+     * nothing to correct. Never under a third of the target: an encoder that
+     * overshoots by more than that is not keeping to a rate at all.
+     */
+    fun correctedRequestBps(askedBps: Int, measuredVideoBps: Long, targetBps: Int): Int? {
+        if (askedBps <= 0 || measuredVideoBps <= 0 || targetBps <= 0) return null
+        if (measuredVideoBps <= targetBps) return null
+        val next = askedBps.toDouble() * targetBps / measuredVideoBps * CORRECTION_MARGIN
+        return maxOf(next, targetBps * MIN_CORRECTION).toInt().takeIf { it < askedBps }
     }
 
     /**

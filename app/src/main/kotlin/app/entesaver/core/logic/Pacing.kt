@@ -36,6 +36,17 @@ object Pacing {
         return ceil(dailyCapBytes.toDouble() / SLICES_PER_DAY).toLong().coerceAtLeast(1L)
     }
 
+    /**
+     * Whether a file of about [nextBytes] may still be replaced on this phone
+     * today, with [replacedToday] written already. Replace on this phone has
+     * no upload folder to pace - Ente uploads each replaced file as it backs
+     * the album up - so the daily limit is kept where the files are written.
+     * The first file of a day always fits, as in the folder (ReleasePlanner):
+     * a file bigger than the limit would otherwise wait for ever.
+     */
+    fun replaceFitsToday(dailyCapBytes: Long, replacedToday: Long, nextBytes: Long): Boolean =
+        dailyCapBytes < 0 || replacedToday <= 0L || replacedToday + nextBytes <= dailyCapBytes
+
     /** What is left of today's allowance after [releasedToday]. */
     fun remainingToday(dailyCapBytes: Long, releasedToday: Long): Long {
         if (dailyCapBytes < 0) return -1L

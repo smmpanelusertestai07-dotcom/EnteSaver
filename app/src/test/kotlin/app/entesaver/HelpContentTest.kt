@@ -255,7 +255,9 @@ class HelpContentTest {
             "READ_MEDIA_IMAGES" to listOf("photos"),
             "READ_MEDIA_VIDEO" to listOf("videos"),
             "PACKAGE_USAGE_STATS" to listOf("usage access", "bytes"),
-            "POST_NOTIFICATIONS" to listOf("notification")
+            "POST_NOTIFICATIONS" to listOf("notification"),
+            "MANAGE_EXTERNAL_STORAGE" to listOf("all files access"),
+            "WRITE_EXTERNAL_STORAGE" to listOf("storage write access")
         )
         val unaccounted = mustMention
             .filterKeys { it in held }

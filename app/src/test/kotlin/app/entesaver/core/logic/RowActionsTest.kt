@@ -12,8 +12,9 @@ class RowActionsTest {
         state: ItemState,
         evidence: Evidence = Evidence.NONE,
         neverOptimise: Boolean = false,
-        originalMissing: Boolean = false
-    ) = RowActions.Row(state, evidence, neverOptimise, originalMissing)
+        originalMissing: Boolean = false,
+        originalKept: Boolean = false
+    ) = RowActions.Row(state, evidence, neverOptimise, originalMissing, originalKept)
 
     @Test
     fun `a waiting file can be pushed forward or skipped`() {
@@ -94,6 +95,34 @@ class RowActionsTest {
     fun `an already reclaimed file offers nothing further`() {
         assertEquals(listOf(Action.OPEN), RowActions.forItem(row(ItemState.FREED)))
         assertEquals(listOf(Action.OPEN), RowActions.forItem(row(ItemState.FREED_KEPT)))
+    }
+
+    @Test
+    fun `a file replaced on this phone can be put back while its original is kept`() {
+        assertEquals(
+            listOf(Action.OPEN, Action.PUT_BACK),
+            RowActions.forItem(row(ItemState.FREED_KEPT, originalKept = true))
+        )
+        // Past its 30 days, or deleted: there is nothing to put back.
+        assertEquals(listOf(Action.OPEN), RowActions.forItem(row(ItemState.FREED_KEPT, originalKept = false)))
+        // And never for a file that is not on the phone any more.
+        assertEquals(
+            listOf(Action.OPEN),
+            RowActions.forItem(row(ItemState.FREED_KEPT, originalMissing = true, originalKept = true))
+        )
+    }
+
+    @Test
+    fun `while an original is kept, putting it back is the only thing offered`() {
+        // A replace recovery gave up on is a SKIP that still keeps its
+        // original: Put back is its way out, and Try again would read the
+        // replaced file as changed and drop the row with the only record of
+        // where the original waits.
+        for (state in ItemState.entries) {
+            assertEquals("$state", listOf(Action.OPEN, Action.PUT_BACK), RowActions.forItem(row(state, originalKept = true)))
+        }
+        assertFalse(Action.TRY_AGAIN in RowActions.forItem(row(ItemState.SKIP, originalKept = true)))
+        assertTrue(Action.TRY_AGAIN in RowActions.forItem(row(ItemState.SKIP, originalKept = false)))
     }
 
     @Test

@@ -22,12 +22,25 @@ class MediaAccessTest {
         images: Boolean = false,
         video: Boolean = false,
         selected: Boolean = false,
-        legacy: Boolean = false
-    ) = Permissions.mediaAccessFor(sdk, images, video, selected, legacy)
+        legacy: Boolean = false,
+        write: Boolean = false
+    ) = Permissions.mediaAccessFor(sdk, images, video, selected, legacy, write)
+
+    @Test
+    fun `api 28 needs storage write as well as read`() {
+        // Android 9 writes every copy into its folder as a file: reading the
+        // gallery without that would queue work the app cannot finish.
+        assertEquals(MediaAccess.FULL, level(sdk = 28, legacy = true, write = true))
+        assertEquals(MediaAccess.NONE, level(sdk = 28, legacy = true))
+        assertEquals(MediaAccess.NONE, level(sdk = 28, write = true))
+        assertEquals(MediaAccess.NONE, level(sdk = 28, images = true, video = true, selected = true))
+    }
 
     @Test
     fun `api 29 knows only full or none`() {
         assertEquals(MediaAccess.FULL, level(sdk = 29, legacy = true))
+        // Write access is for Replace on this phone there, never for reading.
+        assertEquals(MediaAccess.NONE, level(sdk = 29, write = true))
         assertEquals(MediaAccess.NONE, level(sdk = 29, legacy = false))
         // The user-selected grant does not exist there; even if some OEM
         // reported it, it must not count.

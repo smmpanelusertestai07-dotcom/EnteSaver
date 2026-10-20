@@ -8,12 +8,14 @@ import org.junit.Test
 class PlatformTest {
 
     @Test
-    fun `Android 10 is supported, but without undo`() {
+    fun `Android 9 and 10 are supported, but without undo`() {
         // The distinction this whole class exists for: the app runs there,
         // and a removal there cannot be taken back.
-        assertEquals(Platform.Support.NO_UNDO, Platform.supportFor(29))
-        assertFalse(Platform.canTrash(29))
-        assertFalse(Platform.canBatchDelete(29))
+        for (sdk in listOf(28, 29)) {
+            assertEquals("API $sdk", Platform.Support.NO_UNDO, Platform.supportFor(sdk))
+            assertFalse(Platform.canTrash(sdk))
+            assertFalse(Platform.canBatchDelete(sdk))
+        }
     }
 
     @Test
@@ -33,13 +35,14 @@ class PlatformTest {
 
     @Test
     fun `the stated minimum matches what the app is built for`() {
-        assertEquals(29, Platform.MIN_SDK)
+        assertEquals(28, Platform.MIN_SDK)
         assertEquals(36, Platform.TARGET_SDK)
         assertTrue(Platform.TARGET_SDK > Platform.MIN_SDK)
     }
 
     @Test
     fun `every supported level has a name people recognise`() {
+        assertEquals("9", Platform.releaseName(28))
         assertEquals("10", Platform.releaseName(29))
         assertEquals("11", Platform.releaseName(30))
         assertEquals("12L", Platform.releaseName(32))

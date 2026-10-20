@@ -17,11 +17,36 @@ class HomeActionTest {
         freeBytes: Long = 20_000_000_000L,
         minFreeBytes: Long = 1_500_000_000L,
         waitReason: RunDecider.Wait = RunDecider.Wait.NONE,
-        earlierApp: Boolean = false
+        earlierApp: Boolean = false,
+        needsFileAccess: Boolean = false,
+        modifiedBuild: Boolean = false,
+        needsMediaLocation: Boolean = false
     ) = HomeAction.decide(
         queued, running, paused, thermalThrottled, batteryPct, plugged,
-        freeBytes, minFreeBytes, waitReason, earlierApp
+        freeBytes, minFreeBytes, waitReason, earlierApp, needsFileAccess, modifiedBuild, needsMediaLocation
     )
+
+    @Test
+    fun `replace on this phone blocks the button until it can run`() {
+        // A run would stop at once; the button says why instead of starting it.
+        val access = decide(needsFileAccess = true)
+        assertFalse(access.enabled)
+        assertEquals(HomeAction.Blocker.FILE_ACCESS, access.blocker)
+        val modified = decide(needsFileAccess = true, modifiedBuild = true)
+        assertFalse(modified.enabled)
+        assertEquals("the reason no access can fix comes first", HomeAction.Blocker.MODIFIED_BUILD, modified.blocker)
+        assertTrue("granted, it starts", decide(needsFileAccess = false).enabled)
+        // Without media-location access every photo comes with its place
+        // blanked out, so nothing is replaced until it is allowed.
+        val location = decide(needsMediaLocation = true)
+        assertFalse(location.enabled)
+        assertEquals(HomeAction.Blocker.MEDIA_LOCATION, location.blocker)
+        assertEquals(
+            "file access is asked for first",
+            HomeAction.Blocker.FILE_ACCESS,
+            decide(needsFileAccess = true, needsMediaLocation = true).blocker
+        )
+    }
 
     @Test
     fun `blocked while the earlier Ente Saver is installed`() {

@@ -3,6 +3,8 @@ package app.entesaver.media
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import app.entesaver.R
 import app.entesaver.core.logic.FormatResolver
@@ -32,8 +34,9 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Moves staged copies into the public output folder(s) Pictures/CloudSaver via
- * MediaStore (IS_PENDING flow), sets DATE_TAKEN and lastModified to the
- * original capture date, then removes the stage file. The release cap IS the
+ * MediaStore (IS_PENDING flow; on Android 9, which has none, as a file the
+ * media scanner adds), sets DATE_TAKEN and lastModified to the original
+ * capture date, then removes the stage file. The release cap IS the
  * cloud app's network cap: nothing can be uploaded that was never released.
  *
  * Releases are paced rather than dumped once a day - see [Pacing] for why a
@@ -82,9 +85,9 @@ class Releaser(private val context: Context, private val db: AppDb) {
         // read as an SD card that has stopped filling for no reason.
         val chosen = Volumes
             .selected(context, options.storageVolume)?.mediaVolumeName
-            ?: MediaStore.VOLUME_EXTERNAL_PRIMARY
+            ?: Volumes.PRIMARY
         val decision = VolumeRules.releaseVolume(
-            selectedVolume = if (chosen == MediaStore.VOLUME_EXTERNAL_PRIMARY) "" else chosen,
+            selectedVolume = if (chosen == Volumes.PRIMARY) "" else chosen,
             selectedWritable = Volumes.probeWritable(context, chosen)
         )
         val volumeName = decision.volumeName
@@ -218,6 +221,10 @@ class Releaser(private val context: Context, private val db: AppDb) {
         volumeName: String,
         folderPath: String
     ): Boolean {
+        // Android 9 has no pending items to publish through: the copy is
+        // written into the folder as a file instead, on the phone's own
+        // storage, which is the only volume Android 9 lets an app write to.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return releaseOneAsFile(row, batchId, now, folderPath)
         val stagePath = row.stagePath ?: return false
         val stageFile = File(stagePath)
         if (!stageFile.exists()) return false
@@ -349,27 +356,111 @@ class Releaser(private val context: Context, private val db: AppDb) {
                 return@releaseOne false
             }
 
-            db.items().update(
-                row.copy(
-                    state = ItemState.RELEASED.name,
-                    outputUri = itemUri.toString(),
-                    outputName = actualName,
-                    outputRelPath = OutputRoots.normalize(actualPath),
-                    releasedAt = now,
-                    // Out again: an earlier leave says nothing about this copy.
-                    leftFolderAt = null,
-                    batchId = batchId,
-                    stagePath = null,
-                    appDeletedCopy = false,
-                    updatedAt = now
-                )
-            )
+            markReleased(row, itemUri, actualName, actualPath, batchId, now)
             stageFile.delete()
             true
         } catch (e: Exception) {
             runCatching { resolver.delete(itemUri, null, null) }
             false
         }
+    }
+
+    /**
+     * [releaseOne] on Android 9: the copy written into [folderPath] as a
+     * file and added by the media scanner ([LegacyMedia]), then read back
+     * and judged by the same rule as a pending row from Android 10 (CC1.1).
+     *
+     * The file carries the capture date as its own modified time before the
+     * scanner first reads it, so the date the gallery records is the
+     * original's from the start; DATE_TAKEN is then stamped as well, because
+     * the scanner takes that date only from EXIF it trusts.
+     */
+    private suspend fun releaseOneAsFile(row: ItemRow, batchId: Long, now: Long, folderPath: String): Boolean {
+        val stageFile = row.stagePath?.let { File(it) }?.takeIf { it.exists() } ?: return false
+        val relPath = OutputRoots.normalize(folderPath) + "/"
+        val outName = row.outputName ?: stageFile.name
+        val published = LegacyMedia.publish(
+            context, relPath, outName, mimeFor(outName, row.mimeType), modifiedMs = row.captureAt
+        ) { out ->
+            FileInputStream(stageFile).use { it.copyTo(out, 128 * 1024) }
+        } ?: return false
+        val resolver = context.contentResolver
+        val itemUri = published.uri
+        var actualName = published.name
+        var actualPath = relPath
+        var verdict: ReleaseVerdict.Failure? = ReleaseVerdict.Failure.MISSING
+        try {
+            resolver.update(
+                itemUri,
+                ContentValues().apply { put(MediaStore.MediaColumns.DATE_TAKEN, row.captureAt) },
+                null, null
+            )
+            @Suppress("DEPRECATION")
+            val projection = arrayOf(
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.DATA,
+                MediaStore.MediaColumns.SIZE
+            )
+            resolver.query(itemUri, projection, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    c.getString(0)?.let { actualName = it }
+                    val landedIn = MediaPaths.relativePathOfFile(c.getString(1))
+                    landedIn?.takeIf { it.isNotBlank() }?.let { actualPath = it }
+                    verdict = ReleaseVerdict.check(
+                        found = true,
+                        isPending = false,
+                        sizeBytes = c.getLong(2),
+                        relativePath = landedIn,
+                        expectedPath = relPath
+                    )
+                }
+            }
+        } catch (e: Exception) {
+        }
+        if (!ReleaseVerdict.isVisible(verdict)) {
+            runCatching { resolver.delete(itemUri, null, null) }
+            published.file.delete()
+            ActivityLog(context).record(
+                ActivityLog.Kind.PROBLEM,
+                detail = context.getString(R.string.problem_release_invisible, actualName)
+            )
+            return false
+        }
+        return try {
+            markReleased(row, itemUri, actualName, actualPath, batchId, now)
+            stageFile.delete()
+            true
+        } catch (e: Exception) {
+            runCatching { resolver.delete(itemUri, null, null) }
+            published.file.delete()
+            false
+        }
+    }
+
+    /** The one write that makes a row RELEASED: the copy, the name it landed under and the folder it is in. */
+    private suspend fun markReleased(
+        row: ItemRow,
+        itemUri: Uri,
+        actualName: String,
+        actualPath: String,
+        batchId: Long,
+        now: Long
+    ) {
+        db.items().update(
+            row.copy(
+                state = ItemState.RELEASED.name,
+                outputUri = itemUri.toString(),
+                outputName = actualName,
+                outputRelPath = OutputRoots.normalize(actualPath),
+                releasedAt = now,
+                // Out again: an earlier leave says nothing about this copy.
+                leftFolderAt = null,
+                batchId = batchId,
+                stagePath = null,
+                appDeletedCopy = false,
+                updatedAt = now
+            )
+        )
     }
 
     companion object {

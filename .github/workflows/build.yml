@@ -7,8 +7,9 @@ on:
       - "claude/**"
   workflow_dispatch:
 
+# Read-only for every job; the release job alone asks for write, to publish.
 permissions:
-  contents: write
+  contents: read
 
 env:
   # The Ente Saver release certificate (public). Every release is signed by
@@ -34,6 +35,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config for the build to find.
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -42,82 +46,55 @@ jobs:
           java-version: "17"
 
       - name: Set up Gradle (with cache)
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
-      # Keystore first: the signing-cert SHA-256 is embedded into the APK
-      # (tamper evidence), so it must exist before the build.
+      # The certificate first: its SHA-256 is embedded into the APK (tamper
+      # evidence), so it must be known before the build. No key is opened
+      # in this job at all: it runs Gradle, its plugins and every
+      # dependency, and none of that needs the key or its passwords. The
+      # sign job, on a runner of its own, signs.
       #
-      # - release: the four signing secrets are set. The key is checked against
-      #   RELEASE_CERT_SHA256 before it signs anything, so a wrong secret fails
-      #   here, with its name, not on people's phones.
-      # - throwaway: no secrets (a fork). A key that lives for this run only;
-      #   the release step refuses to publish with it.
-      - name: Prepare signing keystore
+      # - release: the signing secrets are set, and the APK will carry
+      #   RELEASE_CERT_SHA256. The sign job checks the key really is that
+      #   one before it signs anything.
+      # - throwaway: no secrets (a fork). The sign job signs with a key that
+      #   lives for that job only, and the release job refuses the result.
+      #   The APK carries no certificate to check itself against, as a
+      #   developer build does not.
+      - name: Choose the signing certificate
         id: keystore
         env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-          SECRET_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          SECRET_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          HAS_RELEASE_KEY: ${{ secrets.KEYSTORE_B64 != '' }}
         run: |
           set -eu
-          cert_of() {
-            keytool -exportcert -keystore "$1" -alias "$2" -storepass "$3" -rfc \
-              | openssl x509 -noout -fingerprint -sha256 \
-              | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f'
-          }
-          if [ -n "${KEYSTORE_B64:-}" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > release.p12
-            KS_PASS="$SECRET_KEYSTORE_PASSWORD"
-            KEY_ALIAS="${SECRET_KEY_ALIAS:-entesaver}"
-            KEY_PASS="${SECRET_KEY_PASSWORD:-$KS_PASS}"
-            CERT_SHA=$(cert_of release.p12 "$KEY_ALIAS" "$KS_PASS" || true)
-            if [ "$CERT_SHA" != "$RELEASE_CERT_SHA256" ]; then
-              echo "::error title=KEYSTORE_B64 is not the Ente Saver release key::It holds certificate '$CERT_SHA' (empty: KEYSTORE_PASSWORD or KEY_ALIAS does not open it), but releases are signed with $RELEASE_CERT_SHA256. Use the four values from the secrets file."
-              exit 1
-            fi
-            MODE=release
+          if [ "$HAS_RELEASE_KEY" = "true" ]; then
+            echo "CERT_SHA256=$RELEASE_CERT_SHA256" >> "$GITHUB_ENV"
+            echo "mode=release" >> "$GITHUB_OUTPUT"
             echo "generated=false" >> "$GITHUB_OUTPUT"
-            echo "Using the release key from repository secrets."
+            echo "The release key is in repository secrets; only the sign job opens it."
           else
-            KS_PASS=$(openssl rand -hex 16)
-            echo "::add-mask::$KS_PASS"
-            KEY_ALIAS=entesaver
-            KEY_PASS="$KS_PASS"
-            keytool -genkeypair -v -keystore release.p12 -storetype PKCS12 -alias "$KEY_ALIAS" \
-              -keyalg RSA -keysize 4096 -validity 9125 \
-              -storepass "$KS_PASS" -keypass "$KEY_PASS" \
-              -dname "CN=Ente Saver Release, OU=Ente Saver, O=Ente Saver"
-            CERT_SHA=$(cert_of release.p12 "$KEY_ALIAS" "$KS_PASS")
-            MODE=throwaway
+            echo "CERT_SHA256=" >> "$GITHUB_ENV"
+            echo "mode=throwaway" >> "$GITHUB_OUTPUT"
             echo "generated=true" >> "$GITHUB_OUTPUT"
-            echo "No signing secrets found - minted a throwaway key for THIS RUN only."
-            echo "It is not written anywhere but this runner, and the release step will refuse to publish with it."
+            echo "No signing secrets found - the sign job will use a key that exists for that job only."
           fi
-          {
-            echo "KEYSTORE_PASSWORD=$KS_PASS"
-            echo "KEY_ALIAS=$KEY_ALIAS"
-            echo "KEY_PASSWORD=$KEY_PASS"
-            echo "SIGN_KS=release.p12"
-            echo "SIGN_MODE=$MODE"
-            echo "CERT_SHA256=$CERT_SHA"
-          } >> "$GITHUB_ENV"
-          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "Signing mode: $MODE"
-          echo "Signing cert SHA-256: $CERT_SHA"
 
       - name: Lint, unit tests, release build
         run: >
           ./gradlew --no-daemon lint testDebugUnitTest assembleRelease
           -PsigningCertSha256=${{ env.CERT_SHA256 }}
 
-      - name: Sign APK (apksigner - v2+v3)
+      - name: Name the APK
         run: |
           set -eu
           VERSION=$(./gradlew -q printVersionName --no-daemon | tail -1)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          APK_NAME="EnteSaver-v$VERSION-release.apk"
-          echo "APK_NAME=$APK_NAME" >> "$GITHUB_ENV"
+
+      # Aligned here, where the build tools are already in use; signing
+      # rewrites the archive's signature block, not its entries.
+      - name: Align the unsigned APK
+        run: |
+          set -eu
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
           [ -f "$UNSIGNED" ] || UNSIGNED=app/build/outputs/apk/release/app-release.apk
@@ -129,9 +106,117 @@ jobs:
           # is still required. Writing "-P 16 in out" prints the usage text
           # and produces no file - caught by signing a real APK by hand
           # rather than by reading the flag name and assuming.
-          "$BT/zipalign" -f -P 16 4 "$UNSIGNED" EnteSaver-aligned.apk
+          "$BT/zipalign" -f -P 16 4 "$UNSIGNED" EnteSaver-unsigned.apk
+
+      - name: Publish version for later jobs
+        id: meta
+        run: echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the unsigned APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: EnteSaver-unsigned.apk
+          path: EnteSaver-unsigned.apk
+          if-no-files-found: error
+          # Only the sign job of this run reads it.
+          retention-days: 3
+
+  sign:
+    # On a runner of its own, which never runs the build. Gradle, its
+    # plugins and every dependency ran on the build's runner as the same
+    # user, where they could have left something behind for the step that
+    # holds the key - a changed script, a changed tool, a line in
+    # GITHUB_ENV. Here nothing runs before the signing but a fresh checkout
+    # and the download of the unsigned APK.
+    name: sign
+    needs: build
+    runs-on: ubuntu-26.04  # the build's image (see there)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config.
+          persist-credentials: false
+
+      # keytool and apksigner run on Java; GitHub's own action, no Gradle.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download the unsigned APK
+        uses: actions/download-artifact@v7
+        with:
+          name: EnteSaver-unsigned.apk
+
+      # What the build reported, checked before it names any file: a version
+      # is digits and dots, and the mode is one of the two.
+      - name: Name the APK
+        env:
+          BUILT_VERSION: ${{ needs.build.outputs.version }}
+          BUILT_MODE: ${{ needs.build.outputs.sign_mode }}
+        run: |
+          set -eu
+          if ! printf '%s' "$BUILT_VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}$'; then
+            echo "::error::The build reported version '$BUILT_VERSION'"
+            exit 1
+          fi
+          case "$BUILT_MODE" in release|throwaway) ;; *) echo "::error::Unknown signing mode '$BUILT_MODE'"; exit 1 ;; esac
+          VERSION="$BUILT_VERSION"
+          {
+            echo "VERSION=$VERSION"
+            echo "SIGN_MODE=$BUILT_MODE"
+            echo "APK_NAME=EnteSaver-v$VERSION-release.apk"
+          } >> "$GITHUB_ENV"
+
+      # The key and its passwords exist in this step alone: decoded into the
+      # runner's temporary folder, checked, used and removed again.
+      - name: Sign APK (apksigner - v2+v3)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          SECRET_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SECRET_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          KS="$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$KS"' EXIT
+          if [ "$SIGN_MODE" = release ]; then
+            if [ -z "$KEYSTORE_B64" ]; then
+              echo "::error::The build embedded the release certificate, but no signing key reached this job"
+              exit 1
+            fi
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
+            export KEYSTORE_PASSWORD="$SECRET_KEYSTORE_PASSWORD"
+            export KEY_PASSWORD="${SECRET_KEY_PASSWORD:-$SECRET_KEYSTORE_PASSWORD}"
+            ALIAS="${SECRET_KEY_ALIAS:-entesaver}"
+            CERT_SHA=$(keytool -exportcert -keystore "$KS" -alias "$ALIAS" -storepass:env KEYSTORE_PASSWORD -rfc \
+              | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f' || true)
+            if [ "$CERT_SHA" != "$RELEASE_CERT_SHA256" ]; then
+              echo "::error title=KEYSTORE_B64 is not the Ente Saver release key::It holds certificate '$CERT_SHA' (empty: KEYSTORE_PASSWORD or KEY_ALIAS does not open it), but releases are signed with $RELEASE_CERT_SHA256. Use the four values from the secrets file."
+              exit 1
+            fi
+          else
+            # A key for this job only: it is never written anywhere but
+            # this runner's temporary folder, and goes with it.
+            KEYSTORE_PASSWORD=$(openssl rand -hex 16)
+            echo "::add-mask::$KEYSTORE_PASSWORD"
+            export KEYSTORE_PASSWORD
+            export KEY_PASSWORD="$KEYSTORE_PASSWORD"
+            ALIAS=entesaver
+            keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias "$ALIAS" \
+              -keyalg RSA -keysize 4096 -validity 9125 \
+              -storepass:env KEYSTORE_PASSWORD -keypass:env KEY_PASSWORD \
+              -dname "CN=Ente Saver Release, OU=Ente Saver, O=Ente Saver"
+            CERT_SHA=$(keytool -exportcert -keystore "$KS" -alias "$ALIAS" -storepass:env KEYSTORE_PASSWORD -rfc \
+              | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+          fi
+          echo "CERT_SHA256=$CERT_SHA" >> "$GITHUB_ENV"
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           # The one signing recipe (sign-apk.sh).
-          SIGN_KS_ALIAS="$KEY_ALIAS" bash .github/scripts/sign-apk.sh EnteSaver-aligned.apk "$APK_NAME"
+          SIGN_KS="$KS" SIGN_KS_ALIAS="$ALIAS" bash .github/scripts/sign-apk.sh EnteSaver-unsigned.apk "$APK_NAME"
           "$BT/apksigner" verify --print-certs "$APK_NAME"
           # The emulator job installs a fixed name, so keep one alongside it.
           cp "$APK_NAME" EnteSaver-release.apk
@@ -140,7 +225,7 @@ jobs:
       # it would not install over the Ente Saver already on phones. (A
       # throwaway-key build never publishes; the release job refuses it.)
       - name: The APK is signed by the release key
-        if: steps.keystore.outputs.mode != 'throwaway'
+        if: needs.build.outputs.sign_mode != 'throwaway'
         run: bash .github/scripts/check-signer.sh "$APK_NAME" "$RELEASE_CERT_SHA256"
 
       - name: Alignment gate (16 KiB pages, Android 16)
@@ -180,32 +265,34 @@ jobs:
         run: |
           set -eu
           KEYSTORE_NOTE=""
-          if [ "${{ steps.keystore.outputs.generated }}" = "true" ]; then
+          if [ "${{ needs.build.outputs.throwaway_key }}" = "true" ]; then
             KEYSTORE_NOTE="This build was signed with a throwaway key that existed only inside its CI run, because no signing secrets are configured. It therefore CANNOT be installed over any other Ente Saver build. The release step refuses to publish it until the four signing secrets are set."
           fi
           cat > RELEASE_NOTES.md <<EOF
           Ente Saver, made for Ente Photos.
 
-          Offline storage saver. Light copies go to one folder (Pictures/EnteSaver);
-          Ente Photos backs up only that folder. Photos and videos have their own
-          settings. Originals are never touched automatically. Everything else is
-          explained inside the app (Help).
+          Makes your photos and videos smaller on the phone, each at the quality
+          its picture needs, within the size limits of Google Photos' Storage
+          saver (16 MP, 1080p). Every file keeps its format, name, album and dates,
+          and a file is never made smaller twice.
 
-          From 12.3 Ente Saver has its own application ID (package name),
-          app.entesaver; until 12.2 it was app.cloudsaver. To Android that is a
-          different app, so it installs next to an earlier Ente Saver, not over
-          it. Moving takes a minute and is needed only once:
-          1. Install this one, open it, and on the first screen tap "Restore
-             from a saved file". Choose history.json in Documents › Ente Saver.
-          2. Uninstall the earlier Ente Saver. The new one shows a button for it
-             for as long as the earlier one is on the phone.
-          Your photos, the copies waiting for Ente and your Ente account are not
-          touched.
+          Two ways to save space, in Settings › Saving space:
+          - Replace on this phone (the default): the smaller version takes the
+            original's place in the same file, so Ente Photos uploads it in place
+            of the original and your Ente storage shrinks too. The original waits
+            in the phone's trash for 30 days, and Files can put it back.
+          - Copies for Ente: smaller copies go to Pictures/EnteSaver for Ente
+            Photos to back up, and the originals stay until you free them.
+
+          Coming from Ente Saver 12.2 or older (app.cloudsaver)? That is a
+          different app to Android: install this one, tap "Restore from a saved
+          file" on its first screen and choose history.json in Documents › Ente
+          Saver, then uninstall the earlier one.
 
           No server, no account, no analytics, no internet permission, nothing
           that expires.
 
-          Needs Android 10 or newer. Install: download ${APK_NAME} below and
+          Needs Android 9 or newer. Install: download ${APK_NAME} below and
           open it on your phone.
           Play Protect may warn about an app installed from a file — choose
           "More details" › "Install anyway". The app holds no INTERNET permission.
@@ -225,7 +312,7 @@ jobs:
             echo "- APK SHA-256: \`${APK_SHA256}\`"
             echo "- Signing cert SHA-256: \`${CERT_SHA256}\`"
             echo "- Signing: ${SIGN_MODE}"
-            if [ "${{ steps.keystore.outputs.generated }}" = "true" ]; then
+            if [ "${{ needs.build.outputs.throwaway_key }}" = "true" ]; then
               echo ""
               echo "### No signing key is configured, so this build cannot be published"
               echo ""
@@ -237,28 +324,29 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish version for later jobs
-        id: meta
-        run: echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
           name: EnteSaver-release.apk
           path: |
-            EnteSaver-*.apk
+            ${{ env.APK_NAME }}
+            EnteSaver-release.apk
             RELEASE_NOTES.md
           if-no-files-found: error
+          # The release is the lasting copy; a run's own copy need not outlive a fortnight.
+          retention-days: 14
 
   emulator:
     # Every Android this app installs on, from minSdk to targetSdk, not just
     # the one that happens to be current. The behaviour genuinely differs
-    # across them: 29 has no media trash and no batch delete request, 30
-    # introduces both, 31 adds wallpaper colours, 33 adds the runtime
-    # notification permission. A suite that only ever runs on one level says
-    # nothing about the phones the other rows describe.
+    # across them: 28 has no scoped storage, so every copy is a file written
+    # with storage write access and found by the media scanner; 29 has no
+    # media trash and no batch delete request, 30 introduces both, 31 adds
+    # wallpaper colours, 33 adds the runtime notification permission. A suite
+    # that only ever runs on one level says nothing about the phones the
+    # other rows describe.
     name: end-to-end on Android ${{ matrix.api }}
-    needs: build
+    needs: [build, sign]
     runs-on: ubuntu-26.04  # the build's image (see there)
     timeout-minutes: 75
     # Android 17 (API 37) runs ahead of the target, to see early what the
@@ -270,7 +358,7 @@ jobs:
       # learn which Androids are affected, not just that something is.
       fail-fast: false
       matrix:
-        api: [29, 30, 31, 32, 33, 34, 35, 36]
+        api: [28, 29, 30, 31, 32, 33, 34, 35, 36]
         include:
           # The SDK names Android 17's packages "android-37.0", not "android-37".
           - api: 37
@@ -279,6 +367,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config for the build to find.
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -287,7 +378,7 @@ jobs:
           java-version: "17"
 
       - name: Set up Gradle (with cache)
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       # A stock runner has ~7.3 GB free, and the AVD wants 7.37 GB for its
       # userdata partition alone - it dies at launch with "Not enough space to
@@ -342,7 +433,7 @@ jobs:
           exit 1
 
       - name: Run instrumented suite + live install on a real emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           # The update-over-the-last-release check downloads that release.
           GH_TOKEN: ${{ github.token }}
@@ -373,6 +464,7 @@ jobs:
             artifacts/logcat.txt
             artifacts/logcat-crash.txt
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload instrumentation report
         if: always()
@@ -383,12 +475,16 @@ jobs:
             app/build/reports/androidTests/**
             app/build/outputs/androidTest-results/**
           if-no-files-found: warn
+          retention-days: 14
 
   release:
     name: publish release
-    needs: [build, emulator]
+    needs: [build, sign, emulator]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04  # the build's image (see there)
+    # The one job that writes: it creates the tag and the release.
+    permissions:
+      contents: write
     steps:
       # A release nobody can install as an update is not a release.
       #

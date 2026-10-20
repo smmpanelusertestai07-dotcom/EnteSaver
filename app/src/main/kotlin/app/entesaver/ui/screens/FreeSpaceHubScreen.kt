@@ -22,6 +22,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import app.entesaver.R
+import app.entesaver.core.logic.SaveMode
+import app.entesaver.data.EnteApp
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.Routes
 import app.entesaver.ui.components.AppCard
@@ -267,10 +270,88 @@ fun FreeSpaceHubScreen(vm: AppViewModel, nav: NavHostController) {
                     }
                 }
             }
+            EnteTools(saveMode = options.saveMode, onGuide = { vm.openEnteHelp(it) })
         }
         Spacer(Modifier.height(28.dp))
     }
 }
+
+/**
+ * Ente Photos' own tools for space, by Ente's own names and menu path, with
+ * where each one acts. Ente Saver does not copy what Ente already does well -
+ * it says where it is, and opens Ente's own guide to it.
+ */
+@Composable
+private fun EnteTools(saveMode: SaveMode, onGuide: (String) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Text(
+        stringResource(R.string.hub_ente_title),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .padding(top = 18.dp)
+            .semantics { heading() }
+    )
+    Text(
+        stringResource(R.string.hub_ente_intro),
+        style = MaterialTheme.typography.bodySmall,
+        color = scheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+    )
+    val tools = listOf(
+        EnteTool(
+            R.string.ente_tool_free_device, R.string.ente_tool_free_device_what, R.string.hub_ente_on_phone,
+            review = false, EnteApp.Help.FREE_UP_DEVICE,
+            extra = if (saveMode == SaveMode.IN_PLACE) R.string.ente_tool_free_device_in_place else R.string.ente_tool_free_device_copies
+        ),
+        EnteTool(R.string.ente_tool_similar, R.string.ente_tool_similar_what, R.string.hub_ente_on_ente, review = true, EnteApp.Help.SIMILAR),
+        EnteTool(R.string.ente_tool_duplicates, R.string.ente_tool_duplicates_what, R.string.hub_ente_on_ente, review = true, EnteApp.Help.DUPLICATES),
+        EnteTool(R.string.ente_tool_large, R.string.ente_tool_large_what, R.string.hub_ente_on_both, review = true, EnteApp.Help.LARGE_FILES),
+        EnteTool(R.string.ente_tool_suggestions, R.string.ente_tool_suggestions_what, R.string.hub_ente_on_ente, review = true, EnteApp.Help.SUGGESTIONS),
+        EnteTool(R.string.ente_tool_cache, R.string.ente_tool_cache_what, R.string.hub_ente_on_phone, review = false, EnteApp.Help.DEVICE_CACHE),
+        EnteTool(R.string.ente_tool_trash, R.string.ente_tool_trash_what, R.string.hub_ente_on_both, review = false, EnteApp.Help.TRASH)
+    )
+    for (tool in tools) {
+        val name = stringResource(tool.name)
+        AppCard(modifier = Modifier.padding(vertical = 4.dp)) {
+            Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(
+                stringResource(tool.acts),
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.primary
+            )
+            Text(
+                stringResource(tool.what),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+            tool.extra?.let {
+                Text(
+                    stringResource(it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            Text(
+                stringResource(if (tool.review) R.string.hub_ente_where_review else R.string.hub_ente_where, name),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            TextButton(onClick = { onGuide(tool.guide) }) { Text(stringResource(R.string.hub_ente_guide)) }
+        }
+    }
+}
+
+private class EnteTool(
+    val name: Int,
+    val what: Int,
+    val acts: Int,
+    val review: Boolean,
+    val guide: String,
+    val extra: Int? = null
+)
 
 /** One section: icon, name, one line, its size, a chevron. */
 @Composable

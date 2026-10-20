@@ -1,9 +1,12 @@
 package app.entesaver.engine
 
+import android.annotation.SuppressLint
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -22,11 +25,13 @@ import app.entesaver.data.db.ItemRow
 import app.entesaver.data.db.LedgerRow
 import app.entesaver.data.db.record
 import app.entesaver.data.prefs.OptionsRepo
+import app.entesaver.media.LegacyMedia
 import app.entesaver.media.OutputInventory
 import app.entesaver.util.BoundedRead
 import app.entesaver.util.Locks
 import app.entesaver.util.Permissions
 import java.io.File
+import java.io.FileOutputStream
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -67,6 +72,13 @@ class SnapshotStore(
          * The rest are queue state, and a scan rebuilds them.
          */
         const val MAX_REBUILDABLE_ITEMS = 5_000
+
+        /** Where Android 9 keeps the paths of the history files this install wrote ([ownFilesOnDisk]). */
+        private const val WRITTEN_PREFS = "shared_history_files"
+        private const val WRITTEN_KEY = "paths"
+
+        /** Before a path, the key its size and modified time are kept under ([stillOurs]). */
+        private const val STAMP_PREFIX = "stamp:"
     }
 
     suspend fun build(): SnapshotCodec.Snapshot {
@@ -106,7 +118,11 @@ class SnapshotStore(
                 neverOptimise = row.neverOptimise,
                 outputRelPath = row.outputRelPath,
                 duplicateOf = row.duplicateOf,
-                leftFolderAt = row.leftFolderAt
+                leftFolderAt = row.leftFolderAt,
+                backupUri = row.backupUri,
+                // The hash a kept original is checked against; only rows
+                // replaced on this phone carry one in the file.
+                originalSha256 = row.originalSha256.takeIf { row.backupUri != null }
             )
         }
         val batches = db.batches().all().map { b ->
@@ -185,6 +201,10 @@ class SnapshotStore(
      * nothing is left in it.
      */
     private fun removePrevious() {
+        // Every build before 12.0 needed Android 10, so on Android 9 nothing
+        // of theirs can be there - and a file in those folders there is not
+        // this app's to remove.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val resolver = context.contentResolver
         for (dir in Defaults.PREVIOUS_SNAPSHOT_DIRS) {
             for (row in ownFiles(dir)) {
@@ -264,6 +284,7 @@ class SnapshotStore(
      * files in shared storage: the ones this install wrote.
      */
     private fun ownFiles(relativeDir: String, name: String? = null): List<SharedFile> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return ownFilesOnDisk(relativeDir, name)
         val files = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         var selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND " +
             "${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ?"
@@ -318,6 +339,7 @@ class SnapshotStore(
      * is removed.
      */
     private fun writeTo(json: String, relativeDir: String, name: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return writeToDisk(json, relativeDir, name)
         val resolver = context.contentResolver
         return try {
             val own = ownFiles(relativeDir, name)
@@ -345,6 +367,121 @@ class SnapshotStore(
             false
         }
     }
+
+    // ---- Android 9 -------------------------------------------------------------
+
+    /**
+     * The history files this install wrote, on Android 9.
+     *
+     * From Android 10 MediaStore says which shared files are an app's own.
+     * Android 9 records no owner, and lets any app with storage access read
+     * any file - so the paths this install wrote are kept with its own data,
+     * gone with it on an uninstall or "Clear data" just as Android 10 stops
+     * showing a file to a new install. A history.json another install or
+     * another app left there is never read on its own or written over;
+     * Restore, with the person picking the file, still opens it.
+     */
+    private fun ownFilesOnDisk(relativeDir: String, name: String?): List<SharedFile> {
+        val dir = LegacyMedia.folder(relativeDir)
+        val base = name?.substringBeforeLast('.')
+        val ext = name?.substringAfterLast('.', "")
+        return writtenPaths().map { File(it) }
+            .filter { file ->
+                file.parentFile == dir && file.isFile && stillOurs(file) && (
+                    name == null || file.name == name ||
+                        (file.name.startsWith("$base (") && file.name.endsWith(").$ext"))
+                    )
+            }
+            .map { SharedFile(Uri.fromFile(it), it.name, it.lastModified() / 1000) }
+            .sortedByDescending { it.modified }
+    }
+
+    /**
+     * [writeTo] on Android 9: over this install's own file when it has one,
+     * as a new file otherwise, under a name nothing in the folder has yet.
+     * Written whole or not at all - into a hidden file in the same folder,
+     * synced, then renamed into place - and handed to the media scanner so
+     * the phone's file apps list it as they would on Android 10.
+     */
+    private fun writeToDisk(json: String, relativeDir: String, name: String): Boolean {
+        val dir = LegacyMedia.folder(relativeDir)
+        val own = ownFilesOnDisk(relativeDir, name).mapNotNull { it.uri.path?.let(::File) }
+        val hidden = File(dir, ".pending-${System.currentTimeMillis()}-$name")
+        // The empty file that holds a new name until the rename fills it; it
+        // goes again if the write fails, since nothing else is in it.
+        var claimed: File? = null
+        return try {
+            if (!dir.isDirectory && !dir.mkdirs()) return false
+            FileOutputStream(hidden).use { out ->
+                out.write(json.toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
+            val target = own.firstOrNull()
+                ?: LegacyMedia.claimName(dir, name)?.also { claimed = it }
+                ?: error("no free name for $name")
+            remember(target)
+            if (!hidden.renameTo(target)) error("could not name the file")
+            stamp(target)
+            claimed = null
+            for (extra in own.drop(1)) {
+                if (extra.delete() || !extra.exists()) forget(extra)
+            }
+            runCatching {
+                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf("application/json"), null)
+            }
+            true
+        } catch (e: Exception) {
+            hidden.delete()
+            claimed?.let { placeholder ->
+                placeholder.delete()
+                forget(placeholder)
+            }
+            false
+        }
+    }
+
+    private val written by lazy { context.getSharedPreferences(WRITTEN_PREFS, Context.MODE_PRIVATE) }
+
+    private fun writtenPaths(): Set<String> = written.getStringSet(WRITTEN_KEY, null).orEmpty()
+
+    /**
+     * Kept before the file is put in place, so a file this install made is
+     * never one it cannot name. Written through to disk there and then, not
+     * later: a process ended right after the rename must not lose the record.
+     */
+    @SuppressLint("ApplySharedPref")
+    private fun remember(file: File) {
+        written.edit().putStringSet(WRITTEN_KEY, writtenPaths() + file.absolutePath).commit()
+    }
+
+    @SuppressLint("ApplySharedPref")
+    private fun forget(file: File) {
+        written.edit()
+            .putStringSet(WRITTEN_KEY, writtenPaths() - file.absolutePath)
+            .remove(STAMP_PREFIX + file.absolutePath)
+            .commit()
+    }
+
+    /** Notes the size and modified time [file] has now that this install has written it. */
+    @SuppressLint("ApplySharedPref")
+    private fun stamp(file: File) {
+        written.edit().putString(STAMP_PREFIX + file.absolutePath, stampOf(file)).commit()
+    }
+
+    /**
+     * False once a file at a path this install wrote is no longer what it
+     * wrote there: another history copied over it, say, to restore from. On
+     * Android 10 Android tells the two apart by owner; here the size and
+     * time do, so such a file is read and written over no more than another
+     * app's would be. A path written before its stamp was noted counts as
+     * this install's.
+     */
+    private fun stillOurs(file: File): Boolean {
+        val stamp = written.getString(STAMP_PREFIX + file.absolutePath, null) ?: return true
+        return stamp == stampOf(file)
+    }
+
+    private fun stampOf(file: File): String = "${file.length()}:${file.lastModified()}"
 
     /**
      * Manual export to a user-chosen location. With a password the file is
@@ -546,6 +683,10 @@ class SnapshotStore(
                     confirmedAt = mapped.confirmedAt,
                     leftFolderAt = ImportMerge.leftAtOnImport(raw, now),
                     keptUri = mapped.keptUri,
+                    // Replaced on this phone: never a light copy to remove,
+                    // and Put back stays possible while the original is kept.
+                    backupUri = raw.backupUri,
+                    originalSha256 = raw.originalSha256,
                     neverOptimise = mapped.neverOptimise,
                     duplicateOf = mapped.duplicateOf,
                     fromImport = true,

@@ -17,6 +17,7 @@ import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
 import app.entesaver.util.Locks
 import app.entesaver.util.Permissions
+import app.entesaver.util.Volumes
 import kotlinx.coroutines.sync.withLock
 
 /**
@@ -208,9 +209,9 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
     fun queryAll(): List<Found> {
         val out = mutableListOf<Found>()
         val volumes = try {
-            MediaStore.getExternalVolumeNames(context)
+            Volumes.mediaVolumeNames(context)
         } catch (e: Exception) {
-            setOf(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            setOf(Volumes.PRIMARY)
         }
         for (volume in volumes) {
             // A volume that refuses to be read - an SD card pulled out
@@ -275,9 +276,9 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
         val skipBuckets = excludedBuckets + excludedBucketReasons().keys
         val monthAgoSeconds = nowMs / 1000 - 30L * 86_400
         val volumes = try {
-            MediaStore.getExternalVolumeNames(context)
+            Volumes.mediaVolumeNames(context)
         } catch (e: Exception) {
-            setOf(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            setOf(Volumes.PRIMARY)
         }
         // DURATION is asked for only where it exists. Several devices reject
         // it on the Images collection with "Invalid column duration", and that
@@ -287,7 +288,7 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_ADDED,
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-            MediaStore.MediaColumns.RELATIVE_PATH
+            MediaPaths.FOLDER_COLUMN
         )
         val videoProjection = baseProjection + MediaStore.MediaColumns.DURATION
         for (volume in volumes) {
@@ -311,9 +312,9 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
                             val iBucket =
                                 c.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
                             val iRel =
-                                c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+                                c.getColumnIndexOrThrow(MediaPaths.FOLDER_COLUMN)
                             while (c.moveToNext()) {
-                                if (Defaults.isAppOwnedPath(c.getString(iRel))) continue
+                                if (Defaults.isAppOwnedPath(MediaPaths.relativePath(c.getString(iRel)))) continue
                                 val bucket = c.getString(iBucket)
                                 if (bucket != null && bucket in skipBuckets) continue
                                 val size = c.getLong(iSize)
@@ -361,7 +362,7 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
             MediaStore.MediaColumns.DATE_ADDED,
             MediaStore.MediaColumns.MIME_TYPE,
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-            MediaStore.MediaColumns.RELATIVE_PATH
+            MediaPaths.FOLDER_COLUMN
         )
         val projection = if (isVideo) {
             baseProjection + MediaStore.MediaColumns.DURATION
@@ -380,15 +381,19 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
             val iDur = c.getColumnIndex(MediaStore.MediaColumns.DURATION)
             val iMime = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             val iBucket = c.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
-            val iRel = c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            val iRel = c.getColumnIndexOrThrow(MediaPaths.FOLDER_COLUMN)
             while (c.moveToNext()) {
-                val rel = c.getString(iRel)
+                val rel = MediaPaths.relativePath(c.getString(iRel))
                 // Our own output, hidden folders and other pipelines' output
                 // are dropped later by excludeOutputFolders(), which can also
                 // judge a folder by its contents. Only the cheap, certain case
                 // is short-circuited here.
                 if (Defaults.isAppOwnedPath(rel)) continue
                 val name = c.getString(iName) ?: continue
+                // A hidden file is no photo of the person's: galleries pass
+                // over one, and Android 9 lists one only when it reads the
+                // whole of storage again - half-written files among them.
+                if (name.startsWith(".")) continue
                 val size = c.getLong(iSize)
                 if (size <= 0) continue
                 val id = c.getLong(iId)
@@ -420,7 +425,7 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
      */
     fun presentKeys(): Set<String>? {
         val volumes = try {
-            MediaStore.getExternalVolumeNames(context)
+            Volumes.mediaVolumeNames(context)
         } catch (e: Exception) {
             return null
         }
@@ -450,8 +455,8 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
 
     /**
      * Every photo and video starred as a favourite in the gallery, as the
-     * same addresses the rows carry. Empty on Android 10, which has no shared
-     * favourite. Null when any volume could not be read: an incomplete list
+     * same addresses the rows carry. Empty on Android 9 and 10, which have no
+     * shared favourite. Null when any volume could not be read: an incomplete list
      * would make the missing favourites look like ordinary photos, and Free
      * up space promises to leave favourites alone.
      */
@@ -509,14 +514,16 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
             val volume = contentUri
                 ?.let { runCatching { Uri.parse(it).pathSegments.firstOrNull() }
                     .getOrNull() }
-                ?: MediaStore.VOLUME_EXTERNAL_PRIMARY
+                ?: Volumes.PRIMARY
             // A row written against the catch-all "external" volume - what an
             // older build stored, and what a hand-built uri still says - can
             // never match a presence key, because getExternalVolumeNames()
             // deliberately leaves that name out. Its originals would all read
-            // as deleted. It has only ever meant internal storage.
-            val resolved = if (volume.equals(MediaStore.VOLUME_EXTERNAL, ignoreCase = true)) {
-                MediaStore.VOLUME_EXTERNAL_PRIMARY
+            // as deleted. It has only ever meant internal storage. On Android
+            // 9 "external" is the one volume there is, and PRIMARY is that
+            // very name, so the key stays as it is.
+            val resolved = if (volume.equals(Volumes.EXTERNAL, ignoreCase = true)) {
+                Volumes.PRIMARY
             } else {
                 volume
             }
@@ -597,15 +604,15 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
     private fun folderTallies(): Map<String, FolderTally> {
         val out = LinkedHashMap<String, FolderTally>()
         val volumes = try {
-            MediaStore.getExternalVolumeNames(context)
+            Volumes.mediaVolumeNames(context)
         } catch (e: Exception) {
-            setOf(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            setOf(Volumes.PRIMARY)
         }
         val projection = arrayOf(
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-            MediaStore.MediaColumns.RELATIVE_PATH
+            MediaPaths.FOLDER_COLUMN
         )
         for (volume in volumes) {
             for (collection in listOf(
@@ -621,9 +628,9 @@ class MediaScanner(private val context: Context, private val db: AppDb) {
                             val iBucket =
                                 c.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
                             val iRel =
-                                c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+                                c.getColumnIndexOrThrow(MediaPaths.FOLDER_COLUMN)
                             while (c.moveToNext()) {
-                                val rel = c.getString(iRel)
+                                val rel = MediaPaths.relativePath(c.getString(iRel))
                                 if (Defaults.isAppOwnedPath(rel)) continue
                                 val name = c.getString(iName) ?: continue
                                 if (c.getLong(iSize) <= 0) continue

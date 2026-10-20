@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
@@ -26,12 +28,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
+import app.entesaver.core.logic.OnboardingSteps
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.MediaScanner
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -65,8 +69,9 @@ class UiWalkthroughTest {
     @get:Rule
     val permissions: GrantPermissionRule = GrantPermissionRule.grant(*TestPermissions.forThisDevice())
 
+    /** Composition's coroutines run on the main thread, as they do in the app: see HomeFilesE2eTest. */
     @get:Rule
-    val compose = createEmptyComposeRule()
+    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
 
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val target: Context get() = instrumentation.targetContext
@@ -106,6 +111,14 @@ class UiWalkthroughTest {
      * never interfere with it.)
      */
     private fun publish(name: String, png: ByteArray) {
+        // Android 9 has no RELATIVE_PATH, and adb reads its shared storage
+        // directly: the picture is written into the folder as a file.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            @Suppress("DEPRECATION")
+            val dir = File(Environment.getExternalStorageDirectory(), SHOT_DIR).apply { mkdirs() }
+            File(dir, "$name.png").writeBytes(png)
+            return
+        }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "$name.png")
             put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
@@ -305,6 +318,26 @@ class UiWalkthroughTest {
         }
     }
 
+    /**
+     * The summary, where a long value used to be wrapped into a narrow
+     * column against the end. Every line is on screen whole, and the shot
+     * shows how the values sit on each Android version's screen.
+     */
+    @Test
+    fun readyStepLooksRight() {
+        setOnboardingDone(false)
+        runBlocking {
+            OptionsRepo.get(target).setInt(OptionsRepo.K.ONBOARDING_STEP, OnboardingSteps.Step.READY.ordinal)
+        }
+        ActivityScenario.launch(HostActivity::class.java).use {
+            compose.onNodeWithText(s(R.string.onb_ready_title)).assertIsDisplayed()
+            shoot("13-onboarding-ready")
+            for (label in listOf(R.string.onb_ready_what, R.string.onb_ready_quality, R.string.onb_ready_when)) {
+                compose.onNodeWithText(s(label), useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+            }
+        }
+    }
+
     @Test
     fun everyMainScreenRenders() {
         setOnboardingDone(true)
@@ -322,7 +355,7 @@ class UiWalkthroughTest {
             compose.onNodeWithText(s(R.string.nav_options)).performClick()
             shoot("23-settings-top")
             // Scroll through the long settings list to catch layout problems.
-            compose.onAllNodes(hasText(s(R.string.opt_photos_hint))).onFirst()
+            compose.onAllNodes(hasText(s(R.string.opt_optimise_hint))).onFirst()
                 .performScrollTo().assertIsDisplayed()
             shoot("24-settings-quality")
             compose.openRow(s(R.string.opt_advanced_show))

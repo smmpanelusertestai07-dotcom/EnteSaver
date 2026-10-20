@@ -19,14 +19,14 @@ android {
         // sees it; people see the name. (Until 12.2 it was app.cloudsaver,
         // which 12.3 replaced once, with the name.)
         applicationId = "app.entesaver"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 36
         // Semantic version, and a versionCode derived from it rather than
         // hand-incremented: major*10000 + minor*100 + patch. It is always
         // monotonic, it never collides across branches, and it leaves room
         // for 99 minors and 99 patches without ever needing a reset.
         //   3.0.0 -> 30000
-        versionName = "13.2.0"
+        versionName = "15.1.0"
         versionCode = versionName!!.split(".").let { (major, minor, patch) ->
             major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
         }

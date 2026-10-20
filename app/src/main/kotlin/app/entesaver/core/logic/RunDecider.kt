@@ -54,7 +54,27 @@ object RunDecider {
          * The earlier Ente Saver (until 12.2) is still installed: it would
          * make copies of the same photos, so this one waits until it is gone.
          */
-        EARLIER_APP
+        EARLIER_APP,
+
+        /** Replace on this phone is on, and Android's file access for it is not. */
+        NEEDS_FILE_ACCESS,
+
+        /**
+         * Replace on this phone is on, and media-location access is not:
+         * without it every photo is handed over with its location blanked
+         * out, and a replace would lose it.
+         */
+        NEEDS_MEDIA_LOCATION,
+
+        /** Replace on this phone has written today's daily limit; Ente uploads no more than that a day. */
+        DAILY_LIMIT,
+
+        /**
+         * Replace on this phone is on in a build not signed with Ente
+         * Saver's key. A replaced original is deleted after 30 days, and a
+         * modified build deletes nothing (TamperCheck).
+         */
+        MODIFIED_BUILD
     }
 
     /**

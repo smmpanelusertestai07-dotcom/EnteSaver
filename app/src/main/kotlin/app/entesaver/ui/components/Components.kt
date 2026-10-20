@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -273,14 +274,13 @@ fun MetricTile(
 ) {
     val scheme = MaterialTheme.colorScheme
     val interaction = remember { MutableInteractionSource() }
-    // The floor grows with the text, because what has to fit inside a tile is
-    // text - the same reasoning, and the same 200% cap, as the width floor the
-    // grid below uses to decide how many tiles share a row. A bare 126 dp
-    // stops meaning anything at a large font: the number and its label both
-    // grow past it, the tile grows with them, and every tile in the row ends
-    // up at whatever height its own label happened to need, which is the
-    // ragged grid the floor exists to prevent.
-    val floor = TileHeight * LocalDensity.current.fontScale.coerceIn(1f, 2f)
+    // The floor does not grow with the text. The grid's rows are measured at
+    // IntrinsicSize.Min, which already lifts every tile in a row to the one
+    // whose number and label need the most, so a row is never ragged; scaled
+    // by the font as well, the floor made each tile 252 dp tall at 200% when
+    // its content needs about 145 - one row taller than everything a phone
+    // turned sideways shows above the tab bar.
+    val floor = TileHeight
     var box = modifier
         // A minimum, not a fixed height. The reason the height was pinned -
         // a count going 9 to 10 must not make the grid jump - is already
@@ -547,52 +547,79 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 fun KeyValueRow(key: String, value: String) {
-    // At a large text size the two columns leave each other about three words
-    // of width, and the values here are file names, album names and dates -
-    // none of which survive being squeezed into a third of a narrow phone. Past
-    // that point the value goes under its label with the whole row to itself.
-    if (LocalDensity.current.fontScale >= StackedTextScale) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-        ) {
-            Text(
-                key,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                value,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-        }
-        return
-    }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
-    ) {
+    LabelValueRow(key, value, Modifier.padding(vertical = 4.dp), FontWeight.Medium)
+}
+
+/**
+ * A label and its value, as one line when the line holds both whole.
+ *
+ * Two weighted columns split the line whether or not either half fits, so a
+ * value such as "Photos and videos, from 2 of your 5 albums" was wrapped into
+ * a narrow column pushed against the end - two lines of ragged text beside a
+ * label with room to spare, on an ordinary phone at an ordinary font. Laid
+ * out by [TrailingOrBelow] the pair shares a line only when both fit on it
+ * unbroken, and otherwise the value goes under its label with the whole
+ * width to itself. Read as one item by a screen reader.
+ */
+@Composable
+fun LabelValueRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueWeight: FontWeight = FontWeight.SemiBold
+) {
+    TrailingOrBelow(modifier.semantics(mergeDescendants = true) {}) {
         Text(
-            key,
+            label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.End,
-            modifier = Modifier
-                .weight(1.2f)
-                .padding(start = 12.dp)
+            fontWeight = valueWeight
         )
+    }
+}
+
+/**
+ * Two pieces of [content] - something and what goes with it - on one line,
+ * the second against the end, when the line holds both unbroken; otherwise
+ * the second under the first, from the start, with the whole width to
+ * itself. Measured, not guessed from the text size, so it holds at any
+ * screen width and any font scale, and it mirrors for right-to-left.
+ */
+@Composable
+fun TrailingOrBelow(
+    modifier: Modifier = Modifier,
+    gap: Dp = 12.dp,
+    lineGap: Dp = 2.dp,
+    content: @Composable () -> Unit
+) {
+    Layout(content = content, modifier = modifier.fillMaxWidth()) { measurables, constraints ->
+        require(measurables.size == 2) { "TrailingOrBelow lays out exactly two pieces" }
+        val (first, second) = measurables
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val gapPx = gap.roundToPx()
+        val oneLine = !constraints.hasBoundedWidth ||
+            first.maxIntrinsicWidth(constraints.maxHeight) + gapPx +
+            second.maxIntrinsicWidth(constraints.maxHeight) <= constraints.maxWidth
+        val a = first.measure(loose)
+        val b = second.measure(loose)
+        if (oneLine) {
+            val width = if (constraints.hasBoundedWidth) constraints.maxWidth else a.width + gapPx + b.width
+            val height = maxOf(a.height, b.height)
+            layout(width, height) {
+                a.placeRelative(0, (height - a.height) / 2)
+                b.placeRelative(width - b.width, (height - b.height) / 2)
+            }
+        } else {
+            val under = lineGap.roundToPx()
+            layout(constraints.maxWidth, a.height + under + b.height) {
+                a.placeRelative(0, 0)
+                b.placeRelative(0, a.height + under)
+            }
+        }
     }
 }
 
@@ -809,14 +836,17 @@ fun StateBadge(text: String, tone: BadgeTone, modifier: Modifier = Modifier) {
         // paler pill; the words on it stay readable.
         BadgeTone.MUTED -> scheme.surfaceContainerHigh to scheme.onSurfaceVariant
     }
+    // Two lines and a rounded box rather than one line in a pill: beside a
+    // file in a selection on a narrow phone, "Replaced with light copy" read
+    // "Replaced with light c...".
     Text(
         text = text,
         style = MaterialTheme.typography.labelSmall,
         color = foreground,
-        maxLines = 1,
+        maxLines = 2,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(10.dp))
             .background(background)
             .padding(horizontal = 10.dp, vertical = 4.dp)
     )

@@ -42,11 +42,10 @@ class PermissionLedgerTest {
 
     @Test
     fun `what the app can work without is not asked for at all`() {
-        // Libraries merge these for older Android or for calls the app never
-        // makes, and battery optimisation is switched off on Android's own
-        // page, which needs no permission.
+        // Libraries merge these for calls the app never makes, and battery
+        // optimisation is switched off on Android's own page, which needs no
+        // permission.
         for (name in listOf(
-            "android.permission.USE_FINGERPRINT",
             "\${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         )) {
             val removal = Regex("""<uses-permission\s+android:name="${Regex.escape(name)}"\s+tools:node="remove"""")
@@ -57,9 +56,24 @@ class PermissionLedgerTest {
                 .containsMatchIn(manifest)
         )
         assertFalse(manifest.contains("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"))
-        for (gone in listOf("USE_FINGERPRINT", "DYNAMIC_RECEIVER", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS")) {
+        for (gone in listOf("DYNAMIC_RECEIVER", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS")) {
             assertFalse("$gone must not be in the ledger", ledger.contains(gone))
         }
+    }
+
+    @Test
+    fun `the fingerprint permission is held on Android 9 alone, and explained`() {
+        // androidx.biometric reaches the fingerprint service on Android 9,
+        // which wants USE_FINGERPRINT; from Android 10 USE_BIOMETRIC is enough.
+        assertTrue(
+            Regex("""<uses-permission\s+android:name="android\.permission\.USE_FINGERPRINT"\s+android:maxSdkVersion="28"\s*/>""")
+                .containsMatchIn(manifest)
+        )
+        assertFalse(
+            "USE_FINGERPRINT must not be removed again: the lock on Android 9 needs it",
+            Regex("""USE_FINGERPRINT"\s+tools:node="remove"""").containsMatchIn(manifest)
+        )
+        assertTrue(ledger.contains("\"android.permission.USE_FINGERPRINT\" -> Build.VERSION.SDK_INT <= 28"))
     }
 
     @Test
@@ -84,13 +98,25 @@ class PermissionLedgerTest {
 
     @Test
     fun `what the app never asks for is named on the screen`() {
-        for (absent in listOf("never_camera", "never_location", "never_microphone", "never_contacts", "never_all_files")) {
+        for (absent in listOf("never_camera", "never_location", "never_microphone", "never_contacts")) {
             assertTrue("$absent must be in the ledger", ledger.contains(absent))
             assertTrue("$absent must have a string", strings.contains("name=\"$absent\""))
         }
         // And none of them is in the manifest.
-        for (name in listOf("CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "RECORD_AUDIO", "READ_CONTACTS", "MANAGE_EXTERNAL_STORAGE", "READ_SMS")) {
+        for (name in listOf("CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "RECORD_AUDIO", "READ_CONTACTS", "READ_SMS")) {
             assertFalse("the manifest must not ask for $name", manifest.contains("android.permission.$name"))
         }
+    }
+
+    @Test
+    fun `all files access is declared for replacing in place, explained, and never with the internet`() {
+        assertTrue(manifest.contains("android.permission.MANAGE_EXTERNAL_STORAGE"))
+        // Storage write access only for Android 9 and 10, which have no All files access.
+        assertTrue(
+            Regex("""WRITE_EXTERNAL_STORAGE"\s+android:maxSdkVersion="29"""").containsMatchIn(manifest)
+        )
+        assertTrue(ledger.contains("MANAGE_EXTERNAL_STORAGE to (R.string.perm_name_all_files to R.string.perm_purpose_all_files)"))
+        assertTrue(strings.contains("Only for Replace on this phone"))
+        assertFalse(declared().contains("android.permission.INTERNET"))
     }
 }

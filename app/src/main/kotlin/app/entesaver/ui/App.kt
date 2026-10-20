@@ -64,6 +64,7 @@ import app.entesaver.R
 import app.entesaver.core.logic.TabBadges
 import app.entesaver.ui.components.AppBackground
 import app.entesaver.ui.components.HideWhileLocked
+import app.entesaver.ui.components.LocalSelectionHidesTabs
 import app.entesaver.ui.screens.ActivityScreen
 import app.entesaver.ui.screens.BiggestFilesScreen
 import app.entesaver.ui.screens.CalculatorScreen
@@ -240,10 +241,10 @@ private fun MainNav(vm: AppViewModel) {
     // this activity and starts a new one; locking on that stop asked for a
     // fingerprint every time the phone went sideways. Nobody left the app.
     //
-    // And except, on Android 10, for the phone's own PIN pad: there it is an
+    // And except, on Android 9 and 10, for the phone's own PIN pad: there it is an
     // activity of its own, so asking for the PIN stops this one. Treated as
     // leaving, it re-armed the prompt it was in the middle of answering. The
-    // price is small and safe: leaving Android 10 with the fingerprint sheet
+    // price is small and safe: leaving Android 9 or 10 with the fingerprint sheet
     // up, the app is still locked on return, and asks at a tap of Unlock.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         if (activity?.isChangingConfigurations == true) return@LifecycleEventEffect
@@ -283,6 +284,9 @@ private fun MainNav(vm: AppViewModel) {
         nav.goTo(target)
     }
 
+    // A list with a selection running puts its own bars where the tab bar
+    // was (LocalSelectionHidesTabs).
+    val selectionHidesTabs = remember { mutableStateOf(false) }
     Scaffold(
         containerColor = Color.Transparent,
         // contentColorFor(Transparent) is Unspecified, and Surface would then
@@ -293,7 +297,7 @@ private fun MainNav(vm: AppViewModel) {
             // The same four routes the bar navigates between, named once:
             // a second copy of the list here is a bar that shows on a screen
             // it cannot navigate to, the day one of them changes.
-            if (!needsLock && route in Routes.TABS) {
+            if (!needsLock && route in Routes.TABS && !selectionHidesTabs.value) {
                 FloatingTabBar {
                     TabItem(nav, route, Routes.HOME, R.drawable.ic_tab_home, R.drawable.ic_tab_home_on, R.string.nav_home)
                     TabItem(nav, route, Routes.FILES, R.drawable.ic_tab_files, R.drawable.ic_tab_files_on, R.string.nav_files)
@@ -370,61 +374,63 @@ private fun MainNav(vm: AppViewModel) {
                 onUnlock = unlockPrompt
             )
         } else {
-            NavHost(
-                navController = nav,
-                startDestination = Routes.HOME,
-                // One rule for every screen, applied once: the content never
-                // spans more than a comfortable reading width, and is centred
-                // in whatever is left. On a phone - portrait or landscape,
-                // 320 dp or 480 - nothing changes at all, because nothing is
-                // that wide. On a tablet, a foldable opened out, or a phone
-                // turned sideways it stops a line of text running the full
-                // width of the glass, which is unreadable and is the one way
-                // the same app looks like a different app on a bigger screen.
-                //
-                // The Scaffold's padding is consumed as well as applied. Only
-                // applied, the insets it stands for were still unclaimed below
-                // it, so a screen that pads for the keyboard with imePadding
-                // counted the navigation bar a second time on top of it, and
-                // its field sat a bar's height higher than the keyboard.
-                modifier = Modifier
-                    .padding(padding)
-                    .consumeWindowInsets(padding)
-                    .then(cutoutSides)
-                    .fillMaxSize()
-                    .wrapContentWidth()
-                    .widthIn(max = Dimens.ContentMaxWidth),
-                enterTransition = {
-                    fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 12 }
-                },
-                exitTransition = { fadeOut(tween(160)) },
-                popEnterTransition = {
-                    fadeIn(tween(220)) + slideInHorizontally(tween(260)) { -it / 12 }
-                },
-                popExitTransition = { fadeOut(tween(160)) }
-            ) {
-                composable(Routes.HOME) { HomeScreen(vm, nav) }
-                composable(Routes.FILES) { FilesScreen(vm) }
-                composable(Routes.STORAGE) { StorageScreen(vm, nav) }
-                composable(Routes.OPTIONS) { OptionsScreen(vm, nav) }
-                composable(Routes.FREE_SPACE_HUB) { FreeSpaceHubScreen(vm, nav) }
-                composable(Routes.FREE_UP) { ReclaimScreen(vm, reclaimVm, nav) }
-                composable(Routes.RECLAIM_HISTORY) { ReclaimHistoryScreen(reclaimVm, nav) }
-                composable(Routes.DUPLICATES) { DuplicatesScreen(vm, reclaimVm, nav) }
-                composable(Routes.BIGGEST) { BiggestFilesScreen(vm, reclaimVm, nav) }
-                composable(Routes.KEPT) { KeptCopiesScreen(vm, nav) }
-                composable(Routes.CALCULATOR) { CalculatorScreen(vm, nav) }
-                composable(Routes.ACTIVITY) { ActivityScreen(vm, nav) }
-                composable(Routes.HELP) { HelpScreen(vm, nav) }
-                composable(Routes.HELP_FAQ) { HelpFaqScreen(nav) }
-                composable(Routes.HELP_DELETED) { HelpDeletedScreen(nav) }
-                composable(Routes.HELP_QUALITY) { HelpQualityScreen(nav, vm) }
-                composable(Routes.HELP_CLOUD) { HelpCloudScreen(nav) }
-                composable(Routes.HELP_GALLERY) { HelpGalleryScreen(nav) }
-                composable(Routes.HELP_PRIVACY) { HelpPrivacyScreen(nav) }
-                composable(Routes.HELP_LICENSES) { HelpLicensesScreen(nav) }
-                composable(Routes.HELP_ABOUT) { HelpAboutScreen(vm, nav) }
-                composable(Routes.PERMISSIONS) { PermissionsScreen(vm, nav) }
+            CompositionLocalProvider(LocalSelectionHidesTabs provides selectionHidesTabs) {
+                NavHost(
+                    navController = nav,
+                    startDestination = Routes.HOME,
+                    // One rule for every screen, applied once: the content never
+                    // spans more than a comfortable reading width, and is centred
+                    // in whatever is left. On a phone - portrait or landscape,
+                    // 320 dp or 480 - nothing changes at all, because nothing is
+                    // that wide. On a tablet, a foldable opened out, or a phone
+                    // turned sideways it stops a line of text running the full
+                    // width of the glass, which is unreadable and is the one way
+                    // the same app looks like a different app on a bigger screen.
+                    //
+                    // The Scaffold's padding is consumed as well as applied. Only
+                    // applied, the insets it stands for were still unclaimed below
+                    // it, so a screen that pads for the keyboard with imePadding
+                    // counted the navigation bar a second time on top of it, and
+                    // its field sat a bar's height higher than the keyboard.
+                    modifier = Modifier
+                        .padding(padding)
+                        .consumeWindowInsets(padding)
+                        .then(cutoutSides)
+                        .fillMaxSize()
+                        .wrapContentWidth()
+                        .widthIn(max = Dimens.ContentMaxWidth),
+                    enterTransition = {
+                        fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 12 }
+                    },
+                    exitTransition = { fadeOut(tween(160)) },
+                    popEnterTransition = {
+                        fadeIn(tween(220)) + slideInHorizontally(tween(260)) { -it / 12 }
+                    },
+                    popExitTransition = { fadeOut(tween(160)) }
+                ) {
+                    composable(Routes.HOME) { HomeScreen(vm, nav) }
+                    composable(Routes.FILES) { FilesScreen(vm) }
+                    composable(Routes.STORAGE) { StorageScreen(vm, nav) }
+                    composable(Routes.OPTIONS) { OptionsScreen(vm, nav) }
+                    composable(Routes.FREE_SPACE_HUB) { FreeSpaceHubScreen(vm, nav) }
+                    composable(Routes.FREE_UP) { ReclaimScreen(vm, reclaimVm, nav) }
+                    composable(Routes.RECLAIM_HISTORY) { ReclaimHistoryScreen(reclaimVm, nav) }
+                    composable(Routes.DUPLICATES) { DuplicatesScreen(vm, reclaimVm, nav) }
+                    composable(Routes.BIGGEST) { BiggestFilesScreen(vm, reclaimVm, nav) }
+                    composable(Routes.KEPT) { KeptCopiesScreen(vm, nav) }
+                    composable(Routes.CALCULATOR) { CalculatorScreen(vm, nav) }
+                    composable(Routes.ACTIVITY) { ActivityScreen(vm, nav) }
+                    composable(Routes.HELP) { HelpScreen(vm, nav) }
+                    composable(Routes.HELP_FAQ) { HelpFaqScreen(nav) }
+                    composable(Routes.HELP_DELETED) { HelpDeletedScreen(nav) }
+                    composable(Routes.HELP_QUALITY) { HelpQualityScreen(nav, vm) }
+                    composable(Routes.HELP_CLOUD) { HelpCloudScreen(nav) }
+                    composable(Routes.HELP_GALLERY) { HelpGalleryScreen(nav) }
+                    composable(Routes.HELP_PRIVACY) { HelpPrivacyScreen(nav) }
+                    composable(Routes.HELP_LICENSES) { HelpLicensesScreen(nav) }
+                    composable(Routes.HELP_ABOUT) { HelpAboutScreen(vm, nav) }
+                    composable(Routes.PERMISSIONS) { PermissionsScreen(vm, nav) }
+                }
             }
         }
     }

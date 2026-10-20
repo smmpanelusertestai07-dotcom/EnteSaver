@@ -59,7 +59,7 @@ import app.entesaver.R
 import app.entesaver.core.logic.ActivityWording
 import app.entesaver.core.logic.BackupScope
 import app.entesaver.core.logic.OutputMode
-import app.entesaver.core.logic.PhotoPreset
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.ThemeMode
 import app.entesaver.data.db.ActivityRow
@@ -408,6 +408,7 @@ private fun settingSentence(detail: String?): String {
             ActivityWording.Setting.THEME -> R.string.opt_theme
             ActivityWording.Setting.SCOPE -> R.string.opt_scope
             ActivityWording.Setting.SPACE -> R.string.opt_group_space
+            ActivityWording.Setting.SAVE_MODE -> R.string.opt_save_mode
         }
     )
     return stringResource(R.string.activity_setting_changed, name, settingValue(change))
@@ -424,11 +425,13 @@ private fun settingValue(change: ActivityWording.Change): String {
             "MAX_SAVER" -> R.string.preset_smallest
             else -> null
         }
+        // Before 14 photos and videos each had presets; an entry from then
+        // is named as the screen named it.
         ActivityWording.Setting.PHOTOS, ActivityWording.Setting.VIDEOS -> when (change.value) {
-            PhotoPreset.BEST.name -> R.string.preset_best
-            PhotoPreset.BALANCED.name -> R.string.preset_balanced
-            PhotoPreset.SMALLEST.name -> R.string.preset_smallest
-            PhotoPreset.CUSTOM.name -> R.string.preset_custom
+            "BEST" -> R.string.preset_best
+            "BALANCED" -> R.string.preset_balanced
+            "SMALLEST" -> R.string.preset_smallest
+            "CUSTOM" -> R.string.preset_custom
             else -> null
         }
         ActivityWording.Setting.SPEED -> when (change.value) {
@@ -457,6 +460,11 @@ private fun settingValue(change: ActivityWording.Change): String {
             BackupScope.ALL.name -> R.string.scope_all
             BackupScope.PHOTOS.name -> R.string.scope_photos
             BackupScope.VIDEOS.name -> R.string.scope_videos
+            else -> null
+        }
+        ActivityWording.Setting.SAVE_MODE -> when (change.value) {
+            SaveMode.IN_PLACE.name -> R.string.save_mode_in_place
+            SaveMode.COPIES.name -> R.string.save_mode_copies
             else -> null
         }
         // Cloud app, space and folder store a label already fit to read.

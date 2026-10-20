@@ -113,6 +113,29 @@ fi
 
 BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
 
+# install_apk <log> <adb install arguments...>: true when the package manager
+# says Success. Streamed, never incremental: on a busy emulator adb's
+# incremental install hung for a minute and then both it and the streamed
+# fallback broke off with "Failure calling service package: Broken pipe"
+# before the package manager had said anything about the APK. A stream that
+# breaks like that is tried once more, after the package service answers
+# again; anything the package manager itself says stands.
+install_apk() {
+  local log=$1
+  shift
+  adb install --no-incremental "$@" > "$log" 2>&1
+  if ! grep -q "^Success" "$log" && grep -qE "Broken pipe|Can't find service: package|device offline" "$log"; then
+    echo "::warning::adb install broke off before the package manager answered; trying once more"
+    adb wait-for-device
+    for _ in $(seq 1 30); do
+      adb shell pm path android > /dev/null 2>&1 && break
+      sleep 2
+    done
+    adb install --no-incremental "$@" > "$log" 2>&1
+  fi
+  grep -q "^Success" "$log"
+}
+
 # The last published release: what every phone with Ente Saver updates from.
 PREV_DIR=$(mktemp -d)
 PREV=""
@@ -144,6 +167,21 @@ else
     echo "::notice::The last release ($PREV_CODE) is newer than this build ($NEW_CODE); no update to check."
     PREV=""
   fi
+  # A release built for a newer Android than this emulator's does not
+  # install on it - every release before Android 9 support needs Android 10
+  # - so no phone on this Android can have it to update from, or to sit
+  # beside. The checks below are for the Androids that can.
+  min_of() { badging "$1" | sed -n "s/^\(minSdkVersion\|sdkVersion\):'\([0-9]*\)'.*/\2/p" | head -1; }
+  DEVICE_SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+  for apk in "$PREV" "$EARLIER"; do
+    [ -n "$apk" ] || continue
+    NEED=$(min_of "$apk")
+    if [ -n "$NEED" ] && [ -n "$DEVICE_SDK" ] && [ "$DEVICE_SDK" -lt "$NEED" ]; then
+      echo "::notice::$(basename "$apk") needs API $NEED and this emulator runs API $DEVICE_SDK; there is nothing to update from or install beside here."
+      [ "$apk" = "$PREV" ] && PREV=""
+      [ "$apk" = "$EARLIER" ] && EARLIER=""
+    fi
+  done
 fi
 
 # What the update does to the app, whichever key signs this build: the last
@@ -163,8 +201,7 @@ if [ -n "$PREV" ]; then
       step bash .github/scripts/sign-apk.sh "${apk#*:}" "$TK/${apk%%:*}.apk"
   done
   adb uninstall "$PKG" > /dev/null 2>&1 || true
-  adb install -g "$TK/prev.apk" > "$PREV_DIR/one.log" 2>&1
-  if ! grep -q "^Success" "$PREV_DIR/one.log"; then
+  if ! install_apk "$PREV_DIR/one.log" -g "$TK/prev.apk"; then
     echo "::error::The last published release did not install"
     cat "$PREV_DIR/one.log"
     exit 1
@@ -175,8 +212,7 @@ if [ -n "$PREV" ]; then
   # As after Force stop or an OEM cleaner: the update then reaches an app
   # that no broadcast wakes, so the icon must not depend on any code running.
   adb shell am force-stop "$PKG" > /dev/null 2>&1 || true
-  adb install -r -g "$TK/new.apk" > "$PREV_DIR/two.log" 2>&1
-  if ! grep -q "^Success" "$PREV_DIR/two.log"; then
+  if ! install_apk "$PREV_DIR/two.log" -r -g "$TK/new.apk"; then
     echo "::error::This build does not install as an update over the last published release ($(basename "$PREV"))"
     cat "$PREV_DIR/two.log"
     exit 1
@@ -216,14 +252,12 @@ if [ "${THROWAWAY_KEY:-false}" = "true" ]; then
   echo "::notice::This build was signed with a throwaway key; it is never published, so its signature is not checked against the last release."
 elif [ -n "$PREV" ]; then
   adb uninstall "$PKG" > /dev/null 2>&1 || true
-  adb install -g "$PREV" > "$PREV_DIR/three.log" 2>&1
-  if ! grep -q "^Success" "$PREV_DIR/three.log"; then
+  if ! install_apk "$PREV_DIR/three.log" -g "$PREV"; then
     echo "::error::The last published release did not install"
     cat "$PREV_DIR/three.log"
     exit 1
   fi
-  adb install -r -g EnteSaver-release.apk > "$PREV_DIR/four.log" 2>&1
-  if ! grep -q "^Success" "$PREV_DIR/four.log"; then
+  if ! install_apk "$PREV_DIR/four.log" -r -g EnteSaver-release.apk; then
     echo "::error::This build's signature cannot update the last published release ($(basename "$PREV"))"
     cat "$PREV_DIR/four.log"
     exit 1
@@ -238,14 +272,12 @@ echo "::group::Next to the earlier Ente Saver ($EARLIER_PKG)"
 if [ -n "$EARLIER" ]; then
   adb uninstall "$PKG" > /dev/null 2>&1 || true
   adb uninstall "$EARLIER_PKG" > /dev/null 2>&1 || true
-  adb install -g "$EARLIER" > "$PREV_DIR/five.log" 2>&1
-  if ! grep -q "^Success" "$PREV_DIR/five.log"; then
+  if ! install_apk "$PREV_DIR/five.log" -g "$EARLIER"; then
     echo "::error::The earlier release did not install"
     cat "$PREV_DIR/five.log"
     exit 1
   fi
-  adb install -g EnteSaver-release.apk > "$PREV_DIR/six.log" 2>&1
-  if ! grep -q "^Success" "$PREV_DIR/six.log"; then
+  if ! install_apk "$PREV_DIR/six.log" -g EnteSaver-release.apk; then
     echo "::error::This build does not install next to the earlier Ente Saver"
     cat "$PREV_DIR/six.log"
     exit 1
@@ -271,7 +303,13 @@ echo "::group::Install the signed release APK and launch it"
 adb uninstall "$PKG" 2>/dev/null || true
 # -g grants the runtime permissions up front, so setup's media step offers
 # "Next" instead of a system prompt the walk below cannot answer.
-adb install -r -g EnteSaver-release.apk
+LIVE_LOG=$(mktemp)
+if ! install_apk "$LIVE_LOG" -r -g EnteSaver-release.apk; then
+  echo "::error::The signed release APK did not install"
+  cat "$LIVE_LOG"
+  exit 1
+fi
+rm -f "$LIVE_LOG"
 adb logcat -c || true
 adb shell am start -n "$PKG/.MainActivity"
 sleep 12
@@ -308,8 +346,15 @@ if ! adb shell cmd package query-activities -a org.adw.launcher.THEMES | grep -q
   echo "::error::The icon pack is not discoverable by launchers"
   exit 1
 fi
-# The Photos shortcut's landing screen must open without bringing the app down.
-adb shell am start -n "$PKG/.OpenEnteActivity" || true
+# Ente Saver's own screens open only from its icon, its alerts and its
+# shortcuts. From outside - here the shell - Android must refuse them.
+for cls in HostActivity OpenEnteActivity; do
+  out=$(adb shell am start -W -n "$PKG/.$cls" 2>&1 || true)
+  if echo "$out" | grep -q "Status: ok"; then
+    echo "::error::$cls can be opened by other apps: $out"
+    exit 1
+  fi
+done
 sleep 3
 
 if adb logcat -d -b crash | grep -q "$PKG"; then

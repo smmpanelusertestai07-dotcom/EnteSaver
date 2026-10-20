@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
@@ -16,11 +17,9 @@ import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.Evidence
 import app.entesaver.core.logic.FolderName
 import app.entesaver.core.logic.ItemState
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.VideoCodec
-import app.entesaver.core.logic.VideoCodecChoice
-import app.entesaver.core.logic.VideoPreset
-import app.entesaver.core.logic.VideoSettings
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.engine.MaintainEngine
@@ -142,7 +141,10 @@ class PipelineE2eTest {
         assertEquals(3, inFolder!!.size)
         for (entry in inFolder) {
             assertEquals(Defaults.OUTPUT_DIR, entry.relPath.trimEnd('/'))
-            assertTrue("copy must be owned by us", entry.ownedByUs)
+            // Android 9 records no owner for a file at all.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                assertTrue("copy must be owned by us", entry.ownedByUs)
+            }
             if (originalTaken > 0 && entry.dateTaken > 0) {
                 assertTrue(
                     "copy DATE_TAKEN ${entry.dateTaken} must match the original's " +
@@ -268,7 +270,7 @@ class PipelineE2eTest {
     }
 
     /**
-     * An ordinary 60 fps clip is written at 30, the cap every preset carries:
+     * An ordinary 60 fps clip is written at 30, the cap every copy carries:
      * half the frames is most of the saving, and nothing a phone shows misses
      * them. (Slow motion, 90 fps and up, keeps every frame - MediaSettingsTest.)
      */
@@ -281,7 +283,7 @@ class PipelineE2eTest {
         val src = File(context.cacheDir, "sixty_out").apply { mkdirs() }
         val result = VideoCompressor.compress(
             context, uri!!, "e2e_sixty.mp4", "video/mp4", sizeOf(uri),
-            VideoSettings().spec(), src
+            MediaSettings.VIDEO, src
         )
         try {
             assertFalse(
@@ -297,17 +299,17 @@ class PipelineE2eTest {
 
     /**
      * HEVC is never encoded in software: on a phone without an HEVC chip -
-     * every emulator - a clip asked for in HEVC comes out H.264, and Settings
-     * says so.
+     * every emulator - a clip comes out H.264, and Settings says so.
      */
     @Test
     fun hevcWithoutAChipFallsBackToH264() = runBlockingTest {
         assumeFalse("this phone has an HEVC chip", EncoderCaps.hevcFits(640, 360, 10f))
         val uri = MediaFixtures.insertVideo(context, "e2e_hevc_ask.mp4", width = 640, height = 360, frames = 30)
         assertNotNull(uri)
-        val spec = VideoSettings(VideoPreset.CUSTOM, codec = VideoCodecChoice.HEVC, audioKbps = 64).spec()
         val out = File(context.cacheDir, "hevc_out").apply { mkdirs() }
-        val result = VideoCompressor.compress(context, uri!!, "e2e_hevc_ask.mp4", "video/mp4", sizeOf(uri), spec, out)
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_hevc_ask.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
         try {
             if (!result.asIs) {
                 assertEquals(VideoCodec.H264, result.codec)
@@ -477,8 +479,12 @@ class PipelineE2eTest {
             awaitGalleryRescan(released.outputRelPath!!)
             val window = MaintainEngine(context).openConfirmWindow()!!
             assertTrue("the copy is there at the tap", released.id in window.presentAtTap)
-            val moved = ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, elsewhere) }
-            assertEquals(1, context.contentResolver.update(Uri.parse(released.outputUri), moved, null, null))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val moved = ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, elsewhere) }
+                assertEquals(1, context.contentResolver.update(Uri.parse(released.outputUri), moved, null, null))
+            } else {
+                moveOnDisk(Uri.parse(released.outputUri), elsewhere)
+            }
 
             // The gallery finishes a move in its own time - Android 12 may
             // even give the file a new address - so the return pass runs
@@ -662,6 +668,23 @@ class PipelineE2eTest {
             context, arrayOf("${Environment.getExternalStorageDirectory()}/$relPath"), null
         ) { _, _ -> done.countDown() }
         assertTrue("the gallery rescan did not finish", done.await(60, TimeUnit.SECONDS))
+    }
+
+    /**
+     * A move the way a file manager makes one on Android 9, which has no
+     * RELATIVE_PATH to change: the file itself goes to [relativeDir], and
+     * MediaStore is told its new path.
+     */
+    @Suppress("DEPRECATION")
+    private fun moveOnDisk(item: Uri, relativeDir: String) {
+        val from = context.contentResolver.query(
+            item, arrayOf(MediaStore.MediaColumns.DATA), null, null, null
+        )!!.use { c -> assertTrue("the copy must be in MediaStore", c.moveToFirst()); File(c.getString(0)) }
+        val dir = File(Environment.getExternalStorageDirectory(), relativeDir.trim('/')).apply { mkdirs() }
+        val to = File(dir, from.name)
+        assertTrue("the copy must move on disk", from.renameTo(to))
+        val path = ContentValues().apply { put(MediaStore.MediaColumns.DATA, to.absolutePath) }
+        assertEquals(1, context.contentResolver.update(item, path, null, null))
     }
 
     private fun clearOutputFolder() {

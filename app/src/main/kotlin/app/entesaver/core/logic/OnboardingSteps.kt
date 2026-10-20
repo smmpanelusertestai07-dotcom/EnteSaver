@@ -21,6 +21,12 @@ object OnboardingSteps {
          * folder, and the first they learn of it is the cloud bill.
          */
         ALBUMS,
+
+        /**
+         * Replace on this phone, or copies for Ente: what happens to the
+         * person's own files, chosen before anything happens to them.
+         */
+        SAVE_MODE,
         NOTIFICATIONS,
         BATTERY,
         USAGE,
@@ -34,6 +40,13 @@ object OnboardingSteps {
     }
 
     val ALL: List<Step> = Step.entries.toList()
+
+    /**
+     * The steps shown for [mode]. Usage access confirms that Ente collected
+     * a copy from Ente Saver's folder; replacing in place puts nothing in a
+     * folder, so the step would ask for something that is never used.
+     */
+    fun visible(mode: SaveMode): List<Step> = if (mode == SaveMode.IN_PLACE) ALL - Step.USAGE else ALL
 
     val TOTAL: Int = ALL.size
 

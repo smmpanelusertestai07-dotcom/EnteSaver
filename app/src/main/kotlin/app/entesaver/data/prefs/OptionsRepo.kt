@@ -18,15 +18,13 @@ import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.DeviceDefaults
 import app.entesaver.core.logic.EvidenceRules
 import app.entesaver.core.logic.FolderName
-import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
 import app.entesaver.core.logic.OutputLayout
 import app.entesaver.core.logic.OutputMode
 import app.entesaver.core.logic.OutputRoots
-import app.entesaver.core.logic.PhotoSettings
+import app.entesaver.core.logic.SaveMode
 import app.entesaver.core.logic.SpeedMode
 import app.entesaver.core.logic.ThemeMode
-import app.entesaver.core.logic.VideoSettings
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -79,6 +77,8 @@ data class Options(
      */
     val cloudSingle: String = "ente",
     val speed: SpeedMode = SpeedMode.SMART,
+    /** Where optimised files go ([SaveMode]); an install set up before 14 reads as COPIES. */
+    val saveMode: SaveMode = SaveMode.IN_PLACE,
     /**
      * The three space limits below follow the phone's storage (the default),
      * or hold the person's own figures. An install from before 11.1 that never
@@ -88,10 +88,6 @@ data class Options(
     val dailyCapMb: Int = Defaults.DAILY_CAP_MB,
     val minFreeMb: Int = Defaults.MIN_FREE_MB,
     val maxExtraMb: Int = Defaults.MAX_EXTRA_MB,
-    /** How photos are optimised; see [PhotoSettings]. */
-    val photo: PhotoSettings = PhotoSettings(),
-    /** How videos are optimised; see [VideoSettings]. */
-    val video: VideoSettings = VideoSettings(),
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = false,
     /** MediaStore volume for stage + output; "" = internal (primary). */
@@ -251,6 +247,7 @@ class OptionsRepo(private val context: Context) {
         val NEW_FOLDER_PENDING = booleanPreferencesKey("newFolderPending")
         val CLOUD_SINGLE = stringPreferencesKey("cloudSingle")
         val SPEED = stringPreferencesKey("speed")
+        val SAVE_MODE = stringPreferencesKey("saveMode")
         val SPACE_AUTO = booleanPreferencesKey("spaceAuto")
         /** What Automatic worked out last; the three keys below stay the person's own (Custom). */
         val AUTO_DAILY_CAP_MB = intPreferencesKey("autoDailyCapMb")
@@ -260,19 +257,6 @@ class OptionsRepo(private val context: Context) {
         val MIN_FREE_MB = intPreferencesKey("minFreeMb")
         val MAX_EXTRA_MB = intPreferencesKey("maxExtraMb")
         /** The single preset and codec before 11: read only to derive the two below. */
-        val PRESET = stringPreferencesKey("preset")
-        val CODEC = stringPreferencesKey("codec")
-        val PHOTO_PRESET = stringPreferencesKey("photoPreset")
-        val PHOTO_FORMAT = stringPreferencesKey("photoFormat")
-        val PHOTO_MAX_MP = intPreferencesKey("photoMaxMp")
-        val PHOTO_QUALITY = intPreferencesKey("photoQuality")
-        val VIDEO_PRESET = stringPreferencesKey("videoPreset")
-        val VIDEO_CODEC = stringPreferencesKey("videoCodec")
-        val VIDEO_LONG_SIDE = intPreferencesKey("videoLongSide")
-        val VIDEO_FPS = intPreferencesKey("videoFps")
-        val VIDEO_QUALITY = stringPreferencesKey("videoQuality")
-        val VIDEO_AUDIO_KBPS = intPreferencesKey("videoAudioKbps")
-        val VIDEO_HDR = stringPreferencesKey("videoHdr")
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamicColor")
         val STORAGE_VOLUME = stringPreferencesKey("storageVolume")
@@ -339,6 +323,11 @@ class OptionsRepo(private val context: Context) {
             newFolderPending = p[K.NEW_FOLDER_PENDING] ?: false,
             cloudSingle = p[K.CLOUD_SINGLE] ?: "ente",
             speed = enumOr(p[K.SPEED], SpeedMode.SMART),
+            // Nothing stored and set up already: an install from before 14,
+            // which keeps making copies until its owner chooses otherwise.
+            saveMode = enumOr(
+                p[K.SAVE_MODE], if (p[K.ONBOARDING_DONE] == true) SaveMode.COPIES else SaveMode.IN_PLACE
+            ),
             spaceAuto = spaceAutoOf(p),
             // Snapped, so a limit stored by an older build still lands on one
             // of the chips instead of leaving the control looking unset.
@@ -351,8 +340,6 @@ class OptionsRepo(private val context: Context) {
             maxExtraMb = Defaults.snapToChoice(
                 limitOf(p, K.MAX_EXTRA_MB, K.AUTO_MAX_EXTRA_MB) ?: Defaults.MAX_EXTRA_MB, Defaults.MAX_EXTRA_CHOICES_MB
             ),
-            photo = photoOf(p),
-            video = videoOf(p),
             theme = enumOr(p[K.THEME], ThemeMode.SYSTEM),
             dynamicColor = p[K.DYNAMIC_COLOR] ?: false,
             storageVolume = p[K.STORAGE_VOLUME] ?: "",
@@ -498,64 +485,6 @@ class OptionsRepo(private val context: Context) {
         p[K.FOLDER_PHOTOS] ?: "",
         p[K.FOLDER_VIDEOS] ?: ""
     )
-
-    /**
-     * The photo setting as stored, each value checked against what the
-     * screen offers. Nothing stored yet - every install before 11, and every
-     * new one - reads as the nearest new preset to what the old single preset
-     * stood for (MediaSettings.fromLegacy), so an upgrade needs no write.
-     */
-    private fun photoOf(p: Preferences): PhotoSettings {
-        val legacy = MediaSettings.fromLegacy(p[K.PRESET], p[K.CODEC]).first
-        return PhotoSettings(
-            preset = enumOr(p[K.PHOTO_PRESET], legacy.preset),
-            format = enumOr(p[K.PHOTO_FORMAT], legacy.format),
-            maxMp = p[K.PHOTO_MAX_MP]?.takeIf { it in MediaSettings.PHOTO_MP_CHOICES } ?: legacy.maxMp,
-            quality = p[K.PHOTO_QUALITY]?.takeIf { it in MediaSettings.PHOTO_QUALITY_CHOICES }
-                ?: legacy.quality
-        )
-    }
-
-    private fun videoOf(p: Preferences): VideoSettings {
-        val legacy = MediaSettings.fromLegacy(p[K.PRESET], p[K.CODEC]).second
-        return VideoSettings(
-            preset = enumOr(p[K.VIDEO_PRESET], legacy.preset),
-            codec = enumOr(p[K.VIDEO_CODEC], legacy.codec),
-            longSide = p[K.VIDEO_LONG_SIDE]?.takeIf { it in MediaSettings.VIDEO_LONG_SIDE_CHOICES }
-                ?: legacy.longSide,
-            fpsCap = p[K.VIDEO_FPS]?.takeIf { it in MediaSettings.VIDEO_FPS_CHOICES } ?: legacy.fpsCap,
-            quality = enumOr(p[K.VIDEO_QUALITY], legacy.quality),
-            audioKbps = p[K.VIDEO_AUDIO_KBPS]?.takeIf { it in MediaSettings.AUDIO_KBPS_CHOICES }
-                ?: legacy.audioKbps,
-            hdr = enumOr(p[K.VIDEO_HDR], legacy.hdr)
-        )
-    }
-
-    /** The whole photo setting in one write, so no half of a change can land alone. */
-    suspend fun setPhoto(v: PhotoSettings) {
-        write { putPhoto(it, v) }
-    }
-
-    suspend fun setVideo(v: VideoSettings) {
-        write { putVideo(it, v) }
-    }
-
-    private fun putPhoto(p: MutablePreferences, v: PhotoSettings) {
-        p[K.PHOTO_PRESET] = v.preset.name
-        p[K.PHOTO_FORMAT] = v.format.name
-        p[K.PHOTO_MAX_MP] = v.maxMp
-        p[K.PHOTO_QUALITY] = v.quality
-    }
-
-    private fun putVideo(p: MutablePreferences, v: VideoSettings) {
-        p[K.VIDEO_PRESET] = v.preset.name
-        p[K.VIDEO_CODEC] = v.codec.name
-        p[K.VIDEO_LONG_SIDE] = v.longSide
-        p[K.VIDEO_FPS] = v.fpsCap
-        p[K.VIDEO_QUALITY] = v.quality.name
-        p[K.VIDEO_AUDIO_KBPS] = v.audioKbps
-        p[K.VIDEO_HDR] = v.hdr.name
-    }
 
     /**
      * A choice, once made, is written even if the screen that made it goes.
@@ -730,21 +659,11 @@ class OptionsRepo(private val context: Context) {
             "folderPhotos" to o.folderPhotos,
             "folderVideos" to o.folderVideos,
             "speed" to o.speed.name,
+            "saveMode" to o.saveMode.name,
             "spaceAuto" to o.spaceAuto.toString(),
             "dailyCapMb" to o.dailyCapMb.toString(),
             "minFreeMb" to o.minFreeMb.toString(),
             "maxExtraMb" to o.maxExtraMb.toString(),
-            "photoPreset" to o.photo.preset.name,
-            "photoFormat" to o.photo.format.name,
-            "photoMaxMp" to o.photo.maxMp.toString(),
-            "photoQuality" to o.photo.quality.toString(),
-            "videoPreset" to o.video.preset.name,
-            "videoCodec" to o.video.codec.name,
-            "videoLongSide" to o.video.longSide.toString(),
-            "videoFps" to o.video.fpsCap.toString(),
-            "videoQuality" to o.video.quality.name,
-            "videoAudioKbps" to o.video.audioKbps.toString(),
-            "videoHdr" to o.video.hdr.name,
             "theme" to o.theme.name,
             "dynamicColor" to o.dynamicColor.toString(),
             "storageVolume" to o.storageVolume,
@@ -782,6 +701,7 @@ class OptionsRepo(private val context: Context) {
             // "cloud*" keys from backups made before 11 are ignored: Ente
             // Saver works with Ente Photos only.
             map["speed"]?.let { p[K.SPEED] = it }
+            map["saveMode"]?.takeIf { v -> SaveMode.entries.any { it.name == v } }?.let { p[K.SAVE_MODE] = it }
             // Only values the UI itself offers. A hand-edited backup could
             // otherwise set an absurd minimum-free figure, which makes the
             // resource gate refuse to run for good.
@@ -803,45 +723,6 @@ class OptionsRepo(private val context: Context) {
             map["maxExtraMb"]?.toIntOrNull()
                 ?.takeIf { it in Defaults.MAX_EXTRA_CHOICES_MB }
                 ?.let { p[K.MAX_EXTRA_MB] = it }
-            // Photo and video settings: a backup from 11 on carries them;
-            // one from before carries the single preset and codec, which
-            // stand for the same encode. Either way only values the screen
-            // offers are taken; anything else keeps today's.
-            val legacy = MediaSettings.fromLegacy(map["preset"], map["codec"])
-            val hasNew = map.keys.any { it.startsWith("photo") || it.startsWith("video") }
-            val photoNow = photoOf(p)
-            val videoNow = videoOf(p)
-            if (hasNew) {
-                putPhoto(
-                    p,
-                    PhotoSettings(
-                        preset = enumOr(map["photoPreset"], photoNow.preset),
-                        format = enumOr(map["photoFormat"], photoNow.format),
-                        maxMp = map["photoMaxMp"]?.toIntOrNull()
-                            ?.takeIf { it in MediaSettings.PHOTO_MP_CHOICES } ?: photoNow.maxMp,
-                        quality = map["photoQuality"]?.toIntOrNull()
-                            ?.takeIf { it in MediaSettings.PHOTO_QUALITY_CHOICES } ?: photoNow.quality
-                    )
-                )
-                putVideo(
-                    p,
-                    VideoSettings(
-                        preset = enumOr(map["videoPreset"], videoNow.preset),
-                        codec = enumOr(map["videoCodec"], videoNow.codec),
-                        longSide = map["videoLongSide"]?.toIntOrNull()
-                            ?.takeIf { it in MediaSettings.VIDEO_LONG_SIDE_CHOICES } ?: videoNow.longSide,
-                        fpsCap = map["videoFps"]?.toIntOrNull()
-                            ?.takeIf { it in MediaSettings.VIDEO_FPS_CHOICES } ?: videoNow.fpsCap,
-                        quality = enumOr(map["videoQuality"], videoNow.quality),
-                        audioKbps = map["videoAudioKbps"]?.toIntOrNull()
-                            ?.takeIf { it in MediaSettings.AUDIO_KBPS_CHOICES } ?: videoNow.audioKbps,
-                        hdr = enumOr(map["videoHdr"], videoNow.hdr)
-                    )
-                )
-            } else if (map.containsKey("preset") || map.containsKey("codec")) {
-                putPhoto(p, legacy.first)
-                putVideo(p, legacy.second)
-            }
             map["theme"]?.let { p[K.THEME] = it }
             map["dynamicColor"]?.let { p[K.DYNAMIC_COLOR] = it.toBoolean() }
             map["storageVolume"]?.let { p[K.STORAGE_VOLUME] = it }

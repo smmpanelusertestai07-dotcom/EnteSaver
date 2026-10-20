@@ -64,7 +64,7 @@ object PowerPages {
         vendor: Vendor,
         ignoringBatteryOptimizations: Boolean,
         backgroundRestricted: Boolean = false,
-        /** Null where Android has no such switch (Android 10). */
+        /** Null where Android has no such switch (Android 9 and 10). */
         permissionsAutoReset: Boolean? = null
     ): List<Requirement> {
         val battery = Requirement(

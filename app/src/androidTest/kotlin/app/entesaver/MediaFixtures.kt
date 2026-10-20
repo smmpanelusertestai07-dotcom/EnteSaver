@@ -11,22 +11,40 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
+import app.entesaver.media.LegacyMedia
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.random.Random
 
 /**
  * Builds real media in MediaStore so the end-to-end test works on genuine
  * files rather than mocks. Test originals live in DCIM/EnteSaverTest, which
  * the scanner treats exactly like camera output.
+ *
+ * From Android 10 a fixture is a pending MediaStore item, written and then
+ * published. Android 9 has neither pending items nor RELATIVE_PATH, so there
+ * a fixture is a file written into its folder and handed to the media
+ * scanner - the way a camera's photo arrives on that Android.
  */
 object MediaFixtures {
 
     const val TEST_ALBUM = "DCIM/EnteSaverTest"
+
+    /** The phone's own storage, as this Android's MediaStore names it: "external" before Android 10. */
+    val volume: String
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.VOLUME_EXTERNAL_PRIMARY else "external"
 
     /** A detailed photo that JPEG cannot trivially shrink to nothing. */
     fun makeBitmap(width: Int, height: Int, seed: Int): Bitmap {
@@ -81,6 +99,11 @@ object MediaFixtures {
         val bytes = temp.readBytes()
         temp.delete()
 
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val uri = publishFile(context, "$TEST_ALBUM/", name, "image/jpeg", captureMillis) { it.write(bytes) }
+            awaitIndexed(context, uri, name)
+            return uri
+        }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -145,6 +168,14 @@ object MediaFixtures {
             temp.delete()
             return null
         }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val uri = publishFile(context, "$TEST_ALBUM/", name, "video/mp4", captureMillis) { out ->
+                temp.inputStream().use { it.copyTo(out) }
+            }
+            temp.delete()
+            awaitIndexed(context, uri, name)
+            return uri
+        }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
@@ -176,9 +207,17 @@ object MediaFixtures {
             null,
             null
         )
-        // Publishing triggers a metadata scan. It should be done by the time
-        // update() returns, but read the date back and retry rather than let a
-        // slow emulator turn into a mystery test failure.
+        stampDate(context, uri, captureMillis)
+    }
+
+    /**
+     * [uri]'s DATE_TAKEN set to [captureMillis], once the scan that reads the
+     * file has run. It should be done by the time update() returns, but the
+     * date is read back and set again rather than let a slow emulator turn
+     * into a mystery test failure.
+     */
+    private fun stampDate(context: Context, uri: Uri, captureMillis: Long) {
+        val resolver = context.contentResolver
         repeat(5) {
             resolver.update(
                 uri,
@@ -189,6 +228,48 @@ object MediaFixtures {
             if (dateTaken(context, uri) == captureMillis) return
             Thread.sleep(200)
         }
+    }
+
+    /**
+     * A file the way it arrives on Android 9: written into [relativeDir]
+     * under shared storage, handed to the media scanner, and its uri given
+     * back. [captureMillis], when there is one, is stamped as DATE_TAKEN
+     * once the scanner has read the file, as the pending flow does from
+     * Android 10. A [name] already in the folder gets " (1)", as
+     * MediaProvider names it from Android 10 and the app does on Android 9:
+     * written over, a second fixture of the same name was the first one,
+     * under the same entry.
+     */
+    @Suppress("DEPRECATION")
+    fun publishFile(
+        context: Context,
+        relativeDir: String,
+        name: String,
+        mime: String,
+        captureMillis: Long? = null,
+        write: (OutputStream) -> Unit
+    ): Uri {
+        val dir = File(Environment.getExternalStorageDirectory(), relativeDir.trim('/'))
+        dir.mkdirs()
+        val file = LegacyMedia.claimName(dir, name)
+            ?: throw AssertionError("no free name for the fixture $name")
+        FileOutputStream(file).use(write)
+        val uri = scan(context, file, mime)
+            ?: throw AssertionError("the media scanner never added the fixture $name")
+        if (captureMillis != null) stampDate(context, uri, captureMillis)
+        return uri
+    }
+
+    /** The uri the media scanner gives [file], or null when it gave none in time. */
+    fun scan(context: Context, file: File, mime: String?): Uri? {
+        val done = CountDownLatch(1)
+        val result = AtomicReference<Uri?>(null)
+        MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), mime?.let { arrayOf(it) }) { _, uri ->
+            result.set(uri)
+            done.countDown()
+        }
+        done.await(30, TimeUnit.SECONDS)
+        return result.get()
     }
 
     /** The DATE_TAKEN MediaStore currently reports, or 0. */
@@ -396,6 +477,10 @@ object MediaFixtures {
 
     /** Removes every fixture this run created. */
     fun cleanUp(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            cleanUpFiles(context)
+            return
+        }
         for (collection in listOf(
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -415,5 +500,25 @@ object MediaFixtures {
                 }
             }
         }
+    }
+
+    /**
+     * [cleanUp] on Android 9: the rows, found by their path, and then what
+     * is left in the folder - the hidden folder a replaced photo's original
+     * waits in among it, which MediaStore never lists.
+     */
+    @Suppress("DEPRECATION")
+    private fun cleanUpFiles(context: Context) {
+        for (collection in listOf(
+            MediaStore.Images.Media.getContentUri(volume),
+            MediaStore.Video.Media.getContentUri(volume)
+        )) {
+            runCatching {
+                context.contentResolver.delete(
+                    collection, "${MediaStore.MediaColumns.DATA} LIKE ?", arrayOf("%/$TEST_ALBUM/%")
+                )
+            }
+        }
+        File(Environment.getExternalStorageDirectory(), TEST_ALBUM).listFiles()?.forEach { it.deleteRecursively() }
     }
 }

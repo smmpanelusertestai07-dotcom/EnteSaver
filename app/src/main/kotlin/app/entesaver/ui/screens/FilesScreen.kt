@@ -62,6 +62,8 @@ import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.RowActions
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.data.db.ItemRow
+import app.entesaver.media.InPlace
+import app.entesaver.media.Stager
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.components.AccessNotice
 import app.entesaver.ui.components.AppCard
@@ -82,6 +84,7 @@ import app.entesaver.ui.components.sizeFilter
 import app.entesaver.ui.components.typeFilter
 import app.entesaver.util.Formats
 import app.entesaver.util.OemPages
+import app.entesaver.util.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,6 +98,7 @@ fun FilesScreen(vm: AppViewModel) {
     val sort by vm.filesSort.collectAsStateWithLifecycle()
     var detail by remember { mutableStateOf<ItemRow?>(null) }
     var openError by remember { mutableStateOf<String?>(null) }
+    var putBackOf by remember { mutableStateOf<ItemRow?>(null) }
 
     // Y2.7: skipping a file is undoable, and says where the list lives. It
     // is a decision about someone's photograph made with one tap, so it needs
@@ -334,6 +338,38 @@ fun FilesScreen(vm: AppViewModel) {
         )
     }
 
+    putBackOf?.let { row ->
+        val messages = mapOf(
+            InPlace.PutBack.DONE to stringResource(R.string.put_back_done),
+            InPlace.PutBack.NOT_KEPT to stringResource(R.string.put_back_not_kept),
+            InPlace.PutBack.NO_SPACE to stringResource(R.string.put_back_no_space),
+            InPlace.PutBack.CHANGED to stringResource(R.string.put_back_changed),
+            InPlace.PutBack.FAILED to stringResource(R.string.put_back_failed)
+        )
+        AlertDialog(
+            onDismissRequest = { putBackOf = null },
+            title = { Text(stringResource(R.string.put_back_title)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(stringResource(R.string.put_back_text, row.displayName))
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.put_back_ente))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    putBackOf = null
+                    vm.putBackOriginal(row) { outcome ->
+                        scope.launch { snackbar.showSnackbar(messages.getValue(outcome)) }
+                    }
+                }) { Text(stringResource(R.string.put_back_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { putBackOf = null }) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+    }
+
     detail?.let { row ->
         AlertDialog(
             onDismissRequest = { detail = null },
@@ -355,9 +391,12 @@ fun FilesScreen(vm: AppViewModel) {
             title = {
                 Text(
                     row.displayName,
-                    maxLines = 2,
-                    // The middle, so the extension survives: which file this
-                    // dialog is about is the one thing it must not lose.
+                    // One line, cut in the middle, so the extension survives:
+                    // which file this dialog is about is the one thing it must
+                    // not lose. Android shortens only the last line of a
+                    // longer text, so on two lines a long name was cut off
+                    // with no ellipsis at all, extension first.
+                    maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis
                 )
             },
@@ -378,8 +417,15 @@ fun FilesScreen(vm: AppViewModel) {
                         KeyValueRow(stringResource(R.string.detail_holding_app), it)
                     }
                     KeyValueRow(stringResource(R.string.detail_original), Formats.bytes(row.sizeBytes))
-                    row.outputBytes?.let {
-                        KeyValueRow(stringResource(R.string.detail_copy), Formats.bytes(it))
+                    // A file kept whole has no smaller size to show - its
+                    // "Kept unchanged" line below says why - and a file
+                    // replaced on this phone is not a copy: it is the file.
+                    val keptWhole = row.lastError != null && row.outputBytes == row.sizeBytes
+                    row.outputBytes?.takeUnless { keptWhole }?.let {
+                        KeyValueRow(
+                            stringResource(if (row.backupUri != null) R.string.detail_in_place_now else R.string.detail_copy),
+                            Formats.bytes(it)
+                        )
                         val saved = row.sizeBytes - it
                         if (saved > 0) {
                             KeyValueRow(
@@ -396,7 +442,7 @@ fun FilesScreen(vm: AppViewModel) {
                     row.releasedAt?.let {
                         KeyValueRow(stringResource(R.string.detail_released), Formats.dateTime(it))
                     }
-                    row.outputName?.let {
+                    row.outputName?.takeIf { it != row.displayName }?.let {
                         KeyValueRow(stringResource(R.string.detail_copy_name), it)
                     }
                     row.bucket?.let {
@@ -413,8 +459,7 @@ fun FilesScreen(vm: AppViewModel) {
                                 stringResource(
                                     R.string.detail_video_settings,
                                     codecLabel(codec),
-                                    if (k.longSide <= 0) stringResource(R.string.res_keep) else MediaSettings.pLabel(k.longSide),
-                                    videoQualityLabel(k.quality).lowercase()
+                                    if (k.longSide <= 0) stringResource(R.string.res_keep) else MediaSettings.pLabel(k.longSide)
                                 )
                             }
                         } else {
@@ -427,8 +472,7 @@ fun FilesScreen(vm: AppViewModel) {
                                         stringResource(R.string.photo_size_full)
                                     } else {
                                         stringResource(R.string.photo_size_mp, k.maxMp)
-                                    },
-                                    k.quality
+                                    }
                                 )
                             }
                         }
@@ -496,6 +540,11 @@ fun FilesScreen(vm: AppViewModel) {
                                 detail = null
                             }) { Text(stringResource(R.string.detail_optimise_again)) }
 
+                            RowActions.Action.PUT_BACK -> TextButton(onClick = {
+                                putBackOf = row
+                                detail = null
+                            }) { Text(stringResource(R.string.detail_put_back)) }
+
                             // OPEN already has its own button; removal lives
                             // on Reclaim, which is the single deletion path.
                             else -> Unit
@@ -524,8 +573,8 @@ fun Thumbnail(row: ItemRow) {
         value = source?.let { uriString ->
             withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.loadThumbnail(
-                        Uri.parse(uriString), Size(128, 128), null
+                    Thumbnails.load(
+                        context.contentResolver, Uri.parse(uriString), Size(128, 128)
                     )
                 }.getOrNull()
             }
@@ -590,7 +639,7 @@ fun stateLabel(row: ItemRow): String {
         )
         ItemState.SKIP -> stringResource(R.string.state_skip)
         ItemState.FREED -> stringResource(R.string.state_freed)
-        ItemState.FREED_KEPT -> stringResource(R.string.state_freed_kept)
+        ItemState.FREED_KEPT -> stringResource(if (row.backupUri != null) R.string.state_in_place else R.string.state_freed_kept)
         ItemState.UNKNOWN -> stringResource(R.string.state_unknown)
     }
 }
@@ -603,6 +652,7 @@ fun stateLabel(row: ItemRow): String {
 private fun fileSkipReason(reason: String): String = when (reason) {
     "removed_before_upload" -> stringResource(R.string.asis_removed_early)
     "user_excluded" -> stringResource(R.string.skip_user_excluded_one)
+    Stager.PUT_BACK -> stringResource(R.string.skip_put_back)
     else -> skipReasonLabel(reason)
 }
 
@@ -619,6 +669,9 @@ fun asIsReasonLabel(reason: String): String = when (reason) {
     "not_smaller" -> stringResource(R.string.asis_not_smaller)
     "hdr_not_supported" -> stringResource(R.string.asis_hdr)
     "removed_before_upload" -> stringResource(R.string.asis_removed_early)
+    "already_optimised" -> stringResource(R.string.asis_already_optimised)
+    "ultra_hdr_kept" -> stringResource(R.string.asis_ultra_hdr)
+    "wide_colour" -> stringResource(R.string.asis_wide_colour)
     else -> stringResource(R.string.asis_other)
 }
 
@@ -643,7 +696,8 @@ fun ItemRow.toActionRow(): RowActions.Row = RowActions.Row(
     state = runCatching { ItemState.valueOf(state) }.getOrDefault(ItemState.UNKNOWN),
     evidence = Evidence.parse(evidence),
     neverOptimise = neverOptimise,
-    originalMissing = originalMissing
+    originalMissing = originalMissing,
+    originalKept = !backupUri.isNullOrEmpty()
 )
 
 /** The Status filter, the one chip that belongs to Files alone. */

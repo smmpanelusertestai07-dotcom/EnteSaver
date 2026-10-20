@@ -5,14 +5,19 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
 import android.net.Uri
+import android.os.Build
 import androidx.exifinterface.media.ExifInterface
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.entesaver.core.logic.PhotoFormat
+import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.PhotoSpec
 import app.entesaver.media.PhotoCompressor
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.util.zip.CRC32
+import java.util.zip.Deflater
+import java.util.zip.DeflaterOutputStream
 import kotlin.random.Random
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -112,7 +117,7 @@ class PhotoCompressorTest {
 
     private fun compress(
         file: File,
-        spec: PhotoSpec = PhotoSpec(PhotoFormat.JPEG, 16, 82),
+        spec: PhotoSpec = MediaSettings.PHOTO,
         heicWorks: Boolean = false
     ) = PhotoCompressor.compress(
         context = context,
@@ -235,10 +240,26 @@ class PhotoCompressorTest {
         result.file.delete()
     }
 
+    /** A WebP on disk, written lossy at quality 95, carrying a shooting date. */
+    private fun sourceWebp(name: String): File {
+        val bitmap = Bitmap.createBitmap(1200, 800, Bitmap.Config.ARGB_8888)
+        fillRows(bitmap) { i -> (0xFF shl 24) or (((i * 37) and 0xFF) shl 16) or (((i * 91) and 0xFF) shl 8) or ((i * 173) and 0xFF) }
+        val file = File(tempDir, name)
+        @Suppress("DEPRECATION")
+        val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+        FileOutputStream(file).use { bitmap.compress(format, 95, it) }
+        bitmap.recycle()
+        ExifInterface(file.absolutePath).apply {
+            setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2024:05:06 07:08:09")
+            saveAttributes()
+        }
+        return file
+    }
+
     @Test
-    fun aWebpCopyKeepsTheShootingDate() {
-        val file = sidewaysJpeg("for_webp.jpg")
-        val result = compress(file, spec = PhotoSpec(PhotoFormat.WEBP, 16, 82))
+    fun aWebpStaysAWebpAndKeepsItsShootingDate() {
+        val file = sourceWebp("photo.webp")
+        val result = compress(file)
         assertTrue("must compress, got ${result.reason}", !result.asIs)
         assertEquals("webp", result.ext)
         assertTrue(result.bytes < file.length())
@@ -246,23 +267,38 @@ class PhotoCompressorTest {
             "2024:05:06 07:08:09",
             ExifInterface(result.file.absolutePath).getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
         )
-        val (w, h) = decodedSize(result.file)
-        assertTrue("upright means portrait: ${w}x$h", h > w)
         result.file.delete()
     }
 
     @Test
-    fun aHeicRequestEndsInAReadableSmallerFileWhateverTheEncoder() {
-        // Emulators have no HEIC chip. Told the phone passed anyway, the
-        // compressor must either write a real HEIC or fall back to JPEG -
-        // never fail the photo, never return something larger or unreadable.
-        val file = sidewaysJpeg("for_heic.jpg")
-        val result = compress(file, spec = PhotoSpec(PhotoFormat.HEIC, 16, 82), heicWorks = true)
+    fun aJpegStaysAJpegEvenWhereThePhoneMakesHeic() {
+        val file = sidewaysJpeg("stays_jpeg.jpg")
+        val result = compress(file, heicWorks = true)
         assertTrue("must compress, got ${result.reason}", !result.asIs)
-        assertTrue(result.ext == "heic" || result.ext == "jpg")
+        assertEquals("jpg", result.ext)
         assertTrue(result.bytes < file.length())
-        val (w, h) = decodedSize(result.file)
-        assertTrue("readable and upright: ${w}x$h", w > 0 && h > w)
+        result.file.delete()
+    }
+
+    @Test
+    fun aCopyCarriesTheMarkAndIsNeverOptimisedTwice() {
+        val file = sourceJpeg("first_pass.jpg", 3000, 2000, quality = 98)
+        val first = compress(file)
+        assertTrue("must compress, got ${first.reason}", !first.asIs)
+        val again = File(tempDir, "second_pass.jpg").also { first.file.copyTo(it) }
+        val second = compress(again)
+        assertTrue("an optimised copy must be left alone, got ${second.reason}", second.asIs)
+        assertEquals("already_optimised", second.reason)
+        first.file.delete()
+        second.file.delete()
+    }
+
+    @Test
+    fun aJpegSavedCoarserThanAnyRungIsKeptAsItIs() {
+        val file = sourceJpeg("coarse.jpg", 800, 600, quality = 50)
+        val result = compress(file)
+        assertTrue("must be kept as it is, got ${result.reason}", result.asIs)
+        assertEquals("already_efficient", result.reason)
         result.file.delete()
     }
 
@@ -270,7 +306,7 @@ class PhotoCompressorTest {
     fun aPhotoOverTheCapIsDecodedStraightToTheCap() {
         // 3000x2000 is 6 MP; a 2 MP cap is a third of it, in one decode.
         val file = sourceJpeg("over_cap.jpg", 3000, 2000, quality = 95)
-        val result = compress(file, spec = PhotoSpec(PhotoFormat.JPEG, 2, 82))
+        val result = compress(file, spec = PhotoSpec(2))
         assertTrue(!result.asIs)
         assertTrue("at most the cap: ${result.outPixels}", result.outPixels <= 2_000_000L)
         assertTrue("and not far under it: ${result.outPixels}", result.outPixels >= 1_800_000L)
@@ -300,31 +336,74 @@ class PhotoCompressorTest {
     }
 
     @Test
-    fun aSeeThroughPictureIsCopiedAsItIsNeverFlattenedOntoBlack() {
-        // JPEG and HEIC have no alpha: a sticker re-encoded came out on
-        // black, and the original could then be freed.
+    fun aSeeThroughPngKeepsItsClearAreas() {
+        // A sticker must never come out on black: a PNG stays a PNG, alpha
+        // and all, or it is kept as it is.
         val file = sourcePng("sticker.png", seeThrough = true)
-        val result = compress(file, heicWorks = true, spec = PhotoSpec(PhotoFormat.AUTO, 16, 82))
-        assertTrue("must be kept as it is, got ${result.reason}", result.asIs)
-        assertEquals("transparency", result.reason)
-        assertEquals(file.length(), result.bytes)
+        val result = compress(file, heicWorks = true)
+        if (result.asIs) {
+            assertEquals(file.length(), result.bytes)
+        } else {
+            assertEquals("png", result.ext)
+            val decoded = BitmapFactory.decodeFile(result.file.absolutePath)
+            assertEquals("the clear square stays clear", 0, decoded.getPixel(300, 200) ushr 24)
+            assertEquals("the rest stays solid", 0xFF, decoded.getPixel(20, 20) ushr 24)
+            decoded.recycle()
+        }
         result.file.delete()
     }
 
+    /**
+     * A PNG written with no compression at all, as some apps save
+     * screenshots: lossless packing alone makes it much smaller.
+     */
+    private fun loosePng(name: String, w: Int, h: Int): File {
+        val raw = ByteArrayOutputStream()
+        for (y in 0 until h) {
+            raw.write(0)
+            for (x in 0 until w) {
+                raw.write(x * 255 / w)
+                raw.write(y * 255 / h)
+                raw.write(0x40)
+            }
+        }
+        val packed = ByteArrayOutputStream()
+        DeflaterOutputStream(packed, Deflater(Deflater.NO_COMPRESSION)).use { it.write(raw.toByteArray()) }
+        fun chunk(type: String, data: ByteArray): ByteArray {
+            val crc = CRC32().apply { update(type.toByteArray()); update(data) }.value.toInt()
+            return int(data.size) + type.toByteArray() + data + int(crc)
+        }
+        val header = int(w) + int(h) + byteArrayOf(8, 2, 0, 0, 0)
+        val file = File(tempDir, name)
+        file.writeBytes(
+            byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) +
+                chunk("IHDR", header) + chunk("IDAT", packed.toByteArray()) + chunk("IEND", ByteArray(0))
+        )
+        return file
+    }
+
+    private fun int(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
+
     @Test
-    fun anOpaquePngIsStillOptimised() {
-        // A screenshot is stored with an alpha channel it never uses; that
-        // alone must not keep it full size.
-        val file = sourcePng("screenshot.png", seeThrough = false)
-        val result = compress(file, spec = PhotoSpec(PhotoFormat.JPEG, 16, 60))
+    fun aLooselyPackedPngIsRepackedWithoutLosingAPixel() {
+        val file = loosePng("loose.png", 400, 300)
+        val result = compress(file)
         assertTrue("must compress, got ${result.reason}", !result.asIs)
+        assertEquals("png", result.ext)
+        assertTrue(result.bytes < file.length() / 2)
+        val before = BitmapFactory.decodeFile(file.absolutePath)
+        val after = BitmapFactory.decodeFile(result.file.absolutePath)
+        val a = IntArray(400 * 300).also { before.getPixels(it, 0, 400, 0, 0, 400, 300) }
+        val b = IntArray(400 * 300).also { after.getPixels(it, 0, 400, 0, 0, 400, 300) }
+        assertTrue("lossless means every pixel the same", a.contentEquals(b))
+        before.recycle()
+        after.recycle()
         result.file.delete()
     }
 
     @Test
-    fun aWideGamutPhotoIsNotWrittenAsHeic() {
-        // The HEIC encoder labels whatever it is given as sRGB, so a Display
-        // P3 photo came out paler; JPEG carries its colour profile.
+    fun aWideGamutJpegStaysAJpegWithItsColours() {
+        // JPEG carries its colour profile, so a Display P3 photo stays P3.
         val w = 1600
         val h = 1200
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888, false, ColorSpace.get(ColorSpace.Named.DISPLAY_P3))
@@ -332,9 +411,12 @@ class PhotoCompressorTest {
         val file = File(tempDir, "p3.jpg")
         FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 98, it) }
         bitmap.recycle()
-        val result = compress(file, spec = PhotoSpec(PhotoFormat.HEIC, 16, 82), heicWorks = true)
+        val result = compress(file, heicWorks = true)
         assertTrue("must compress, got ${result.reason}", !result.asIs)
         assertEquals("jpg", result.ext)
+        val decoded = BitmapFactory.decodeFile(result.file.absolutePath)
+        assertTrue("the copy keeps its wide colours", decoded.colorSpace?.isSrgb == false)
+        decoded.recycle()
         result.file.delete()
     }
 }

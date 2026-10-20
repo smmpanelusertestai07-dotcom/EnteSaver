@@ -16,6 +16,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.container.MdtaMetadataEntry
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
@@ -27,14 +28,18 @@ import androidx.media3.transformer.EncoderSelector
 import androidx.media3.transformer.EncoderUtil
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import app.entesaver.core.logic.AudioPlan
 import app.entesaver.core.logic.BitrateCalc
-import app.entesaver.core.logic.HdrPolicy
 import app.entesaver.core.logic.MediaSettings
+import app.entesaver.core.logic.OptimisedMark
+import app.entesaver.core.logic.QualityFloor
 import app.entesaver.core.logic.RunDecider
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.core.logic.VideoCodecResolver
+import app.entesaver.core.logic.VideoShare
 import app.entesaver.core.logic.VideoSpec
 import app.entesaver.util.DeviceTier
 import com.google.common.collect.ImmutableList
@@ -50,12 +55,23 @@ import kotlinx.coroutines.withTimeout
 /**
  * Video pipeline (Media3 Transformer): MP4 out, H.264 or HEVC (HEVC only on a
  * hardware encoder that takes the clip), aspect kept, rotation applied
- * upright, an ordinary high frame rate capped (slow motion kept), AAC at the
- * setting's bitrate. Target bitrate from OUTPUT pixels x fps x the quality's
- * bits per pixel, VBR first. Known Media3 pitfalls are handled with a
- * mandatory result check and a retry ladder: VBR -> CBR -> H.264 (on its
- * hardware for an HEVC clip, in software for an H.264 one) -> copy as-is.
- * An item is never lost.
+ * upright, an ordinary high frame rate capped (slow motion kept).
+ *
+ * How many bits a clip gets is read from its picture, not assumed: a few
+ * pairs of its frames say how much it moves and how dark it is
+ * ([MotionProbe]), and the clip is given that share of the standard rate
+ * ([VideoShare], [BitrateCalc]) - a still scene little, fast motion and night
+ * much more. Nothing is test-encoded first. Sound that is already lean is
+ * copied across untouched, and the rest written as HE-AAC ([AudioPlan]).
+ * Key frames every few seconds and B-frames where the chip makes them spend
+ * the bits on the picture.
+ *
+ * Known Media3 pitfalls are handled with a mandatory result check and a
+ * retry ladder: VBR with B-frames -> VBR -> CBR -> H.264 (on its hardware
+ * for an HEVC clip, in software for an H.264 one) -> copy as-is. Where
+ * Android's quality floor would raise a VBR encode (QualityFloor), CBR comes
+ * first. A rung that overshoots its target has the next one asked for less,
+ * by as far as it went over. An item is never lost.
  */
 @OptIn(UnstableApi::class)
 object VideoCompressor {
@@ -66,31 +82,58 @@ object VideoCompressor {
         val rotation: Int,
         val durationMs: Long,
         val bitrateBps: Long,
-        val fps: Float
+        val fps: Float,
+        /** The picture's codec and its own bitrate, when the file says. */
+        val videoMime: String? = null,
+        val videoBps: Long? = null
     )
 
     private data class Attempt(
         val cbr: Boolean,
         val software: Boolean,
         val label: String,
-        val codec: VideoCodec
+        val codec: VideoCodec,
+        /**
+         * Media3's table of what each chip encodes best with (B-frames and
+         * frame layering where they work, none where they break); the next
+         * rung goes without it.
+         */
+        val tuned: Boolean = false,
+        /**
+         * Sound as HE-AAC (AudioPlan). Only the first rung asks for it: an
+         * encoder that will not write it fails that rung, and every rung
+         * after it writes plain AAC.
+         */
+        val heAudio: Boolean = false
     )
 
     /**
-     * The rungs for a clip encoded as [codec]. HEVC is never handed to a
-     * software encoder - on a budget phone that is many times the clip's own
-     * length, running hot - so its last rung is H.264 on the hardware every
-     * phone has.
+     * The rungs for a clip encoded as [codec]. VBR spends a clip's bits where
+     * its motion is, but where Android's quality floor holds a VBR encode far
+     * above the rate asked for (QualityFloor) the clip is written in CBR
+     * first ([cbrFirst]), which the floor leaves alone: one encode at the
+     * size the app chose instead of two thrown away. HEVC is never handed to
+     * a software encoder - on a budget phone that is many times the clip's
+     * own length, running hot - so its last rung is H.264 on the hardware
+     * every phone has.
      */
-    private fun attemptsFor(codec: VideoCodec): List<Attempt> = listOf(
-        Attempt(cbr = false, software = false, label = "vbr", codec = codec),
-        Attempt(cbr = true, software = false, label = "cbr", codec = codec),
-        if (codec == VideoCodec.HEVC) {
+    private fun attemptsFor(codec: VideoCodec, cbrFirst: Boolean): List<Attempt> {
+        val vbr = Attempt(cbr = false, software = false, label = "vbr", codec = codec)
+        val cbr = Attempt(cbr = true, software = false, label = "cbr", codec = codec)
+        val last = if (codec == VideoCodec.HEVC) {
             Attempt(cbr = false, software = false, label = "h264", codec = VideoCodec.H264)
         } else {
             Attempt(cbr = false, software = true, label = "sw", codec = VideoCodec.H264)
         }
-    )
+        return if (cbrFirst) {
+            listOf(cbr.copy(label = "tuned_cbr", tuned = true, heAudio = true), cbr, vbr, last)
+        } else {
+            listOf(vbr.copy(label = "tuned", tuned = true, heAudio = true), vbr, cbr, last)
+        }
+    }
+
+    private fun mimeOf(codec: VideoCodec): String =
+        if (codec == VideoCodec.H264) MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
 
     private val COPY_OK_CONTAINERS = setOf("video/mp4", "video/quicktime", "video/3gpp")
 
@@ -126,6 +169,20 @@ object VideoCompressor {
     private const val MIN_ATTEMPT_MS = 60_000L
 
     /**
+     * Seconds between key frames. A camera writes one every second so it can
+     * be cut anywhere; a copy that is only watched spends those bits better
+     * on the picture. Ente plays a file it has downloaded whole, so five
+     * seconds costs nothing in seeking and saves on every still scene.
+     */
+    const val KEY_FRAME_SECONDS = 5f
+
+    /** MediaCodec's priority for work nobody is watching in real time. */
+    private const val NON_REALTIME = 1
+
+    /** Twice the clip's own frame rate: well ahead of real time, short of flat out. */
+    private fun operatingRateFor(fps: Float): Int = (2 * (if (fps.isFinite() && fps > 1f) fps else 30f)).toInt().coerceIn(30, 120)
+
+    /**
      * The ladder's budget for a caller with [remainingMs] left on its deadline.
      *
      * Never more than one video's fair share of a run, and never so little that
@@ -142,11 +199,17 @@ object VideoCompressor {
         srcBytes: Long,
         spec: VideoSpec,
         tempDir: File,
-        maxTotalMs: Long = DEFAULT_TOTAL_MS
+        maxTotalMs: Long = DEFAULT_TOTAL_MS,
+        screenRecording: Boolean = false
     ): CompressResult {
         // Started before the probe, because probing a damaged file can itself
         // take a while and the caller was promised a bound on the whole call.
         val budgetEndsAt = System.currentTimeMillis() + maxTotalMs
+        // Made by Ente Saver already: measured again it would only be
+        // compared with itself and taken down another step.
+        if (MarkReader.isMarked(context, uri, srcBytes)) {
+            return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_optimised")
+        }
         val probe = probe(context, uri)
             ?: return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "probe_failed")
 
@@ -166,27 +229,38 @@ object VideoCompressor {
             dims = BitrateCalc.outputDims(upright.first, upright.second, MediaSettings.FULL_HD)
         }
         val (outW, outH) = dims
-        val codec = VideoCodecResolver.resolve(
-            spec.codec, VideoCodecResolver.Hardware(hevcFits = EncoderCaps.hevcFits(outW, outH, outFps))
-        )
-        val targetBps = BitrateCalc.targetBps(outW, outH, outFps, codec, spec.quality)
+        val codec = VideoCodecResolver.resolve(VideoCodecResolver.Hardware(hevcFits = EncoderCaps.hevcFits(outW, outH, outFps)))
+        // Android's quality floor holds a VBR encode of this picture to its
+        // own table, far above these rates (QualityFloor), so where it
+        // applies the clip is written in CBR - if the chip has CBR for this
+        // codec. Where it has not, a VBR copy at the floor is the least this
+        // phone can make, and every check below judges it as that.
+        val floored = EncoderCaps.qualityFloorApplies(context, outW, outH)
+        val cbrFirst = floored && EncoderCaps.cbrFits(mimeOf(codec), outW, outH, outFps)
+        val heldTo = { rate: Int, c: VideoCodec, cbr: Boolean ->
+            if (floored && !cbr) QualityFloor.vbrBps(rate, outW, outH, c) else rate
+        }
+        // The standard rate for this picture; what the clip is given is a
+        // share of it read from its frames (VideoShare).
+        val base = BitrateCalc.targetBps(outW, outH, outFps, codec)
         val containerOk = mimeType.lowercase() in COPY_OK_CONTAINERS
         val srcLongSide = maxOf(upright.first, upright.second)
 
-        if (cappedFps == null &&
-            BitrateCalc.shouldCopyAsIs(srcLongSide, spec.longSideLimit, probe.bitrateBps, targetBps, containerOk)
+        // Leaner already than the least any clip is given: nothing to win.
+        if (cappedFps == null && BitrateCalc.shouldCopyAsIs(
+                srcLongSide, spec.longSideLimit, probe.bitrateBps,
+                heldTo((base * VideoShare.MIN).toInt(), codec, cbrFirst), containerOk
+            )
         ) {
             return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
         }
 
-        // HDR policy: H.264 cannot carry HDR, so it is tone-mapped to SDR, as
-        // is everything when the setting asks for SDR. HEVC keeps HDR only
-        // when this device can actually encode 10-bit HDR; otherwise it is
-        // tone-mapped too. A device that can do neither ends at the as-is
-        // copy below - colours are never silently washed out.
+        // HDR: H.264 cannot carry it, so an H.264 copy is tone-mapped to SDR.
+        // HEVC keeps HDR only when this device can actually encode 10-bit
+        // HDR; otherwise it is tone-mapped too. A device that can do neither
+        // ends at the as-is copy below - colours are never silently washed out.
         val hdr = MediaTraits.hdrOf(context, uri)
         val keepHdr = hdr != MediaTraits.Hdr.NONE &&
-            spec.hdr == HdrPolicy.KEEP_WHEN_POSSIBLE &&
             codec == VideoCodec.HEVC &&
             MediaTraits.deviceSupportsHdrHevcEncode()
         // The phone's own decoder does it where it can: lighter than a GL
@@ -203,6 +277,32 @@ object VideoCompressor {
             keepHdr -> "_hdr"
             else -> "_tonemap"
         }
+        val sound = audioTrackOf(context, uri)
+        val audio = sound?.let { AudioPlan.decide(it.mime, it.channels, it.bitrateBps, it.sampleRate) }
+        val plainAudio = sound?.let { AudioPlan.plain(it.channels, it.bitrateBps) }
+
+        val motion = MotionProbe.read(context, uri, probe.durationMs, outFps)
+        val share = VideoShare.of(motion?.ti, motion?.meanLuma, screenRecording)
+        // Never more than the source's own picture holds, in the copy's codec
+        // and size (BitrateCalc.sourceCapBps): the file's own figure for its
+        // picture, or the whole file less its sound.
+        val sourceVideoBps = probe.videoBps ?: (probe.bitrateBps - (sound?.bitrateBps ?: 0)).takeIf { it > 0 }
+        val rateFor = { c: VideoCodec ->
+            val asked = (BitrateCalc.targetBps(outW, outH, outFps, c) * share).toInt()
+            val cap = sourceVideoBps?.let {
+                BitrateCalc.sourceCapBps(
+                    it, probe.videoMime, upright.first, upright.second, probe.fps, outW, outH, outFps, c
+                )
+            }
+            if (cap != null) minOf(asked, cap) else asked
+        }
+        // Measured, the clip needs no fewer bits than it already has.
+        if (cappedFps == null && BitrateCalc.shouldCopyAsIs(
+                srcLongSide, spec.longSideLimit, probe.bitrateBps, heldTo(rateFor(codec), codec, cbrFirst), containerOk
+            )
+        ) {
+            return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
+        }
 
         var outOfTime = false
         var notSmaller = false
@@ -210,17 +310,25 @@ object VideoCompressor {
         // The smallest copy that only missed its bitrate target, kept in case
         // no rung meets it (BitrateCalc.worthKeeping).
         var fallback: CompressResult? = null
-        val attempts = attemptsFor(codec)
+        // After an encode that overshot, what the next one in that codec asks
+        // for: lowered by as far as it went over (BitrateCalc.correctedRequestBps).
+        var request: Pair<VideoCodec, Int>? = null
+        val attempts = attemptsFor(codec, cbrFirst)
         var rung = 0
         while (rung < attempts.size) {
             val attempt = attempts[rung]
+            val target = rateFor(attempt.codec)
+            val asked = request?.takeIf { it.first == attempt.codec }?.second ?: target
+            // Under the floor a VBR rung comes out at the floor, never smaller
+            // than a copy already made that only missed its own target.
+            if (fallback != null && floored && !attempt.cbr) break
             // Keeping HDR is a promise about HEVC; the H.264 rung tone-maps.
             val hdrMode = when {
                 hdr == MediaTraits.Hdr.NONE -> Composition.HDR_MODE_KEEP_HDR
                 keepHdr && attempt.codec == VideoCodec.HEVC -> Composition.HDR_MODE_KEEP_HDR
                 else -> toneMap
             }
-            val codecMime = if (attempt.codec == VideoCodec.H264) MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
+            val codecMime = mimeOf(attempt.codec)
             // Each rung gets what is left of the budget, not a fresh twenty
             // minutes of its own, so three attempts can never cost three times
             // the number the caller asked for.
@@ -232,11 +340,12 @@ object VideoCompressor {
             val outFile = File(tempDir, "video_${System.nanoTime()}_${attempt.label}.mp4")
             val export = try {
                 runTransform(
-                    context, uri, outFile, outW, outH,
-                    BitrateCalc.targetBps(outW, outH, outFps, attempt.codec, spec.quality),
+                    context, uri, outFile, outW, outH, asked,
                     codecMime, attempt, hdrMode, leftMs,
-                    audioBps = spec.audioKbps * 1000,
+                    audio = audio,
+                    plainAudio = plainAudio,
                     frameRateCap = cappedFps?.toInt(),
+                    operatingRate = operatingRateFor(outFps),
                     onError = { detail = "${attempt.label}: $it" }
                 )
             } catch (ce: CancellationException) {
@@ -263,8 +372,21 @@ object VideoCompressor {
                     probeDurationMs(outFile)
                 }
                 val outBps = if (outDur > 0) outBytes * 8000L / outDur else Long.MAX_VALUE
-                val rungTarget = BitrateCalc.targetBps(outW, outH, outFps, attempt.codec, spec.quality)
+                // The file's bitrate counts its sound too, and at these picture
+                // rates a kept 64 kbps track is a quarter of a small clip: the
+                // check allows for the sound this rung writes, and for the
+                // floor a VBR rung is held to.
+                val rungSound = soundBps(audio, plainAudio, sound?.bitrateBps, attempt)
+                val rungTarget = heldTo(target, attempt.codec, attempt.cbr) + rungSound
                 if (BitrateCalc.resultAcceptable(srcBytes, outBytes, outBps, rungTarget, probe.durationMs, outDur)) {
+                    // A later rung can pass at a higher target - the floor's, or
+                    // H.264's - and still be the bigger copy.
+                    val earlier = fallback
+                    if (earlier != null && earlier.bytes <= outBytes) {
+                        outFile.delete()
+                        return earlier
+                    }
+                    earlier?.file?.delete()
                     return CompressResult(
                         outFile,
                         outBytes,
@@ -276,8 +398,16 @@ object VideoCompressor {
                         codec = attempt.codec
                     )
                 }
-                detail = "${attempt.label}: $outBytes of $srcBytes bytes, $outBps of $rungTarget bps, " +
-                    "$outDur of ${probe.durationMs} ms"
+                detail = "${attempt.label}: $outBytes of $srcBytes bytes, $outBps of $rungTarget bps " +
+                    "(asked $asked), $outDur of ${probe.durationMs} ms"
+                // Judged against the target, asked for less: the next encode
+                // in this codec lands near the target instead of over it a
+                // second time. Not under the floor, where a VBR rung is
+                // raised whatever it asks and the floor is what overshot.
+                if (outDur > 0 && !(floored && !attempt.cbr)) {
+                    request = BitrateCalc.correctedRequestBps(asked, outBps - rungSound, target)
+                        ?.let { attempt.codec to it } ?: request
+                }
                 if (BitrateCalc.worthKeeping(srcBytes, outBytes, probe.durationMs, outDur) &&
                     outBytes < (fallback?.bytes ?: Long.MAX_VALUE)
                 ) {
@@ -340,8 +470,10 @@ object VideoCompressor {
         attempt: Attempt,
         hdrMode: Int,
         attemptMs: Long,
-        audioBps: Int,
+        audio: AudioPlan.Decision?,
+        plainAudio: AudioPlan.Decision.Encode?,
         frameRateCap: Int?,
+        operatingRate: Int,
         onError: (String) -> Unit
     ): ExportResult? = withContext(Dispatchers.Default) {
         // Background priority: encoding must never make the phone feel slow.
@@ -358,16 +490,37 @@ object VideoCompressor {
                 } else {
                     MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
                 }
+                // Profile and level are left to Media3, which asks for H.264
+                // High at the highest level the chip supports (minus the chips
+                // known to break on it), and HEVC Main.
+                // Best effort at twice the clip's own frame rate, not as fast
+                // as the chip can go: Media3's default runs the encoder flat
+                // out, and that heat is what a game in the foreground feels.
                 val videoSettings = VideoEncoderSettings.Builder()
                     .setBitrate(bitrateBps)
                     .setBitrateMode(bitrateMode)
+                    .setiFrameIntervalSeconds(KEY_FRAME_SECONDS)
+                    .setEncoderPerformanceParameters(operatingRate, NON_REALTIME)
                     .build()
+                // Asking for any sound settings at all makes Media3 re-encode
+                // the sound, so a track that is kept asks for none.
+                val encode = (audio as? AudioPlan.Decision.Encode)?.let {
+                    if (it.he && !attempt.heAudio) plainAudio ?: it.copy(he = false) else it
+                }
                 val encoderFactory = DefaultEncoderFactory.Builder(context)
                     .setRequestedVideoEncoderSettings(videoSettings)
-                    .setRequestedAudioEncoderSettings(
-                        AudioEncoderSettings.Builder().setBitrate(audioBps).build()
-                    )
+                    .apply {
+                        if (encode != null) {
+                            setRequestedAudioEncoderSettings(
+                                AudioEncoderSettings.Builder()
+                                    .setBitrate(encode.bps)
+                                    .apply { if (encode.he) setProfile(MediaCodecInfo.CodecProfileLevel.AACObjectHE) }
+                                    .build()
+                            )
+                        }
+                    }
                     .setEnableFallback(true)
+                    .setEnableCodecDbLite(attempt.tuned)
                     .apply { if (attempt.software) setVideoEncoderSelector(SOFTWARE_SELECTOR) }
                     .build()
 
@@ -388,15 +541,16 @@ object VideoCompressor {
 
                 val transformer = Transformer.Builder(context)
                     .setVideoMimeType(codecMime)
-                    .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                    .apply { if (encode != null) setAudioMimeType(MimeTypes.AUDIO_AAC) }
                     .setEncoderFactory(encoderFactory)
+                    .setMuxerFactory(MUXER)
                     .addListener(listener)
                     .build()
                 transformerRef.set(transformer)
 
                 // Presentation is always applied: it keeps aspect (even dims) and
                 // forces a real re-encode so the bitrate settings actually apply.
-                val edited = EditedMediaItem.Builder(MediaItem.fromUri(uri))
+                fun edited(item: MediaItem) = EditedMediaItem.Builder(item)
                     .setEffects(
                         Effects(
                             emptyList<AudioProcessor>(),
@@ -424,10 +578,10 @@ object VideoCompressor {
                 // did. Both branches are pinned by instrumented tests against
                 // real clips, because the wrong choice fails nothing else - the
                 // copy is smaller, valid, and either silent or padded.
-                val sequence = if (hasAudioTrack(context, uri)) {
-                    EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited))
+                val sequence = if (audio != null) {
+                    EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited(MediaItem.fromUri(uri))))
                 } else {
-                    EditedMediaItemSequence.withVideoFrom(listOf(edited))
+                    EditedMediaItemSequence.withVideoFrom(listOf(edited(MediaItem.fromUri(uri))))
                 }
                 val composition = Composition.Builder(sequence).setHdrMode(hdrMode).build()
                 transformer.start(composition, outFile.absolutePath)
@@ -450,11 +604,62 @@ object VideoCompressor {
         }
     }
 
+    /** The sound a rung's copy carries, in bits a second: what the result check allows for it. */
+    private fun soundBps(
+        audio: AudioPlan.Decision?,
+        plainAudio: AudioPlan.Decision.Encode?,
+        sourceBps: Int?,
+        attempt: Attempt
+    ): Int = when (audio) {
+        null -> 0
+        AudioPlan.Decision.Keep -> sourceBps?.takeIf { it > 0 } ?: AudioPlan.KEEP_STEREO_BPS
+        is AudioPlan.Decision.Encode -> if (audio.he && !attempt.heAudio) plainAudio?.bps ?: audio.bps else audio.bps
+    }
+
+    /** The original's sound track; null when it has none (or cannot be read). */
+    private data class SourceAudio(val mime: String?, val channels: Int, val bitrateBps: Int?, val sampleRate: Int?)
+
+    private fun audioTrackOf(context: Context, uri: Uri): SourceAudio? {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(context, uri, null)
+            (0 until extractor.trackCount).asSequence()
+                .map { extractor.getTrackFormat(it) }
+                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?.let { f ->
+                    SourceAudio(
+                        mime = f.getString(MediaFormat.KEY_MIME),
+                        channels = if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) f.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2,
+                        bitrateBps = if (f.containsKey(MediaFormat.KEY_BIT_RATE)) f.getInteger(MediaFormat.KEY_BIT_RATE) else null,
+                        sampleRate = if (f.containsKey(MediaFormat.KEY_SAMPLE_RATE)) f.getInteger(MediaFormat.KEY_SAMPLE_RATE) else null
+                    )
+                }
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    /**
+     * The MP4 writer: the index at the front, so a player - Ente's on the web
+     * too - starts before the whole file is read, and the note that keeps
+     * the copy from being optimised again ([OptimisedMark]). The original's
+     * own metadata (date, place, rotation) is carried over by Media3.
+     */
+    private val MUXER = InAppMp4Muxer.Factory { entries ->
+        entries.add(
+            MdtaMetadataEntry(
+                OptimisedMark.VIDEO_KEY, "1".toByteArray(Charsets.US_ASCII), MdtaMetadataEntry.TYPE_INDICATOR_STRING
+            )
+        )
+    }.setAttemptStreamableOutputEnabled(true)
+
     private val SOFTWARE_SELECTOR = EncoderSelector { mimeType ->
         val all = EncoderUtil.getSupportedEncoders(mimeType)
         val software = all.filter { info ->
             try {
-                info.isSoftwareOnly ||
+                EncoderCaps.isSoftware(info) ||
                     info.name.startsWith("c2.android.", ignoreCase = true) ||
                     info.name.startsWith("OMX.google.", ignoreCase = true)
             } catch (e: Exception) {
@@ -471,6 +676,7 @@ object VideoCompressor {
             val w = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
             val h = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
             if (w == null || h == null || w <= 0 || h <= 0) return null
+            val track = videoTrackOf(context, uri)
             Probe(
                 width = w,
                 height = h,
@@ -480,7 +686,9 @@ object VideoCompressor {
                     ?.toLongOrNull() ?: 0L,
                 bitrateBps = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
                     ?.toLongOrNull() ?: 0L,
-                fps = extractFps(context, uri) ?: 30f
+                fps = track?.fps ?: 30f,
+                videoMime = track?.mime,
+                videoBps = track?.bitrateBps
             )
         } catch (e: Exception) {
             null
@@ -489,23 +697,9 @@ object VideoCompressor {
         }
     }
 
-    /** True when the container has an audio track; a probe failure reads as none. */
-    fun hasAudioTrack(context: Context, uri: Uri): Boolean {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(context, uri, null)
-            (0 until extractor.trackCount).any { i ->
-                extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
-                    ?.startsWith("audio/") == true
-            }
-        } catch (e: Exception) {
-            false
-        } finally {
-            runCatching { extractor.release() }
-        }
-    }
+    private data class SourceVideo(val mime: String, val fps: Float?, val bitrateBps: Long?)
 
-    private fun extractFps(context: Context, uri: Uri): Float? {
+    private fun videoTrackOf(context: Context, uri: Uri): SourceVideo? {
         val extractor = MediaExtractor()
         return try {
             extractor.setDataSource(context, uri, null)
@@ -513,7 +707,7 @@ object VideoCompressor {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
                 if (mime.startsWith("video/")) {
-                    return try {
+                    val fps = try {
                         format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
                     } catch (e: Exception) {
                         try {
@@ -522,6 +716,15 @@ object VideoCompressor {
                             null
                         }
                     }
+                    // Often missing; never worth losing the frame rate over.
+                    val bps = runCatching {
+                        if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                            format.getInteger(MediaFormat.KEY_BIT_RATE).toLong()
+                        } else {
+                            null
+                        }
+                    }.getOrNull()?.takeIf { it > 0 }
+                    return SourceVideo(mime, fps, bps)
                 }
             }
             null
