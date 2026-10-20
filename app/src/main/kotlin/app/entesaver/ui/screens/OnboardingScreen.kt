@@ -66,7 +66,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -92,6 +91,7 @@ import app.entesaver.ui.components.BrandMark
 import app.entesaver.ui.components.EmptyState
 import app.entesaver.ui.components.EnteIcon
 import app.entesaver.ui.components.EnteInstallButtons
+import app.entesaver.ui.components.LabelValueRow
 import app.entesaver.ui.components.ListTags
 import app.entesaver.ui.components.OpenHistory
 import app.entesaver.ui.components.PasswordDialog
@@ -910,7 +910,13 @@ fun OnboardingScreen(vm: AppViewModel) {
                 // be fixed in one tap.
                 if (allAlbums.isNotEmpty() && includedAlbums == 0) {
                     WarningText(stringResource(R.string.onb_ready_no_albums))
-                    TextButton(onClick = { choosingAlbums = true }) {
+                    // Outlined like "Copy folder path" below it: a text
+                    // button's own padding set its label in from the line the
+                    // warning starts on, and it read as a stray link.
+                    OutlinedButton(
+                        onClick = { choosingAlbums = true },
+                        modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                    ) {
                         Text(stringResource(R.string.onb_ready_pick_albums))
                     }
                 }
@@ -1191,39 +1197,9 @@ fun CopyPathButton(layout: OutputLayout) {
 }
 
 /** One "label - value" line in the setup summary. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SummaryLine(label: String, value: String) {
-    // Neither half is weighted any more, because a weighted pair divides the
-    // line whether or not either share is enough.
-    //
-    // The value is unbounded - "Photos and videos, from 2 of your 5 albums"
-    // beside "What's backed up" - and at the largest accessibility font on a
-    // 320 dp phone a fixed 0.8-to-1.2 split left the label a single word wide
-    // down the left edge while the value was still wrapping to four lines
-    // next to it. Flowing, they share a line whenever a line will hold them,
-    // which is every ordinary phone at an ordinary font, and where it will
-    // not the value moves underneath its own label and both are read in full.
-    FlowRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.End,
-            modifier = Modifier.padding(start = 12.dp)
-        )
-    }
+    LabelValueRow(label, value, Modifier.padding(vertical = 3.dp))
 }
 
 @Composable

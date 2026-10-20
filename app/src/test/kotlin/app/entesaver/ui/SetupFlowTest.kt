@@ -69,7 +69,7 @@ class SetupFlowTest {
         val ready = onb.substringAfter("Step.READY ->")
         assertTrue(
             "the no-albums warning must open the sheet in place",
-            ready.contains("TextButton(onClick = { choosingAlbums = true })")
+            Regex("""OutlinedButton\(\s*onClick = \{ choosingAlbums = true \}""").containsMatchIn(ready)
         )
         assertTrue(
             "the trial card must open the same sheet",

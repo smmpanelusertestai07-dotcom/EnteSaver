@@ -87,7 +87,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
@@ -121,6 +120,7 @@ import app.entesaver.ui.components.PasswordDialog
 import app.entesaver.ui.components.SectionHeader
 import app.entesaver.ui.components.SegmentedChoice
 import app.entesaver.ui.components.StackedTextScale
+import app.entesaver.ui.components.TrailingOrBelow
 import app.entesaver.ui.components.WarningNote
 import app.entesaver.ui.components.WarningText
 import app.entesaver.ui.goTo
@@ -1341,26 +1341,26 @@ internal fun OptionCard(
                 // 320 dp phone at the largest accessibility font that left the
                 // title a word wide down the left edge and cut "Photos and
                 // videos" to "Photos a...", so neither half could be read.
-                // Flowing, each is shown in full; one of them just moves down
-                // a line to get there.
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                // Each is shown in full; one of them just moves down a line
+                // to get there, and then starts where the title starts.
+                val titleText = @Composable {
                     Text(
                         title,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
-                    value?.let {
+                }
+                if (value == null) {
+                    titleText()
+                } else {
+                    TrailingOrBelow {
+                        titleText()
                         Text(
-                            it,
+                            value,
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.padding(start = 12.dp)
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

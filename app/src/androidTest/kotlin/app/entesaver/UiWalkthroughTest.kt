@@ -26,6 +26,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
+import app.entesaver.core.logic.OnboardingSteps
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.MediaScanner
@@ -302,6 +303,26 @@ class UiWalkthroughTest {
             compose.onNodeWithText(s(R.string.onb_next)).performClick()
             compose.waitForIdle()
             shoot("12-onboarding-step")
+        }
+    }
+
+    /**
+     * The summary, where a long value used to be wrapped into a narrow
+     * column against the end. Every line is on screen whole, and the shot
+     * shows how the values sit on each Android version's screen.
+     */
+    @Test
+    fun readyStepLooksRight() {
+        setOnboardingDone(false)
+        runBlocking {
+            OptionsRepo.get(target).setInt(OptionsRepo.K.ONBOARDING_STEP, OnboardingSteps.Step.READY.ordinal)
+        }
+        ActivityScenario.launch(HostActivity::class.java).use {
+            compose.onNodeWithText(s(R.string.onb_ready_title)).assertIsDisplayed()
+            shoot("13-onboarding-ready")
+            for (label in listOf(R.string.onb_ready_what, R.string.onb_ready_quality, R.string.onb_ready_when)) {
+                compose.onNodeWithText(s(label), useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+            }
         }
     }
 

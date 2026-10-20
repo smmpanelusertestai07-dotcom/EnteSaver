@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -547,52 +548,79 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 fun KeyValueRow(key: String, value: String) {
-    // At a large text size the two columns leave each other about three words
-    // of width, and the values here are file names, album names and dates -
-    // none of which survive being squeezed into a third of a narrow phone. Past
-    // that point the value goes under its label with the whole row to itself.
-    if (LocalDensity.current.fontScale >= StackedTextScale) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-        ) {
-            Text(
-                key,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                value,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-        }
-        return
-    }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
-    ) {
+    LabelValueRow(key, value, Modifier.padding(vertical = 4.dp), FontWeight.Medium)
+}
+
+/**
+ * A label and its value, as one line when the line holds both whole.
+ *
+ * Two weighted columns split the line whether or not either half fits, so a
+ * value such as "Photos and videos, from 2 of your 5 albums" was wrapped into
+ * a narrow column pushed against the end - two lines of ragged text beside a
+ * label with room to spare, on an ordinary phone at an ordinary font. Laid
+ * out by [TrailingOrBelow] the pair shares a line only when both fit on it
+ * unbroken, and otherwise the value goes under its label with the whole
+ * width to itself. Read as one item by a screen reader.
+ */
+@Composable
+fun LabelValueRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueWeight: FontWeight = FontWeight.SemiBold
+) {
+    TrailingOrBelow(modifier.semantics(mergeDescendants = true) {}) {
         Text(
-            key,
+            label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.End,
-            modifier = Modifier
-                .weight(1.2f)
-                .padding(start = 12.dp)
+            fontWeight = valueWeight
         )
+    }
+}
+
+/**
+ * Two pieces of [content] - something and what goes with it - on one line,
+ * the second against the end, when the line holds both unbroken; otherwise
+ * the second under the first, from the start, with the whole width to
+ * itself. Measured, not guessed from the text size, so it holds at any
+ * screen width and any font scale, and it mirrors for right-to-left.
+ */
+@Composable
+fun TrailingOrBelow(
+    modifier: Modifier = Modifier,
+    gap: Dp = 12.dp,
+    lineGap: Dp = 2.dp,
+    content: @Composable () -> Unit
+) {
+    Layout(content = content, modifier = modifier.fillMaxWidth()) { measurables, constraints ->
+        require(measurables.size == 2) { "TrailingOrBelow lays out exactly two pieces" }
+        val (first, second) = measurables
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val gapPx = gap.roundToPx()
+        val oneLine = !constraints.hasBoundedWidth ||
+            first.maxIntrinsicWidth(constraints.maxHeight) + gapPx +
+            second.maxIntrinsicWidth(constraints.maxHeight) <= constraints.maxWidth
+        val a = first.measure(loose)
+        val b = second.measure(loose)
+        if (oneLine) {
+            val width = if (constraints.hasBoundedWidth) constraints.maxWidth else a.width + gapPx + b.width
+            val height = maxOf(a.height, b.height)
+            layout(width, height) {
+                a.placeRelative(0, (height - a.height) / 2)
+                b.placeRelative(width - b.width, (height - b.height) / 2)
+            }
+        } else {
+            val under = lineGap.roundToPx()
+            layout(constraints.maxWidth, a.height + under + b.height) {
+                a.placeRelative(0, 0)
+                b.placeRelative(0, a.height + under)
+            }
+        }
     }
 }
 
