@@ -5,12 +5,15 @@ import android.content.Context
 import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
+import androidx.media3.common.C
+import androidx.media3.common.ColorInfo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -49,11 +52,10 @@ import org.junit.runner.RunWith
  * forwards, saved reels, downloads, screen recordings, an old phone's clips -
  * and runs this class with `-e savingsBench true`. It goes through Ente
  * Saver's own pipeline: the scanner, then the Stager exactly as a scheduled
- * run calls it, making copies (Copies for Ente) at Google Photos' Storage
- * saver limits (16 MP photos, 1080p videos). One CSV line per video says
- * what went in, what came out - read
- * from the file the app wrote, track by track - and why a file was kept as it
- * was. The copies of the files named by `-e keep` (base64url of one name per
+ * run calls it, making copies (Copies for Ente) that keep each video's own
+ * codec, size and frame rate. One CSV line per video says what went in and
+ * what came out - both read from the files themselves, track by track,
+ * with the date and place each carries - and why a file was kept as it was. The copies of the files named by `-e keep` (base64url of one name per
  * line) are kept in files/savings/keep for the workflow to grade against
  * their originals; every other copy is deleted once measured. Without
  * `savingsBench` it skips, so the end-to-end suite never pays for it.
@@ -72,10 +74,11 @@ class SavingsBenchTest {
         assumeTrue("a benchmark: run with -e savingsBench true", args.getString("savingsBench") == "true")
         val expected = args.getString("expected")?.toIntOrNull() ?: 0
         val keepNames = keepList(args.getString("keep"))
-        // An emulator has no hardware encoder; with -e hevcSoftware true its
-        // software HEVC encoder stands in for a phone's chip, so the HEVC
-        // path that phones take is the one measured (EncoderCaps).
-        EncoderCaps.softwareHevcForBenchmark = args.getString("hevcSoftware") == "true"
+        // An emulator has no hardware encoder; with -e softwareEncoders true
+        // its software encoders stand in for a phone's chip, so the path
+        // phones take - each video in its own codec - is the one measured
+        // (EncoderCaps).
+        EncoderCaps.softwareForBenchmark = args.getString("softwareEncoders") == "true"
         // run-on-emulator.sh switches Android's quality floor off; told so
         // with -e floorOff true, the app judges its copies as a phone does
         // whose encoder writes in CBR (EncoderCaps.qualityFloorApplies).
@@ -128,6 +131,8 @@ class SavingsBenchTest {
             val staged = after.state == ItemState.STAGED.name
             val copy = after.stagePath?.let { File(it) }?.takeIf { staged && it.isFile }
             val made = copy?.let { written(it) }
+            // The original as it was, read the same way: what "kept the same" is judged against.
+            val was = row.contentUri?.let { original(Uri.parse(it)) }
             val reencoded = staged && after.lastError.isNullOrEmpty()
             val codec = VideoCodec.entries.firstOrNull { it.name == after.codecUsed }
             // The share of the standard rate the copy came out at: what the
@@ -154,7 +159,11 @@ class SavingsBenchTest {
                 made?.channels ?: 0, made?.durationMs ?: 0L,
                 made?.let { bps(after.outputBytes ?: 0L, it.durationMs) } ?: 0L, videoBps, target,
                 if (target > 0) fmt(videoBps.toDouble() / target, 3) else "", after.presetUsed.orEmpty(),
-                after.encoderName.orEmpty(), chosen?.let { fmt(it, 3) }.orEmpty()
+                after.encoderName.orEmpty(), chosen?.let { fmt(it, 3) }.orEmpty(),
+                was?.videoMime.orEmpty(), was?.width ?: 0, was?.height ?: 0, was?.rotation ?: 0, was?.frames ?: 0,
+                fmt(was?.fps ?: 0.0, 3), was?.audioMime.orEmpty(), was?.channels ?: 0, was?.sampleRate ?: 0,
+                was?.date.orEmpty(), was?.place.orEmpty(),
+                made?.frames ?: 0, made?.sampleRate ?: 0, made?.date.orEmpty(), made?.place.orEmpty()
             ).joinToString(",") { cell(it) }
             csv.appendText(line + "\n")
             Log.i(TAG, "${i + 1}/${videos.size} $line")
@@ -165,7 +174,7 @@ class SavingsBenchTest {
         device.appendText("kept=$kept\n")
     }
 
-    /** One track-by-track reading of a file the app wrote. */
+    /** One track-by-track reading of a file: the original, or the copy the app wrote. */
     private data class Written(
         val width: Int,
         val height: Int,
@@ -176,17 +185,41 @@ class SavingsBenchTest {
         val audioMime: String,
         val audioBytes: Long,
         val channels: Int,
-        val durationMs: Long
+        val durationMs: Long,
+        val frames: Int = 0,
+        val sampleRate: Int = 0,
+        /** The file's own date and place, as Android's reader hands them to a gallery. */
+        val date: String = "",
+        val place: String = ""
     )
 
     /**
      * Sizes and formats from the file itself: every sample's size summed per
      * track (no data is read), the frame rate from the frames' own times.
      */
-    private fun written(file: File): Written? = runCatching {
+    private fun written(file: File): Written? = read({ setDataSource(file.absolutePath) }) {
+        setDataSource(file.absolutePath)
+    }
+
+    /** The same reading of an original, through its content URI. */
+    private fun original(uri: Uri): Written? = read({ setDataSource(context, uri, null) }) {
+        setDataSource(context, uri)
+    }
+
+    private fun read(open: MediaExtractor.() -> Unit, openMeta: MediaMetadataRetriever.() -> Unit): Written? = runCatching {
+        val meta = MediaMetadataRetriever()
+        val (date, place) = try {
+            meta.openMeta()
+            meta.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE).orEmpty() to
+                meta.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION).orEmpty()
+        } catch (e: Exception) {
+            "" to ""
+        } finally {
+            runCatching { meta.release() }
+        }
         val ex = MediaExtractor()
         try {
-            ex.setDataSource(file.absolutePath)
+            ex.open()
             var video = -1
             var audio = -1
             for (t in 0 until ex.trackCount) {
@@ -232,7 +265,12 @@ class SavingsBenchTest {
                 audioBytes = audioBytes,
                 channels = af?.takeIf { it.containsKey(MediaFormat.KEY_CHANNEL_COUNT) }
                     ?.getInteger(MediaFormat.KEY_CHANNEL_COUNT) ?: 0,
-                durationMs = durationMs
+                durationMs = durationMs,
+                frames = frames,
+                sampleRate = af?.takeIf { it.containsKey(MediaFormat.KEY_SAMPLE_RATE) }
+                    ?.getInteger(MediaFormat.KEY_SAMPLE_RATE) ?: 0,
+                date = date,
+                place = place
             )
         } finally {
             ex.release()
@@ -267,8 +305,9 @@ class SavingsBenchTest {
             "sdk=${Build.VERSION.SDK_INT}",
             "ram_bytes=${memory.totalMem}",
             "tier=${DeviceTier.tier(context)}",
-            "hevc_1080p30=${EncoderCaps.hevcFits(1920, 1080, 30f)}",
-            "hevc_software_stands_in=${EncoderCaps.softwareHevcForBenchmark}",
+            "h264_1080p30=${EncoderCaps.hardwareFits(MediaFormat.MIMETYPE_VIDEO_AVC, 1920, 1080, 30f)}",
+            "hevc_1080p30=${EncoderCaps.hardwareFits(MediaFormat.MIMETYPE_VIDEO_HEVC, 1920, 1080, 30f)}",
+            "software_stands_in=${EncoderCaps.softwareForBenchmark}",
             "handheld=$handheld",
             "quality_floor_off_for_benchmark=${EncoderCaps.qualityFloorOffForBenchmark}",
             "quality_floor_1080p=${EncoderCaps.qualityFloorApplies(context, 1920, 1080)}",
@@ -277,6 +316,10 @@ class SavingsBenchTest {
             "video_encoders=${videoEncoders()}",
             "video_long_side=${MediaSettings.VIDEO.longSide}",
             "video_fps_cap=${MediaSettings.VIDEO.fpsCap}",
+            "h264_4k30=${EncoderCaps.hardwareFits(MediaFormat.MIMETYPE_VIDEO_AVC, 3840, 2160, 30f)}",
+            "hdr_hlg_hevc_encode=${EncoderCaps.writesHdr(ColorInfo.Builder().setColorSpace(C.COLOR_SPACE_BT2020)
+                .setColorRange(C.COLOR_RANGE_LIMITED).setColorTransfer(C.COLOR_TRANSFER_HLG).build())}",
+            "aac_keeps_sync=${EncoderCaps.aacKeepsSync()}",
             "save_mode=${SaveMode.COPIES}",
             "expected=$expected",
             "found=$found",
@@ -292,8 +335,7 @@ class SavingsBenchTest {
     private fun chosenShare(row: ItemRow): Double? = runCatching {
         val uri = Uri.parse(row.contentUri ?: return null)
         val probe = VideoCompressor.probe(context, uri) ?: return null
-        val fps = MediaSettings.outputFps(probe.fps, MediaSettings.VIDEO.fpsCap) ?: probe.fps
-        val reading = MotionProbe.read(context, uri, probe.durationMs, fps)
+        val reading = MotionProbe.read(context, uri, probe.durationMs, VideoCompressor.MOTION_FPS)
         VideoShare.of(reading?.ti, reading?.meanLuma, VideoShare.isScreenRecording(row.displayName, row.bucket))
     }.getOrNull()
 
@@ -319,6 +361,8 @@ class SavingsBenchTest {
             "codec,src_pixels,out_pixels,ms,error," +
             "kept_file,out_width,out_height,out_rotation,out_fps,out_video_mime,out_video_bytes,out_audio_mime," +
             "out_audio_bytes,out_audio_channels,out_duration_ms,out_bps,out_video_bps,target_bps,share,preset_key," +
-            "encoder,chosen_share"
+            "encoder,chosen_share," +
+            "src_video_mime,src_width,src_height,src_rotation,src_frames,src_fps,src_audio_mime,src_audio_channels," +
+            "src_sample_rate,src_date,src_place,out_frames,out_sample_rate,out_date,out_place"
     }
 }

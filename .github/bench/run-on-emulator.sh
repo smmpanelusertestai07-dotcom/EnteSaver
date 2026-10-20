@@ -80,7 +80,7 @@ fi
 # Android's quality floor (QualityFloor in the app) raises any VBR encode
 # below its own table - 3.9 Mbps for 1080p H.264 - and the emulator's
 # software H.264 encoder offers no CBR, the mode the app writes in on a phone
-# whose chip has it, as a Realme 11 Pro 5G's HEVC chip does. With the floor
+# whose chip has it. With the floor
 # off, the copies come out at the rates the app asks for, as they do from
 # such a chip. This is the framework's own switch for it.
 adb shell setprop debug.stagefright.enableshaping 0
@@ -99,14 +99,15 @@ adb logcat -c || true
 # Bounded below the job's own limit: the results are written line by line,
 # so a run that is cut short still leaves everything it measured to pull,
 # and the grading after it still has time.
-# An emulator has no encoder chip: its software HEVC encoder stands in for
-# the one a phone like the Realme 11 Pro 5G has, for the clips it takes
-# (512x512 at most); everything bigger is measured in H.264, and the report
-# works the HEVC sizes out from it (EncoderCaps.softwareHevcForBenchmark).
+# An emulator has no encoder chip: its software encoders stand in for the
+# ones a phone like the Realme 11 Pro 5G has, each video in its own codec
+# (EncoderCaps.softwareForBenchmark). Its HEVC encoder takes 512x512 at most,
+# so bigger HEVC videos stay as they are here, and the report works out what
+# a phone's HEVC chip makes of them at the rate the app asks for.
 timeout 7200 adb shell am instrument -w -r \
   -e class app.entesaver.SavingsBenchTest \
   -e savingsBench true \
-  -e hevcSoftware true \
+  -e softwareEncoders true \
   ${floor[@]+"${floor[@]}"} \
   -e expected "$expected" \
   ${keep[@]+"${keep[@]}"} \

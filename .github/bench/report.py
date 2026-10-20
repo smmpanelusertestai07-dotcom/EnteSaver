@@ -5,25 +5,33 @@ Each video was made shorter than the one it stands for, at the same
 resolution, frame rate, codec and bitrate, so the app's copy of the short file
 is in the same proportion to it as its copy of the long one would be. This
 puts every measured file back at its real length, adds the library up by kind
-of video, sets the result against the owner's target (46 GB down to 5 GB),
-and writes:
+of video, sets the result against the owner's target (46 GB down to under
+10 GB), and writes:
 
   summary.txt   the verdict, the totals and the tables (also the job summary)
   per-file.csv  every video: real size before and after, and what happened
   summary.json  the same totals, for anything that reads them
 
+Every copy keeps its original's codec, size and frame rate (Ente Saver
+16.0), so each video is measured in its own codec. An emulator has no
+encoder chip: its software encoders stand in for a phone's (-e
+softwareEncoders true, which savings-bench.yml passes). They cannot write
+everything a phone's chip does - Android's software HEVC encoder takes
+512x512 at most, its H.264 encoder 2048x2048 - so on the emulator a 4K clip,
+a tall screen recording or an HEVC clip at its own size stays as it is.
+What a phone's chip makes of them, at the rate the app asks for, is worked
+out from the app's own rules and the share it chose for each clip, and kept
+apart from the measurement; the verdict is given for a phone like the
+Realme 11 Pro 5G, whose chip writes H.264 and HEVC at these sizes.
+
+Kept the same: every copy the emulator made is read back, as the app reads
+it, against its original - codec, size, rotation, frames, sound, date and
+place - and the report says how many kept each.
+
 The quality of the copies comes from quality.py, which graded a sample of
 them on the shard runners - SSIM, PSNR and VMAF against the original, beside
 a Storage saver reference made from the same original - and is reported by
 kind and by scene.
-
-The codec: an emulator has no encoder chip at all. Run with -e hevcSoftware
-true (savings-bench.yml does), its software HEVC encoder stands in for the
-HEVC chip a phone like the Realme 11 Pro 5G has - but it takes 512x512 at
-most, so nearly every clip is measured in H.264, asked for 1.45 times the
-bits. What the same copies come to in the other codec is worked out from the
-app's own rules and kept apart from the measurement, and the verdict is
-given for the HEVC path, the one a Realme 11 Pro 5G takes.
 
 Android's quality floor: from Android 12 a phone raises any VBR encode below
 its own table (QualityFloor in the app), and the emulator's H.264 encoder has
@@ -44,25 +52,25 @@ import os
 import statistics
 from collections import OrderedDict
 
-# The app's one video setting (MediaSettings.VIDEO: 1920 on the long side,
-# 30 fps), BitrateCalc's standard rates and AudioPlan's sound, as
+# The app's one video setting - every video at its own size and frame rate,
+# in its own codec - BitrateCalc's standard rates and AudioPlan's sound, as
 # app/src/main/kotlin/app/entesaver/core/logic/MediaSettings.kt,
 # BitrateCalc.kt and AudioPlan.kt define them.
-LONG_SIDE = 1920
-FPS_CAP = 30
-SLOW_MOTION_FPS = 90.0
-AUDIO_BPS = 48_000
-REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 950_000, 1920 * 1080 * 30, 0.75
+REF_HEVC_BPS, REF_PIXEL_RATE, SCALE_EXPONENT = 850_000, 1920 * 1080 * 30, 0.75
 CODEC_FACTOR = {"HEVC": 1.0, "H264": 1.45}
-CAP_BPS, FLOOR_BPS = 8_000_000, 150_000
+CAP_BPS, FLOOR_BPS = 24_000_000, 150_000
 COPY_FACTOR = 1.15
+# AudioPlan: a track up to these rates is copied; a heavier AAC one is
+# written again as AAC-LC at the lower ones.
+KEEP_AUDIO = {1: 96_000, 2: 160_000}
+AUDIO_AIM = {1: 64_000, 2: 128_000}
 BUDGET_S = 20 * 60
 # How fast a phone encodes, as a multiple of playing the video: 0.5 takes
 # twice its length (what the emulator's software encoder managed), 2 half.
 SPEEDS = (0.5, 1.0, 2.0)
 GB = 1e9
-# The owner's target: the 46 GB library down to 5 GB, and no more than 7.
-TARGET_GB, TARGET_LOW_GB = 7.0, 5.0
+# The owner's target: the 46 GB library under 10 GB.
+TARGET_GB = 10.0
 # A copy is as good as Storage saver's when it is no more than this below it.
 VMAF_SLACK, SSIM_SLACK = 1.0, 0.002
 SCENES = OrderedDict([("day", "Daylight camera pan"), ("night", "Night / indoor"), ("motion", "High motion"),
@@ -74,62 +82,73 @@ WHY = {
     "encoder_rejected": "no encoder made a copy that passed the app's checks",
     "out_of_time": "it could not be encoded in the time the app allows",
     "probe_failed": "its format could not be read",
-    "hdr_not_supported": "HDR this phone cannot encode",
+    "hdr_not_supported": "HDR this phone cannot write as HDR, so it is kept rather than made SDR",
+    "chip_cannot_keep": "this phone's encoder cannot write it in its own codec at its own size and frame rate",
+    "codec_kept": "a codec no phone chip writes, which a copy would have to change",
+    "container_kept": "a file type other than MP4 or MOV",
+    "size_kept": "an odd size, which an encoder cannot write",
+    "sound_kept": "sound a copy could not keep the same",
+    "tracks_kept": "a track besides one picture and one sound, which a copy would lose",
+    "trailer_kept": "a camera's trailer (Samsung), which a copy would lose",
 }
+# Kept as they were on the emulator only because its software encoders are
+# smaller than a phone's chip: a Realme 11 Pro 5G writes these.
+EMULATOR_ONLY = {"chip_cannot_keep"}
 
 
-def output_dims(w, h, limit):
-    long_side = max(w, h)
-    if long_side <= limit:
-        return w - w % 2, h - h % 2
-    scale = limit / long_side
-    ow, oh = round(w * scale), round(h * scale)
-    return ow - ow % 2, oh - oh % 2
+def kind(row):
+    return "HEVC" if str(row.get("codec", "")).lower() == "hevc" else "H264"
 
 
-def plan(row, codec, src_bps, share=1.0):
-    """What the app does with this video on a phone that writes `codec`:
-    (kept_as_is, standard target video bits per second). src_bps is the
-    file's own bitrate, sound included, as Android's metadata reader reports
-    it; share is the part of the standard rate the app measured the clip to
-    need - a clip already as lean as that, within 15%, is kept as it is."""
-    w, h, fps = int(row["width"]), int(row["height"]), float(row["fps"])
-    if int(row["rotation"]) in (90, 270):
-        w, h = h, w
-    capped = FPS_CAP if FPS_CAP + 0.5 < fps < SLOW_MOTION_FPS else None
-    out_fps = capped or fps
-    ow, oh = output_dims(w, h, LONG_SIDE)
-    raw = REF_HEVC_BPS * (ow * oh * out_fps / REF_PIXEL_RATE) ** SCALE_EXPONENT * CODEC_FACTOR[codec]
-    target = min(max(raw, FLOOR_BPS), CAP_BPS)
-    cap = source_cap(row, codec)
-    asked = min(target * share, cap) if cap else target * share
-    as_is = capped is None and max(w, h) <= LONG_SIDE and src_bps <= asked * COPY_FACTOR
-    return as_is, target
+def upright(row):
+    w, h = int(row["width"]), int(row["height"])
+    return (h, w) if int(row["rotation"]) in (90, 270) else (w, h)
 
 
-# How many times HEVC's rate a source codec spends on the same picture
-# (BitrateCalc.sourceFactor), by the manifest's codec names.
-SOURCE_FACTOR = {"hevc": 1.0, "h264": CODEC_FACTOR["H264"]}
+def target_bps(row):
+    """BitrateCalc.targetBps at the video's own size and frame rate, in its own codec."""
+    w, h = upright(row)
+    fps = float(row["fps"])
+    raw = REF_HEVC_BPS * (w * h * fps / REF_PIXEL_RATE) ** SCALE_EXPONENT * CODEC_FACTOR[kind(row)]
+    return min(max(raw, FLOOR_BPS), CAP_BPS)
+
+
 # BitrateCalc.SOURCE_SHARE: the most of what its source holds a copy is asked for.
 SOURCE_SHARE = 0.6
 
 
-def source_cap(row, codec):
-    """The most the app asks for this video in `codec`: SOURCE_SHARE of what
-    its source's own picture holds at the copy's size and frame rate
-    (BitrateCalc.sourceCapBps). None when the source's codec or bitrate is not
-    known."""
-    factor = SOURCE_FACTOR.get(str(row.get("codec", "")).lower())
+def source_cap(row):
+    """BitrateCalc.sourceCapBps: SOURCE_SHARE of what the source's own picture
+    holds - in the same codec at the same size, so nothing else scales it.
+    None when the source's bitrate is not known."""
     video_bps = float(row.get("video_kbps") or 0) * 1000
-    if not factor or video_bps <= 0:
+    if video_bps <= 0:
         return None
-    w, h, fps = int(row["width"]), int(row["height"]), float(row["fps"])
-    if int(row["rotation"]) in (90, 270):
-        w, h = h, w
-    capped = FPS_CAP if FPS_CAP + 0.5 < fps < SLOW_MOTION_FPS else None
-    ow, oh = output_dims(w, h, LONG_SIDE)
-    scale = min(1.0, (ow * oh * (capped or fps)) / (w * h * fps)) ** SCALE_EXPONENT
-    return min(max(video_bps * scale * CODEC_FACTOR[codec] / factor * SOURCE_SHARE, FLOOR_BPS), CAP_BPS)
+    return min(max(video_bps * SOURCE_SHARE, FLOOR_BPS), CAP_BPS)
+
+
+def audio_bps(row):
+    """AudioPlan: what the copy's sound comes to."""
+    channels = int(row.get("channels") or 0)
+    if channels <= 0:
+        return 0
+    have = float(row.get("audio_kbps") or 0) * 1000
+    keep = KEEP_AUDIO.get(channels, 2 * KEEP_AUDIO[2])
+    return have if have <= keep else min(have, AUDIO_AIM.get(channels, 2 * AUDIO_AIM[2]))
+
+
+def asked_bps(row, share):
+    """The picture's rate the app asks a chip for: its share of the standard
+    rate, never more than SOURCE_SHARE of what the source holds."""
+    target = target_bps(row) * share
+    cap = source_cap(row)
+    return min(target, cap) if cap else target
+
+
+def lean_already(row, src_bps, share):
+    """BitrateCalc.shouldCopyAsIs: the file already at or under what the app
+    would ask for, within 15%."""
+    return src_bps <= asked_bps(row, share) * COPY_FACTOR
 
 
 def num(row, key, default=0.0):
@@ -231,6 +250,44 @@ def quality_table(lines, title, groups, first="Kind of video"):
     return out
 
 
+def same_counts(files):
+    """For every copy the emulator made, how many kept each thing the same
+    as their original - read back from both files, as the app reads them."""
+    checks = OrderedDict([
+        ("codec", lambda m: m.get("out_video_mime", "").lower() == m.get("src_video_mime", "").lower()),
+        ("size as shown", lambda m: shown(m, "out") == shown(m, "src")),
+        ("rotation tag", lambda m: m.get("out_rotation") == m.get("src_rotation")),
+        ("every frame (within 2 or 1%)", lambda m: frames_kept(m)),
+        ("sound codec", lambda m: m.get("out_audio_mime", "").lower() == m.get("src_audio_mime", "").lower()),
+        ("sound channels", lambda m: m.get("out_audio_channels") == m.get("src_audio_channels")),
+        ("sound sample rate", lambda m: m.get("out_sample_rate") == m.get("src_sample_rate")),
+        ("date filmed", lambda m: m.get("out_date") == m.get("src_date")),
+        ("place filmed", lambda m: m.get("out_place") == m.get("src_place")),
+    ])
+    copies = [f["m"] for f in files if f["reencoded"] and f["m"].get("src_video_mime")]
+    out = OrderedDict()
+    for label, ok in checks.items():
+        kept = sum(1 for m in copies if ok(m))
+        out[label] = dict(kept=kept, of=len(copies))
+    places = [m for m in copies if m.get("src_place")]
+    dates = [m for m in copies if m.get("src_date")]
+    out["place filmed"]["with_one"] = sum(1 for m in places if m.get("out_place") == m.get("src_place"))
+    out["place filmed"]["of_with_one"] = len(places)
+    out["date filmed"]["with_one"] = sum(1 for m in dates if m.get("out_date") == m.get("src_date"))
+    out["date filmed"]["of_with_one"] = len(dates)
+    return out
+
+
+def shown(m, side):
+    w, h, r = (int(num(m, f"{side}_width")), int(num(m, f"{side}_height")), int(num(m, f"{side}_rotation")))
+    return (h, w) if r % 180 else (w, h)
+
+
+def frames_kept(m):
+    a, b = int(num(m, "src_frames")), int(num(m, "out_frames"))
+    return a > 0 and abs(a - b) <= max(2, a // 100)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", required=True)
@@ -254,9 +311,10 @@ def main():
         src = int(m["src_bytes"]) if m else int(made_row["bytes"]) if made_row else 0
         before = src * k
         state = m["state"] if m else "NOT_MEASURED"
+        reason = m["kept_reason"] if m else ""
         if m and state == "STAGED":
             after = int(m["out_bytes"]) * k
-            outcome = "kept as it was (" + m["kept_reason"] + ")" if m["kept_reason"] else "made smaller"
+            outcome = "kept as it was (" + reason + ")" if reason else "made smaller"
         else:
             after = before
             if not m and row.get("in_gallery") == "0":
@@ -264,223 +322,164 @@ def main():
             elif not m:
                 outcome = "not measured"
             else:
-                outcome = "failed: " + (m["skip_reason"] or m["error"] or m["kept_reason"] or state)
-        reencoded = bool(m) and state == "STAGED" and not m["kept_reason"]
-        codec = (m.get("codec") or "H264").upper() if m else "H264"
-        if codec not in CODEC_FACTOR:
-            codec = "H264"
-        # How far the encoder landed from the bitrate the app asked of it,
-        # measured on this file: carried over to the other codec's estimate.
-        # The test reads the copy's video and sound tracks apart; older
-        # results give the whole file, less the app's usual sound.
+                outcome = "failed: " + (m["skip_reason"] or m["error"] or reason or state)
+        reencoded = bool(m) and state == "STAGED" and not reason
         src_bps = src * 8 / gen_s if src else (float(row["video_kbps"]) + float(row["audio_kbps"])) * 1000
-        _, target_used = plan(row, codec, src_bps)
-        landed, audio_bps, share = None, AUDIO_BPS, None
-        if reencoded:
-            out_s = num(m, "out_duration_ms") / 1000 or gen_s
-            if num(m, "out_video_bytes") > 0:
-                out_bps = num(m, "out_video_bytes") * 8 / out_s
-                audio_bps = num(m, "out_audio_bytes") * 8 / out_s
-            else:
-                out_bps = int(m["out_bytes"]) * 8 / gen_s - AUDIO_BPS
-            landed = out_bps / target_used if target_used else None
-            share = num(m, "share", None) if m.get("share") else None
-        q = quality.get(name, {})
         chosen = num(m, "chosen_share", None) if m and m.get("chosen_share") else None
-        files.append(dict(row=row, name=name, real_s=real_s, before=before, after=after, outcome=outcome,
-                          reencoded=reencoded, landed=landed, audio_bps=audio_bps, share=share, measured=bool(m),
-                          codec=codec, chosen=chosen,
-                          src_bps=src_bps, gen_s=gen_s, ms=int(m["ms"]) if m else 0, quality=q,
+        landed = None
+        if reencoded and chosen:
+            out_s = num(m, "out_duration_ms") / 1000 or gen_s
+            out_video = num(m, "out_video_bytes") * 8 / out_s if num(m, "out_video_bytes") > 0 else None
+            asked = asked_bps(row, chosen)
+            landed = out_video / asked if out_video and asked else None
+        # At the rate the app asks a phone's chip for, which a chip writing
+        # in CBR holds to. Every clip the app makes a copy of on such a phone
+        # counts: those made here, those lean already, those the emulator's
+        # software encoder could not bring down to the rate (encoder_rejected)
+        # and those its encoders could not write at their own size at all
+        # (chip_cannot_keep). HDR stays as it is - the emulator writes no HDR,
+        # and a phone only with a chip Media3 counts as editing HDR.
+        hdr = row.get("hdr") == "1"
+        counts = reencoded or reason in ("already_efficient", "encoder_rejected", "not_smaller") or \
+            reason in EMULATOR_ONLY
+        if hdr or row.get("in_gallery") == "0" or not counts or chosen is None:
+            asked_after = after
+        else:
+            est = (asked_bps(row, chosen) + audio_bps(row)) * real_s / 8
+            asked_after = before if lean_already(row, src_bps, chosen) or est >= before else est
+        # The same, counting the clips the emulator's encoder would not bring
+        # down as kept whole: the figure that assumes nothing of the chip.
+        asked_kept = before if reason == "encoder_rejected" else asked_after
+        q = quality.get(name, {})
+        files.append(dict(row=row, m=m or {}, name=name, real_s=real_s, before=before, after=after, outcome=outcome,
+                          reason=reason, reencoded=reencoded, measured=bool(m), chosen=chosen, landed=landed,
+                          asked=asked_after, asked_kept=asked_kept, src_bps=src_bps, gen_s=gen_s,
+                          ms=int(m["ms"]) if m else 0, quality=q, codec=kind(row),
                           compressed=row.get("already_compressed") == "1", scene=row.get("scene", "")))
 
-    landed_all = [f["landed"] for f in files if f["landed"]]
-    landed_typ = statistics.median(landed_all) if landed_all else 1.0
-    used = [f["codec"] for f in files if f["reencoded"]]
-    measured_codec = max(set(used), key=used.count) if used else "H264"
-    other_codec = "H264" if measured_codec == "HEVC" else "HEVC"
-    name_of = {"HEVC": "HEVC", "H264": "H.264"}
-    mc, oc = name_of[measured_codec], name_of[other_codec]
-    other_phone = "a phone without an HEVC chip" if other_codec == "H264" else "a phone with an HEVC chip"
-
-    # The other codec: the app's own decision on a phone that writes it, at
-    # the share of the standard rate the copy came out at here (the median
-    # for a clip kept as it was).
-    for f in files:
-        row = f["row"]
-        as_is, target = plan(row, other_codec, f["src_bps"], f["landed"] or landed_typ)
-        if as_is or not f["measured"]:
-            f["after_hevc"] = f["before"]
-        else:
-            est = (target * (f["landed"] or landed_typ) + f["audio_bps"]) * f["real_s"] / 8
-            f["after_hevc"] = est if est < f["before"] else f["before"]
-        # HEVC at the rate the app asked for - the share it chose for this
-        # clip, read from its frames - which a chip writing in CBR holds to.
-        # The emulator's software encoder could not always come down to it;
-        # this leaves out how far it overshot. That includes the clips it
-        # overshot on every rung, so that the app kept them whole
-        # (encoder_rejected): asked for less after each overshoot, it still
-        # wrote more than nine tenths of the original - the encoder not
-        # holding the rate, not the app's choice. A chip that holds the rate
-        # writes them at it, and the app's check passes them. They are also
-        # counted as kept, separately (after_hevc_asked_kept), for the figure
-        # that assumes nothing of the chip. A clip kept for any other reason
-        # but being lean already is kept in both.
-        made_or_lean = f["reencoded"] or f["outcome"] == "kept as it was (already_efficient)"
-        overshot_whole = f["outcome"] == "kept as it was (encoder_rejected)"
-        if f["chosen"] is None or not (made_or_lean or overshot_whole):
-            f["after_hevc_asked"] = f["after_hevc"] if f["chosen"] is None else f["before"]
-        else:
-            as_is_a, target_a = plan(row, "HEVC", f["src_bps"], f["chosen"])
-            cap_a = source_cap(row, "HEVC")
-            asked_a = min(target_a * f["chosen"], cap_a) if cap_a else target_a * f["chosen"]
-            est = (asked_a + f["audio_bps"]) * f["real_s"] / 8
-            f["after_hevc_asked"] = f["before"] if as_is_a or est >= f["before"] else est
-        f["after_hevc_asked_kept"] = f["before"] if overshot_whole else f["after_hevc_asked"]
-
     def totals(sel, key="after"):
-        before = sum(f["before"] for f in sel)
-        after = sum(f[key] for f in sel)
-        return before, after
+        return sum(f["before"] for f in sel), sum(f[key] for f in sel)
 
-    groups = OrderedDict()
-    for f in files:
-        groups.setdefault(f["row"]["label"], []).append(f)
-
-    lines = []
     b, af = totals(files)
-    _, ah = totals(files, "after_hevc")
-    _, aa = totals(files, "after_hevc_asked")
-    _, aak = totals(files, "after_hevc_asked_kept")
-    overshot = [f for f in files if f["outcome"] == "kept as it was (encoder_rejected)"]
-    n_chosen = sum(1 for f in files if f["chosen"] is not None)
+    _, aa = totals(files, "asked")
+    _, aak = totals(files, "asked_kept")
     n_measured = sum(1 for f in files if f["measured"])
-    n_kept = sum(1 for f in files if f["measured"] and not f["reencoded"])
+    n_made = sum(1 for f in files if f["reencoded"])
+    emulator_only = [f for f in files if f["reason"] in EMULATOR_ONLY]
+    eo_b = sum(f["before"] for f in emulator_only)
+    overshot = [f for f in files if f["reason"] == "encoder_rejected"]
     received = [f for f in files if f["compressed"]]
-    rb, ra = totals(received)
-    _, rh = totals(received, "after_hevc")
-    lines.append(f"## Ente Saver savings benchmark v3 (measured with {mc}, the codec the app picks on a phone with "
-                 f"an HEVC chip)")
-    lines.append("")
-    # The verdict is for the path a Realme 11 Pro 5G takes: HEVC, written in
-    # CBR (the Dimensity 7050's HEVC encoder lists it), which holds the rate
-    # the app asks for. Measured when the run measured HEVC; otherwise worked
-    # out from the share the app chose for each clip.
-    if measured_codec == "HEVC":
-        hevc_after, how = af, "measured"
-    elif n_chosen:
-        hevc_after, how = aa, "an estimate at the rates the app asks for, from the share it chose for each clip"
-    else:
-        hevc_after, how = ah, f"an estimate worked out from the {mc} copies"
-    met = hevc_after <= TARGET_GB * GB
+    rb, ra = totals(received, "asked")
+    met = aa < TARGET_GB * GB
+    lines = ["## Ente Saver savings benchmark v4 (every video in its own codec, size and frame rate)", ""]
     lines.append(
-        f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_LOW_GB:.0f}-{TARGET_GB:.0f} GB - "
-        f"{'met' if met else 'not met'} on a phone whose HEVC chip writes in CBR: {hevc_after / GB:.1f} GB "
-        f"({b / max(hevc_after, 1):.1f} times smaller; {how}).** "
-        + (f"Counting the {len(overshot)} clips the emulator's encoder would not bring down as kept whole, "
-           f"{aak / GB:.1f} GB. " if overshot and how.startswith("an estimate at the rates") else "")
-        + f"Measured on the emulator ({mc}), the library went from {b / GB:.1f} GB to "
-        f"{af / GB:.1f} GB ({100 * (b - af) / max(b, 1):.0f}% smaller, {b / max(af, 1):.1f} times smaller); in {oc}, "
-        f"carrying over "
-        f"how far the emulator's software encoder overshot the rate it was asked for, {ah / GB:.1f} GB. Of what is "
-        f"left after the measured run, {ra / GB:.1f} GB are downloads and forwards that WhatsApp, Instagram, YouTube "
-        f"or Telegram had already compressed ({rb / GB:.1f} GB before); the rest, {(af - ra) / GB:.1f} GB, is "
-        f"camera videos, screen recordings and other phones' originals.")
+        f"**Verdict: the owner's target is the {b / GB:.0f} GB library under {TARGET_GB:.0f} GB - "
+        f"{'met' if met else 'not met'} on a phone whose chip keeps to the rate the app asks for: "
+        f"{aa / GB:.2f} GB ({b / max(aa, 1):.1f} times smaller; an estimate from the share the app chose for each "
+        f"clip).** Counting the {len(overshot)} clips the emulator's encoder would not bring down as kept whole, "
+        f"{aak / GB:.2f} GB. Measured on the emulator, where {len(emulator_only)} videos ({eo_b / GB:.1f} GB: 4K, tall "
+        f"screen recordings and HEVC, which its software encoders cannot write at their own size) stayed as they "
+        f"were, the library went from {b / GB:.1f} GB to {af / GB:.1f} GB. Of the estimate, {ra / GB:.1f} GB are "
+        f"downloads and forwards WhatsApp, Instagram, YouTube or Telegram had already compressed ({rb / GB:.1f} GB "
+        f"before).")
     lines.append("")
-    lines.append(f"- Library: {len(files)} videos, {b / GB:.2f} GB (measured: {n_measured})")
-    lines.append(f"- Measured ({mc}): {af / GB:.2f} GB after, **{(b - af) / GB:.2f} GB saved "
-                 f"({100 * (b - af) / b:.1f}%)**")
-    lines.append(f"- On {other_phone} ({oc}, estimate): {ah / GB:.2f} GB after, {(b - ah) / GB:.2f} GB saved "
-                 f"({100 * (b - ah) / b:.1f}%)")
-    if n_chosen:
-        lines.append(f"- HEVC at the rates the app asks for (a chip writing in CBR holds them; estimate): "
-                     f"{aa / GB:.2f} GB after, {(b - aa) / GB:.2f} GB saved ({100 * (b - aa) / b:.1f}%); "
-                     f"the app's chosen share is known for {n_chosen} videos")
-        if overshot:
-            ob = sum(f["before"] for f in overshot)
-            lines.append(f"- Of those, {len(overshot)} videos ({ob / GB:.2f} GB) the emulator's software encoder would "
-                         f"not bring down: every rung's copy, asked for less after each overshoot, still weighed more "
-                         f"than nine tenths of the original, so the app kept them whole here; at the rate it asked "
-                         f"for, as above. Counted as kept whole instead: {aak / GB:.2f} GB after")
-    lines.append(f"- Kept as they were (nothing to gain, or failed): {n_kept} videos")
-    lines.append(f"- Encoder landed at {landed_typ:.2f} x the standard bitrate for its size (median; "
-                 f"the app's per-video choice included)")
-    shares = [f["share"] for f in files if f["share"]]
+    lines.append(f"- Library: {len(files)} videos, {b / GB:.2f} GB (measured: {n_measured}, copies made here: {n_made})")
+    lines.append(f"- At the rate the app asks a phone's chip for (estimate): **{aa / GB:.2f} GB after, "
+                 f"{(b - aa) / GB:.2f} GB saved ({100 * (b - aa) / b:.1f}%)**")
+    lines.append(f"- The same, with the {len(overshot)} clips the emulator's encoder overshot on every try kept "
+                 f"whole: {aak / GB:.2f} GB")
+    lines.append(f"- Measured on the emulator: {af / GB:.2f} GB after ({100 * (b - af) / b:.1f}% smaller), with "
+                 f"{len(emulator_only)} videos ({eo_b / GB:.2f} GB) its encoders could not write kept whole")
+    landed = [f["landed"] for f in files if f["landed"]]
+    if landed:
+        lines.append(f"- The emulator's encoder wrote {statistics.median(landed):.2f} x the rate the app asked for "
+                     f"(median; {min(landed):.2f} to {max(landed):.2f}): a phone's chip in CBR keeps to it")
+    shares = [f["chosen"] for f in files if f["chosen"]]
     if shares:
-        lines.append(f"- The copies came out at {statistics.median(shares):.2f} x the standard rate (median share, "
-                     f"{min(shares):.2f} to {max(shares):.2f})")
+        lines.append(f"- The app gave each clip {statistics.median(shares):.2f} x the standard rate (median share, "
+                     f"{min(shares):.2f} to {max(shares):.2f}), read from how much it moves and how dark it is")
     speeds = [f["gen_s"] / (f["ms"] / 1000) for f in files if f["reencoded"] and f["ms"] > 0]
     if speeds:
-        lines.append(f"- The emulator's software {mc} encoder ran at {statistics.median(speeds):.2f} x real time "
+        lines.append(f"- The emulator's software encoders ran at {statistics.median(speeds):.2f} x real time "
                      f"(median, the app's own measuring of each clip included); a phone's chip is faster")
     for d in devices[:1]:
         lines.append(f"- Emulator: {d.get('model')} API {d.get('sdk')}, RAM {int(d.get('ram_bytes', 0)) / GB:.1f} GB, "
-                     f"tier {d.get('tier')}, software HEVC standing in for a chip: "
-                     f"{d.get('hevc_software_stands_in', 'false')} (HEVC at 1080p30: "
-                     f"{d.get('hevc_1080p30', 'unknown')})")
+                     f"tier {d.get('tier')}; software encoders standing in for a chip: "
+                     f"{d.get('software_stands_in', 'unknown')}; H.264 at 1080p30: {d.get('h264_1080p30', '?')}, "
+                     f"HEVC at 1080p30: {d.get('hevc_1080p30', '?')}, H.264 at 4K30: {d.get('h264_4k30', '?')}, "
+                     f"HDR (HLG) in HEVC: {d.get('hdr_hlg_hevc_encode', '?')}, AAC encoder in sync: "
+                     f"{d.get('aac_keeps_sync', '?')}")
         shaping = sorted({x.get("quality_floor_shaping", "unknown") for x in devices})
         lines.append(f"- Android's quality floor: applies on this emulator at 1080p: "
-                     f"{d.get('quality_floor_1080p', 'unknown')}; CBR at 1080p30, H.264: "
-                     f"{d.get('cbr_h264_1080p30', 'unknown')}, HEVC: {d.get('cbr_hevc_1080p30', 'unknown')}; "
-                     f"switched off for the run (debug.stagefright.enableshaping={', '.join(shaping)}; 0 is off)")
+                     f"{d.get('quality_floor_1080p', 'unknown')}; switched off for the run "
+                     f"(debug.stagefright.enableshaping={', '.join(shaping)}; 0 is off)")
+
+    # Kept the same: read back from every copy made.
+    same = same_counts(files)
+    lines.append("")
+    lines.append("### Kept the same (every copy the emulator made, read back against its original)")
+    lines.append("")
+    lines.append("| What | Copies that kept it | Of |")
+    lines.append("|---|---:|---:|")
+    for label, t in same.items():
+        extra = ""
+        if "of_with_one" in t:
+            extra = f" ({t['with_one']} of the {t['of_with_one']} that had one)"
+        lines.append(f"| {label} | {t['kept']}{extra} | {t['of']} |")
+
     broad = OrderedDict()
     for f in files:
         broad.setdefault(f["row"]["group"], []).append(f)
+    groups = OrderedDict()
+    for f in files:
+        groups.setdefault(f["row"]["label"], []).append(f)
     for title, table in (("Where the videos came from", broad), ("Every kind of video", groups)):
         lines.append("")
         lines.append(f"### {title}")
         lines.append("")
-        lines.append(f"| Kind of video | Videos | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) | Saved | "
-                     f"After GB (HEVC at the asked rate, est.) | Saved |")
-        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append("| Kind of video | Videos | Before GB | After GB (chip, at the asked rate, est.) | Saved | "
+                     "After GB (measured on the emulator) | Saved |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|")
         for label, sel in table.items():
-            gb, ga = totals(sel)
-            _, gh = totals(sel, "after_hevc")
-            _, gq = totals(sel, "after_hevc_asked")
+            gb, ga = totals(sel, "asked")
+            _, gm = totals(sel)
             pct = lambda x: f"{100 * (gb - x) / gb:.0f}%" if gb else "-"
-            lines.append(f"| {label} | {len(sel)} | {gb / GB:.2f} | {ga / GB:.2f} | {pct(ga)} | {gh / GB:.2f} | "
-                         f"{pct(gh)} | {gq / GB:.2f} | {pct(gq)} |")
-        lines.append(f"| **All** | {len(files)} | {b / GB:.2f} | {af / GB:.2f} | {100 * (b - af) / b:.0f}% | "
-                     f"{ah / GB:.2f} | {100 * (b - ah) / b:.0f}% | {aa / GB:.2f} | {100 * (b - aa) / b:.0f}% |")
+            lines.append(f"| {label} | {len(sel)} | {gb / GB:.2f} | {ga / GB:.2f} | {pct(ga)} | {gm / GB:.2f} | "
+                         f"{pct(gm)} |")
+        lines.append(f"| **All** | {len(files)} | {b / GB:.2f} | {aa / GB:.2f} | {100 * (b - aa) / b:.0f}% | "
+                     f"{af / GB:.2f} | {100 * (b - af) / b:.0f}% |")
 
-    # The library's pictures: what the scene column says, and what the app
-    # saved on each.
     by_scene = OrderedDict((s, []) for s in SCENES)
     for f in files:
         by_scene.setdefault(f["scene"] or "-", []).append(f)
     lines.append("")
     lines.append("### What is in the picture (the manifest's scene column)")
     lines.append("")
-    lines.append(f"| Scene | Videos | Real hours | Before GB | After GB ({mc}) | Saved | After GB ({oc} est.) | "
-                 f"After GB (HEVC at the asked rate, est.) |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Scene | Videos | Real hours | Before GB | After GB (chip, est.) | Saved | After GB (measured) |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
     scene_rows = OrderedDict()
-    for s, sel in by_scene.items():
+    for sc, sel in by_scene.items():
         if not sel:
             continue
-        gb, ga = totals(sel)
-        _, gh = totals(sel, "after_hevc")
-        _, gq = totals(sel, "after_hevc_asked")
+        gb, ga = totals(sel, "asked")
+        _, gm = totals(sel)
         hours = sum(f["real_s"] for f in sel) / 3600
-        scene_rows[s] = dict(videos=len(sel), hours=hours, before=gb, after_h264=ga, after_hevc=gh, after_hevc_asked=gq)
-        saved = f"{100 * (gb - ga) / gb:.0f}%" if gb else "-"
-        lines.append(f"| {SCENES.get(s, s)} | {len(sel)} | {hours:.1f} | {gb / GB:.2f} | {ga / GB:.2f} | "
-                     f"{saved} | {gh / GB:.2f} | {gq / GB:.2f} |")
+        scene_rows[sc] = dict(videos=len(sel), hours=hours, before=gb, after_asked=ga, after_measured=gm)
+        lines.append(f"| {SCENES.get(sc, sc)} | {len(sel)} | {hours:.1f} | {gb / GB:.2f} | {ga / GB:.2f} | "
+                     f"{100 * (gb - ga) / gb:.0f}% | {gm / GB:.2f} |")
 
     lines.append("")
     lines.append("### The 20-minute limit (a video that cannot be encoded in 20 minutes is kept as it is)")
     lines.append("")
-    lines.append(f"| Encoding takes | Videos that would run out of time | Saved ({mc}) | Saved ({oc} est.) |")
-    lines.append("|---|---:|---:|---:|")
+    lines.append("| Encoding takes | Videos that would run out of time | Saved (chip, est.) |")
+    lines.append("|---|---:|---:|")
     speed_rows = {}
     for speed in SPEEDS:
-        late = [f for f in files if f["reencoded"] and f["real_s"] / speed > BUDGET_S]
-        late_ids = {id(f) for f in late}
-        a1 = sum(f["before"] if id(f) in late_ids else f["after"] for f in files)
-        a2 = sum(f["before"] if id(f) in late_ids else f["after_hevc"] for f in files)
-        speed_rows[speed] = dict(late=len(late), saved_h264=b - a1, saved_hevc=b - a2)
-        lines.append(f"| {1 / speed:g}x the video's length | {len(late)} | {(b - a1) / GB:.2f} GB | {(b - a2) / GB:.2f} GB |")
+        late = {id(f) for f in files if f["asked"] < f["before"] and f["real_s"] / speed > BUDGET_S}
+        left = sum(f["before"] if id(f) in late else f["asked"] for f in files)
+        speed_rows[speed] = dict(late=len(late), saved=b - left)
+        lines.append(f"| {1 / speed:g}x the video's length | {len(late)} | {(b - left) / GB:.2f} GB |")
 
-    # Kept as they were, and why: by count and by size.
     kept = OrderedDict()
     for f in files:
         if f["outcome"] == "made smaller":
@@ -492,21 +491,18 @@ def main():
         t["videos"] += 1
         t["before"] += f["before"]
     lines.append("")
-    lines.append("### Kept as they were, and why")
+    lines.append("### Kept as they were on the emulator, and why")
     lines.append("")
     lines.append("| Why | Videos | Share of videos | GB | Share of the library | What it means |")
     lines.append("|---|---:|---:|---:|---:|---|")
     for key, t in sorted(kept.items(), key=lambda kv: -kv[1]["before"]):
         means = WHY.get(key, "in a folder no gallery sees (WhatsApp's Sent)" if key.startswith("not in the gallery")
                         else "the run did not reach it" if key == "not measured" else "")
+        if key in EMULATOR_ONLY:
+            means += " - here the emulator's software encoder; a phone's chip writes them (in the estimate)"
         lines.append(f"| {key} | {t['videos']} | {100 * t['videos'] / len(files):.0f}% | {t['before'] / GB:.2f} | "
                      f"{100 * t['before'] / b:.0f}% | {means} |")
-    n_left = sum(t["videos"] for t in kept.values())
-    gb_left = sum(t["before"] for t in kept.values())
-    lines.append(f"| **Not made smaller, for any reason** | {n_left} | {100 * n_left / len(files):.0f}% | "
-                 f"{gb_left / GB:.2f} | {100 * gb_left / b:.0f}% | |")
 
-    # The quality of the copies, from quality.py's sample.
     if quality:
         by_kind = OrderedDict()
         for f in files:
@@ -521,24 +517,15 @@ def main():
         q_scene = quality_table(lines, "How good the copies are, by scene", by_scene_q, first="Scene")
         graded = [q for q in quality.values() if q.get("status") == "graded"]
         tools = sorted({q.get("vmaf_tool", "") for q in quality.values() if q.get("vmaf_tool")})
-        verdicts = [v["verdict"] for v in q_kind.values() if v.get("graded")]
-        good = sum(1 for v in verdicts if v.startswith(("as good", "better")))
         lines.append("")
-        lines.append(f"In {good} of the {len(verdicts)} kinds graded the app's copy was at least as good as the "
-                     f"Storage saver reference (VMAF where every copy of the kind has it, SSIM Y otherwise; "
-                     f"as good means within {VMAF_SLACK:g} VMAF or {SSIM_SLACK:g} SSIM). {len(graded)} copies graded "
-                     f"of {len(quality)} sampled.")
-        lines.append("")
-        lines.append("How: each copy's original is scaled to the copy's size (bicubic) and put on the copy's frame "
-                     "rate, lined up to within one of its own frames (up to two of the copy's frames either way), "
-                     "and the two are compared over the whole clip: SSIM and PSNR on brightness (Y), VMAF "
-                     "(vmaf_v0.6.1) and VMAF's phone model (the same model for a phone held at arm's length: "
-                     "93 and up looks like the original, 85-93 good, 75-85 fair). The reference is the same "
-                     "original at most 1080p and 30 fps, H.264 by libx264 -preset medium at 8 Mbps for 1080p30 and "
-                     "in proportion below that. Google publishes no bitrate for Storage saver (its help page says "
-                     "only that videos above 1080p are resized to 1080p), so 8 Mbps is an assumption, not a "
-                     "measurement. A frame from each graded copy - original, app, reference - is in the shard "
-                     "artifacts' frames folder.")
+        lines.append(f"{len(graded)} copies graded of {len(quality)} sampled. How: each copy's original is put on the "
+                     "copy's size and frame rate (the same ones, now), lined up to within one of its own frames, and "
+                     "the two are compared over the whole clip: SSIM and PSNR on brightness (Y), VMAF (vmaf_v0.6.1) "
+                     "and VMAF's phone model (a phone held at arm's length: 93 and up looks like the original, "
+                     "85-93 good, 75-85 fair). The reference is the same original at most 1080p and 30 fps, H.264 by "
+                     "libx264 -preset medium at 8 Mbps for 1080p30 and in proportion below that - a yardstick for "
+                     "Google Photos' Storage saver, whose bitrate Google does not publish. The copies here were "
+                     "written by the emulator's software encoder, not a phone's chip.")
         lines.append("")
         lines.append("VMAF: " + ("; ".join(tools) if tools else "not run"))
     else:
@@ -552,41 +539,39 @@ def main():
         key = f["outcome"].split(" (")[0] if f["outcome"].startswith("kept") else f["outcome"]
         outcomes[key] = outcomes.get(key, 0) + 1
     lines.append("Outcomes: " + ", ".join(f"{k}: {v}" for k, v in outcomes.items()))
-    reasons = OrderedDict()
-    for f in files:
-        if f["outcome"].startswith("kept"):
-            reasons[f["outcome"]] = reasons.get(f["outcome"], 0) + 1
-    if reasons:
-        lines.append("Kept as they were: " + ", ".join(f"{k}: {v}" for k, v in reasons.items()))
 
     with open(os.path.join(a.out, "summary.txt"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
     with open(os.path.join(a.out, "per-file.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["name", "group", "kind", "folder", "real_minutes", "width", "height", "fps", "codec", "video_kbps",
-                    "before_mb", "after_mb_measured", "codec_used", "after_mb_other_codec_estimate", "outcome", "scene",
-                    "already_compressed", "share", "graded", "app_ssim_y", "ref_ssim_y", "app_vmaf", "ref_vmaf",
-                    "app_vmaf_phone", "ref_vmaf_phone", "chosen_share", "after_mb_hevc_at_asked_rate"])
+                    "before_mb", "after_mb_measured", "after_mb_chip_at_asked_rate", "outcome", "scene",
+                    "already_compressed", "chosen_share", "landed", "graded", "app_ssim_y", "ref_ssim_y", "app_vmaf",
+                    "ref_vmaf", "app_vmaf_phone", "ref_vmaf_phone", "out_video_mime", "out_rotation", "src_rotation",
+                    "src_frames", "out_frames", "src_date", "out_date", "src_place", "out_place"])
         for f in files:
-            r, q = f["row"], f["quality"]
-            w.writerow([f["name"], r["group"], r["label"], r["folder"], f"{f['real_s'] / 60:.2f}", r["width"], r["height"],
-                        r["fps"], r["codec"], r["video_kbps"], f"{f['before'] / 1e6:.1f}", f"{f['after'] / 1e6:.1f}",
-                        f["codec"] if f["reencoded"] else "", f"{f['after_hevc'] / 1e6:.1f}", f["outcome"], f["scene"],
-                        int(f["compressed"]), f"{f['share']:.3f}" if f["share"] else "", q.get("status", ""),
-                        q.get("app_ssim_y", ""), q.get("ref_ssim_y", ""), q.get("app_vmaf", ""), q.get("ref_vmaf", ""),
-                        q.get("app_vmaf_phone", ""), q.get("ref_vmaf_phone", ""),
-                        f"{f['chosen']:.3f}" if f["chosen"] is not None else "", f"{f['after_hevc_asked'] / 1e6:.1f}"])
+            r, q, m = f["row"], f["quality"], f["m"]
+            w.writerow([f["name"], r["group"], r["label"], r["folder"], f"{f['real_s'] / 60:.2f}", r["width"],
+                        r["height"], r["fps"], r["codec"], r["video_kbps"], f"{f['before'] / 1e6:.1f}",
+                        f"{f['after'] / 1e6:.1f}", f"{f['asked'] / 1e6:.1f}", f["outcome"], f["scene"],
+                        int(f["compressed"]), f"{f['chosen']:.3f}" if f["chosen"] is not None else "",
+                        f"{f['landed']:.3f}" if f["landed"] else "", q.get("status", ""), q.get("app_ssim_y", ""),
+                        q.get("ref_ssim_y", ""), q.get("app_vmaf", ""), q.get("ref_vmaf", ""),
+                        q.get("app_vmaf_phone", ""), q.get("ref_vmaf_phone", ""), m.get("out_video_mime", ""),
+                        m.get("out_rotation", ""), m.get("src_rotation", ""), m.get("src_frames", ""),
+                        m.get("out_frames", ""), m.get("src_date", ""), m.get("out_date", ""),
+                        m.get("src_place", ""), m.get("out_place", "")])
     with open(os.path.join(a.out, "summary.json"), "w") as fh:
-        json.dump(dict(videos=len(files), measured=n_measured, measured_codec=measured_codec, before_bytes=b,
-                       after_bytes_measured=af, after_bytes_other_codec_estimate=ah,
-                       after_bytes_hevc_at_asked_rate=aa, after_bytes_hevc_at_asked_rate_overshot_kept=aak,
-                       overshot_kept_whole=len(overshot), verdict_bytes=hevc_after, landed_median=landed_typ,
-                       target=dict(gb=TARGET_GB, low_gb=TARGET_LOW_GB, met=met, already_compressed_before=rb,
-                                   already_compressed_after_measured=ra, already_compressed_after_other=rh),
-                       by_kind={label: dict(zip(("before", "after_measured"), totals(sel))) | dict(
-                           after_other=totals(sel, "after_hevc")[1], videos=len(sel)) for label, sel in groups.items()},
-                       by_scene=scene_rows, kept_as_they_were=kept,
-                       quality=dict(by_kind=q_kind, by_scene=q_scene),
+        json.dump(dict(videos=len(files), measured=n_measured, made=n_made, before_bytes=b, after_bytes_measured=af,
+                       after_bytes_chip_at_asked_rate=aa, after_bytes_chip_overshot_kept=aak,
+                       emulator_only_kept=len(emulator_only), emulator_only_bytes=eo_b,
+                       overshot_kept_whole=len(overshot),
+                       target=dict(gb=TARGET_GB, met=met, already_compressed_before=rb,
+                                   already_compressed_after=ra),
+                       same=same,
+                       by_kind={label: dict(zip(("before", "after_chip"), totals(sel, "asked"))) | dict(
+                           after_measured=totals(sel)[1], videos=len(sel)) for label, sel in groups.items()},
+                       by_scene=scene_rows, kept_as_they_were=kept, quality=dict(by_kind=q_kind, by_scene=q_scene),
                        time_limit={str(k): v for k, v in speed_rows.items()}, devices=devices), fh, indent=2)
     print("\n".join(lines))
 
