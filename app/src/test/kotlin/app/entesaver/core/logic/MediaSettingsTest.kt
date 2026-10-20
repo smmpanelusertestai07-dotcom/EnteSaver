@@ -6,19 +6,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * There is one way to optimise: Storage saver's size limits, each file at
- * the quality it needs. These pin the limits and the keys results are
- * grouped under, which files made by earlier versions still carry.
+ * There is one way to optimise: photos at Storage saver's size limit, videos
+ * at their own size and frame rate, each file at the quality it needs. These
+ * pin the limits and the keys results are grouped under, which files made by
+ * earlier versions still carry.
  */
 class MediaSettingsTest {
 
     @Test
-    fun `the limits are Storage saver's own`() {
+    fun `photos keep Storage saver's limit, videos their own size and frame rate`() {
         assertEquals(16, MediaSettings.PHOTO.maxMp)
         assertEquals(16_000_000L, MediaSettings.PHOTO.maxPixels)
-        assertEquals(1920, MediaSettings.VIDEO.longSide)
-        assertEquals(1920, MediaSettings.VIDEO.longSideLimit)
-        assertEquals(30, MediaSettings.VIDEO.fpsCap)
+        assertEquals(0, MediaSettings.VIDEO.longSide)
+        assertEquals(Int.MAX_VALUE, MediaSettings.VIDEO.longSideLimit)
+        assertEquals(0, MediaSettings.VIDEO.fpsCap)
+        for (fps in listOf(24f, 30f, 60f, 120f, 240f)) {
+            assertNull("$fps fps is written as filmed", MediaSettings.outputFps(fps, MediaSettings.VIDEO.fpsCap))
+        }
     }
 
     @Test
@@ -43,7 +47,14 @@ class MediaSettingsTest {
     fun `keys group results by how the file was made and read back for the details`() {
         assertEquals("heic-16", MediaSettings.photoKey(PhotoFormat.HEIC))
         assertEquals(MediaSettings.PhotoKey(PhotoFormat.HEIC, 16), MediaSettings.parsePhotoKey("heic-16"))
-        assertEquals("hevc-1920", MediaSettings.videoKey(VideoCodec.HEVC))
+        assertEquals("hevc-0", MediaSettings.videoKey(VideoCodec.HEVC))
+        assertEquals("h264-0", MediaSettings.videoKey(VideoCodec.H264))
+        assertEquals(MediaSettings.VideoKey(VideoCodec.HEVC, 0), MediaSettings.parseVideoKey("hevc-0"))
+        // Every video handled the way new ones are, in either codec or left
+        // as it was, counts in an estimate; a video left as it was names no codec.
+        assertEquals(listOf("h264-0", "hevc-0", "asis-0"), MediaSettings.videoKeys())
+        assertNull(MediaSettings.parseVideoKey(MediaSettings.videoKeyAsIs()))
+        // Earlier versions made videos HEVC at 1080p; their key still reads.
         assertEquals(MediaSettings.VideoKey(VideoCodec.HEVC, 1920), MediaSettings.parseVideoKey("hevc-1920"))
         // Keys written by versions with quality presets still read.
         assertEquals(MediaSettings.PhotoKey(PhotoFormat.JPEG, 16), MediaSettings.parsePhotoKey("jpeg-16-82"))

@@ -64,6 +64,7 @@ import app.entesaver.core.logic.VideoCodec
 import app.entesaver.data.db.ItemRow
 import app.entesaver.media.InPlace
 import app.entesaver.media.Stager
+import app.entesaver.media.VideoCompressor
 import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.components.AccessNotice
 import app.entesaver.ui.components.AppCard
@@ -668,6 +669,11 @@ fun asIsReasonLabel(reason: String): String = when (reason) {
     "already_efficient" -> stringResource(R.string.asis_already_small)
     "not_smaller" -> stringResource(R.string.asis_not_smaller)
     "hdr_not_supported" -> stringResource(R.string.asis_hdr)
+    VideoCompressor.CODEC_KEPT -> stringResource(R.string.asis_codec_kept)
+    VideoCompressor.CONTAINER_KEPT -> stringResource(R.string.asis_container_kept)
+    VideoCompressor.SIZE_KEPT -> stringResource(R.string.asis_size_kept)
+    VideoCompressor.CHIP_CANNOT_KEEP -> stringResource(R.string.asis_chip_cannot_keep)
+    VideoCompressor.SOUND_KEPT -> stringResource(R.string.asis_sound_kept)
     "removed_before_upload" -> stringResource(R.string.asis_removed_early)
     "already_optimised" -> stringResource(R.string.asis_already_optimised)
     "ultra_hdr_kept" -> stringResource(R.string.asis_ultra_hdr)

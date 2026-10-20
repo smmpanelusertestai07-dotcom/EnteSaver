@@ -22,9 +22,10 @@ import app.entesaver.util.DeviceTier
 
 /**
  * The Optimisation card: nothing to choose, only what this phone will do.
- * There is one way to optimise - Storage saver's size limits, each file at
- * the quality it measures it needs - so the card says it in the phone's own
- * terms: its memory's photo ceiling, and whether its chip makes HEVC.
+ * There is one way to optimise - photos at Storage saver's size limit, videos
+ * kept as they are in all but their bitrate, each file at the quality it
+ * measures it needs - so the card says it in the phone's own terms: its
+ * memory's photo ceiling, and which videos its chip can write as they are.
  */
 @Composable
 fun OptimisationCard(plan: AppViewModel.EncodePlan, icon: ImageVector, onInfo: () -> Unit) {
@@ -46,7 +47,7 @@ fun OptimisationCard(plan: AppViewModel.EncodePlan, icon: ImageVector, onInfo: (
                 }
             )
         )
-        ChoiceNote(stringResource(R.string.optimise_videos, codecLabel(plan.videoCodec)))
+        ChoiceNote(stringResource(R.string.optimise_videos))
         ChoiceNote(
             stringResource(
                 when (plan.heic) {
@@ -57,6 +58,7 @@ fun OptimisationCard(plan: AppViewModel.EncodePlan, icon: ImageVector, onInfo: (
             )
         )
         ChoiceNote(stringResource(if (plan.hevcHardware) R.string.video_hevc_ok else R.string.video_hevc_none))
+        if (!plan.fourKHardware) ChoiceNote(stringResource(R.string.video_4k_none))
         ChoiceNote(stringResource(R.string.optimise_kept_whole))
     }
 }

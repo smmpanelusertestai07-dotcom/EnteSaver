@@ -7,6 +7,11 @@ import android.media.MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
+import androidx.annotation.OptIn
+import androidx.media3.common.ColorInfo
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.transformer.EncoderUtil
 import app.entesaver.BuildConfig
 import app.entesaver.core.logic.CodecNames
 import app.entesaver.core.logic.MediaSettings
@@ -54,12 +59,12 @@ object EncoderCaps {
 
     /**
      * The savings benchmark only, on an emulator, which has no hardware
-     * encoder at all: let its software HEVC encoder stand in for a phone's
-     * chip, so the HEVC path phones take is the one measured. A release
-     * build ignores it entirely.
+     * encoder at all: let its software encoders stand in for a phone's chip,
+     * so the path phones take - each video in its own codec - is the one
+     * measured. A release build ignores it entirely.
      */
     @Volatile
-    var softwareHevcForBenchmark: Boolean = false
+    var softwareForBenchmark: Boolean = false
 
     /**
      * The savings benchmark only: its emulator runs with Android's quality
@@ -76,53 +81,45 @@ object EncoderCaps {
             QualityFloor.applies(Build.VERSION.SDK_INT, handheld(context), width, height)
 
     private fun encoders(mime: String): List<MediaCodecInfo> =
-        if (BuildConfig.DEBUG && softwareHevcForBenchmark) {
+        if (BuildConfig.DEBUG && softwareForBenchmark) {
             codecs.filter { info -> info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) } }
         } else {
             hardwareEncoders(mime)
         }
 
+    /** Software encoders for [mime]: Android's own, on every phone. */
+    private fun softwareEncoders(mime: String): List<MediaCodecInfo> = codecs.filter { info ->
+        info.isEncoder &&
+            info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
+            runCatching { isSoftware(info) }.getOrDefault(false)
+    }
+
     /**
-     * True when a hardware HEVC encoder takes a video of this size and frame
-     * rate. Either orientation is accepted: encoders often state limits for
+     * True when one of [infos] takes a video of this size and frame rate.
+     * Either orientation is accepted: encoders often state limits for
      * landscape only and rotate a portrait frame themselves.
      */
-    fun hevcFits(width: Int, height: Int, fps: Float): Boolean =
-        encoders(MIME_HEVC).any { info ->
+    private fun anyTakes(infos: List<MediaCodecInfo>, mime: String, width: Int, height: Int, fps: Float): Boolean =
+        infos.any { info ->
             runCatching {
-                val video = info.getCapabilitiesForType(MIME_HEVC).videoCapabilities
+                val video = info.getCapabilitiesForType(mime).videoCapabilities
                 val rate = fps.toDouble().coerceAtLeast(1.0)
                 video.areSizeAndRateSupported(width, height, rate) ||
                     video.areSizeAndRateSupported(height, width, rate)
             }.getOrDefault(false)
         }
 
-    /**
-     * Whether a video [width] x [height] at [fps] is made at 1080p instead:
-     * above 1080p only where a hardware encoder takes the size - a budget
-     * chip that stops at 1080p would otherwise encode in software, for hours
-     * - and never on the smallest phones ([smallestPhone]). The one rule the
-     * compressor applies and Settings and About describe.
-     */
-    fun holdsToFullHd(width: Int, height: Int, fps: Float, smallestPhone: Boolean): Boolean =
-        maxOf(width, height) > MediaSettings.FULL_HD && (smallestPhone || !anyHardwareFits(width, height, fps))
+    /** True when a hardware encoder for [mime] takes a video of this size and frame rate. */
+    fun hardwareFits(mime: String, width: Int, height: Int, fps: Float): Boolean =
+        anyTakes(encoders(mime), mime, width, height, fps)
 
     /**
-     * True when some hardware video encoder - H.264 or HEVC - takes this size
-     * and frame rate. A budget phone's chip often stops at 1080p; asking it
-     * for more ends in a software encode or a failed one.
+     * True when Android's own software encoder for [mime] takes this size and
+     * frame rate: H.264's last resort, for a clip no chip rung could write. Never
+     * above 1080p, which in software would take hours on a budget phone.
      */
-    fun anyHardwareFits(width: Int, height: Int, fps: Float): Boolean =
-        listOf(MediaFormat.MIMETYPE_VIDEO_AVC, MIME_HEVC).any { mime ->
-            hardwareEncoders(mime).any { info ->
-                runCatching {
-                    val video = info.getCapabilitiesForType(mime).videoCapabilities
-                    val rate = fps.toDouble().coerceAtLeast(1.0)
-                    video.areSizeAndRateSupported(width, height, rate) ||
-                        video.areSizeAndRateSupported(height, width, rate)
-                }.getOrDefault(false)
-            }
-        }
+    fun softwareFits(mime: String, width: Int, height: Int, fps: Float): Boolean =
+        maxOf(width, height) <= MediaSettings.FULL_HD && anyTakes(softwareEncoders(mime), mime, width, height, fps)
 
     /**
      * True when an encoder for [mime] takes a video of this size and frame
@@ -155,6 +152,28 @@ object EncoderCaps {
         )
         return pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) && others.none { pm.hasSystemFeature(it) }
     }
+
+    /**
+     * Whether this phone writes a video of [colorInfo]'s HDR as HDR: Media3's
+     * own test, an HEVC encoder Android counts as editing HDR (Android 13 and
+     * up). Where it fails, Media3 would tone-map the copy to SDR without a
+     * word, so a video that fails it stays as it is.
+     */
+    @OptIn(UnstableApi::class)
+    fun writesHdr(colorInfo: ColorInfo?): Boolean =
+        colorInfo != null && runCatching {
+            EncoderUtil.getSupportedEncodersForHdrEditing(MimeTypes.VIDEO_H265, colorInfo).isNotEmpty()
+        }.getOrDefault(false)
+
+    /**
+     * Whether the AAC encoder Media3 would write sound with is Android's own
+     * Codec2 one, the only one whose start-up delay it allows for. With any
+     * other the sound would come out a few hundredths of a second late.
+     */
+    @OptIn(UnstableApi::class)
+    fun aacKeepsSync(): Boolean = runCatching {
+        EncoderUtil.getSupportedEncoders(MimeTypes.AUDIO_AAC).firstOrNull()?.name == "c2.android.aac.encoder"
+    }.getOrDefault(false)
 
     /** A hardware encoder HEIC can be written with: a HEIC one, or HEVC. */
     fun hasHardwareHeic(): Boolean =

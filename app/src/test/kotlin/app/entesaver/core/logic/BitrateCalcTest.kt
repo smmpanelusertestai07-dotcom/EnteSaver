@@ -11,18 +11,21 @@ class BitrateCalcTest {
     @Test
     fun bitrateTable1080p30() {
         // The reference: 1080p30 in HEVC, and H.264 asked for 1.45 times it.
-        assertEquals(950_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC))
-        assertEquals(1_377_500, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
+        assertEquals(850_000, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC))
+        assertEquals(1_232_500, BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.H264))
     }
 
     @Test
     fun `smaller pictures get more bits per pixel`() {
         // 720p has 44% of 1080p's pixels and gets 54% of its rate.
-        assertEquals(517_114, BitrateCalc.targetBps(1280, 720, 30f, VideoCodec.HEVC))
+        assertEquals(462_681, BitrateCalc.targetBps(1280, 720, 30f, VideoCodec.HEVC))
         // A WhatsApp 480p clip.
-        assertEquals(280_161, BitrateCalc.targetBps(848, 480, 30f, VideoCodec.HEVC))
+        assertEquals(250_670, BitrateCalc.targetBps(848, 480, 30f, VideoCodec.HEVC))
         // Slow motion keeps its frames: four times the frames, 2.8 times the rate.
-        assertEquals(2_687_005, BitrateCalc.targetBps(1920, 1080, 120f, VideoCodec.HEVC))
+        assertEquals(2_404_163, BitrateCalc.targetBps(1920, 1080, 120f, VideoCodec.HEVC))
+        // 4K is kept at 4K, at 2.8 times 1080p's rate; 60 fps at 1.7 times.
+        assertEquals(2_404_163, BitrateCalc.targetBps(3840, 2160, 30f, VideoCodec.HEVC))
+        assertEquals(1_429_523, BitrateCalc.targetBps(1920, 1080, 60f, VideoCodec.HEVC))
         val hd = BitrateCalc.targetBps(1920, 1080, 30f, VideoCodec.HEVC).toDouble()
         val half = BitrateCalc.targetBps(1920, 540, 30f, VideoCodec.HEVC).toDouble()
         assertEquals(Math.pow(0.5, BitrateCalc.SCALE_EXPONENT), half / hd, 0.001)
@@ -30,8 +33,10 @@ class BitrateCalcTest {
 
     @Test
     fun bitrateCapAndFloor() {
-        // 4K at 120 fps in H.264 would be 15 Mbps -> capped at 8 Mbps.
-        assertEquals(BitrateCalc.CAP_BPS, BitrateCalc.targetBps(3840, 2160, 120f, VideoCodec.H264))
+        // 8K at 120 fps in H.264 would be 28 Mbps -> capped at 24 Mbps.
+        assertEquals(BitrateCalc.CAP_BPS, BitrateCalc.targetBps(7680, 4320, 120f, VideoCodec.H264))
+        // 4K at 60 fps in fast motion stays under the cap.
+        assertTrue(BitrateCalc.targetBps(3840, 2160, 60f, VideoCodec.H264) * VideoShare.MAX < BitrateCalc.CAP_BPS)
         // Tiny video -> floored.
         assertEquals(BitrateCalc.FLOOR_BPS, BitrateCalc.targetBps(320, 240, 15f, VideoCodec.H264))
     }

@@ -1,8 +1,6 @@
 package app.entesaver.media
 
 import android.content.Context
-import android.media.MediaCodecInfo
-import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
@@ -49,22 +47,6 @@ object MediaTraits {
         } finally {
             runCatching { extractor.release() }
         }
-    }
-
-    /** True when this device has an encoder that can write 10-bit HDR HEVC. */
-    fun deviceSupportsHdrHevcEncode(): Boolean = try {
-        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
-            info.isEncoder && info.supportedTypes.any { it.equals("video/hevc", true) } &&
-                runCatching {
-                    info.getCapabilitiesForType("video/hevc").profileLevels.any { pl ->
-                        pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10 ||
-                            pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10 ||
-                            pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10Plus
-                    }
-                }.getOrDefault(false)
-        }
-    } catch (e: Exception) {
-        false
     }
 
     /**

@@ -76,6 +76,7 @@ import app.entesaver.util.Formats
 import app.entesaver.util.Locks
 import app.entesaver.util.OemPages
 import app.entesaver.util.Permissions
+import app.entesaver.util.PhoneLimits
 import app.entesaver.util.PowerPages
 import app.entesaver.util.SpaceLimits
 import app.entesaver.util.SqlChunks
@@ -362,7 +363,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val o = repo.current()
             val photos = db.items().photoRatioSamples(PlannedEncode.photoKey())
-            val videos = db.items().videoRatioSamples(PlannedEncode.videoKey())
+            val videos = db.items().videoRatioSamples(PlannedEncode.videoKeys())
             fun shrink(rows: List<RatioSample>): Int {
                 val original = rows.sumOf { it.sizeBytes }
                 if (original <= 0) return 0
@@ -910,7 +911,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val photoSamples = db.items().photoRatioSamples(PlannedEncode.photoKey()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes)
             }
-            val videoSamples = db.items().videoRatioSamples(PlannedEncode.videoKey()).map {
+            val videoSamples = db.items().videoRatioSamples(PlannedEncode.videoKeys()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes, it.durationMs / 60_000.0)
             }
             // The gallery's own median is what the sample is judged against:
@@ -919,7 +920,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             calcRatios.value = CapacityMath.ratios(
                 photo = photoSamples,
                 video = videoSamples,
-                codec = PlannedEncode.videoCodec(),
+                // Every video keeps its own codec, and nearly every phone
+                // video is H.264: its typical figures stand in until this
+                // phone has measured its own.
+                codec = VideoCodec.H264,
                 source = calcSource.value ?: CapacityMath.Source.MEASURED,
                 galleryPhotoMedian = if (totals.photoCount > 0) {
                     totals.photoBytes / totals.photoCount
@@ -1542,8 +1546,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     data class EncodePlan(
         val heic: HeicSupport.State = HeicSupport.State.UNKNOWN,
-        val videoCodec: VideoCodec = VideoCodec.H264,
+        /** Whether this phone's chip writes HEVC; without one, HEVC videos stay as they are. */
         val hevcHardware: Boolean = false,
+        /** Whether its chip writes 4K; without one, 4K videos stay as they are. */
+        val fourKHardware: Boolean = false,
         /** This phone's photo ceiling in MP (its memory, and what it has taught the app). */
         val photoCeilingMp: Int = 0
     ) {
@@ -1557,8 +1563,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Default) {
             encodePlan.value = EncodePlan(
                 heic = HeicSupport.state(ctx),
-                videoCodec = PlannedEncode.videoCodec(),
                 hevcHardware = EncoderCaps.hardwareEncoders(EncoderCaps.MIME_HEVC).isNotEmpty(),
+                fourKHardware = PhoneLimits.writesFourK(ctx),
                 photoCeilingMp = DeviceTier.lastingCeilingMp(ctx)
             )
         }

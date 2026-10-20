@@ -332,8 +332,6 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
     val kept by vm.detailKept.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refreshMeasuredQuality() }
 
-    val plan by vm.encodePlan.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { vm.refreshEncodePlan() }
     val photoSpec = MediaSettings.PHOTO
     val videoSpec = MediaSettings.VIDEO
 
@@ -360,12 +358,7 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
                 )
             }
             Text(
-                stringResource(
-                    R.string.quality_current_limits,
-                    photoLimitPhrase(photoSpec),
-                    videoLimitPhrase(videoSpec),
-                    codecLabel(plan.videoCodec)
-                ),
+                stringResource(R.string.quality_current_limits, photoLimitPhrase(photoSpec)),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 10.dp)
             )

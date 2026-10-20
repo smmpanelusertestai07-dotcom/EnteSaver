@@ -33,6 +33,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import app.entesaver.core.logic.CapacityMath
 import app.entesaver.core.logic.ItemState
+import app.entesaver.core.logic.VideoCodec
 import app.entesaver.data.EnteApp
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.db.ItemRow
@@ -1260,10 +1261,10 @@ class HomeFilesE2eTest {
             photo = db.items().photoRatioSamples(PlannedEncode.photoKey()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes)
             },
-            video = db.items().videoRatioSamples(PlannedEncode.videoKey()).map {
+            video = db.items().videoRatioSamples(PlannedEncode.videoKeys()).map {
                 CapacityMath.Sample(it.sizeBytes, it.outputBytes, it.durationMs / 60_000.0)
             },
-            codec = PlannedEncode.videoCodec(),
+            codec = VideoCodec.H264,
             source = CapacityMath.Source.MEASURED,
             galleryPhotoMedian = if (totals.photoCount > 0) {
                 totals.photoBytes / totals.photoCount

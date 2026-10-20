@@ -100,9 +100,31 @@ class EncoderChoiceTest {
     }
 
     @Test
-    fun `HEVC needs a hardware encoder`() {
-        assertEquals(VideoCodec.HEVC, VideoCodecResolver.resolve(VideoCodecResolver.Hardware(hevcFits = true)))
-        assertEquals("never HEVC in software", VideoCodec.H264, VideoCodecResolver.resolve(VideoCodecResolver.Hardware(hevcFits = false)))
+    fun `a video keeps its own codec, and one no phone writes is kept whole`() {
+        assertEquals(VideoCodec.H264, VideoCodecResolver.keptCodec("video/avc"))
+        assertEquals(VideoCodec.HEVC, VideoCodecResolver.keptCodec("video/hevc"))
+        assertEquals(VideoCodec.HEVC, VideoCodecResolver.keptCodec("VIDEO/HEVC"))
+        for (other in listOf("video/mp4v-es", "video/3gpp", "video/x-vnd.on2.vp9", "video/x-vnd.on2.vp8", "video/av01",
+            "video/dolby-vision", "video/mjpeg", null)) {
+            assertNull("$other has no copy in its own codec", VideoCodecResolver.keptCodec(other))
+        }
+    }
+
+    @Test
+    fun `a copy is kept only when it is the same video at a lower bitrate`() {
+        val src = KeptRules.Picture("video/avc", 1920, 1080, 90, 900)
+        assertEquals(emptyList<String>(), KeptRules.changes(src, "video/avc", src))
+        // Stored the other way round but shown the same: the same picture.
+        assertEquals(emptyList<String>(), KeptRules.changes(src, "video/avc", KeptRules.Picture("video/avc", 1080, 1920, 0, 900)))
+        // An encoder's last frame or two may go.
+        assertEquals(emptyList<String>(), KeptRules.changes(src, "video/avc", src.copy(frameCount = 898)))
+        assertEquals(listOf("codec"), KeptRules.changes(src, "video/avc", src.copy(mime = "video/hevc")))
+        assertEquals(listOf("codec"), KeptRules.changes(src, "video/hevc", src.copy(mime = "video/hevc")))
+        assertEquals(listOf("size"), KeptRules.changes(src, "video/avc", src.copy(width = 1280, height = 720)))
+        assertEquals(listOf("size"), KeptRules.changes(src, "video/avc", src.copy(rotation = 0)))
+        assertEquals("a 60 fps clip written at 30", listOf("frames"), KeptRules.changes(src, "video/avc", src.copy(frameCount = 450)))
+        // A file that does not say how many frames it holds is judged on the rest.
+        assertEquals(emptyList<String>(), KeptRules.changes(src.copy(frameCount = null), "video/avc", src))
     }
 
     @Test

@@ -161,10 +161,13 @@ object MediaFixtures {
         captureMillis: Long = 1_600_000_000_000L,
         withAudio: Boolean = false,
         fps: Int = 10,
-        textured: Boolean = false
+        textured: Boolean = false,
+        mime: String = MediaFormat.MIMETYPE_VIDEO_AVC,
+        rotation: Int = 0,
+        place: Pair<Float, Float>? = null
     ): Uri? {
         val temp = File(context.cacheDir, name)
-        if (!encodeH264(temp, width, height, frames, withAudio, fps, textured)) {
+        if (!encodeVideo(temp, width, height, frames, withAudio, fps, textured, mime, rotation, place)) {
             temp.delete()
             return null
         }
@@ -287,14 +290,17 @@ object MediaFixtures {
      * track which went in comes out - a clip with no audio can prove nothing
      * about whether the optimiser keeps sound.
      */
-    private fun encodeH264(
+    private fun encodeVideo(
         out: File,
         width: Int,
         height: Int,
         frames: Int,
         withAudio: Boolean = false,
         fps: Int = 10,
-        textured: Boolean = false
+        textured: Boolean = false,
+        mime: String = MediaFormat.MIMETYPE_VIDEO_AVC,
+        rotation: Int = 0,
+        place: Pair<Float, Float>? = null
     ): Boolean {
         val frameUs = 1_000_000L / fps
         var codec: MediaCodec? = null
@@ -303,7 +309,7 @@ object MediaFixtures {
         // MediaMuxer refuses a track added after start().
         val audio = if (withAudio) encodeSilentAac(frames * frameUs) ?: return false else null
         return try {
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height)
+            val format = MediaFormat.createVideoFormat(mime, width, height)
                 .apply {
                     setInteger(
                         MediaFormat.KEY_COLOR_FORMAT,
@@ -313,10 +319,13 @@ object MediaFixtures {
                     setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 }
-            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            codec = MediaCodec.createEncoderByType(mime)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // As a camera writes them: a rotation tag, and the place in the movie's ©xyz box.
+            if (rotation != 0) muxer.setOrientationHint(rotation)
+            place?.let { (lat, lon) -> muxer.setLocation(lat, lon) }
 
             val frameBytes = width * height * 3 / 2
             val frame = ByteArray(frameBytes)

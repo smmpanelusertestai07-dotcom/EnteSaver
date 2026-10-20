@@ -237,7 +237,12 @@
     <string name="asis_format">This format is kept as it is</string>
     <string name="asis_already_small">Already small enough</string>
     <string name="asis_not_smaller">Optimising would not have made it smaller</string>
-    <string name="asis_hdr">HDR video this phone cannot re-encode safely</string>
+    <string name="asis_hdr">HDR video this phone\u2019s chip cannot write as HDR, so it stays exactly as it is</string>
+    <string name="asis_codec_kept">Its video codec is one no phone chip writes (an old phone\u2019s, or a download\u2019s VP9 or AV1), and a copy would have to change it</string>
+    <string name="asis_container_kept">Its file type is not MP4 or MOV, and a copy would have to change it</string>
+    <string name="asis_size_kept">Its picture has an odd number of lines, which a video chip cannot write, and a copy would have to change its size</string>
+    <string name="asis_chip_cannot_keep">This phone\u2019s chip cannot write this video in its own codec at its own size and frame rate, so it stays exactly as it is</string>
+    <string name="asis_sound_kept">Its sound is in a format a copy could not keep the same</string>
     <string name="asis_other">Kept as it is to be safe</string>
     <string name="asis_already_optimised">Already optimised by Ente Saver, and a file is never optimised twice</string>
     <string name="asis_ultra_hdr">Ultra HDR photo \u2014 on this Android version only the original keeps its HDR</string>
@@ -737,7 +742,7 @@
     <string name="opt_optimise_hint">One way, the same on every phone. Each file gets only the bytes its picture needs.</string>
     <string name="optimise_value">Automatic</string>
     <string name="optimise_photos">Photos: %1$s, each in its own format — a JPEG stays a JPEG. Each gets the lowest quality that still measures like its original.</string>
-    <string name="optimise_videos">Videos: up to 1080p as %1$s, 30 fps at most; slow motion keeps every frame. Each gets the bits its motion needs: a still scene few, fast motion and night more. A video another app already made smaller still comes down by two fifths at least. Sound is written as HE-AAC, which keeps voices and music clear at a fraction of the size.</string>
+    <string name="optimise_videos">Videos keep everything but their bitrate. The codec stays (H.264 stays H.264, HEVC stays HEVC), and so do the size, frame rate, rotation, HDR and sound. So do the date and place they were filmed. Each gets the bits its picture needs: a still scene few, fast motion and night more. A video another app already made smaller still comes down by two fifths at least. A heavy sound track is written again as AAC at 128 kbps; a lighter one is copied untouched.</string>
     <string name="optimise_kept_whole">Motion, portrait and HDR photos, and anything a copy would lose something from, are kept whole. A file is never optimised twice.</string>
     <string name="preset_best">Best</string>
     <string name="preset_balanced">Balanced</string>
@@ -755,8 +760,9 @@
     <string name="photo_heic_fail">This phone\u2019s chip did not pass the HEIC check, so HEIC photos are kept as they are.</string>
     <string name="res_keep">as filmed</string>
     <string name="video_size_p">up to %1$s</string>
-    <string name="video_hevc_none">This phone has no HEVC chip, so videos are made with H.264. HEVC without one would take far longer and run the phone hot.</string>
-    <string name="video_hevc_ok">This phone has an HEVC chip, so Auto makes videos about a third smaller than H.264 at the same look.</string>
+    <string name="video_hevc_none">This phone has no HEVC chip, so HEVC videos (an iPhone\u2019s, or a camera set to save space) stay exactly as they are. H.264 videos, which most phones film, are made smaller as H.264.</string>
+    <string name="video_hevc_ok">This phone\u2019s chip writes both H.264 and HEVC, so every ordinary video is made smaller in its own codec.</string>
+    <string name="video_4k_none">This phone\u2019s chip stops below 4K, so 4K videos stay exactly as they are.</string>
     <string name="codec_h264">H.264</string>
     <string name="codec_hevc">HEVC</string>
     <string name="opt_theme">Theme</string>
@@ -1097,7 +1103,7 @@
     <string name="quality_measured_none">Nothing measured yet \u2014 this fills in after your first 20 photos and 20 videos are optimised.</string>
     <string name="quality_originals_safe">With Copies for Ente, your originals are never edited, moved or deleted. With Replace on this phone, each original waits in the phone\u2019s trash for 30 days.</string>
     <string name="quality_codec_title">H.264 or HEVC?</string>
-    <string name="quality_codec_text" formatted="false">Two ways of packing a video. H.264 plays on everything, including old phones and TVs. HEVC makes files about a third smaller for the same picture, but some older devices cannot play it. Ente Saver uses HEVC only where this phone has the chip for it, and H.264 everywhere else.</string>
+    <string name="quality_codec_text" formatted="false">Two ways of packing a video. H.264 plays on everything, including old phones and TVs. HEVC makes files about a third smaller for the same picture, but some older devices cannot play it. Ente Saver keeps every video in the codec it is already in, so a smaller copy plays everywhere its original did.</string>
     <string name="quality_table_title">What to expect</string>
     <string name="quality_table_note">Typical results. Each file gets the quality its own picture needs, so its saving is its own.</string>
     <string name="quality_row1_k">1080p video</string>
@@ -1353,10 +1359,10 @@
     <string name="faq_a19">Every official build is published at github.com/smmpanelusertestai07-dotcom/EnteSaver, and each release prints two long codes: one for the file itself and one for the key it was signed with. The file\u2019s code changes with every build; the key\u2019s code is the same for every genuine Ente Saver there will ever be. Android checks that key for you: a build signed with a different one cannot install over this app at all. Installed on its own, after this one is removed, it would open and say so on Home, and it would keep deletion switched off. Installing from a file rather than a store is also why the phone shows a Play Protect warning the first time: \u201cMore details\u201d, then \u201cInstall anyway\u201d.</string>
     <string name="about_running_full">Android %1$s \u2014 supported.</string>
     <string name="limit_memory">%1$s of memory: photo copies are made at up to %2$d MP, so the phone never runs out of memory mid-photo.</string>
-    <string name="limit_memory_small">%1$s of memory: photo copies are made at up to %2$d MP, and videos only while charging, at up to 1080p.</string>
+    <string name="limit_memory_small">%1$s of memory: photo copies are made at up to %2$d MP, and videos only while charging; videos above 1080p stay as they are.</string>
     <string name="limit_learned">A very large photo once ran this phone short of memory, so copies are now made at up to %1$d MP.</string>
-    <string name="limit_no_hevc">No HEVC video chip: videos are made as H.264, which is about a third larger.</string>
-    <string name="limit_video_chip">The video chip stops below 4K, so videos above 1080p are made at 1080p.</string>
+    <string name="limit_no_hevc">No HEVC video chip: HEVC videos stay as they are, and H.264 videos are made smaller.</string>
+    <string name="limit_video_chip">The video chip stops below 4K, so 4K videos stay as they are.</string>
     <string name="limit_heic_fail">The photo chip did not pass the HEIC check, so photos are saved as JPEG.</string>
     <string name="limit_battery">Battery optimisation is on: a long video finishes only while Ente Saver is open. Settings \u203a Permissions and battery changes it.</string>
     <string name="limit_space">%1$s free, below the %2$s Ente Saver keeps free: new copies wait until there is room.</string>
@@ -1412,7 +1418,7 @@
     <string name="trial_discard">Remove trial copies</string>
     <string name="trial_tap_compare">Tap to compare before and after</string>
     <string name="quality_current_title">How files are optimised</string>
-    <string name="quality_current_limits">Photos %1$s, each in its own format. Videos %2$s as %3$s, 30 fps at most; slow motion keeps every frame.</string>
+    <string name="quality_current_limits">Photos %1$s, each in its own format. Videos in their own codec, at their own size and frame rate: only the bitrate changes.</string>
     <string name="quality_looks_photo">Every photo is checked against its original before it is written. It gets the lowest quality at which it still looks the same.</string>
     <string name="quality_looks_video">Every video is read first for how much it moves and how dark it is. A still scene gets few bits, fast motion and night more.</string>
     <string name="quality_looks_note">Detail kept counts pixels; these lines describe how it looks.</string>

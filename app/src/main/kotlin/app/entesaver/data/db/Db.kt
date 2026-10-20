@@ -1071,10 +1071,10 @@ interface ItemDao {
 
     @Query(
         "SELECT sizeBytes, outputBytes, durationMs FROM items " +
-            "WHERE outputBytes IS NOT NULL AND isVideo = 1 AND presetUsed = :key " +
+            "WHERE outputBytes IS NOT NULL AND isVideo = 1 AND presetUsed IN (:keys) " +
             "ORDER BY updatedAt DESC LIMIT 500"
     )
-    suspend fun videoRatioSamples(key: String): List<RatioSample>
+    suspend fun videoRatioSamples(keys: List<String>): List<RatioSample>
 }
 
 @Dao

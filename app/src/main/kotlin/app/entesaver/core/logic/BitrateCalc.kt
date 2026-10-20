@@ -13,18 +13,19 @@ import kotlin.math.roundToInt
  * to the power [SCALE_EXPONENT], not in proportion: a bigger picture has
  * more pixels alike, so each needs fewer bits - what streaming services'
  * per-title ladders measure. 1080p30 in HEVC is [REF_HEVC_BPS]; H.264 is
- * asked for [H264_FACTOR] times as much for the same look. So 1080p30 is
- * 0.95 Mbps in HEVC and 1.38 Mbps in H.264, 720p30 0.52 and 0.75, a
- * WhatsApp 480p clip 0.28 and 0.41 - and a clip gets 0.7 to 2.4 times that
- * by what it shows, never more than [SOURCE_SHARE] of what its source holds.
- * A camera writes 20 Mbps: the savings benchmark's 46 GB library comes down
- * to about a seventh (6.3 GB on a phone whose HEVC chip keeps to the rate),
- * which is what it takes to last in Ente's free 10 GB.
+ * asked for [H264_FACTOR] times as much for the same look, since every video
+ * stays in its own codec. So 1080p30 is 0.85 Mbps in HEVC and 1.23 Mbps in
+ * H.264, 4K30 2.4 and 3.5, 720p30 0.46 and 0.67, a WhatsApp 480p clip 0.25
+ * and 0.36 - and a clip gets 0.7 to 2.4 times that by what it shows, never
+ * more than [SOURCE_SHARE] of what its source holds. A camera writes
+ * 20 Mbps: the savings benchmark's 46 GB library comes down to under 10 GB
+ * on a phone whose chip keeps to the rate, which is what it takes to last in
+ * Ente's free 10 GB.
  */
 object BitrateCalc {
 
     /** 1080p at 30 frames a second, in HEVC. */
-    const val REF_HEVC_BPS = 950_000
+    const val REF_HEVC_BPS = 850_000
 
     /** H.264 needs this much more than HEVC for the same picture. */
     const val H264_FACTOR = 1.45
@@ -36,15 +37,17 @@ object BitrateCalc {
     const val SCALE_EXPONENT = 0.75
 
     const val FLOOR_BPS = 150_000
-    const val CAP_BPS = 8_000_000
+
+    /** The most any clip is asked for: room for 4K at 60 fps in fast motion, which a video keeps. */
+    const val CAP_BPS = 24_000_000
 
     /**
      * The most of what its source's own picture holds a copy is asked for
      * ([sourceCapBps]): a file another app already compressed - a Telegram
      * episode, a YouTube download - still comes down by two fifths at least,
      * instead of being written again for next to nothing. Set with the
-     * standard rate on the savings benchmark: the 46 GB library lands at
-     * 6.3 GB, and a camera's own videos keep their full rate.
+     * standard rate on the savings benchmark: the 46 GB library lands under
+     * 10 GB, and a camera's own videos keep their full rate.
      */
     const val SOURCE_SHARE = 0.6
 
