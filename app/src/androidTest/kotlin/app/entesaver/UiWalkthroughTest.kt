@@ -35,6 +35,7 @@ import app.entesaver.media.MediaScanner
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -68,8 +69,9 @@ class UiWalkthroughTest {
     @get:Rule
     val permissions: GrantPermissionRule = GrantPermissionRule.grant(*TestPermissions.forThisDevice())
 
+    /** Composition's coroutines run on the main thread, as they do in the app: see HomeFilesE2eTest. */
     @get:Rule
-    val compose = createEmptyComposeRule()
+    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
 
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val target: Context get() = instrumentation.targetContext

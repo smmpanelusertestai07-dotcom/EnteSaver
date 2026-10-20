@@ -55,6 +55,7 @@ import java.io.File
 import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,9 +106,14 @@ class SettingsE2eTest {
      * Empty, because the activity has to be launched *after* the options have
      * been seeded: HostActivity reads onboardingDone on its first frame, and a
      * rule that launches for us would launch before @Before runs.
+     *
+     * Composition's coroutines run on the main thread, as they do in the app
+     * (see HomeFilesE2eTest). Left unconfined, an album cover that finished
+     * loading on an IO thread recomposed the album picker there while it was
+     * being dismissed - slowly enough on Android 9 to crash the recreate after.
      */
     @get:Rule
-    val compose = createEmptyComposeRule()
+    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
 
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context: Context get() = instrumentation.targetContext

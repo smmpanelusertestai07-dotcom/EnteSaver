@@ -36,6 +36,7 @@ import app.entesaver.ui.AppViewModel
 import app.entesaver.util.Permissions
 import java.io.File
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -67,8 +68,9 @@ class OnboardingE2eTest {
         *(TestPermissions.forThisDevice() + if (Build.VERSION.SDK_INT <= 29) arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) else emptyArray())
     )
 
+    /** Composition's coroutines run on the main thread, as they do in the app: see HomeFilesE2eTest. */
     @get:Rule
-    val compose = createEmptyComposeRule()
+    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
 
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context: Context get() = instrumentation.targetContext

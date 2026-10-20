@@ -24,6 +24,7 @@ import app.entesaver.util.BoundedRead
 import java.io.File
 import java.io.RandomAccessFile
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,8 +53,9 @@ class LockBackupE2eTest {
     @get:Rule
     val permissions: GrantPermissionRule = GrantPermissionRule.grant(*TestPermissions.forThisDevice())
 
+    /** Composition's coroutines run on the main thread, as they do in the app: see HomeFilesE2eTest. */
     @get:Rule
-    val compose = createEmptyComposeRule()
+    val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher())
 
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val target: Context get() = instrumentation.targetContext
