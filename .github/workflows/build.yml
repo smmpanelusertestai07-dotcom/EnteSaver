@@ -272,9 +272,10 @@ jobs:
           Ente Saver, made for Ente Photos.
 
           Makes your photos and videos smaller on the phone, each at the quality
-          its picture needs, within the size limits of Google Photos' Storage
-          saver (16 MP, 1080p). Every file keeps its format, name, album and dates,
-          and a file is never made smaller twice.
+          its picture needs. A photo comes down to 16 MP at most, as in Google
+          Photos' Storage saver. A video keeps its codec, size, frame rate,
+          sound, date and place; only its bitrate changes. Every file keeps its
+          format, name, album and dates, and a file is never made smaller twice.
 
           Two ways to save space, in Settings › Saving space:
           - Replace on this phone (the default): the smaller version takes the
