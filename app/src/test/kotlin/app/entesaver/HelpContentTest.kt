@@ -311,6 +311,45 @@ class HelpContentTest {
         )
     }
 
+    /**
+     * Ente moved its menus in Photos 1.3.5: App icon went to Settings ›
+     * Appearance, and Free up space to the top of Settings. Every step the
+     * app gives uses Ente's current menus and labels.
+     */
+    @Test
+    fun `every step in Ente uses Ente's current menus and labels`() {
+        val gt = "\\u203a"
+        val stale = listOf(
+            "General $gt Advanced" to "App icon is in Settings $gt Appearance",
+            "Backup $gt Free up space" to "Free up space is at the top of Settings",
+            "Back up over mobile data" to "Ente's switch is Backup over mobile data",
+            "backup is on" to "Ente has no single backup switch; a folder is ticked or not"
+        )
+        val offenders = values().flatMap { (key, value) ->
+            stale.filter { (words, _) -> value.contains(words, ignoreCase = true) }.map { (words, why) -> "$key: $words ($why)" }
+        }
+        assertTrue("old Ente steps: $offenders", offenders.isEmpty())
+        // The safe proof step frees only Ente Saver's folder, never the whole phone.
+        val folderStep = "Albums $gt Device $gt Ente Saver\\u2019s folder"
+        for (key in listOf("confirm_none_text", "verify_link_hint", "verify_link_hint_graded", "cl_ente", "cloudhelp_proof_b")) {
+            assertTrue("$key frees only Ente Saver's folder", values().first { it.first == key }.second.contains(folderStep))
+        }
+    }
+
+    @Test
+    fun `the who-does-what table has three answers for every feature`() {
+        val keys = values().map { it.first }.toSet()
+        val features = keys.filter { Regex("feat_[a-z_]+").matches(it) }
+            .filter { k -> listOf("_phone", "_ente", "_saver").none { k.endsWith(it) } }
+            .filter { it !in setOf("feat_intro", "feat_footer", "feat_yes", "feat_no", "feat_partly", "feat_none",
+                "feat_cleaner_apps", "feat_gallery_apps") && !it.startsWith("feat_who_") }
+        assertTrue("the table names at least fifteen features: $features", features.size >= 15)
+        for (f in features) {
+            assertTrue("$f says what Ente does", "${f}_ente" in keys)
+            assertTrue("$f says what Ente Saver does", "${f}_saver" in keys)
+        }
+    }
+
     @Test
     fun `no help sentence runs past about fifteen words`() {
         assertTrue("strings.xml not found", strings() != null)

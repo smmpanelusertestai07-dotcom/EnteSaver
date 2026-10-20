@@ -717,7 +717,7 @@ class ProductBoundariesTest {
         // first, the copies are gone before the tap and never in its window.
         val strings = File("src/main/res/values/strings.xml").readText()
         val none = strings.substringAfter("name=\"confirm_none_text\">").substringBefore("</string>")
-        assertTrue(none.indexOf("Tap Confirm uploads") in 0 until none.indexOf("Free up device space"))
+        assertTrue(none.indexOf("Tap Confirm uploads") in 0 until none.indexOf("Free up space"))
     }
 
     @Test

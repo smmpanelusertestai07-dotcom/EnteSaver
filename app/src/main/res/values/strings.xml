@@ -148,7 +148,7 @@
     <string name="confirm_none_title">Nothing confirmed yet</string>
     <string name="note_freeable_title">%1$s of space can be freed</string>
     <string name="note_freeable_text">Ente has these photos and videos. Tap to see them and free up space on your phone.</string>
-    <string name="confirm_none_text">No copy left the upload folder while you were in Ente Photos. Tap Confirm uploads in Ente Photos first. Then, in Ente Photos, open Settings \u203a Free up space \u203a Free up device space, let it finish, and come back here.</string>
+    <string name="confirm_none_text">No copy left the upload folder while you were in Ente Photos. Tap Confirm uploads in Ente Photos first. Then, in Ente Photos, open Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space, let it finish, and come back here.</string>
     <plurals name="confirm_result_line">
         <item quantity="one">%1$d file confirmed as backed up</item>
         <item quantity="other">%1$d files confirmed as backed up</item>
@@ -307,8 +307,8 @@
 
     <!-- cloud health -->
     <string name="cloud_problem_missing">Ente Photos is not installed any more. Nothing will be deleted until it is back.</string>
-    <string name="cloud_problem_updated">Ente Photos updated. Check that backup is still on and the Ente Saver folder is still in its backed up folders.</string>
-    <string name="cloud_problem_silent">Ente Photos has not uploaded anything for three days. Open it and check you are signed in and backup is on.</string>
+    <string name="cloud_problem_updated">Ente Photos updated. Check that the Ente Saver folder is still ticked in Settings \u203a Backup \u203a Backed up folders.</string>
+    <string name="cloud_problem_silent">Ente Photos has not uploaded anything for three days. Open it and check you are signed in and the Ente Saver folder is still ticked in Settings \u203a Backup \u203a Backed up folders.</string>
     <string name="cloud_problem_full">Your Ente storage may be full. Nothing will be deleted until uploads start again.</string>
     <string name="warn_cloud_title">Ente Photos needs attention</string>
 
@@ -333,7 +333,7 @@
     <!-- free-up -->
     <string name="freeup_title">Backed-up originals</string>
     <string name="freeup_empty_title">Nothing to free up yet</string>
-    <string name="freeup_empty">Originals appear here once Ente Saver can prove their light copies reached Ente and a 30-day safety wait has passed. The proof comes when you run Free up device space in Ente Photos now and then, or by itself with Usage access on.</string>
+    <string name="freeup_empty">Originals appear here once Ente Saver can prove their light copies reached Ente and a 30-day safety wait has passed. The proof comes when you free up Ente Saver\u2019s folder in Ente Photos now and then (Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space), or by itself with Usage access on.</string>
 
     <!-- reclaim -->
     <string name="reclaim_target_label">Free a set amount</string>
@@ -472,16 +472,90 @@
     <!-- Same line, for when what can be freed does not change the figure -->
     <string name="hub_volume_line_only">Cleaning %1$s \u00b7 %2$s free now</string>
     <string name="hub_clean_now">Clear</string>
+    <string name="help_ente_features">Ente Photos and Ente Saver: who does what</string>
+    <string name="feat_intro">What your phone, Ente Photos and Ente Saver each do, by the names and menus Ente\u2019s own app uses. Where Ente already does something well, Ente Saver points you to it rather than doing it twice.</string>
+    <string name="feat_who_phone">Your phone</string>
+    <string name="feat_who_ente">Ente Photos</string>
+    <string name="feat_who_saver">Ente Saver</string>
+    <string name="feat_yes">Yes</string>
+    <string name="feat_partly">In part</string>
+    <string name="feat_no">No</string>
+    <string name="feat_none">Not on its own.</string>
+    <string name="feat_cleaner_apps">Only with a cleaner app.</string>
+    <string name="feat_gallery_apps">Some gallery apps do it.</string>
+    <string name="feat_backup">Back up chosen folders</string>
+    <string name="feat_backup_phone">Android has no photo backup of its own.</string>
+    <string name="feat_backup_ente">Settings \u203a Backup \u203a Backed up folders: tick the folders to back up.</string>
+    <string name="feat_backup_saver">Uploads nothing itself. Tick its folder in Ente.</string>
+    <string name="feat_data">Mobile data, and a data limit</string>
+    <string name="feat_data_phone">A monthly limit for the whole phone, in Android\u2019s network settings.</string>
+    <string name="feat_data_ente">Settings \u203a Backup \u203a Backup settings \u203a Backup over mobile data, off at first. Ente has no data limit of its own.</string>
+    <string name="feat_data_saver">A daily limit on how much it makes ready, which also limits how much Ente uploads in a day.</string>
+    <string name="feat_videos">Back up videos</string>
+    <string name="feat_videos_ente">Settings \u203a Backup \u203a Backup settings \u203a Backup videos, on at first.</string>
+    <string name="feat_videos_saver">Chooses what it makes smaller: photos, videos, or both.</string>
+    <string name="feat_smaller">Make photos and videos smaller</string>
+    <string name="feat_smaller_phone">Keeps every file as the camera wrote it.</string>
+    <string name="feat_smaller_ente">Keeps every file exactly as it was uploaded, in its original quality.</string>
+    <string name="feat_smaller_saver">Makes each one smaller in its own format, codec and size, so Ente\u2019s storage goes further.</string>
+    <string name="feat_free_all">Free up the whole phone</string>
+    <string name="feat_free_all_phone">Only for files Google Photos backed up.</string>
+    <string name="feat_free_all_ente">Settings \u203a Free up space \u203a Free up device space: removes every photo and video Ente has backed up from this phone, for good.</string>
+    <string name="feat_free_all_saver">Free up space \u203a Backed-up originals: only files it has proof Ente holds, after 30 days, to the trash.</string>
+    <string name="feat_free_folder">Free up one folder</string>
+    <string name="feat_free_folder_ente">Albums \u203a Device \u203a the folder \u203a \u22ee \u203a Free up space: only that folder\u2019s backed-up files.</string>
+    <string name="feat_free_folder_saver">Use it on Ente Saver\u2019s folder: that is how Ente Saver knows its copies arrived.</string>
+    <string name="feat_auto">Remove backed-up files by itself</string>
+    <string name="feat_auto_phone">Only Files by Google\u2019s Smart Storage, for Google Photos backups.</string>
+    <string name="feat_auto_ente">Never: every tool for space is one you run.</string>
+    <string name="feat_auto_saver">Never removes an original without you. Replace on this phone keeps the old file 30 days in the trash.</string>
+    <string name="feat_duplicates">Duplicates</string>
+    <string name="feat_duplicates_ente">Settings \u203a Free up space \u203a Duplicates, among your files in Ente.</string>
+    <string name="feat_duplicates_saver">Duplicate files, among the files on this phone.</string>
+    <string name="feat_similar">Similar photos</string>
+    <string name="feat_similar_ente">Settings \u203a Free up space \u203a Similar images, once Machine learning is on.</string>
+    <string name="feat_similar_saver">Uses Ente\u2019s: its Free up space page opens Ente\u2019s guide.</string>
+    <string name="feat_large">Largest files</string>
+    <string name="feat_large_ente">Settings \u203a Free up space \u203a Large files: everything over 10 MB.</string>
+    <string name="feat_large_saver">Largest files, and Free a set amount.</string>
+    <string name="feat_trash">Trash</string>
+    <string name="feat_trash_phone">Android 11 and up keep a deleted file 30 days.</string>
+    <string name="feat_trash_ente">Trash keeps files 30 days and counts them in your storage until you empty it.</string>
+    <string name="feat_trash_saver">Uses the phone\u2019s trash; Recently freed up puts files back.</string>
+    <string name="feat_status">What is backed up</string>
+    <string name="feat_status_ente">Settings \u203a Backup \u203a Backup status; a crossed-out cloud marks a file not backed up.</string>
+    <string name="feat_status_saver">Every file\u2019s own state: waiting for Ente, or backed up.</string>
+    <string name="feat_ml">Faces and magic search</string>
+    <string name="feat_ml_ente">Settings \u203a Machine learning: on this phone only, off at first.</string>
+    <string name="feat_ml_saver">Leaves it to Ente, which reads Ente Saver\u2019s copies too.</string>
+    <string name="feat_streams">Video streaming</string>
+    <string name="feat_streams_ente">Settings \u203a Streamable videos (beta): a 720p stream beside the original.</string>
+    <string name="feat_streams_saver">Makes the video file itself smaller.</string>
+    <string name="feat_map">Map</string>
+    <string name="feat_map_ente">Settings \u203a Maps.</string>
+    <string name="feat_map_saver">Keeps the place each file was taken inside the file.</string>
+    <string name="feat_lock">App lock</string>
+    <string name="feat_lock_phone">The phone\u2019s screen lock.</string>
+    <string name="feat_lock_ente">Settings \u203a Security \u203a App lock.</string>
+    <string name="feat_lock_saver">App lock, with the phone\u2019s screen lock.</string>
+    <string name="feat_gallery">Gallery and app icon</string>
+    <string name="feat_gallery_phone">Android Settings \u203a Apps \u203a Default apps \u203a Gallery app, where the phone has it.</string>
+    <string name="feat_gallery_ente">Can be that gallery; Settings \u203a Appearance \u203a App icon changes its look.</string>
+    <string name="feat_gallery_saver">An icon pack, and a Photos shortcut that opens Ente.</string>
+    <string name="feat_storage">Free storage</string>
+    <string name="feat_storage_ente">10 GB free for good; a friend\u2019s referral code adds 10 GB.</string>
+    <string name="feat_storage_saver">The Ente storage calculator says how long it lasts.</string>
+    <string name="feat_footer">Checked against Ente Photos 1.3.65 (October 2026). Ente may move or rename its menus; each guide link shows Ente\u2019s current steps.</string>
     <string name="hub_ente_title">In Ente Photos</string>
     <string name="hub_ente_intro">Ente Photos keeps every file as it is. Its own tools for space are here, by the names Ente uses, with where each one acts.</string>
     <string name="hub_ente_where">Ente Photos \u203a Settings \u203a Free up space \u203a %1$s</string>
-    <string name="hub_ente_where_review">Ente Photos \u203a Settings \u203a Free up space \u203a Review \u203a %1$s</string>
+    <string name="hub_ente_where_review">Ente Photos \u203a Settings \u203a Free up space \u203a %1$s (under Review)</string>
     <string name="hub_ente_on_phone">On this phone</string>
     <string name="hub_ente_on_ente">In Ente</string>
     <string name="hub_ente_on_both">In Ente, on this phone, or both</string>
     <string name="hub_ente_guide">Ente\u2019s guide</string>
     <string name="ente_tool_free_device">Free up device space</string>
-    <string name="ente_tool_free_device_what">Deletes from this phone the files Ente has backed up \u2014 for good, not to the trash. Ente keeps them.</string>
+    <string name="ente_tool_free_device_what">Deletes from this phone every photo and video Ente has backed up, from every backed-up folder \u2014 for good, not to the trash. Ente keeps them.</string>
     <string name="ente_tool_free_device_in_place">With Replace on this phone, use it once Ente has uploaded the smaller versions.</string>
     <string name="ente_tool_free_device_copies">It also removes Ente Saver\u2019s copies from Pictures/EnteSaver. That is expected: Ente has them.</string>
     <string name="ente_tool_similar">Similar images</string>
@@ -491,7 +565,7 @@
     <string name="ente_tool_large">Large files</string>
     <string name="ente_tool_large_what">Files in Ente over 10 MB, largest first. Delete each from Ente, from this phone, or both.</string>
     <string name="ente_tool_suggestions">Delete suggestions</string>
-    <string name="ente_tool_suggestions_what">Your photos that a shared album\u2019s owner suggested deleting. Delete them, or reject the suggestion.</string>
+    <string name="ente_tool_suggestions_what">Your photos that a shared album\u2019s owner or an admin suggested deleting. Delete them, or tap Reject suggestions.</string>
     <string name="ente_tool_cache">Manage device cache</string>
     <string name="ente_tool_cache_what">Ente\u2019s own cache on this phone. Clearing it never touches your photos.</string>
     <string name="ente_tool_trash">Trash</string>
@@ -945,7 +1019,7 @@
     <string name="calc_pace">Last 30 days: %1$s GB added.</string>
 
     <!-- cloud checklists (13.B; max 5 short lines each) -->
-    <string name="cl_ente">In Ente Photos, open Settings \u203a Backup \u203a Backed up folders. Turn on Ente Saver\u2019s folder (or folders) only, not Camera, and turn on Backup videos. Back up over mobile data if you like. Now and then, run Settings \u203a Free up space \u203a Free up device space: that is how Ente Saver knows your copies arrived.</string>
+    <string name="cl_ente">In Ente Photos, open Settings \u203a Backup \u203a Backed up folders and tick Ente Saver\u2019s folder (or folders) only, not Camera. In Settings \u203a Backup \u203a Backup settings, keep Backup videos on, and turn on Backup over mobile data if you like. Now and then, open Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space: that is how Ente Saver knows your copies arrived.</string>
 
     <!-- onboarding -->
     <string name="app_tagline">Smaller photos and videos, in Ente and on your phone.</string>
@@ -1035,7 +1109,7 @@
     <string name="link_connected">Looks connected \u2014 Ente Photos is installed, the folder has files, and it has been uploading.</string>
     <string name="link_no_app">Ente Photos is not installed. Install it with one of the buttons above.</string>
     <string name="link_no_folder">The upload folder is still empty. Come back after Ente Saver has optimised its first files.</string>
-    <string name="link_no_traffic">Ente Photos has not uploaded anything in the last day. Open it and check the folder is selected and backup is on.</string>
+    <string name="link_no_traffic">Ente Photos has not uploaded anything in the last day. Open it and check the folder is still ticked in Settings \u203a Backup \u203a Backed up folders.</string>
     <string name="link_cannot_tell">Cannot check upload activity without Usage access. The folder is ready either way.</string>
 
     <!-- help -->
@@ -1044,13 +1118,13 @@
     <string name="cloudhelp_intro_t">Why two apps</string>
     <string name="cloudhelp_intro_b">Ente Saver never uploads anything: it holds no internet permission, so there is no code in it that could. It only makes a smaller copy of each photo and video and puts it in one folder. Ente Photos uploads that folder. Two apps, one job each \u2014 and because the upload is Ente\'s own, your files reach Ente with its own encryption, in your own account.</string>
     <string name="cloudhelp_which_t">Private, and kept exactly as sent</string>
-    <string name="cloudhelp_which_b">Ente Photos is end-to-end encrypted, open source and independently audited, so only you can see your photos. It stores what it is given without shrinking it again, so the saving Ente Saver made is the saving you keep. The free plan holds 10 GB, and optimised copies make it go much further.</string>
+    <string name="cloudhelp_which_b">Ente Photos is end-to-end encrypted, open source and independently audited, so only you can see your photos. It stores what it is given without shrinking it again, so the saving Ente Saver made is the saving you keep. The free plan holds 10 GB for good (Ente may remove an account left unused for 12 months), a friend\u2019s referral code adds 10 GB, and optimised copies make it go much further.</string>
     <string name="cloudhelp_setup_t">The one setting that matters</string>
     <string name="cloudhelp_setup_b">In Ente, open Settings \u203a Backup \u203a Backed up folders. Turn on the Ente Saver folder (or folders) and turn off Camera. Backing up both stores every photo twice \u2014 once full size, once optimised \u2014 and fills your plan faster than using no Ente Saver at all. This is the most expensive mistake available here, which is why setup shows it before anything runs.</string>
     <string name="cloudhelp_detect_t">Everything in one place</string>
     <string name="cloudhelp_detect_b">Your whole library sits in one Ente account: one 24-word recovery key, one timeline. Ente\'s face recognition and magic search run on your phone, and they work on the copies too once machine learning is turned on in Ente (Settings \u203a Machine learning).</string>
     <string name="cloudhelp_proof_t">How Ente Saver knows a copy arrived</string>
-    <string name="cloudhelp_proof_b">When you use Free up device space in Ente (Settings \u203a Free up space \u203a Free up device space), Ente removes the files it has already uploaded, including the copies in the Ente Saver folder. A copy disappearing that way is the proof. With Usage access on, Ente Saver can also measure how much Ente sent while a copy was waiting. Even with proof, an original is offered for removal only after a 30-day safety wait.</string>
+    <string name="cloudhelp_proof_b">When you free up Ente Saver\u2019s folder in Ente (Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space), Ente removes the copies it has already uploaded. A copy disappearing that way is the proof. Ente\u2019s Settings \u203a Free up space \u203a Free up device space does the same for every backed-up folder at once: it also removes every other photo and video Ente has backed up from this phone, for good. With Usage access on, Ente Saver can also measure how much Ente sent while a copy was waiting. Even with proof, an original is offered for removal only after a 30-day safety wait.</string>
     <string name="cloudhelp_none_t">If Ente is not installed yet</string>
     <string name="cloudhelp_none_b">Everything still runs. Photos are optimised on the usual schedule and the copies wait in the folder, using the space you allowed. Once that space is full, Ente Saver stops making more and says so on Home. Nothing can be freed until Ente has the copies. Install Ente Photos from the Play Store, F-Droid or ente.com \u2014 Settings has the buttons \u2014 and the waiting copies go up on its next backup, with nothing redone.</string>
     <string name="cloudhelp_switch_t">If you used another cloud app before</string>
@@ -1059,10 +1133,10 @@
     <string name="help_gallery">Make Ente your gallery</string>
     <string name="gallery_intro">Ente can be the place you look at your photos, not only where they are kept. One app, and no wondering which one to open.</string>
     <string name="gallery_default_t">Open photos in Ente</string>
-    <string name="gallery_default_b">Set Ente as the default gallery, so a photo you tap in another app opens in Ente. It is in Android Settings \u203a Apps \u203a Default apps, and the button below opens it. If your phone lists no gallery there, choose Ente and Always the next time Android asks which app should open a photo.</string>
+    <string name="gallery_default_b">Set Ente as the default gallery, so most photos you tap in other apps open in Ente. It is in Android Settings \u203a Apps \u203a Default apps, and the button below opens it. Some cameras still open their own viewer, as Ente\u2019s own help says. If your phone lists no gallery there, choose Ente and Always the next time Android asks which app should open a photo.</string>
     <string name="gallery_default_button">Open default apps</string>
     <string name="gallery_icon_t">Ente\'s own icons</string>
-    <string name="gallery_icon_b">Ente can change its own icon. In Ente, open Settings \u203a General \u203a Advanced \u203a App icon and pick one of several looks.</string>
+    <string name="gallery_icon_b">Ente can change its own icon. In Ente, open Settings \u203a Appearance \u203a App icon and pick Default, Light, Dark, OG or Ducky.</string>
     <string name="gallery_pack_t">Ente Saver\'s icon pack</string>
     <string name="gallery_pack_b">Ente Saver includes one icon, made for Ente alone: a photo with Ente\'s heart on its corner, in Ente Photos\' own style, the same one the shortcut below uses. On Realme, Oppo and OnePlus phones, long-press Ente Photos on the home screen \u203a Edit, tap its icon and pick it under Ente Saver icons. Nova, Lawnchair and other launchers have their own icon pack or edit-icon setting. With Ente from the Play Store, applying the pack changes Ente\'s icon and no other app\'s; with Ente from F-Droid or ente.com, pick it for Ente in the launcher\'s edit-icon screen. A launcher\'s edit screen may also offer it when you edit some other app; that list is the launcher\'s, so just pick it for Ente. Keep Ente Photos\' own app icon on its default look, so every launcher finds it. The launcher may take a moment to update. The icon lives inside Ente Saver: uninstall it, and Ente gets its own icon back.</string>
     <string name="gallery_shortcut_t">A Photos shortcut</string>
@@ -1073,7 +1147,7 @@
     <string name="gallery_ml_t">Faces and magic search</string>
     <string name="gallery_ml_b">Turn on machine learning in Ente (Settings \u203a Machine learning) for face recognition and magic search. It runs on the phone itself, and it works on Ente Saver\'s copies too.</string>
     <string name="gallery_freeup_t">When copies leave the folder</string>
-    <string name="gallery_freeup_b">Ente\'s Free up device space also removes Ente Saver\'s copies once they are uploaded. That is expected \u2014 it is exactly how Ente Saver knows they arrived.</string>
+    <string name="gallery_freeup_b">Ente\u2019s Free up device space also removes Ente Saver\u2019s copies once they are uploaded. That is expected \u2014 it is exactly how Ente Saver knows they arrived. To free only Ente Saver\u2019s folder, open Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space.</string>
     <string name="help_privacy">Privacy and terms</string>
     <string name="help_licenses">Licences</string>
     <string name="help_about">About</string>
@@ -1205,8 +1279,8 @@
     <string name="optimise_blocked_file_access">Replace on this phone needs All files access first: Settings \u203a Saving space \u203a Allow All files access.</string>
     <string name="optimise_blocked_modified">This is not an official build, so it does not replace files on this phone.</string>
     <string name="optimise_working">Working\u2026</string>
-    <string name="verify_link_hint">Opens Ente Photos. There, run Settings \u203a Free up space \u203a Free up device space, then come back, and Ente Saver counts what Ente took. Or turn on Usage access, and it confirms uploads by itself.</string>
-    <string name="verify_link_hint_graded">Some copies cannot be confirmed from Ente\u2019s traffic. This opens Ente Photos: there, run Settings \u203a Free up space \u203a Free up device space. Then come back, and Ente Saver counts what Ente took.</string>
+    <string name="verify_link_hint">Opens Ente Photos. There, open Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space, then come back, and Ente Saver counts what Ente took. Or turn on Usage access, and it confirms uploads by itself.</string>
+    <string name="verify_link_hint_graded">Some copies cannot be confirmed from Ente\u2019s traffic. This opens Ente Photos: there, open Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space. Then come back, and Ente Saver counts what Ente took.</string>
     <string name="activity_started_by_you">Started by you</string>
     <string name="storage_group_phone">Your phone</string>
     <!-- Held for the moment between the screen opening and the phone's own
@@ -1322,10 +1396,10 @@
     <string name="faq_a5">Yes. A smaller version keeps the original\u2019s shooting date, camera details and format, and its location too, as long as you allowed the location request during setup \u2014 Android hands apps a copy with the location removed unless that one is granted. With Replace on this phone the file also keeps its name, album and date in the gallery, so nothing moves in your timeline or in Ente. With Copies for Ente the copy\u2019s name is the original\u2019s with a short code added, so it can always be matched back to its original, and its file date is set to match.</string>
 
     <string name="faq_q6">How does Ente Saver know a file reached Ente?</string>
-    <string name="faq_a6">With Replace on this phone there is nothing to prove: the smaller version is the original\u2019s own file, and Ente Photos backs it up as it backs up that album. With Copies for Ente, two ways, both watched automatically. When you use Free up device space in Ente (Settings \u203a Free up space \u203a Free up device space), Ente removes the copies it has already uploaded from the folder; a copy that disappears without Ente Saver removing it is the proof. Ente Saver also adds copies a few at a time, and with Usage access on it watches how much data Ente Photos sends, so a matching amount right after one file goes out counts for that file. That weaker proof is used in Free up space only if you turn it on in Settings. Files with no proof are never offered for removal, and even with proof an original is offered only after a 30-day safety wait. Ente Photos has no daily data limit of its own, so Ente Saver\u2019s daily limit decides how much reaches Ente each day \u2014 added to the folder, or replaced on the phone. When Ente uploads, and on which network, is set inside Ente Photos.</string>
+    <string name="faq_a6">With Replace on this phone there is nothing to prove: the smaller version is the original\u2019s own file, and Ente Photos backs it up as it backs up that album. With Copies for Ente, two ways, both watched automatically. When you free up Ente Saver\u2019s folder in Ente (Albums \u203a Device \u203a Ente Saver\u2019s folder \u203a \u22ee \u203a Free up space), Ente removes the copies it has already uploaded from the folder; a copy that disappears without Ente Saver removing it is the proof. Ente Saver also adds copies a few at a time, and with Usage access on it watches how much data Ente Photos sends, so a matching amount right after one file goes out counts for that file. That weaker proof is used in Free up space only if you turn it on in Settings. Files with no proof are never offered for removal, and even with proof an original is offered only after a 30-day safety wait. Ente Photos has no daily data limit of its own, so Ente Saver\u2019s daily limit decides how much reaches Ente each day \u2014 added to the folder, or replaced on the phone. When Ente uploads, and on which network, is set inside Ente Photos.</string>
 
     <string name="faq_q7">How do I make Ente work like my phone\'s gallery?</string>
-    <string name="faq_a7">Set Ente as the default gallery in Android Settings \u203a Apps \u203a Default apps, so photos you open from other apps show in Ente. Give it a gallery-style icon, either with Ente\'s own setting (Ente \u203a Settings \u203a General \u203a Advanced \u203a App icon) or with Ente Saver\'s icon pack in a launcher that supports icon packs. Or, from Help \u203a Make Ente your gallery, add a Photos shortcut to your home screen that opens Ente. Then turn on machine learning in Ente for face recognition and magic search. That help page walks through each step.</string>
+    <string name="faq_a7">Set Ente as the default gallery in Android Settings \u203a Apps \u203a Default apps, so most photos you open from other apps open in Ente. Give it a gallery-style icon, either with Ente\'s own setting (Ente \u203a Settings \u203a Appearance \u203a App icon) or with Ente Saver\'s icon pack in a launcher that supports icon packs. Or, from Help \u203a Make Ente your gallery, add a Photos shortcut to your home screen that opens Ente. Then turn on machine learning in Ente for face recognition and magic search. That help page walks through each step.</string>
 
     <string name="faq_q8">Someone deleted a file from the Ente Saver folder \u2014 what now?</string>
     <string name="faq_a8">If Ente Saver had already confirmed that file reached Ente, nothing happens: the disappearance is exactly what Free up device space in Ente Photos does, and the original was never at risk. If it had not been confirmed, Ente Saver treats the copy as lost and simply makes it again on the next run. Either way your original is untouched, because the app only ever removes an original after you confirm it yourself.</string>

@@ -102,6 +102,16 @@ object EnteApp {
         const val SUGGESTIONS = "$STORAGE#delete-suggestions"
         const val TRASH = "$BASE/features/albums-and-organization/deleting"
         const val BACKUP = "$BASE/faq/backup-and-sync"
+        const val BACKUP_FOLDERS = "$BASE/features/backup-and-sync/"
+        const val MOBILE_DATA = "$BACKUP#mobile-data"
+        const val COMPRESS = "$BACKUP#does-ente-compress"
+        const val FREE_UP_FOLDER = "$BASE/faq/storage-and-plans#free-up-space-slow"
+        const val FREE_PLAN = "$BASE/faq/storage-and-plans#free-plan"
+        const val ML = "$BASE/features/search-and-discovery/machine-learning"
+        const val MAP = "$BASE/features/search-and-discovery/map-and-location"
+        const val STREAMING = "$BASE/features/utilities/video-streaming"
+        const val GALLERY = "$BASE/features/utilities/android-gallery"
+        const val APP_LOCK = "$BASE/features/account/app-lock"
     }
 
     /** Opens one of Ente's help pages in the phone's browser. */
