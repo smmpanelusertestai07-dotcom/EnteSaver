@@ -167,6 +167,21 @@ else
     echo "::notice::The last release ($PREV_CODE) is newer than this build ($NEW_CODE); no update to check."
     PREV=""
   fi
+  # A release built for a newer Android than this emulator's does not
+  # install on it - every release before Android 9 support needs Android 10
+  # - so no phone on this Android can have it to update from, or to sit
+  # beside. The checks below are for the Androids that can.
+  min_of() { badging "$1" | sed -n "s/^\(minSdkVersion\|sdkVersion\):'\([0-9]*\)'.*/\2/p" | head -1; }
+  DEVICE_SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+  for apk in "$PREV" "$EARLIER"; do
+    [ -n "$apk" ] || continue
+    NEED=$(min_of "$apk")
+    if [ -n "$NEED" ] && [ -n "$DEVICE_SDK" ] && [ "$DEVICE_SDK" -lt "$NEED" ]; then
+      echo "::notice::$(basename "$apk") needs API $NEED and this emulator runs API $DEVICE_SDK; there is nothing to update from or install beside here."
+      [ "$apk" = "$PREV" ] && PREV=""
+      [ "$apk" = "$EARLIER" ] && EARLIER=""
+    fi
+  done
 fi
 
 # What the update does to the app, whichever key signs this build: the last

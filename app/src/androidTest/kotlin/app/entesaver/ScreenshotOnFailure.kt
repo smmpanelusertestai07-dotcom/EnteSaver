@@ -1,6 +1,8 @@
 package app.entesaver
 
 import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -35,6 +37,17 @@ class ScreenshotOnFailure : TestWatcher() {
                 description.className.substringAfterLast('.'),
                 description.methodName
             )
+            // Android 9 has no RELATIVE_PATH, and a test that was granted no
+            // storage access cannot write into shared storage there at all.
+            // The shell can, so it takes the picture straight into the
+            // folder adb pulls.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                @Suppress("DEPRECATION")
+                val dir = File(Environment.getExternalStorageDirectory(), SHOT_DIR)
+                device.executeShellCommand("mkdir -p ${dir.absolutePath}")
+                device.executeShellCommand("screencap -p ${File(dir, "$name.png").absolutePath}")
+                return@runCatching
+            }
             val temp = File(context.cacheDir, "$name.png")
             if (!device.takeScreenshot(temp) || !temp.exists()) return@runCatching
 

@@ -31,7 +31,7 @@ object OemPages {
 
     /**
      * Android's list of apps whose battery use is optimised, where the switch
-     * for this app sits. Android 10 and 11 have no per-app battery page, so
+     * for this app sits. Android 9 to 11 have no per-app battery page, so
      * this is where the switch is there. The one-tap question
      * (ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) is not used: it needs a
      * permission of its own and, without it, closes without asking anything.

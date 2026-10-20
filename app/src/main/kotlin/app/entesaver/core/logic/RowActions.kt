@@ -48,7 +48,7 @@ object RowActions {
         val originalMissing: Boolean,
         /**
          * An original is kept for this file after a replace on this phone -
-         * in the trash, or Android 10's hidden file - whatever its state.
+         * in the trash, or the hidden file of Android 9 and 10 - whatever its state.
          */
         val originalKept: Boolean = false
     )

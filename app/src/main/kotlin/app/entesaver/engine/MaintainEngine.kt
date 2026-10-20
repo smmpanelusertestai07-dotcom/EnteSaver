@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import androidx.room.withTransaction
 import app.entesaver.R
@@ -32,6 +33,8 @@ import app.entesaver.data.db.ItemRow
 import app.entesaver.data.db.leftFolderAtAfter
 import app.entesaver.data.prefs.Options
 import app.entesaver.data.prefs.OptionsRepo
+import app.entesaver.media.LegacyMedia
+import app.entesaver.media.MediaPaths
 import app.entesaver.media.MediaScanner
 import app.entesaver.media.OutputInventory
 import app.entesaver.media.Releaser
@@ -568,6 +571,14 @@ class MaintainEngine(private val context: Context) {
      * to Activity rather than fixed in silence.
      */
     private suspend fun repairStalePending(now: Long) {
+        // Android 9 has no pending rows: a copy there is written in full
+        // before the gallery ever hears of it. What a write cut short leaves
+        // behind is a hidden file, and those are cleared away instead.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val folders = OutputRoots.owned + Defaults.KEPT_DIR + Defaults.SNAPSHOT_TARGETS.map { it.first }
+            LegacyMedia.sweepAbandoned(folders, now)
+            return
+        }
         // CC1.2: fifteen minutes, not a day. A pending row is invisible to
         // the gallery and to every cloud app, so a whole day of it reads as
         // a backup that silently stopped - and Android eventually deletes
@@ -1316,11 +1327,11 @@ class MaintainEngine(private val context: Context) {
         return try {
             context.contentResolver.query(
                 uri,
-                arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME),
+                arrayOf(MediaPaths.FOLDER_COLUMN, MediaStore.MediaColumns.DISPLAY_NAME),
                 null, null, null
             )?.use { c ->
                 if (!c.moveToFirst()) return byNameAndSize(row)
-                val rel = c.getString(0)
+                val rel = MediaPaths.relativePath(c.getString(0))
                 val name = c.getString(1)
                 if (rel.isNullOrEmpty() || name.isNullOrEmpty()) byNameAndSize(row) else Whereabouts.Moved(rel, name)
             } ?: Whereabouts.Unknown
@@ -1341,14 +1352,14 @@ class MaintainEngine(private val context: Context) {
         val name = row.outputName ?: return Whereabouts.Gone
         val size = row.outputBytes ?: return Whereabouts.Gone
         val collection = if (row.isVideo) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            MediaStore.Video.Media.getContentUri(Volumes.EXTERNAL)
         } else {
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            MediaStore.Images.Media.getContentUri(Volumes.EXTERNAL)
         }
         return try {
             context.contentResolver.query(
                 collection,
-                arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.RELATIVE_PATH),
+                arrayOf(MediaStore.MediaColumns._ID, MediaPaths.FOLDER_COLUMN),
                 "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?",
                 arrayOf(name, size.toString()),
                 null
@@ -1359,7 +1370,7 @@ class MaintainEngine(private val context: Context) {
                     // An as-is copy has the original's name and size; the
                     // original itself is never taken for the copy.
                     if (id == row.mediaStoreId) continue
-                    val rel = c.getString(1)?.takeIf { it.isNotEmpty() } ?: continue
+                    val rel = MediaPaths.relativePath(c.getString(1))?.takeIf { it.isNotEmpty() } ?: continue
                     found += Whereabouts.Moved(rel, name, ContentUris.withAppendedId(collection, id).toString())
                 }
                 when (found.size) {

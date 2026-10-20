@@ -140,7 +140,7 @@ data class ItemRow(
     val keptUri: String? = null,
     /**
      * Where the original waits after it was replaced in place: an item of
-     * Ente Saver's own in the phone's trash, or (Android 10) a hidden file
+     * Ente Saver's own in the phone's trash, or (Android 9 and 10) a hidden file
      * beside it - 30 days either way, then gone. Null for every other row.
      */
     val backupUri: String? = null,

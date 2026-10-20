@@ -51,6 +51,7 @@ import app.entesaver.core.logic.QualityKept
 import app.entesaver.data.db.ItemRow
 import app.entesaver.ui.components.KeyValueRow
 import app.entesaver.util.Formats
+import app.entesaver.util.Thumbnails
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -298,7 +299,7 @@ private suspend fun loadThumb(
     val uri = uriString?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return null
     return withContext(Dispatchers.IO) {
         runCatching {
-            context.contentResolver.loadThumbnail(uri, Size(1024, 1024), null)
+            Thumbnails.load(context.contentResolver, uri, Size(1024, 1024))
         }.getOrNull()
     }
 }

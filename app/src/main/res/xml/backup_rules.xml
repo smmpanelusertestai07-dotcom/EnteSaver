@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Auto Backup (Android 10-11): allowBackup="false" already stops it; nothing is offered either way. -->
+<!-- Auto Backup (Android 9-11): allowBackup="false" already stops it; nothing is offered either way. -->
 <full-backup-content>
     <exclude domain="root" path="." />
     <exclude domain="file" path="." />

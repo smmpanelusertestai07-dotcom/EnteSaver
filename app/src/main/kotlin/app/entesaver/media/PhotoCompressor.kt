@@ -10,7 +10,6 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
-import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import app.entesaver.core.logic.BitrateCalc
 import app.entesaver.core.logic.FormatResolver
@@ -610,7 +609,7 @@ object PhotoCompressor {
 
     /** Original stream incl. location EXIF when permitted; falls back to redacted. */
     private fun openOriginal(context: Context, uri: Uri): InputStream? = try {
-        context.contentResolver.openInputStream(MediaStore.setRequireOriginal(uri))
+        context.contentResolver.openInputStream(MediaPaths.original(uri))
     } catch (e: Exception) {
         try {
             context.contentResolver.openInputStream(uri)

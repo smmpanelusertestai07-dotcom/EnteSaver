@@ -36,9 +36,9 @@ import org.json.JSONObject
  * original is put back - so whatever the phone cuts short, the next run
  * finishes it or undoes it, and the original is never referenced by
  * nothing. A step that cannot be finished now (the file unreadable, the
- * card out) is tried again later rather than given up. Android 10 has no
- * trash, so there the original waits as a hidden file beside it, under a
- * name no other file has, removed after the same 30 days.
+ * card out) is tried again later rather than given up. Android 9 and 10
+ * have no trash, so there the original waits as a hidden file beside it,
+ * under a name no other file has, removed after the same 30 days.
  */
 object InPlace {
 
@@ -51,7 +51,7 @@ object InPlace {
     /** The write failed and the original could not be written back yet; recovery tries again. */
     const val WRITE_FAILED_KEPT = "write_failed_kept"
 
-    /** The hidden name an original waits under on Android 10. */
+    /** The hidden name an original waits under on Android 9 and 10. */
     private const val HIDDEN_PREFIX = ".entesaver-original-"
 
     private const val JOURNAL = "in-place.json"
@@ -77,13 +77,14 @@ object InPlace {
     /**
      * Whether this phone lets Ente Saver write into photos other apps made
      * without asking each time: All files access from Android 11, storage
-     * write access before it.
+     * write access before it - on Android 10 in its legacy storage, which
+     * Android 9, having no other kind, always is.
      */
     fun canReplace(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         Environment.isExternalStorageManager()
     } else {
         @Suppress("DEPRECATION")
-        Environment.isExternalStorageLegacy() &&
+        (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || Environment.isExternalStorageLegacy()) &&
             context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -145,7 +146,7 @@ object InPlace {
         if (nowSha != copySha) {
             // Half written, or written wrong: the original goes back in.
             if (restoreFrom(context, backup, uri) && sha(context, uri) == originalSha) {
-                rescan(context, info.path)
+                rescan(context, uri, info.path)
                 deleteBackup(context, backup)
                 clearJournal(context)
                 return Result.Failed("write_failed")
@@ -154,7 +155,7 @@ object InPlace {
             // original stays kept the whole time.
             return Result.Failed(WRITE_FAILED_KEPT)
         }
-        rescan(context, info.path)
+        rescan(context, uri, info.path)
         return Result.Replaced(backup, copyBytes, copySha, originalSha)
     }
 
@@ -237,7 +238,7 @@ object InPlace {
                 return Recovered.Stuck(j.rowId, j.backup, j.originalSha, "edited_since")
             }
             restoreFrom(context, j.backup, uri) && sha(context, uri) == j.originalSha -> {
-                rescan(context, infoOf(context, uri)?.path)
+                rescan(context, uri, infoOf(context, uri)?.path)
                 deleteBackup(context, j.backup)
                 if (j.kind == PUT_BACK) Recovered.PutBackDone(j.rowId) else Recovered.Undone(j.rowId)
             }
@@ -308,7 +309,7 @@ object InPlace {
             // Still on record: the next run writes it again.
             return PutBack.FAILED
         }
-        rescan(context, info.path)
+        rescan(context, uri, info.path)
         deleteBackup(context, backup)
         clearJournal(context)
         return PutBack.DONE
@@ -334,7 +335,7 @@ object InPlace {
 
     /** Where an original kept after a replace stands now (see [backupState]). */
     enum class Kept {
-        /** Still Ente Saver's: in the trash, or Android 10's hidden file. */
+        /** Still Ente Saver's: in the trash, or the hidden file of Android 9 and 10. */
         KEPT,
 
         /** No longer there: the trash was emptied, or 30 days passed. */
@@ -399,7 +400,7 @@ object InPlace {
         ours && context.contentResolver.delete(item, includeAll()) > 0
     }.getOrDefault(false)
 
-    /** Android 10's hidden originals older than [KEEP_DAYS], removed as the trash would. */
+    /** The hidden originals of Android 9 and 10 older than [KEEP_DAYS], removed as the trash would. */
     fun purgeExpired(paths: List<String>, now: Long): Int = paths.count { path ->
         val f = File(path)
         f.name.startsWith(HIDDEN_PREFIX) && now - f.lastModified() > KEEP_DAYS * 24L * 3_600_000L && f.delete()
@@ -422,7 +423,7 @@ object InPlace {
             uri,
             arrayOf(
                 MediaStore.MediaColumns.DISPLAY_NAME,
-                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaPaths.FOLDER_COLUMN,
                 MediaStore.MediaColumns.MIME_TYPE,
                 MediaStore.MediaColumns.SIZE,
                 MediaStore.MediaColumns.DATE_TAKEN,
@@ -433,7 +434,7 @@ object InPlace {
             if (!c.moveToFirst()) return@use null
             Info(
                 name = c.getString(0) ?: return@use null,
-                relativePath = c.getString(1),
+                relativePath = MediaPaths.relativePath(c.getString(1)),
                 mime = c.getString(2),
                 size = c.getLong(3),
                 dateTaken = c.getLong(4),
@@ -453,10 +454,11 @@ object InPlace {
      * Read without asking for the original, another app's photo comes back
      * with its location blanked out; hashed, kept or put back from that, the
      * original would lose it. Without media-location access this throws, and
-     * nothing is replaced (the run waits for that access).
+     * nothing is replaced (the run waits for that access). Android 9 blanks
+     * nothing, so there the item is read as it is.
      */
     private fun openOriginal(context: Context, uri: Uri): InputStream? =
-        context.contentResolver.openInputStream(MediaStore.setRequireOriginal(uri))
+        context.contentResolver.openInputStream(MediaPaths.original(uri))
 
     private fun sha(context: Context, uri: Uri): String? = runCatching {
         openOriginal(context, uri)?.use { Fingerprint.sha256(it) }
@@ -654,15 +656,42 @@ object InPlace {
      * Android re-reads the file, so its size, dimensions and dates are the
      * new file's. The date it was taken comes from the file's own metadata,
      * which every copy carries over; Android takes no other word for it.
+     *
+     * Android 9's scanner does: unless that metadata carries a GPS time, it
+     * may take the file's modified time instead, which writing has just made
+     * now - the photo would move to today in every gallery, Ente's too. There
+     * the item's own dates are read before the scan, while it still holds
+     * them, and put back: the modified time on the file, before the scanner
+     * reads it, and the date it was taken on the item, after.
      */
-    private fun rescan(context: Context, path: String?) {
+    private fun rescan(context: Context, uri: Uri, path: String?) {
         if (path == null) return
+        val dates = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) datesOf(context, uri) else null
+        dates?.let { (_, modifiedSec) -> if (modifiedSec > 0) File(path).setLastModified(modifiedSec * 1000) }
         val done = java.util.concurrent.CountDownLatch(1)
         runCatching {
             android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null) { _, _ -> done.countDown() }
             done.await(10, java.util.concurrent.TimeUnit.SECONDS)
         }
+        dates?.let { (taken, _) ->
+            if (taken > 0) {
+                runCatching {
+                    context.contentResolver.update(
+                        uri, ContentValues().apply { put(MediaStore.MediaColumns.DATE_TAKEN, taken) }, null, null
+                    )
+                }
+            }
+        }
     }
+
+    /** The date [uri] was taken (milliseconds) and last modified (seconds), as the item holds them now. */
+    private fun datesOf(context: Context, uri: Uri): Pair<Long, Long>? = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.MediaColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED),
+            null, null, null
+        )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
+    }.getOrNull()
 
     // ---- the journal ---------------------------------------------------------
 

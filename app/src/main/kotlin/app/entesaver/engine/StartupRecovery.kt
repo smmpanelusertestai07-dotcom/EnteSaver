@@ -2,6 +2,7 @@ package app.entesaver.engine
 
 import android.content.ContentUris
 import android.content.Context
+import android.os.Build
 import android.provider.MediaStore
 import androidx.room.withTransaction
 import app.entesaver.core.logic.Defaults
@@ -189,6 +190,9 @@ class StartupRecovery(private val context: Context) {
      * the old visible one is removed once its contents have been read.
      */
     private fun removeLegacyVisibleSnapshot(): Int {
+        // Every build that wrote one needed Android 10, so on Android 9 there
+        // is none to remove - and a file of that name there is not this app's.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
         val resolver = context.contentResolver
         val files = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND " +
@@ -225,6 +229,9 @@ class StartupRecovery(private val context: Context) {
      * is deleted - it is app-owned, which means no user confirmation is needed.
      */
     private fun removeLegacyPlaceholders(): Int {
+        // The builds that left placeholders needed Android 10; Android 9,
+        // which records no owner, could not prove one was this app's anyway.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
         val resolver = context.contentResolver
         var removed = 0
         for (volume in runCatching { MediaStore.getExternalVolumeNames(context) }

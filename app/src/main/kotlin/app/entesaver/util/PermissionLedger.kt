@@ -49,8 +49,9 @@ object PermissionLedger {
         "android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" to (R.string.perm_name_foreground_type to R.string.perm_purpose_foreground_type),
         Manifest.permission.PACKAGE_USAGE_STATS to (R.string.perm_name_usage to R.string.perm_purpose_usage),
         Manifest.permission.USE_BIOMETRIC to (R.string.perm_name_biometric to R.string.perm_purpose_biometric),
+        "android.permission.USE_FINGERPRINT" to (R.string.perm_name_fingerprint to R.string.perm_purpose_biometric),
         Manifest.permission.MANAGE_EXTERNAL_STORAGE to (R.string.perm_name_all_files to R.string.perm_purpose_all_files),
-        Manifest.permission.WRITE_EXTERNAL_STORAGE to (R.string.perm_name_write_storage to R.string.perm_purpose_all_files),
+        Manifest.permission.WRITE_EXTERNAL_STORAGE to (R.string.perm_name_write_storage to R.string.perm_purpose_write_storage),
         Manifest.permission.WAKE_LOCK to (R.string.perm_name_wake to R.string.perm_purpose_wake),
         Manifest.permission.RECEIVE_BOOT_COMPLETED to (R.string.perm_name_boot to R.string.perm_purpose_boot)
     )
@@ -76,7 +77,10 @@ object PermissionLedger {
     private fun appliesHere(permission: String): Boolean = when (permission) {
         Manifest.permission.READ_EXTERNAL_STORAGE -> Build.VERSION.SDK_INT <= 32
         Manifest.permission.WRITE_EXTERNAL_STORAGE -> Build.VERSION.SDK_INT <= 29
+        "android.permission.USE_FINGERPRINT" -> Build.VERSION.SDK_INT <= 28
         Manifest.permission.MANAGE_EXTERNAL_STORAGE -> Build.VERSION.SDK_INT >= 30
+        // Android 9 hides no photo's location, so it has no such permission.
+        Manifest.permission.ACCESS_MEDIA_LOCATION -> Build.VERSION.SDK_INT >= 29
         Manifest.permission.READ_MEDIA_IMAGES,
         Manifest.permission.READ_MEDIA_VIDEO,
         Manifest.permission.POST_NOTIFICATIONS -> Build.VERSION.SDK_INT >= 33

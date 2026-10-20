@@ -18,8 +18,8 @@ import kotlin.math.roundToInt
  * WhatsApp 480p clip 0.28 and 0.41 - and a clip gets 0.7 to 2.4 times that
  * by what it shows, never more than [SOURCE_SHARE] of what its source holds.
  * A camera writes 20 Mbps: the savings benchmark's 46 GB library comes down
- * to about a seventh (6.5 GB), which is what it takes to last in Ente's free
- * 10 GB.
+ * to about a seventh (6.3 GB on a phone whose HEVC chip keeps to the rate),
+ * which is what it takes to last in Ente's free 10 GB.
  */
 object BitrateCalc {
 
@@ -44,7 +44,7 @@ object BitrateCalc {
      * episode, a YouTube download - still comes down by two fifths at least,
      * instead of being written again for next to nothing. Set with the
      * standard rate on the savings benchmark: the 46 GB library lands at
-     * 6.5 GB, and a camera's own videos keep their full rate.
+     * 6.3 GB, and a camera's own videos keep their full rate.
      */
     const val SOURCE_SHARE = 0.6
 

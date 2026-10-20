@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
@@ -107,6 +109,14 @@ class UiWalkthroughTest {
      * never interfere with it.)
      */
     private fun publish(name: String, png: ByteArray) {
+        // Android 9 has no RELATIVE_PATH, and adb reads its shared storage
+        // directly: the picture is written into the folder as a file.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            @Suppress("DEPRECATION")
+            val dir = File(Environment.getExternalStorageDirectory(), SHOT_DIR).apply { mkdirs() }
+            File(dir, "$name.png").writeBytes(png)
+            return
+        }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "$name.png")
             put(MediaStore.MediaColumns.MIME_TYPE, "image/png")

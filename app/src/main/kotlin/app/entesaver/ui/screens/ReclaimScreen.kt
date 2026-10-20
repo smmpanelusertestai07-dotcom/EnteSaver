@@ -628,15 +628,23 @@ fun ReclaimScreen(vm: AppViewModel, rvm: ReclaimViewModel, nav: NavHostControlle
                         }
                     }
                     if (mode != ReclaimRules.Mode.COPIES_ONLY) {
-                        Text(
-                            stringResource(R.string.reclaim_why_android_asks),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp)
-                        )
+                        // Android 9 puts up no dialog of its own: storage
+                        // write access is all it has, and the confirmation
+                        // here is the only one there is.
+                        val androidAsks = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        if (androidAsks) {
+                            Text(
+                                stringResource(R.string.reclaim_why_android_asks),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
                         if (!rvm.canUndoRemoval) {
                             Text(
-                                stringResource(R.string.reclaim_no_trash_here),
+                                stringResource(
+                                    if (androidAsks) R.string.reclaim_no_trash_here else R.string.reclaim_no_trash_here_9
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.padding(top = 6.dp)

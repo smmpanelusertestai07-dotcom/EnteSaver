@@ -8,6 +8,7 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
 import app.entesaver.BuildConfig
+import app.entesaver.core.logic.CodecNames
 import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.QualityFloor
 
@@ -32,8 +33,24 @@ object EncoderCaps {
     fun hardwareEncoders(mime: String): List<MediaCodecInfo> = codecs.filter { info ->
         info.isEncoder &&
             info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
-            runCatching { info.isHardwareAccelerated && !info.isSoftwareOnly }.getOrDefault(false)
+            runCatching { isHardware(info) }.getOrDefault(false)
     }
+
+    /**
+     * Whether [info] runs on a chip. From Android 10 the phone says so;
+     * Android 9 cannot be asked, and there the codec's name decides, by the
+     * rule Android itself filled those answers in with (CodecNames).
+     */
+    fun isHardware(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.isHardwareAccelerated && !info.isSoftwareOnly
+        } else {
+            !CodecNames.looksSoftware(info.name)
+        }
+
+    /** Whether [info] is a software codec, by the same reading as [isHardware]. */
+    fun isSoftware(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isSoftwareOnly else CodecNames.looksSoftware(info.name)
 
     /**
      * The savings benchmark only, on an emulator, which has no hardware

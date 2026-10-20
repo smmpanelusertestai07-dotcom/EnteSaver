@@ -44,6 +44,7 @@ import app.entesaver.ui.AppViewModel
 import app.entesaver.ui.theme.Dimens
 import app.entesaver.ui.theme.TabularFigures
 import app.entesaver.util.Formats
+import app.entesaver.util.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -298,7 +299,7 @@ private fun trialThumb(uri: String?): ImageBitmap? {
     val bitmap by produceState<ImageBitmap?>(initialValue = null, uri) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                resolver.loadThumbnail(Uri.parse(uri), Size(192, 192), null).asImageBitmap()
+                Thumbnails.load(resolver, Uri.parse(uri), Size(192, 192)).asImageBitmap()
             }.getOrNull()
         }
     }

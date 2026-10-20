@@ -316,7 +316,7 @@ class SetupFlowTest {
             stringsNamed("about_updates").isEmpty()
         )
         val requires = stringsNamed("about_requires_min").single().second
-        assertTrue("the minimum must be named", requires.contains("Android 10"))
+        assertTrue("the minimum must be named", requires.contains("Android 9 or newer"))
         assertTrue("and what it is tested against", requires.contains("Android 16"))
     }
 

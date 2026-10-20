@@ -485,7 +485,7 @@ class Stager(private val context: Context, private val db: AppDb) {
 
     /**
      * Forgets originals the trash no longer holds - Android empties it after
-     * 30 days - and, on Android 10, which has no trash, deletes the hidden
+     * 30 days - and, on Android 9 and 10, which have no trash, deletes the hidden
      * ones that are older. At most [limit] are looked at, oldest first.
      */
     suspend fun pruneKeptOriginals(limit: Int = 500) {

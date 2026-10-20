@@ -43,7 +43,8 @@ class PlainEnglishTest {
      * from every other audit here (CC4.5).
      */
     private val allowed = setOf(
-        "lock_subtitle" to "fingerprint"
+        "lock_subtitle" to "fingerprint",
+        "perm_name_fingerprint" to "fingerprint"
     )
 
     private val entry = Regex(

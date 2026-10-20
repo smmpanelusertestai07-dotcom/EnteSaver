@@ -316,10 +316,18 @@ def main():
         # HEVC at the rate the app asked for - the share it chose for this
         # clip, read from its frames - which a chip writing in CBR holds to.
         # The emulator's software encoder could not always come down to it;
-        # this leaves out how far it overshot. A clip kept for any reason but
-        # being lean already is kept here too.
-        lean_or_made = f["reencoded"] or f["outcome"] == "kept as it was (already_efficient)"
-        if f["chosen"] is None or not lean_or_made:
+        # this leaves out how far it overshot. That includes the clips it
+        # overshot on every rung, so that the app kept them whole
+        # (encoder_rejected): asked for less after each overshoot, it still
+        # wrote more than nine tenths of the original - the encoder not
+        # holding the rate, not the app's choice. A chip that holds the rate
+        # writes them at it, and the app's check passes them. They are also
+        # counted as kept, separately (after_hevc_asked_kept), for the figure
+        # that assumes nothing of the chip. A clip kept for any other reason
+        # but being lean already is kept in both.
+        made_or_lean = f["reencoded"] or f["outcome"] == "kept as it was (already_efficient)"
+        overshot_whole = f["outcome"] == "kept as it was (encoder_rejected)"
+        if f["chosen"] is None or not (made_or_lean or overshot_whole):
             f["after_hevc_asked"] = f["after_hevc"] if f["chosen"] is None else f["before"]
         else:
             as_is_a, target_a = plan(row, "HEVC", f["src_bps"], f["chosen"])
@@ -327,6 +335,7 @@ def main():
             asked_a = min(target_a * f["chosen"], cap_a) if cap_a else target_a * f["chosen"]
             est = (asked_a + f["audio_bps"]) * f["real_s"] / 8
             f["after_hevc_asked"] = f["before"] if as_is_a or est >= f["before"] else est
+        f["after_hevc_asked_kept"] = f["before"] if overshot_whole else f["after_hevc_asked"]
 
     def totals(sel, key="after"):
         before = sum(f["before"] for f in sel)
@@ -341,6 +350,8 @@ def main():
     b, af = totals(files)
     _, ah = totals(files, "after_hevc")
     _, aa = totals(files, "after_hevc_asked")
+    _, aak = totals(files, "after_hevc_asked_kept")
+    overshot = [f for f in files if f["outcome"] == "kept as it was (encoder_rejected)"]
     n_chosen = sum(1 for f in files if f["chosen"] is not None)
     n_measured = sum(1 for f in files if f["measured"])
     n_kept = sum(1 for f in files if f["measured"] and not f["reencoded"])
@@ -365,7 +376,9 @@ def main():
         f"**Verdict: the owner's target is {b / GB:.0f} GB down to {TARGET_LOW_GB:.0f}-{TARGET_GB:.0f} GB - "
         f"{'met' if met else 'not met'} on a phone whose HEVC chip writes in CBR: {hevc_after / GB:.1f} GB "
         f"({b / max(hevc_after, 1):.1f} times smaller; {how}).** "
-        f"Measured on the emulator ({mc}), the library went from {b / GB:.1f} GB to "
+        + (f"Counting the {len(overshot)} clips the emulator's encoder would not bring down as kept whole, "
+           f"{aak / GB:.1f} GB. " if overshot and how.startswith("an estimate at the rates") else "")
+        + f"Measured on the emulator ({mc}), the library went from {b / GB:.1f} GB to "
         f"{af / GB:.1f} GB ({100 * (b - af) / max(b, 1):.0f}% smaller, {b / max(af, 1):.1f} times smaller); in {oc}, "
         f"carrying over "
         f"how far the emulator's software encoder overshot the rate it was asked for, {ah / GB:.1f} GB. Of what is "
@@ -382,6 +395,12 @@ def main():
         lines.append(f"- HEVC at the rates the app asks for (a chip writing in CBR holds them; estimate): "
                      f"{aa / GB:.2f} GB after, {(b - aa) / GB:.2f} GB saved ({100 * (b - aa) / b:.1f}%); "
                      f"the app's chosen share is known for {n_chosen} videos")
+        if overshot:
+            ob = sum(f["before"] for f in overshot)
+            lines.append(f"- Of those, {len(overshot)} videos ({ob / GB:.2f} GB) the emulator's software encoder would "
+                         f"not bring down: every rung's copy, asked for less after each overshoot, still weighed more "
+                         f"than nine tenths of the original, so the app kept them whole here; at the rate it asked "
+                         f"for, as above. Counted as kept whole instead: {aak / GB:.2f} GB after")
     lines.append(f"- Kept as they were (nothing to gain, or failed): {n_kept} videos")
     lines.append(f"- Encoder landed at {landed_typ:.2f} x the standard bitrate for its size (median; "
                  f"the app's per-video choice included)")
@@ -560,7 +579,8 @@ def main():
     with open(os.path.join(a.out, "summary.json"), "w") as fh:
         json.dump(dict(videos=len(files), measured=n_measured, measured_codec=measured_codec, before_bytes=b,
                        after_bytes_measured=af, after_bytes_other_codec_estimate=ah,
-                       after_bytes_hevc_at_asked_rate=aa, verdict_bytes=hevc_after, landed_median=landed_typ,
+                       after_bytes_hevc_at_asked_rate=aa, after_bytes_hevc_at_asked_rate_overshot_kept=aak,
+                       overshot_kept_whole=len(overshot), verdict_bytes=hevc_after, landed_median=landed_typ,
                        target=dict(gb=TARGET_GB, low_gb=TARGET_LOW_GB, met=met, already_compressed_before=rb,
                                    already_compressed_after_measured=ra, already_compressed_after_other=rh),
                        by_kind={label: dict(zip(("before", "after_measured"), totals(sel))) | dict(

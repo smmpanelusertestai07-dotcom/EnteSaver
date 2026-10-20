@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import androidx.room.withTransaction
 import app.entesaver.R
@@ -26,6 +27,8 @@ import app.entesaver.data.db.leftFolderAtAfter
 import app.entesaver.data.prefs.Options
 import app.entesaver.data.prefs.OptionsRepo
 import app.entesaver.media.HeicSupport
+import app.entesaver.media.LegacyMedia
+import app.entesaver.media.MediaPaths
 import app.entesaver.media.PhotoCompressor
 import app.entesaver.media.VideoCompressor
 import app.entesaver.util.DeviceTier
@@ -269,6 +272,8 @@ class ReclaimEngine(private val context: Context) {
         now: Long,
         inPlace: Boolean
     ): Pinned? {
+        // Android 9 has no pending items: there the copy is written as a file.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return writeVerifiedAsFile(row, src, now, inPlace)
         val resolver = context.contentResolver
         val collection = if (row.isVideo) {
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -392,8 +397,8 @@ class ReclaimEngine(private val context: Context) {
         val uri = row.contentUri?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return null
         val path = runCatching {
             context.contentResolver.query(
-                uri, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH), null, null, null
-            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                uri, arrayOf(MediaPaths.FOLDER_COLUMN), null, null, null
+            )?.use { c -> if (c.moveToFirst()) MediaPaths.relativePath(c.getString(0)) else null }
         }.getOrNull()
         if (path.isNullOrBlank()) return null
         if (Defaults.isAppOwnedPath(path)) return null
@@ -478,14 +483,14 @@ class ReclaimEngine(private val context: Context) {
                 uri,
                 arrayOf(
                     MediaStore.MediaColumns.DISPLAY_NAME,
-                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    MediaPaths.FOLDER_COLUMN,
                     MediaStore.MediaColumns.SIZE
                 ),
                 null, null, null
             )?.use { c ->
                 if (!c.moveToFirst() || c.getLong(2) <= 0) return@use null
                 val name = c.getString(0) ?: return@use null
-                Triple(name, c.getString(1), c.getLong(2))
+                Triple(name, MediaPaths.relativePath(c.getString(1)), c.getLong(2))
             }
         }.getOrNull() ?: return null
         if (!KeptCopies.isRowsCopy(name, size, row.displayName, row.fingerprint, row.outputBytes)) return null
@@ -1086,5 +1091,55 @@ class ReclaimEngine(private val context: Context) {
                 (r.outputBytes ?: 0L) == item.optimisedBytes &&
                 (KeptCopies.belongsTo(r.displayName, item.displayName, r.fingerprint) || countedUp(r))
         }.singleOrNull()
+    }
+
+    // ---- Android 9 -----------------------------------------------------------
+
+    /**
+     * [writeVerified] on Android 9, which has no pending items: the copy is
+     * written into its album as a file ([LegacyMedia]) and is read back,
+     * hashed and opened before it is given its name - the same checks, in
+     * the same order, as before a copy is published from Android 10. In
+     * place, the original's modified time is the file's own before the
+     * scanner first reads it, so the copy sits where the original sat in the
+     * timeline; DATE_TAKEN is stamped afterwards, because the scanner takes
+     * that date only from EXIF it trusts.
+     */
+    private suspend fun writeVerifiedAsFile(row: ItemRow, src: PinSource, now: Long, inPlace: Boolean): Pinned? {
+        val folder = if (inPlace) originalFolder(row) else null
+        val landing = folder ?: "${Defaults.KEPT_DIR}/"
+        val name = if (folder != null) KeptCopies.inPlaceRequest(folder, inPlaceName(row, src.name)) else src.name
+        val published = LegacyMedia.publish(
+            context,
+            landing,
+            name,
+            mimeForName(name, row.mimeType),
+            modifiedMs = if (folder != null) row.dateModified * 1000 else null,
+            verify = { file ->
+                val landed = runCatching { FileInputStream(file).use { Fingerprint.sha256(it) } }.getOrNull()
+                landed == src.sha256 && landed != EMPTY_SHA256 &&
+                    looksDecodable(Uri.fromFile(file), src.name, row.isVideo)
+            }
+        ) { output ->
+            src.open()?.use { input -> input.copyTo(output, 128 * 1024) } ?: error("no input stream")
+        } ?: return null
+        val resolver = context.contentResolver
+        val target = published.uri
+        return try {
+            // Everything that later looks for this copy knows it by its name,
+            // so a name nothing would recognise is taken back with the copy.
+            if (!KeptCopies.belongsTo(published.name, row.displayName, row.fingerprint)) error("landed name differs")
+            resolver.update(
+                target,
+                ContentValues().apply { put(MediaStore.MediaColumns.DATE_TAKEN, row.captureAt) },
+                null, null
+            )
+            db.items().update(row.copy(keptUri = target.toString(), updatedAt = now))
+            Pinned(target, inPlace = folder != null)
+        } catch (e: Exception) {
+            runCatching { resolver.delete(target, null, null) }
+            published.file.delete()
+            null
+        }
     }
 }

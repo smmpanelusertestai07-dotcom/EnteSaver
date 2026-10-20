@@ -1,6 +1,7 @@
 package app.entesaver.util
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import android.os.StatFs
 import java.io.File
@@ -31,6 +32,13 @@ object Storage {
         val base = vol?.appDir ?: context.getExternalFilesDir(null) ?: context.filesDir
         val dir = File(base, "stage")
         if (!dir.exists()) dir.mkdirs()
+        // Android 9's media scanner indexes every folder on shared storage,
+        // the app's own included, and a copy waiting here would show in the
+        // gallery - and in Ente - as a photo in a folder called "stage".
+        // A .nomedia file keeps it, and the work files under it, out.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            runCatching { File(dir, ".nomedia").takeIf { !it.exists() }?.createNewFile() }
+        }
         return dir
     }
 

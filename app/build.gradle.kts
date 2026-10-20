@@ -19,7 +19,7 @@ android {
         // sees it; people see the name. (Until 12.2 it was app.cloudsaver,
         // which 12.3 replaced once, with the name.)
         applicationId = "app.entesaver"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 36
         // Semantic version, and a versionCode derived from it rather than
         // hand-incremented: major*10000 + minor*100 + patch. It is always

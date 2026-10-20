@@ -297,11 +297,14 @@ class SavingsBenchTest {
         VideoShare.of(reading?.ti, reading?.meanLuma, VideoShare.isScreenRecording(row.displayName, row.bucket))
     }.getOrNull()
 
-    /** Every video encoder this device lists, hardware ones marked, for the report. */
+    /**
+     * Every video encoder this device lists, hardware ones marked, for the
+     * report - judged as the app judges them, since Android 9 cannot be asked.
+     */
     private fun videoEncoders(): String =
         MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
             .filter { it.isEncoder && it.supportedTypes.any { t -> t.startsWith("video/") } }
-            .joinToString(" ") { info -> info.name + if (info.isHardwareAccelerated) "(hw)" else "" }
+            .joinToString(" ") { info -> info.name + if (EncoderCaps.isHardware(info)) "(hw)" else "" }
 
     /** A CSV cell: quoted only when it has to be, so the file reads plainly. */
     private fun cell(value: Any): String {

@@ -5,6 +5,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -523,6 +525,7 @@ class ReclaimFinishTest {
      * scratch, if a second boundary fell between the two.
      */
     private fun numberedPair(originalName: String, copyName: String): Pair<Uri, Uri> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return numberedPairOnDisk(originalName, copyName)
         val resolver = target.contentResolver
         val images = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         fun jpeg(seed: Int): ByteArray {
@@ -557,6 +560,37 @@ class ReclaimFinishTest {
             MediaFixtures.awaitIndexed(target, copy, copyName)
             val modified = seen(original).modified
             if (modified > 0L && modified == seen(copy).modified) return original to copy
+            MediaFixtures.cleanUp(target)
+        }
+        throw AssertionError("$originalName and $copyName never shared a modified time")
+    }
+
+    /**
+     * [numberedPair] on Android 9, where the media scanner takes a file's
+     * modified time from the file itself: both are written into the album
+     * with the same one before it reads them. Written again, from scratch, if
+     * the phone would not take the time.
+     */
+    private fun numberedPairOnDisk(originalName: String, copyName: String): Pair<Uri, Uri> {
+        @Suppress("DEPRECATION")
+        val album = File(Environment.getExternalStorageDirectory(), MediaFixtures.TEST_ALBUM).apply { mkdirs() }
+        repeat(10) { i ->
+            val modified = System.currentTimeMillis()
+            fun land(name: String, seed: Int): Uri {
+                val file = File(album, name)
+                val bitmap = MediaFixtures.makeBitmap(64, 64, seed)
+                file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                bitmap.recycle()
+                file.setLastModified(modified)
+                return MediaFixtures.scan(target, file, "image/jpeg")
+                    ?: throw AssertionError("the media scanner never added $name")
+            }
+            val original = land(originalName, 40 + i)
+            val copy = land(copyName, 60 + i)
+            MediaFixtures.awaitIndexed(target, original, originalName)
+            MediaFixtures.awaitIndexed(target, copy, copyName)
+            val seenModified = seen(original).modified
+            if (seenModified > 0L && seenModified == seen(copy).modified) return original to copy
             MediaFixtures.cleanUp(target)
         }
         throw AssertionError("$originalName and $copyName never shared a modified time")

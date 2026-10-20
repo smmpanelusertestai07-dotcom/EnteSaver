@@ -912,8 +912,9 @@ fun albumFilter(
  *
  * Exactly three lines, always visible, never behind a tap: what is removed
  * from, what is never touched and why that is guaranteed, and where removed
- * files go. It explains; Android's own dialog still authorises. On Android 10
- * the third line changes because there is no gallery trash to restore from.
+ * files go. It explains; Android's own dialog still authorises - on Android 9,
+ * which has none, the app's own confirmation does. On Android 9 and 10 the
+ * third line changes because there is no gallery trash to restore from.
  */
 @Composable
 fun RemovalWarningCard(modifier: Modifier = Modifier) {

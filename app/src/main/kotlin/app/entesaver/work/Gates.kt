@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import android.os.Build
 import android.os.PowerManager
 import app.entesaver.core.logic.Defaults
 import app.entesaver.core.logic.RunDecider
@@ -49,7 +50,11 @@ object Gates {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             interactive = pm.isInteractive
             saver = pm.isPowerSaveMode
-            thermal = pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
+            // Android 9 reports no thermal status at all. There the battery's
+            // own temperature, read above, is the gate that decides.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                thermal = pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
+            }
         } catch (e: Exception) {
             // Some OEMs throw on thermal queries; keep the safe defaults.
         }

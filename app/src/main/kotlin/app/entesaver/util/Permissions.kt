@@ -32,16 +32,18 @@ object Permissions {
         videoGranted = granted(context, Manifest.permission.READ_MEDIA_VIDEO),
         userSelectedGranted = Build.VERSION.SDK_INT >= 34 &&
             granted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED),
-        legacyReadGranted = granted(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+        legacyReadGranted = granted(context, Manifest.permission.READ_EXTERNAL_STORAGE),
+        legacyWriteGranted = granted(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
     )
 
-    /** The decision alone, so the API 29/33/34 mapping is testable on the JVM. */
+    /** The decision alone, so the API 28/29/33/34 mapping is testable on the JVM. */
     fun mediaAccessFor(
         sdk: Int,
         imagesGranted: Boolean,
         videoGranted: Boolean,
         userSelectedGranted: Boolean,
-        legacyReadGranted: Boolean
+        legacyReadGranted: Boolean,
+        legacyWriteGranted: Boolean = false
     ): MediaAccess = when {
         sdk >= 33 -> when {
             // Both halves of the gallery, or it is not a full view of it.
@@ -60,6 +62,11 @@ object Permissions {
             sdk >= 34 && userSelectedGranted -> MediaAccess.PARTIAL
             else -> MediaAccess.NONE
         }
+        // Android 9 has no scoped storage: every copy is written into its
+        // folder as a file, which takes the write permission as well, and
+        // the one storage prompt grants the two together. Reading without
+        // writing would queue a gallery the app could put nothing beside.
+        sdk < 29 -> if (legacyReadGranted && legacyWriteGranted) MediaAccess.FULL else MediaAccess.NONE
         legacyReadGranted -> MediaAccess.FULL
         else -> MediaAccess.NONE
     }
@@ -79,16 +86,29 @@ object Permissions {
             // still works: the same fallback runs, and the FAQ now says so.
             Manifest.permission.ACCESS_MEDIA_LOCATION
         )
-    } else {
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         arrayOf(
             Manifest.permission.READ_EXTERNAL_STORAGE,
             Manifest.permission.ACCESS_MEDIA_LOCATION
         )
+    } else {
+        // Android 9 hides no photo's location, so there is no permission
+        // for it to ask; what it needs is storage write access, for the
+        // copies (see [mediaAccessFor]).
+        arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        )
     }
 
-    /** Whether copies may keep where each photo was taken (see [mediaPermissionsToRequest]). */
+    /**
+     * Whether copies may keep where each photo was taken (see
+     * [mediaPermissionsToRequest]). Always on Android 9, which hands every
+     * app a photo's location with the photo.
+     */
     fun hasMediaLocation(context: Context): Boolean =
-        granted(context, Manifest.permission.ACCESS_MEDIA_LOCATION)
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            granted(context, Manifest.permission.ACCESS_MEDIA_LOCATION)
 
     fun hasNotifications(context: Context): Boolean {
         // Android 13 added a runtime permission, but the switch in system settings is older
@@ -142,7 +162,7 @@ object Permissions {
      * is exactly the app nobody opens for months - it is meant to work
      * unattended - so without this switch off, one day the photos permission
      * is gone and everything stops without a word. True means the reset is
-     * armed; null on Android 10, where there is no such thing.
+     * armed; null on Android 9 and 10, where there is no such thing.
      */
     fun permissionsAutoResetOn(context: Context): Boolean? {
         if (Build.VERSION.SDK_INT < 30) return null

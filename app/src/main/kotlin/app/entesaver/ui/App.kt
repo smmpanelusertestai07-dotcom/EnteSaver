@@ -241,10 +241,10 @@ private fun MainNav(vm: AppViewModel) {
     // this activity and starts a new one; locking on that stop asked for a
     // fingerprint every time the phone went sideways. Nobody left the app.
     //
-    // And except, on Android 10, for the phone's own PIN pad: there it is an
+    // And except, on Android 9 and 10, for the phone's own PIN pad: there it is an
     // activity of its own, so asking for the PIN stops this one. Treated as
     // leaving, it re-armed the prompt it was in the middle of answering. The
-    // price is small and safe: leaving Android 10 with the fingerprint sheet
+    // price is small and safe: leaving Android 9 or 10 with the fingerprint sheet
     // up, the app is still locked on return, and asks at a tap of Unlock.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         if (activity?.isChangingConfigurations == true) return@LifecycleEventEffect

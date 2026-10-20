@@ -133,7 +133,7 @@ class ReclaimViewModel(
     /**
      * Whether this phone can undo a removal.
      *
-     * Android 10 has no media trash. Offering "Move to trash" there and then
+     * Android 9 and 10 have no media trash. Offering "Move to trash" there and then
      * permanently deleting would be the worst thing this screen could do, so
      * the screen asks this and words itself accordingly.
      */
@@ -653,8 +653,8 @@ class ReclaimViewModel(
      * a deleted one never does, and this is a batch operation on someone's
      * photographs.
      *
-     * Returns null on Android 10, which has neither batch request: there the
-     * caller falls back to one system consent per file.
+     * Returns null on Android 9 and 10, which have neither batch request:
+     * there the caller falls back to one file at a time.
      */
     private fun requestFor(uris: List<Uri>, permanent: Boolean): IntentSender? {
         if (Build.VERSION.SDK_INT < 30) return null
@@ -666,13 +666,14 @@ class ReclaimViewModel(
         }
     }
 
-    // ---- Android 10: one consent per file ------------------------------------
+    // ---- Android 9 and 10: one file at a time ---------------------------------
 
     /**
      * Android 10 has no batch delete request and no trash, so each file is
      * attempted directly and the system's own recoverable-security prompt is
      * shown for the ones that need it. Slower, and the only thing that works
-     * there.
+     * there. Android 9 has no such prompt either: with storage write access
+     * each delete simply happens, after the confirmation on this screen.
      */
     private val legacyQueue = ArrayDeque<Uri>()
     private val legacyDeleted = mutableSetOf<String>()
@@ -694,8 +695,14 @@ class ReclaimViewModel(
                     }
                     legacyQueue.removeFirst()
                 } catch (se: SecurityException) {
-                    val sender = (se as? RecoverableSecurityException)
-                        ?.userAction?.actionIntent?.intentSender
+                    // Android 9 has no recoverable refusal: there storage
+                    // write access is all there is, and without it the file
+                    // stays where it is.
+                    val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        (se as? RecoverableSecurityException)?.userAction?.actionIntent?.intentSender
+                    } else {
+                        null
+                    }
                     if (sender != null) {
                         ask(sender, FreeUpFlow.Dialog.LEGACY)
                         return@launch
@@ -873,7 +880,7 @@ class ReclaimViewModel(
         // no longer exist as back on the phone.
         if (!batch.trashed || FreeUpFlow.trashExpired(batch.atMs, System.currentTimeMillis())) return
         val uris = items.mapNotNull { row -> row.contentUri?.let { Uri.parse(it) } }
-        // Nothing to restore from on Android 10: it has no trash, so those
+        // Nothing to restore from on Android 9 and 10: no trash, so those
         // batches were permanent and the history says so.
         if (uris.isEmpty() || Build.VERSION.SDK_INT < 30) return
         restoring = items
@@ -885,7 +892,7 @@ class ReclaimViewModel(
     }
 
     private fun nextRestoreChunk(): IntentSender? {
-        // Android 10 has no trash to put anything back into, and restore()
+        // Android 9 and 10 have no trash to put anything back into, and restore()
         // has already turned back on that phone. Stated again here so the
         // guard holds wherever this is called from.
         if (Build.VERSION.SDK_INT < 30) return null

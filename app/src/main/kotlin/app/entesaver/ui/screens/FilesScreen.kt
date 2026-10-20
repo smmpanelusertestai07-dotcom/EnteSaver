@@ -84,6 +84,7 @@ import app.entesaver.ui.components.sizeFilter
 import app.entesaver.ui.components.typeFilter
 import app.entesaver.util.Formats
 import app.entesaver.util.OemPages
+import app.entesaver.util.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -572,8 +573,8 @@ fun Thumbnail(row: ItemRow) {
         value = source?.let { uriString ->
             withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.loadThumbnail(
-                        Uri.parse(uriString), Size(128, 128), null
+                    Thumbnails.load(
+                        context.contentResolver, Uri.parse(uriString), Size(128, 128)
                     )
                 }.getOrNull()
             }

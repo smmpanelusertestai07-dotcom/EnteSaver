@@ -152,9 +152,11 @@ class LightCopyTest {
     fun `an in-place copy lands in the original's real folder, never the app's`() {
         val folder = engine.substringAfter("private fun originalFolder")
             .substringBefore("private fun inPlaceName")
+        // RELATIVE_PATH, or on Android 9 the path it is derived from.
         assertTrue(
             "the folder must come from the original itself",
-            folder.contains("MediaStore.MediaColumns.RELATIVE_PATH")
+            folder.contains("arrayOf(MediaPaths.FOLDER_COLUMN)") &&
+                folder.contains("MediaPaths.relativePath(c.getString(0))")
         )
         assertTrue(
             "our own folders can never be an in-place destination",

@@ -77,6 +77,7 @@ import app.entesaver.R
 import app.entesaver.media.MediaScanner
 import app.entesaver.ui.theme.Dimens
 import app.entesaver.util.Errand
+import app.entesaver.util.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -451,7 +452,7 @@ private fun albumCover(uri: String?): ImageBitmap? {
     val bitmap by produceState<ImageBitmap?>(initialValue = null, uri) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                resolver.loadThumbnail(Uri.parse(uri), Size(256, 256), null)
+                Thumbnails.load(resolver, Uri.parse(uri), Size(256, 256))
                     .asImageBitmap()
             }.getOrNull()
         }

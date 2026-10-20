@@ -292,7 +292,7 @@ jobs:
           No server, no account, no analytics, no internet permission, nothing
           that expires.
 
-          Needs Android 10 or newer. Install: download ${APK_NAME} below and
+          Needs Android 9 or newer. Install: download ${APK_NAME} below and
           open it on your phone.
           Play Protect may warn about an app installed from a file — choose
           "More details" › "Install anyway". The app holds no INTERNET permission.
@@ -339,10 +339,12 @@ jobs:
   emulator:
     # Every Android this app installs on, from minSdk to targetSdk, not just
     # the one that happens to be current. The behaviour genuinely differs
-    # across them: 29 has no media trash and no batch delete request, 30
-    # introduces both, 31 adds wallpaper colours, 33 adds the runtime
-    # notification permission. A suite that only ever runs on one level says
-    # nothing about the phones the other rows describe.
+    # across them: 28 has no scoped storage, so every copy is a file written
+    # with storage write access and found by the media scanner; 29 has no
+    # media trash and no batch delete request, 30 introduces both, 31 adds
+    # wallpaper colours, 33 adds the runtime notification permission. A suite
+    # that only ever runs on one level says nothing about the phones the
+    # other rows describe.
     name: end-to-end on Android ${{ matrix.api }}
     needs: [build, sign]
     runs-on: ubuntu-26.04  # the build's image (see there)
@@ -356,7 +358,7 @@ jobs:
       # learn which Androids are affected, not just that something is.
       fail-fast: false
       matrix:
-        api: [29, 30, 31, 32, 33, 34, 35, 36]
+        api: [28, 29, 30, 31, 32, 33, 34, 35, 36]
         include:
           # The SDK names Android 17's packages "android-37.0", not "android-37".
           - api: 37

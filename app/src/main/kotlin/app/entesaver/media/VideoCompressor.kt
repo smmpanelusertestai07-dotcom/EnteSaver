@@ -659,7 +659,7 @@ object VideoCompressor {
         val all = EncoderUtil.getSupportedEncoders(mimeType)
         val software = all.filter { info ->
             try {
-                info.isSoftwareOnly ||
+                EncoderCaps.isSoftware(info) ||
                     info.name.startsWith("c2.android.", ignoreCase = true) ||
                     info.name.startsWith("OMX.google.", ignoreCase = true)
             } catch (e: Exception) {

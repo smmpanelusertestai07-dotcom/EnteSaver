@@ -655,7 +655,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *
      * The prompt comes up on its own when the app opens, the way every locked
      * app behaves - but only once per locking. It used to come up on every
-     * resume, and on Android 10 the PIN pad is an activity of its own:
+     * resume, and on Android 9 and 10 the PIN pad is an activity of its own:
      * cancelling it resumes this one, which asked again, which the person
      * cancelled, which resumed this one. After the first prompt the button
      * on the lock screen asks.
@@ -2071,6 +2071,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---- delete flows -------------------------------------------------------
     // API 30+: one system batch dialog (MediaStore.createDeleteRequest).
     // API 29: sequential RecoverableSecurityException flow, one consent per file.
+    // API 28: the same queue, with no consent to ask: storage write access is
+    // the only permission there is, and with it each delete simply happens.
 
     /**
      * Emits when a flow already under way needs the UI to launch another
@@ -2201,8 +2203,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     legacyQueue.removeFirst()
                 } catch (se: SecurityException) {
-                    val sender = (se as? RecoverableSecurityException)
-                        ?.userAction?.actionIntent?.intentSender
+                    // Android 10 asks the person about a file it will not let
+                    // the app delete. Android 9 has no such question: storage
+                    // write access is all there is, and without it the file
+                    // stays where it is.
+                    val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        (se as? RecoverableSecurityException)?.userAction?.actionIntent?.intentSender
+                    } else {
+                        null
+                    }
                     if (sender != null) {
                         deleteIntent.value = sender
                         return@launch

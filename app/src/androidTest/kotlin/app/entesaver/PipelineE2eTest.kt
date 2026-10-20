@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
@@ -140,7 +141,10 @@ class PipelineE2eTest {
         assertEquals(3, inFolder!!.size)
         for (entry in inFolder) {
             assertEquals(Defaults.OUTPUT_DIR, entry.relPath.trimEnd('/'))
-            assertTrue("copy must be owned by us", entry.ownedByUs)
+            // Android 9 records no owner for a file at all.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                assertTrue("copy must be owned by us", entry.ownedByUs)
+            }
             if (originalTaken > 0 && entry.dateTaken > 0) {
                 assertTrue(
                     "copy DATE_TAKEN ${entry.dateTaken} must match the original's " +
@@ -475,8 +479,12 @@ class PipelineE2eTest {
             awaitGalleryRescan(released.outputRelPath!!)
             val window = MaintainEngine(context).openConfirmWindow()!!
             assertTrue("the copy is there at the tap", released.id in window.presentAtTap)
-            val moved = ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, elsewhere) }
-            assertEquals(1, context.contentResolver.update(Uri.parse(released.outputUri), moved, null, null))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val moved = ContentValues().apply { put(MediaStore.MediaColumns.RELATIVE_PATH, elsewhere) }
+                assertEquals(1, context.contentResolver.update(Uri.parse(released.outputUri), moved, null, null))
+            } else {
+                moveOnDisk(Uri.parse(released.outputUri), elsewhere)
+            }
 
             // The gallery finishes a move in its own time - Android 12 may
             // even give the file a new address - so the return pass runs
@@ -660,6 +668,23 @@ class PipelineE2eTest {
             context, arrayOf("${Environment.getExternalStorageDirectory()}/$relPath"), null
         ) { _, _ -> done.countDown() }
         assertTrue("the gallery rescan did not finish", done.await(60, TimeUnit.SECONDS))
+    }
+
+    /**
+     * A move the way a file manager makes one on Android 9, which has no
+     * RELATIVE_PATH to change: the file itself goes to [relativeDir], and
+     * MediaStore is told its new path.
+     */
+    @Suppress("DEPRECATION")
+    private fun moveOnDisk(item: Uri, relativeDir: String) {
+        val from = context.contentResolver.query(
+            item, arrayOf(MediaStore.MediaColumns.DATA), null, null, null
+        )!!.use { c -> assertTrue("the copy must be in MediaStore", c.moveToFirst()); File(c.getString(0)) }
+        val dir = File(Environment.getExternalStorageDirectory(), relativeDir.trim('/')).apply { mkdirs() }
+        val to = File(dir, from.name)
+        assertTrue("the copy must move on disk", from.renameTo(to))
+        val path = ContentValues().apply { put(MediaStore.MediaColumns.DATA, to.absolutePath) }
+        assertEquals(1, context.contentResolver.update(item, path, null, null))
     }
 
     private fun clearOutputFolder() {

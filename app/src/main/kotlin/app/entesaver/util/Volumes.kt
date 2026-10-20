@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 object Volumes {
 
     data class Vol(
-        /** MediaStore volume name ("external_primary" or an SD UUID like "1234-abcd"). */
+        /** MediaStore volume name ("external_primary" or an SD UUID like "1234-abcd"; "external" on Android 9). */
         val mediaVolumeName: String,
         val isPrimary: Boolean,
         val totalBytes: Long,
@@ -37,11 +37,34 @@ object Volumes {
         val shownFreeBytes: Long = freeBytes
     )
 
+    /**
+     * MediaStore's catch-all external volume. The SDK names the constant
+     * only from Android 10, but every version answers to it, and on Android
+     * 9 it is the only external volume there is.
+     */
+    const val EXTERNAL = "external"
+
+    /**
+     * The phone's own storage, as MediaStore names it: "external_primary"
+     * from Android 10. Android 9 has no name for one volume apart from the
+     * rest, so there it is "external", which also holds an SD card's photos.
+     */
+    val PRIMARY: String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.VOLUME_EXTERNAL_PRIMARY else EXTERNAL
+
+    /** Every external volume MediaStore keeps photos and videos on; just [EXTERNAL] on Android 9. */
+    fun mediaVolumeNames(context: Context): Set<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.getExternalVolumeNames(context) else setOf(EXTERNAL)
+
+    /** The volume [uri] is on; [EXTERNAL] on Android 9, which has only that one. */
+    fun volumeOf(uri: Uri): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.getVolumeName(uri) else EXTERNAL
+
     fun list(context: Context): List<Vol> {
         val names = try {
-            MediaStore.getExternalVolumeNames(context)
+            mediaVolumeNames(context)
         } catch (e: Exception) {
-            setOf(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            setOf(PRIMARY)
         }
         val extraDirs = try {
             context.getExternalFilesDirs(null).filterNotNull()
@@ -50,7 +73,7 @@ object Volumes {
         }
         val out = mutableListOf<Vol>()
         for (name in names) {
-            val isPrimary = name == MediaStore.VOLUME_EXTERNAL_PRIMARY
+            val isPrimary = name == PRIMARY
             val dir = if (isPrimary) {
                 context.getExternalFilesDir(null)
             } else {
@@ -129,7 +152,7 @@ object Volumes {
      * on a timer and on a fingerprint change.
      */
     fun probeWritable(context: Context, mediaVolumeName: String): Boolean {
-        if (mediaVolumeName == MediaStore.VOLUME_EXTERNAL_PRIMARY) return true
+        if (mediaVolumeName == PRIMARY) return true
         val now = System.currentTimeMillis()
         val os = Build.FINGERPRINT
         probes[mediaVolumeName]?.let { cached ->
@@ -148,6 +171,10 @@ object Volumes {
     }
 
     private fun runProbe(context: Context, mediaVolumeName: String): Boolean {
+        // Android 9 lists no volume but its one catch-all, which [probeWritable]
+        // answers before this. A card named in a history file from another
+        // phone is a volume Android 9 cannot write to by that name.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
         val resolver = context.contentResolver
         val collection = try {
             MediaStore.Images.Media.getContentUri(mediaVolumeName)

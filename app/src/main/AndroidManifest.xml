@@ -10,12 +10,8 @@
         android:name="android.permission.ACCESS_NETWORK_STATE"
         tools:node="remove" />
     <!-- Libraries add these for older Android or for calls this app never
-         makes: USE_FINGERPRINT (androidx.biometric) is for Android 6-8, below
-         minSdk, and the receiver-permission pair (androidx.core) is only for
+         makes: the receiver-permission pair (androidx.core) is only for
          ContextCompat.registerReceiver(..., RECEIVER_NOT_EXPORTED). -->
-    <uses-permission
-        android:name="android.permission.USE_FINGERPRINT"
-        tools:node="remove" />
     <permission
         android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tools:node="remove" />
@@ -40,11 +36,19 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- The app lock on Android 9: androidx.biometric checks for a
+         fingerprint there, and on some phones asks for it, through the older
+         fingerprint service, which wants this. From Android 10 the lock needs
+         only USE_BIOMETRIC, so the permission stops at 9. -->
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" android:maxSdkVersion="28" />
     <!-- Replace on this phone only, and only once the user turns it on: the
          smaller version is written into the original's own file, which on
          Android 11 and later only All files access allows without asking for
-         every file, and on Android 10 storage write access. There is no
-         network permission, so nothing read with it can leave the phone. -->
+         every file, and on Android 10 storage write access. The one
+         exception is Android 9, which writes every copy as a file and so
+         needs storage write access in both modes: there it is asked for
+         together with the photos. There is no network permission, so
+         nothing read with it can leave the phone. -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
