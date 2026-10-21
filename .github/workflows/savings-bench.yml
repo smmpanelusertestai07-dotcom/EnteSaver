@@ -161,6 +161,10 @@ jobs:
       # original, and against Storage saver's 1080p, 30 fps, 8 Mbps H.264.
       - name: Grade the kept copies
         if: ${{ !cancelled() }}
+        env:
+          # A pilot (fewer videos) also keeps every frame's score and reading
+          # of three graded copies, to set beside what the phone read.
+          DIAG: ${{ inputs.sample != '' && inputs.sample != '1' }}
         run: |
           python3 .github/bench/library.py manifest --shards 16 --out bench-manifest.csv
           python3 .github/bench/quality.py --manifest bench-manifest.csv --library bench-library \
