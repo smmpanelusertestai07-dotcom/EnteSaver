@@ -43,7 +43,9 @@ object CapacityMath {
     const val DEF_PHOTO_ORIG_MB = 3.5
     const val DEF_PHOTO_OUT_MB = 2.5
     const val DEF_VIDEO_ORIG_MB_PER_MIN = 122.0
-    const val DEF_VIDEO_OUT_MB_PER_MIN_H264 = 45.0
+    // About half: what the savings benchmark's 1080p camera videos came
+    // down to, each copy kept only where it still looked like its original.
+    const val DEF_VIDEO_OUT_MB_PER_MIN_H264 = 60.0
     const val DEF_VIDEO_OUT_MB_PER_MIN_HEVC = 28.0
 
     enum class CalcMode { PHOTOS, VIDEOS, BOTH }
