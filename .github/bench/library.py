@@ -11,7 +11,7 @@ marked in the table. A fixed seed draws the library from it - the same files
 on every run - and sizes it to LIBRARY_GB.
 
 The files themselves are made shorter than the videos they stand for (gen_s
-against real_s), so eight emulators get through the whole library in one CI
+against real_s), so sixteen emulators get through the whole library in one CI
 run. Everything the app decides by - resolution, rotation, frame rate, codec,
 bitrate, sound, container - is the real video's, and at a fixed bitrate a
 file's size grows in step with its length, so report.py can put each measured
@@ -47,7 +47,7 @@ file is read back for its codec, size, rotation, frame count, sound, date
 and place - the app's promise is that a copy keeps all of them.
 
   library.py manifest --out manifest.csv [--summary]
-  library.py make --shard 0 --shards 8 --out bench-library
+  library.py make --shard 0 --shards 16 --out bench-library
 """
 import argparse
 import concurrent.futures
@@ -872,7 +872,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("manifest")
     m.add_argument("--out", required=True)
-    m.add_argument("--shards", type=int, default=8)
+    m.add_argument("--shards", type=int, default=16)
     m.add_argument("--summary", action="store_true", help="also print videos, GB and hours by kind and scene")
     mk = sub.add_parser("make")
     mk.add_argument("--shard", type=int, required=True)

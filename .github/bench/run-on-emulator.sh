@@ -104,7 +104,7 @@ adb logcat -c || true
 # (EncoderCaps.softwareForBenchmark). Its HEVC encoder takes 512x512 at most,
 # so bigger HEVC videos stay as they are here, and the report works out what
 # a phone's HEVC chip makes of them at the rate the app asks for.
-timeout 7200 adb shell am instrument -w -r \
+timeout 14400 adb shell am instrument -w -r \
   -e class app.entesaver.SavingsBenchTest \
   -e savingsBench true \
   -e softwareEncoders true \
