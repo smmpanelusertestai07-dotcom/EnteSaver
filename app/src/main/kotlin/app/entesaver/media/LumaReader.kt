@@ -4,12 +4,14 @@ import android.content.Context
 import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import app.entesaver.core.logic.Vmaf
 import java.io.Closeable
 import java.io.File
+import java.util.Locale
 
 /**
  * A video's frames as VMAF reads them: the decoder's own brightness plane.
@@ -22,6 +24,11 @@ import java.io.File
  * change, so the two still compare, but VMAF then reads lower than libvmaf
  * does on the files themselves. Here the planes are the decoder's own, as
  * libvmaf takes them.
+ *
+ * The decoder is Android's own, the one MediaMetadataRetriever decodes with
+ * and the same on every phone, which decodes as exactly as libvmaf's does. A
+ * chip's, or an emulator's, need not: on the savings benchmark's emulator its
+ * host decoder read copies about three points below libvmaf.
  *
  * Brightness is read as it is shown. Video keeps it between 16 and 235, and a
  * level outside them shows as one of them, so it is read as one; a file that
@@ -158,7 +165,11 @@ internal class LumaReader private constructor(
                 format.setInteger(
                     MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
                 )
-                decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                val mime = format.getString(MediaFormat.KEY_MIME)!!
+                val own = androidsOwnDecoder(
+                    mime, format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT)
+                )
+                decoder = if (own != null) MediaCodec.createByCodecName(own) else MediaCodec.createDecoderByType(mime)
                 decoder.configure(format, null, null, 0)
                 decoder.start()
                 LumaReader(extractor, decoder, rotation, levelsOf(format, LIMITED))
@@ -168,6 +179,19 @@ internal class LumaReader private constructor(
                 null
             }
         }
+
+        /**
+         * Android's own decoder for [mime] at [width] x [height], by name; null
+         * when none of them takes it, and the phone's default decodes it.
+         */
+        private fun androidsOwnDecoder(mime: String, width: Int, height: Int): String? = runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull { info ->
+                val name = info.name.lowercase(Locale.ROOT)
+                !info.isEncoder && (name.startsWith("c2.android.") || name.startsWith("omx.google.")) &&
+                    info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
+                    info.getCapabilitiesForType(mime).videoCapabilities?.isSizeSupported(width, height) == true
+            }?.name
+        }.getOrNull()
 
         /**
          * The visible part of [image]'s brightness plane, a byte a pixel, each
