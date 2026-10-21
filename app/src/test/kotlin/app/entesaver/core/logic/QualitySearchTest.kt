@@ -105,6 +105,32 @@ class QualitySearchTest {
     }
 
     @Test
+    fun `a copy held to its encoder's most is followed by one asked for less`() {
+        // Android's own AVC encoder takes 12 Mbps at most: asked for 15.7, it
+        // writes 12. Counted as asked for what it was held to, the next copy
+        // is asked for less, not for more in proportion to the shortfall.
+        val ceiling = 12 * mbps
+        val tries = mutableListOf<QualitySearch.Try>()
+        var ask = 15_700_000
+        while (true) {
+            val held = minOf(ask.toLong(), ceiling)
+            tries += QualitySearch.Try(held.toInt(), held, held * 20 / 8, day(held.toDouble()))
+            val step = QualitySearch.next(
+                tries, 86.0, maxBytes = Long.MAX_VALUE, maxVideoBps = ceiling, minAskBps = 150_000, maxTries = 3
+            )
+            if (step is QualitySearch.Step.Encode) {
+                assertTrue("asked for ${step.askedBps}", step.askedBps < ceiling)
+                ask = step.askedBps
+                continue
+            }
+            val kept = tries[(step as QualitySearch.Step.Keep).index]
+            assertTrue("kept copy scores ${kept.score}", kept.score >= 86.0)
+            assertTrue("kept copy is ${kept.videoBps}", kept.videoBps < 10 * mbps)
+            return
+        }
+    }
+
+    @Test
     fun `a copy is not made again at a rate already tried`() {
         val tries = listOf(
             QualitySearch.Try(8_000_000, 8_000_000, 800, 85.9),

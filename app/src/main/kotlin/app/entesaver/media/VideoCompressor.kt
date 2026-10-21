@@ -344,6 +344,9 @@ object VideoCompressor {
         val motion = MotionProbe.read(context, uri, probe.durationMs, MOTION_FPS)
         val share = VideoShare.of(motion?.ti, motion?.meanLuma, screenRecording)
         val start = minOf(BitrateCalc.targetBps(outW, outH, outFps, codec) * share, maxVideoBps.toDouble()).toInt()
+        // The most a rung's encoder takes: a request above it is held to it,
+        // so the search asks for no more and knows a copy can carry no more.
+        fun ceilingOf(attempt: Attempt) = EncoderCaps.maxBitrateBps(codecMime, outW, outH, outFps, attempt.software)
 
         var outOfTime = false
         var detail = ""
@@ -386,7 +389,8 @@ object VideoCompressor {
             val upright = storedUpright &&
                 EncoderCaps.takesAsStored(codecMime, probe.width, probe.height, outFps, rungs.first().software)
             val found = excerptRate(
-                context, uri, probe, windows, start, maxVideoBps, codecMime, rungs.first(), budgetEndsAt, tempDir, ext,
+                context, uri, probe, windows, start, maxVideoBps, ceilingOf(rungs.first()), codecMime, rungs.first(),
+                budgetEndsAt, tempDir, ext,
                 muxer = { same.muxerFactory() }, operatingRate = operatingRateFor(outFps),
                 softwareDecoding = softwareDecoding, upright = upright
             )
@@ -411,6 +415,8 @@ object VideoCompressor {
         search@ while (true) {
             var made: CompressResult? = null
             var madeVideoBps = 0L
+            var madeAsk = ask
+            var madeCeiling: Long? = null
             val tryStarted = System.currentTimeMillis()
             while (made == null && rungs.isNotEmpty()) {
                 val attempt = rungs.first()
@@ -423,9 +429,11 @@ object VideoCompressor {
                     break@search
                 }
                 val outFile = File(tempDir, "video_${System.nanoTime()}_${attempt.label}.$ext")
+                val ceiling = ceilingOf(attempt)
+                val asked = ceiling?.let { minOf(ask.toLong(), it).toInt() } ?: ask
                 val export = try {
                     runTransform(
-                        context, uri, outFile, ask, codecMime, attempt, leftMs,
+                        context, uri, outFile, asked, codecMime, attempt, leftMs,
                         audio = audio,
                         muxer = same.muxerFactory(),
                         operatingRate = operatingRateFor(outFps),
@@ -478,6 +486,8 @@ object VideoCompressor {
                 val outBytes = outFile.length()
                 // The picture's own rate: the file's, less the sound this rung writes.
                 madeVideoBps = (outBytes * 8000L / outDur - rungSound).coerceAtLeast(1)
+                madeAsk = asked
+                madeCeiling = ceiling
                 made = CompressResult(
                     outFile,
                     outBytes,
@@ -509,13 +519,14 @@ object VideoCompressor {
                 result.file.delete()
                 break
             }
-            tries += QualitySearch.Try(ask, madeVideoBps, result.bytes, score.vmaf)
+            tries += QualitySearch.Try(madeAsk, madeVideoBps, result.bytes, score.vmaf)
             lastTryMs = System.currentTimeMillis() - tryStarted - readMs
             // How it was made and how it measured, kept with the item (Stager).
             val measured = QualityTarget.describe(score.vmaf, score.lowest, score.phone, tries.size, excerptTries)
             copies += result.copy(reason = "${result.reason};$measured")
             val step = QualitySearch.next(
-                tries, QualityTarget.SEARCH_VMAF, maxBytes, maxVideoBps, BitrateCalc.FLOOR_BPS, QualityTarget.MAX_TRIES
+                tries, QualityTarget.SEARCH_VMAF, maxBytes, minOf(maxVideoBps, madeCeiling ?: Long.MAX_VALUE),
+                BitrateCalc.FLOOR_BPS, QualityTarget.MAX_TRIES
             )
             when (step) {
                 is QualitySearch.Step.Encode -> {
@@ -591,6 +602,7 @@ object VideoCompressor {
         windows: List<LongRange>,
         start: Int,
         maxVideoBps: Long,
+        ceiling: Long?,
         codecMime: String,
         attempt: Attempt,
         budgetEndsAt: Long,
@@ -610,13 +622,14 @@ object VideoCompressor {
             var bytes = 0L
             var ms = 0L
             val scores = mutableListOf<VideoQuality.Score>()
+            val asked = ceiling?.let { minOf(ask.toLong(), it).toInt() } ?: ask
             for ((i, w) in windows.withIndex()) {
                 val leftMs = budgetEndsAt - System.currentTimeMillis()
                 if (leftMs < MIN_ATTEMPT_MS) return null
                 val out = File(tempDir, "excerpt_${System.nanoTime()}.$ext")
                 try {
                     val export = runTransform(
-                        context, uri, out, ask, codecMime, attempt, leftMs,
+                        context, uri, out, asked, codecMime, attempt, leftMs,
                         audio = null,
                         muxer = muxer(),
                         operatingRate = operatingRate,
@@ -642,10 +655,10 @@ object VideoCompressor {
                 }
             }
             val pooled = VideoQuality.pooled(scores) ?: return null
-            tries += QualitySearch.Try(ask, bytes * 8000L / ms.coerceAtLeast(1), bytes, pooled.vmaf)
+            tries += QualitySearch.Try(asked, bytes * 8000L / ms.coerceAtLeast(1), bytes, pooled.vmaf)
             val step = QualitySearch.next(
-                tries, QualityTarget.SEARCH_VMAF, Long.MAX_VALUE, maxVideoBps, BitrateCalc.FLOOR_BPS,
-                QualityTarget.MAX_TRIES
+                tries, QualityTarget.SEARCH_VMAF, Long.MAX_VALUE, minOf(maxVideoBps, ceiling ?: Long.MAX_VALUE),
+                BitrateCalc.FLOOR_BPS, QualityTarget.MAX_TRIES
             )
             when (step) {
                 is QualitySearch.Step.Encode -> ask = step.askedBps

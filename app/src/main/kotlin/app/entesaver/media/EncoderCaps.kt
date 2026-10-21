@@ -145,6 +145,25 @@ object EncoderCaps {
         maxOf(width, height) <= MediaSettings.FULL_HD && anyTakes(softwareEncoders(mime), mime, width, height, fps)
 
     /**
+     * The highest rate an encoder for [mime] - a chip's, or Android's own when
+     * [software] - says it takes for a video of this size and frame rate; null
+     * where none says. Media3 holds a request to it (Android's own AVC
+     * encoder: 12 Mbps), so a copy asked for more comes out the same.
+     */
+    fun maxBitrateBps(mime: String, width: Int, height: Int, fps: Float, software: Boolean): Long? =
+        (if (software) softwareEncoders(mime) else encoders(mime)).mapNotNull { info ->
+            runCatching {
+                val video = info.getCapabilitiesForType(mime).videoCapabilities
+                val rate = fps.toDouble().coerceAtLeast(1.0)
+                if (video.areSizeAndRateSupported(width, height, rate) || video.areSizeAndRateSupported(height, width, rate)) {
+                    video.bitrateRange.upper.toLong()
+                } else {
+                    null
+                }
+            }.getOrNull()
+        }.maxOrNull()
+
+    /**
      * True when an encoder for [mime] takes a video of this size and frame
      * rate in CBR - the mode Android's quality floor (QualityFloor) leaves
      * alone. Many chips have it for HEVC and not for H.264.
