@@ -12,20 +12,35 @@ import java.io.File
  * frames from across the clip.
  *
  * The original is read once ([of]): a frame at each of a few moments spread
- * evenly through it, clear of the first and last, and the frames either side
- * of each, which VMAF's motion term is worked out from. Each copy is then read
- * at the same moments ([score]) - a copy keeps its original's timestamps - so
- * a second or third copy of the same clip costs only its own frames.
+ * evenly through it, clear of the first and last, and the frames just before
+ * and after each, which VMAF's motion term is worked out from. Each copy is
+ * then read at the same moments ([score]) - a copy keeps its original's
+ * timestamps - so a second or third copy of the same clip costs only its own
+ * frames. Where a copy's times run a frame or two off its original's, as an
+ * older Android can read some files' times, the copy is lined up first: at
+ * the moment that moves most, the frame within [SHIFT_FRAMES] either way that
+ * clearly matches best says by how much.
+ *
+ * Frames are read as their decoder gives them (LumaReader): brightness only,
+ * a byte a pixel, which is all VMAF looks at. Where a phone's decoder will not
+ * hand them over that way, the original and its copies are all read instead
+ * as MediaMetadataRetriever's pictures, whose brightness is worked out again
+ * from their colours: the two still compare, though VMAF then reads a little
+ * low, which can only keep a copy larger.
  *
  * A 4K picture is read at 1080p, the most a phone's screen shows of it, which
  * also keeps its frames to the memory of a 1080p clip's; anything smaller -
  * a tall screen recording included, which a phone shows pixel for pixel - is
- * read at its own size.
- * Brightness only, a byte a pixel: VMAF looks at nothing else. A moment whose
- * frames cannot be read is left out; with too few read, there is no score
- * (null), which the caller never takes as a pass.
+ * read at its own size. A moment whose frames cannot be read is left out;
+ * with too few read, there is no score (null), which the caller never takes
+ * as a pass.
  */
-internal class VideoQuality private constructor(private val moments: List<Moment>) {
+internal class VideoQuality private constructor(
+    private val moments: List<Moment>,
+    private val way: Way,
+    /** One frame's time at the clip's own rate. */
+    private val frameUs: Long
+) {
 
     /** What a copy measured: mean and lowest VMAF over the moments, the phone model's mean, and how many were read. */
     data class Score(val vmaf: Double, val lowest: Double, val phone: Double, val moments: Int)
@@ -37,32 +52,88 @@ internal class VideoQuality private constructor(private val moments: List<Moment
      */
     private class Moment(val copyTimeUs: Long, val plane: Vmaf.Plane, val motion2: Double)
 
+    /** How the original was read, which its copies are read the same way as. */
+    private sealed interface Way {
+
+        /** As its decoder gave the frames, from a file whose frames turn [rotation] to be shown. */
+        class Decoded(val rotation: Int) : Way
+
+        /** As MediaMetadataRetriever's pictures, [scaled] down for a large picture. */
+        class Pictures(val scaled: Boolean) : Way
+    }
+
     /** The copy's frames at the original's moments, scored; null when too few could be read. */
-    fun score(copy: File): Score? {
-        val mmr = MediaMetadataRetriever()
-        return try {
-            mmr.setDataSource(copy.absolutePath)
-            val scores = mutableListOf<Double>()
-            for (m in moments) {
-                val plane = planeAt(mmr, m.copyTimeUs, m.plane.width, m.plane.height) ?: continue
-                if (plane.width != m.plane.width || plane.height != m.plane.height) continue
-                scores += Vmaf.score(Vmaf.features(m.plane, plane), m.motion2)
+    fun score(copy: File): Score? = try {
+        when (way) {
+            is Way.Decoded -> LumaReader.open(copy)?.use { reader ->
+                reader.turn = reader.rotation - way.rotation
+                val shiftUs = shiftOf(reader)
+                scored { m -> frameAt(reader, m.copyTimeUs + shiftUs) }
             }
-            // The phone model's score is each moment's, then their mean, as
-            // libvmaf pools it: its curve flattens near the top, so the curve
-            // of the mean would read a little high.
-            if (scores.size < minOf(MIN_MOMENTS, moments.size)) {
-                null
-            } else {
-                Score(scores.average(), scores.min(), scores.map { Vmaf.phone(it) }.average(), scores.size)
+            is Way.Pictures -> {
+                val mmr = MediaMetadataRetriever()
+                try {
+                    mmr.setDataSource(copy.absolutePath)
+                    scored { m -> pictureAt(mmr, m.copyTimeUs, way.scaled) }
+                } finally {
+                    runCatching { mmr.release() }
+                }
             }
-        } catch (e: Exception) {
-            null
-        } catch (e: OutOfMemoryError) {
-            null
-        } finally {
-            runCatching { mmr.release() }
         }
+    } catch (e: Exception) {
+        null
+    } catch (e: OutOfMemoryError) {
+        null
+    }
+
+    /** Each moment scored against the copy's frame at it, as [planeAt] reads that. */
+    private fun scored(planeAt: (Moment) -> Vmaf.Plane?): Score? {
+        val scores = mutableListOf<Double>()
+        for (m in moments) {
+            val plane = planeAt(m) ?: continue
+            if (plane.width != m.plane.width || plane.height != m.plane.height) continue
+            scores += Vmaf.score(Vmaf.features(m.plane, plane), m.motion2)
+        }
+        // The phone model's score is each moment's, then their mean, as
+        // libvmaf pools it: its curve flattens near the top, so the curve
+        // of the mean would read a little high.
+        return if (scores.size < minOf(MIN_MOMENTS, moments.size)) {
+            null
+        } else {
+            Score(scores.average(), scores.min(), scores.map { Vmaf.phone(it) }.average(), scores.size)
+        }
+    }
+
+    /** The copy's frame shown at [timeUs]: the first at or after it, less half a frame. */
+    private fun frameAt(reader: LumaReader, timeUs: Long): Vmaf.Plane? {
+        var plane: Vmaf.Plane? = null
+        reader.read(timeUs - frameUs / 2) { f ->
+            plane = f.plane
+            false
+        }
+        return plane
+    }
+
+    /**
+     * How far the copy's times run from its original's: at the moment that
+     * moves most, from the copy's frame at the moment's own time to the one
+     * within [SHIFT_FRAMES] either way that matches the original's best. None
+     * unless that one matches clearly better - in a still scene none does,
+     * and there the frames are alike anyway.
+     */
+    private fun shiftOf(reader: LumaReader): Long {
+        val m = moments.maxByOrNull { it.motion2 } ?: return 0
+        val near = mutableListOf<Pair<Long, Double>>()
+        val lastUs = m.copyTimeUs + SHIFT_FRAMES * frameUs - frameUs / 2
+        reader.read(m.copyTimeUs - SHIFT_FRAMES * frameUs - frameUs / 2) { f ->
+            if (f.plane.width == m.plane.width && f.plane.height == m.plane.height) {
+                near += f.timeUs to difference(m.plane, f.plane)
+            }
+            f.timeUs < lastUs
+        }
+        val own = near.firstOrNull { it.first >= m.copyTimeUs - frameUs / 2 } ?: return 0
+        val best = near.minByOrNull { it.second } ?: return 0
+        return if (best.second < own.second * CLEARLY) best.first - own.first else 0
     }
 
     companion object {
@@ -87,8 +158,13 @@ internal class VideoQuality private constructor(private val moments: List<Moment
         const val FEWEST = 6
         const val MOST = 12
 
-        /** A picture of more pixels than this is read scaled to within [LONG_SIDE] each way. */
-        private const val MAX_PIXELS = 2_800_000L
+        /** How many frames either way a copy is looked at to line it up with its original. */
+        const val SHIFT_FRAMES = 3
+
+        /** A frame matches clearly better when its difference is under this share of the other's. */
+        private const val CLEARLY = 0.5
+
+        /** A picture read as MediaMetadataRetriever's is scaled to within this each way when large. */
         private const val LONG_SIDE = 1920
 
         /** How many moments a clip of [durationMs] is read at. */
@@ -131,46 +207,128 @@ internal class VideoQuality private constructor(private val moments: List<Moment
             fromStart: Boolean
         ): VideoQuality? {
             if (durationMs <= 0 || windowMs.last <= windowMs.first) return null
-            val stepUs = (1_000_000.0 / (if (fps.isFinite() && fps > 1f) fps else 30f)).toLong()
+            val frameUs = (1_000_000.0 / (if (fps.isFinite() && fps > 1f) fps else 30f)).toLong()
             val startUs = windowMs.first * 1000
             val lengthUs = (windowMs.last - windowMs.first) * 1000
+            val times = (0 until count).map { i -> startUs + (lengthUs * (i + 0.5) / count).toLong() }
+                .filter { it - frameUs >= 0 && it + frameUs < durationMs * 1000 }
+            val needed = minOf(MIN_MOMENTS, count)
+            if (times.size < needed) return null
+            val sinceUs = if (fromStart) startUs else 0L
+            val decoded = guarded {
+                LumaReader.open(context, uri)?.use { reader ->
+                    decodedMoments(reader, times, frameUs, sinceUs).takeIf { it.size >= needed }
+                        ?.let { VideoQuality(it, Way.Decoded(reader.rotation), frameUs) }
+                }
+            }
+            if (decoded != null) return decoded
+            val scaled = width.toLong() * height > LumaReader.MAX_PIXELS
+            return guarded {
+                pictureMoments(context, uri, times, frameUs, sinceUs, scaled).takeIf { it.size >= needed }
+                    ?.let { VideoQuality(it, Way.Pictures(scaled), frameUs) }
+            }
+        }
+
+        private inline fun <T> guarded(block: () -> T?): T? = try {
+            block()
+        } catch (e: Exception) {
+            null
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+
+        /**
+         * The original's moments as its decoder gives them, one pass each: at
+         * each of [times], the first frame shown at or after it, less half a
+         * frame, and the frames just before and after that one - or the next,
+         * where the first is the first read and has none before it. A copy is
+         * read at that frame's own time, less [sinceUs].
+         */
+        private fun decodedMoments(
+            reader: LumaReader,
+            times: List<Long>,
+            frameUs: Long,
+            sinceUs: Long
+        ): List<Moment> {
+            val moments = mutableListOf<Moment>()
+            for (t in times) {
+                val seen = ArrayList<LumaReader.Frame>(4)
+                var here = -1
+                reader.read(t - 2 * frameUs) { f ->
+                    seen += f
+                    if (here < 0 && seen.size >= 2 && f.timeUs >= t - frameUs / 2) {
+                        here = seen.size - 1
+                    } else if (here < 0 && seen.size > 2) {
+                        seen.removeAt(0)
+                    }
+                    here < 0 || seen.size < here + 2
+                }
+                if (here < 1 || seen.size < here + 2) continue
+                val at = seen[here]
+                val moment = momentOf(seen[here - 1].plane, at.plane, seen[here + 1].plane, at.timeUs - sinceUs)
+                moments += moment ?: continue
+            }
+            return moments
+        }
+
+        /** The same as MediaMetadataRetriever's pictures, at each of [times] and a frame either side. */
+        private fun pictureMoments(
+            context: Context,
+            uri: Uri,
+            times: List<Long>,
+            frameUs: Long,
+            sinceUs: Long,
+            scaled: Boolean
+        ): List<Moment> {
             val mmr = MediaMetadataRetriever()
-            return try {
+            try {
                 mmr.setDataSource(context, uri)
                 val moments = mutableListOf<Moment>()
-                for (i in 0 until count) {
-                    val t = startUs + (lengthUs * (i + 0.5) / count).toLong()
-                    if (t - stepUs < 0 || t + stepUs >= durationMs * 1000) continue
-                    val here = planeAt(mmr, t, width, height) ?: continue
-                    val before = planeAt(mmr, t - stepUs, width, height) ?: continue
-                    val after = planeAt(mmr, t + stepUs, width, height) ?: continue
-                    if (listOf(before, after).any { it.width != here.width || it.height != here.height }) continue
-                    val blur = Vmaf.motionBlur(here)
-                    val motion2 = minOf(
-                        Vmaf.motion(Vmaf.motionBlur(before), blur, here.width, here.height),
-                        Vmaf.motion(blur, Vmaf.motionBlur(after), here.width, here.height)
-                    )
-                    moments += Moment(if (fromStart) t - startUs else t, here, motion2)
+                for (t in times) {
+                    val here = pictureAt(mmr, t, scaled) ?: continue
+                    val before = pictureAt(mmr, t - frameUs, scaled) ?: continue
+                    val after = pictureAt(mmr, t + frameUs, scaled) ?: continue
+                    moments += momentOf(before, here, after, t - sinceUs) ?: continue
                 }
-                if (moments.size < minOf(MIN_MOMENTS, count)) null else VideoQuality(moments)
-            } catch (e: Exception) {
-                null
-            } catch (e: OutOfMemoryError) {
-                null
+                return moments
             } finally {
                 runCatching { mmr.release() }
             }
         }
 
+        /** A moment of [here], its motion term from the frames [before] and [after] it. */
+        private fun momentOf(before: Vmaf.Plane, here: Vmaf.Plane, after: Vmaf.Plane, copyTimeUs: Long): Moment? {
+            if (listOf(before, after).any { it.width != here.width || it.height != here.height }) return null
+            val blur = Vmaf.motionBlur(here)
+            val motion2 = minOf(
+                Vmaf.motion(Vmaf.motionBlur(before), blur, here.width, here.height),
+                Vmaf.motion(blur, Vmaf.motionBlur(after), here.width, here.height)
+            )
+            return Moment(copyTimeUs, here, motion2)
+        }
+
+        /** The mean squared difference of two planes, on every fourth pixel each way. */
+        private fun difference(a: Vmaf.Plane, b: Vmaf.Plane): Double {
+            var sum = 0L
+            var n = 0
+            for (y in 0 until a.height step 4) {
+                val row = y * a.width
+                for (x in 0 until a.width step 4) {
+                    val d = (a.pixels[row + x].toInt() and 0xFF) - (b.pixels[row + x].toInt() and 0xFF)
+                    sum += d * d
+                    n++
+                }
+            }
+            return sum.toDouble() / n.coerceAtLeast(1)
+        }
+
         /**
-         * The brightness of the frame shown at [timeUs]: a picture of [width] x
-         * [height] above [MAX_PIXELS] is read scaled down, the same way for
-         * the original and every copy.
+         * The brightness of the picture shown at [timeUs], [scaled] to within
+         * [LONG_SIDE] each way - the same for the original and every copy.
          */
-        private fun planeAt(mmr: MediaMetadataRetriever, timeUs: Long, width: Int, height: Int): Vmaf.Plane? {
-            val big = width.toLong() * height > MAX_PIXELS
+        private fun pictureAt(mmr: MediaMetadataRetriever, timeUs: Long, scaled: Boolean): Vmaf.Plane? {
             val bitmap: Bitmap = (
-                if (big) {
+                if (scaled) {
                     mmr.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST, LONG_SIDE, LONG_SIDE)
                 } else {
                     mmr.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
