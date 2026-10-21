@@ -36,9 +36,11 @@ import java.util.Locale
  * into it. A copy whose editor clipped a level no screen shows, or made a
  * full-range original limited, is then not marked down for it.
  *
- * One decoder serves every frame of a file, and each [read] seeks to the key
- * frame before the time asked for and decodes forward, so a moment and its
- * neighbours come from one pass. A picture of more than [MAX_PIXELS] is
+ * One decoder serves every frame of a file. A [read] decodes on from where the
+ * last stopped when that is the shorter way to the time asked for, and seeks
+ * to the key frame before it when that is: a moment and its neighbours come
+ * from one pass, and the moments of a short clip from about one pass of the
+ * whole of it. A picture of more than [MAX_PIXELS] is
  * halved until it is not, by averaging each 2x2 square, the same way for a
  * copy and its original. A plane lies the way the file stores it, turned by
  * [turn]: a copy's, by how its rotation differs from its original's, so the
@@ -46,6 +48,8 @@ import java.util.Locale
  */
 internal class LumaReader private constructor(
     private val extractor: MediaExtractor,
+    /** The same file and track, to look up key frames without moving [extractor]. */
+    private val probe: MediaExtractor,
     private val decoder: MediaCodec,
     /** How far the file's frames are turned, clockwise, to be shown. */
     val rotation: Int,
@@ -64,20 +68,33 @@ internal class LumaReader private constructor(
     /** Whether a pass ran out of time: a decoder that stalls once is not waited on again. */
     private var stalled = false
 
+    /** Whether the end of the file has been handed to the decoder. */
+    private var inputDone = false
+
+    /** The latest time handed to the decoder, and the latest frame it has shown. */
+    private var queuedUs = Long.MIN_VALUE
+    private var shownUs = Long.MIN_VALUE
+
     /**
-     * Decodes from the key frame before [fromUs] and hands [more] each frame
-     * shown from [fromUs] on, in order, for as long as it returns true. It
-     * stops sooner at the end of the clip, at a frame it cannot read, and
-     * after [PASS_MS], after which it reads nothing more.
+     * Hands [more] each frame shown from [fromUs] on, in order, for as long as
+     * it returns true: decoding on from the last read where nothing it has
+     * shown is past [fromUs] and no key frame lies between, else from the key
+     * frame before [fromUs]. It stops sooner at the end of the clip, at a
+     * frame it cannot read, and after [PASS_MS], after which it reads nothing
+     * more.
      */
     fun read(fromUs: Long, more: (Frame) -> Boolean) {
         if (stalled) return
-        if (started) decoder.flush()
-        started = true
-        extractor.seekTo(fromUs.coerceAtLeast(0), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        if (!started || inputDone || fromUs <= shownUs || keyFrameBefore(fromUs) > queuedUs) {
+            if (started) decoder.flush()
+            started = true
+            inputDone = false
+            queuedUs = Long.MIN_VALUE
+            shownUs = Long.MIN_VALUE
+            extractor.seekTo(fromUs.coerceAtLeast(0), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        }
         val info = MediaCodec.BufferInfo()
         val deadline = System.currentTimeMillis() + PASS_MS
-        var inputDone = false
         while (true) {
             if (System.currentTimeMillis() >= deadline) {
                 stalled = true
@@ -92,7 +109,9 @@ internal class LumaReader private constructor(
                         decoder.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                         inputDone = true
                     } else {
-                        decoder.queueInputBuffer(i, 0, n, extractor.sampleTime, 0)
+                        val sampleUs = extractor.sampleTime
+                        decoder.queueInputBuffer(i, 0, n, sampleUs, 0)
+                        queuedUs = maxOf(queuedUs, sampleUs)
                         extractor.advance()
                     }
                 }
@@ -103,6 +122,7 @@ internal class LumaReader private constructor(
             if (o < 0) continue
             val end = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
             val timeUs = info.presentationTimeUs
+            if (info.size > 0) shownUs = maxOf(shownUs, timeUs)
             val wanted = info.size > 0 && timeUs >= fromUs
             val plane = if (wanted) decoder.getOutputImage(o)?.use { lumaOf(it, levels) } else null
             decoder.releaseOutputBuffer(o, false)
@@ -111,10 +131,17 @@ internal class LumaReader private constructor(
         }
     }
 
+    /** When the key frame at or before [timeUs] is shown. */
+    private fun keyFrameBefore(timeUs: Long): Long {
+        probe.seekTo(timeUs.coerceAtLeast(0), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        return probe.sampleTime
+    }
+
     override fun close() {
         runCatching { decoder.stop() }
         runCatching { decoder.release() }
         runCatching { extractor.release() }
+        runCatching { probe.release() }
     }
 
     companion object {
@@ -149,13 +176,16 @@ internal class LumaReader private constructor(
 
         private fun open(source: MediaExtractor.() -> Unit): LumaReader? {
             val extractor = MediaExtractor()
+            val probe = MediaExtractor()
             var decoder: MediaCodec? = null
             return try {
                 extractor.source()
+                probe.source()
                 val track = (0 until extractor.trackCount).firstOrNull {
                     extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
                 } ?: throw IllegalStateException("no picture")
                 extractor.selectTrack(track)
+                probe.selectTrack(track)
                 val format = extractor.getTrackFormat(track)
                 val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
                     format.getInteger(MediaFormat.KEY_ROTATION)
@@ -172,10 +202,11 @@ internal class LumaReader private constructor(
                 decoder = if (own != null) MediaCodec.createByCodecName(own) else MediaCodec.createDecoderByType(mime)
                 decoder.configure(format, null, null, 0)
                 decoder.start()
-                LumaReader(extractor, decoder, rotation, levelsOf(format, LIMITED))
+                LumaReader(extractor, probe, decoder, rotation, levelsOf(format, LIMITED))
             } catch (e: Exception) {
                 runCatching { decoder?.release() }
                 runCatching { extractor.release() }
+                runCatching { probe.release() }
                 null
             }
         }

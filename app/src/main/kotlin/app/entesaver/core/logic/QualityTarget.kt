@@ -17,9 +17,9 @@ import kotlin.math.roundToInt
  * 100 on the phone model, and a copy at the target sits within those
  * fractions of a point, which no one sees.
  *
- * The phone reads a dozen frames of a clip, not every one, so the search aims
- * [MARGIN] above the target ([SEARCH_VMAF]): what the benchmark then measures
- * over every frame lands at the target or over it.
+ * The phone reads two dozen frames of a clip, not every one, so the search
+ * aims [MARGIN] above the target ([SEARCH_VMAF]): what the benchmark then
+ * measures over every frame lands at the target or over it.
  */
 object QualityTarget {
 

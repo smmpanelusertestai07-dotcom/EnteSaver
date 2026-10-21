@@ -20,8 +20,8 @@ object Excerpts {
     const val COUNT = 3
     const val LENGTH_MS = 10_000L
 
-    /** How many moments of each stretch are scored. */
-    const val MOMENTS_EACH = 4
+    /** How many moments of each stretch are scored: two dozen across the three, as for a whole clip. */
+    const val MOMENTS_EACH = 8
 
     /**
      * The stretches of a clip of [durationMs], each from its first to its

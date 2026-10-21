@@ -11,12 +11,21 @@ import java.io.File
  * How a copy of a video looks beside its original, measured: VMAF ([Vmaf]) on
  * frames from across the clip.
  *
- * The original is read once ([of]): a frame at each of a few moments spread
+ * The original is read once ([of]): a frame at each of [MOMENTS] moments spread
  * evenly through it, clear of the first and last, and the frames just before
  * and after each, which VMAF's motion term is worked out from. Each copy is
  * then read at the same moments ([score]) - a copy keeps its original's
  * timestamps - so a second or third copy of the same clip costs only its own
- * frames. Where a copy's times run a frame or two off its original's, as an
+ * frames.
+ *
+ * An encoder takes turns between kinds of frame - a full one, then one it
+ * spends less on - and a copy's frames read a few points apart by turns. On
+ * the savings benchmark's clips, moments an even number of frames apart all
+ * fell on the same kind: six moments of a 20-second clip read 94 where every
+ * frame read 90, twelve read 85. So each moment is moved on by up to
+ * [PHASES] - 1 frames, in turn, and every place in a turn of up to [PHASES]
+ * frames is read as often. Fewer moments are read where the app's memory
+ * would not hold them (planesFor). Where a copy's times run a frame or two off its original's, as an
  * older Android can read some files' times, the copy is lined up first: at
  * the moment that moves most, the frame within [SHIFT_FRAMES] either way that
  * clearly matches best says by how much.
@@ -153,10 +162,18 @@ internal class VideoQuality private constructor(
         /** Fewer moments read than this, and a copy has no score. */
         const val MIN_MOMENTS = 4
 
-        /** One moment for every this many seconds of clip, between [FEWEST] and [MOST]. */
-        private const val SECONDS_PER_MOMENT = 3.0
-        const val FEWEST = 6
-        const val MOST = 12
+        /**
+         * How many moments a clip is read at. On the benchmark's clips, the
+         * mean of 24 came within half a point of every frame's (one standard
+         * deviation), of 12 within one.
+         */
+        const val MOMENTS = 24
+
+        /** Moments are moved on by 0 to this many frames less one, in turn. */
+        const val PHASES = 4
+
+        /** The original's moments may take up this share of the app's memory at most: a quarter. */
+        private const val MEMORY_SHARE = 4
 
         /** How many frames either way a copy is looked at to line it up with its original. */
         const val SHIFT_FRAMES = 3
@@ -167,17 +184,26 @@ internal class VideoQuality private constructor(
         /** A picture read as MediaMetadataRetriever's is scaled to within this each way when large. */
         private const val LONG_SIDE = 1920
 
-        /** How many moments a clip of [durationMs] is read at. */
-        fun momentsFor(durationMs: Long): Int =
-            (durationMs / 1000.0 / SECONDS_PER_MOMENT).toInt().coerceIn(FEWEST, MOST)
+        /**
+         * How many moments of a [width] x [height] picture this phone holds:
+         * [MOMENTS], or as many as fit in [MEMORY_SHARE] of the memory the app
+         * may use, a byte a pixel as read (a large picture halved) - never
+         * fewer than [MIN_MOMENTS].
+         */
+        fun planesFor(width: Int, height: Int, maxMemoryBytes: Long = Runtime.getRuntime().maxMemory()): Int {
+            var pixels = width.toLong() * height
+            while (pixels > LumaReader.MAX_PIXELS) pixels /= 4
+            val fit = maxMemoryBytes / MEMORY_SHARE / pixels.coerceAtLeast(1)
+            return fit.coerceIn(MIN_MOMENTS.toLong(), MOMENTS.toLong()).toInt()
+        }
 
         /**
-         * The original at [uri], read at [momentsFor] moments of its
+         * The original at [uri], read at [planesFor] moments of its
          * [durationMs], frames [fps] apart for the motion term; null when too
          * few moments could be read.
          */
         fun of(context: Context, uri: Uri, durationMs: Long, fps: Float, width: Int, height: Int): VideoQuality? =
-            read(context, uri, 0..durationMs, durationMs, momentsFor(durationMs), fps, width, height, fromStart = false)
+            read(context, uri, 0..durationMs, durationMs, planesFor(width, height), fps, width, height, fromStart = false)
 
         /**
          * The same for a copy of one stretch of the original, from the first
@@ -210,7 +236,8 @@ internal class VideoQuality private constructor(
             val frameUs = (1_000_000.0 / (if (fps.isFinite() && fps > 1f) fps else 30f)).toLong()
             val startUs = windowMs.first * 1000
             val lengthUs = (windowMs.last - windowMs.first) * 1000
-            val times = (0 until count).map { i -> startUs + (lengthUs * (i + 0.5) / count).toLong() }
+            val times = (0 until count)
+                .map { i -> startUs + (lengthUs * (i + 0.5) / count).toLong() + i % PHASES * frameUs }
                 .filter { it - frameUs >= 0 && it + frameUs < durationMs * 1000 }
             val needed = minOf(MIN_MOMENTS, count)
             if (times.size < needed) return null
