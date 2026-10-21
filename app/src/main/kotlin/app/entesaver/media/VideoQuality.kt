@@ -48,11 +48,13 @@ internal class VideoQuality private constructor(private val moments: List<Moment
                 if (plane.width != m.plane.width || plane.height != m.plane.height) continue
                 scores += Vmaf.score(Vmaf.features(m.plane, plane), m.motion2)
             }
+            // The phone model's score is each moment's, then their mean, as
+            // libvmaf pools it: its curve flattens near the top, so the curve
+            // of the mean would read a little high.
             if (scores.size < minOf(MIN_MOMENTS, moments.size)) {
                 null
             } else {
-                val mean = scores.average()
-                Score(mean, scores.min(), Vmaf.phone(mean), scores.size)
+                Score(scores.average(), scores.min(), scores.map { Vmaf.phone(it) }.average(), scores.size)
             }
         } catch (e: Exception) {
             null
@@ -69,8 +71,12 @@ internal class VideoQuality private constructor(private val moments: List<Moment
         fun pooled(scores: List<Score>): Score? {
             val moments = scores.sumOf { it.moments }
             if (moments == 0) return null
-            val mean = scores.sumOf { it.vmaf * it.moments } / moments
-            return Score(mean, scores.minOf { it.lowest }, Vmaf.phone(mean), moments)
+            return Score(
+                scores.sumOf { it.vmaf * it.moments } / moments,
+                scores.minOf { it.lowest },
+                scores.sumOf { it.phone * it.moments } / moments,
+                moments
+            )
         }
 
         /** Fewer moments read than this, and a copy has no score. */
