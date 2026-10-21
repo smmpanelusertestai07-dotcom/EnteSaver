@@ -402,9 +402,9 @@ object VideoCompressor {
             }
         }
         // The original, read once at the moments every copy of the whole clip
-        // is scored at - after any stretches, so the two are never both held.
-        val quality = VideoQuality.of(context, uri, probe.durationMs, probe.fps, probe.width, probe.height)
-            ?: return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, QUALITY_UNREAD)
+        // is scored at - after any stretches, so the two are never both held -
+        // and in its copies' colour, so once the first copy says what that is.
+        var quality: VideoQuality? = null
         // How long the last copy took to make and score: the next is not
         // started without that much time left, and a fifth more.
         var lastTryMs = 0L
@@ -490,6 +490,19 @@ object VideoCompressor {
                 )
             }
             val result = made ?: break
+            val look = LumaReader.colourOf(result.file)
+            var readMs = 0L
+            if (quality == null || quality.look != look) {
+                val readStarted = System.currentTimeMillis()
+                quality = null
+                quality = VideoQuality.of(context, uri, probe.durationMs, probe.fps, probe.width, probe.height, look)
+                if (quality == null) {
+                    result.file.delete()
+                    drop(null)
+                    return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, QUALITY_UNREAD)
+                }
+                readMs = System.currentTimeMillis() - readStarted
+            }
             val score = quality.score(result.file)
             if (score == null) {
                 detail = "${result.reason}: its frames could not be read back to score it"
@@ -497,7 +510,7 @@ object VideoCompressor {
                 break
             }
             tries += QualitySearch.Try(ask, madeVideoBps, result.bytes, score.vmaf)
-            lastTryMs = System.currentTimeMillis() - tryStarted
+            lastTryMs = System.currentTimeMillis() - tryStarted - readMs
             // How it was made and how it measured, kept with the item (Stager).
             val measured = QualityTarget.describe(score.vmaf, score.lowest, score.phone, tries.size, excerptTries)
             copies += result.copy(reason = "${result.reason};$measured")
@@ -588,11 +601,9 @@ object VideoCompressor {
         softwareDecoding: Boolean,
         upright: Boolean
     ): ExcerptRate? {
-        val originals = windows.map { w ->
-            VideoQuality.ofWindow(
-                context, uri, w, probe.durationMs, Excerpts.MOMENTS_EACH, probe.fps, probe.width, probe.height
-            ) ?: return null
-        }
+        // The stretches of the original, read in their copies' colour once
+        // the first copy says what that is (VideoQuality).
+        var originals: List<VideoQuality>? = null
         val tries = mutableListOf<QualitySearch.Try>()
         var ask = start
         while (true) {
@@ -617,7 +628,15 @@ object VideoCompressor {
                     if (export == null || !out.exists()) return null
                     bytes += out.length()
                     ms += w.last - w.first
-                    scores += originals[i].score(out) ?: return null
+                    val read = originals ?: LumaReader.colourOf(out).let { look ->
+                        windows.map { v ->
+                            VideoQuality.ofWindow(
+                                context, uri, v, probe.durationMs, Excerpts.MOMENTS_EACH, probe.fps, probe.width,
+                                probe.height, look
+                            ) ?: return null
+                        }
+                    }.also { originals = it }
+                    scores += read[i].score(out) ?: return null
                 } finally {
                     out.delete()
                 }

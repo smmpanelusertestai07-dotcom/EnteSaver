@@ -36,7 +36,10 @@ import kotlin.math.roundToLong
  * clearly matches best says by how much.
  *
  * Frames are read as their decoder gives them (LumaReader): brightness only,
- * a byte a pixel, which is all VMAF looks at. Where a phone's decoder will not
+ * a byte a pixel, which is all VMAF looks at - the original's in its copies'
+ * colour ([look]), as the savings benchmark's ffmpeg brings it before its
+ * libvmaf compares the two (Recolour), so it is read once its first copy says
+ * what that is. Where a phone's decoder will not
  * hand them over that way, the original and its copies are all read instead
  * as MediaMetadataRetriever's pictures, whose brightness is worked out again
  * from their colours: the two still compare, though VMAF then reads a little
@@ -53,7 +56,9 @@ internal class VideoQuality private constructor(
     private val moments: List<Moment>,
     private val way: Way,
     /** One frame's time at the clip's own rate. */
-    private val frameUs: Long
+    private val frameUs: Long,
+    /** The colour of the copies the original was read for (LumaReader.colourOf); null for as stored. */
+    val look: LumaReader.Colour?
 ) {
 
     /** What a copy measured: mean and lowest VMAF over the moments, the phone model's mean, and how many were read. */
@@ -76,13 +81,17 @@ internal class VideoQuality private constructor(
         class Pictures(val scaled: Boolean) : Way
     }
 
-    /** The copy's frames at the original's moments, scored; null when too few could be read. */
+    /**
+     * The copy's frames at the original's moments, scored; null when too few
+     * could be read, or the copy is not of the colour the original was read in.
+     */
     fun score(copy: File): Score? = try {
         when (way) {
             is Way.Decoded -> LumaReader.open(copy)?.use { reader ->
                 reader.turn = reader.rotation - way.rotation
                 val shiftUs = shiftOf(reader)
                 if (BuildConfig.DEBUG) Log.d(TAG, "copy ${copy.name}: shift $shiftUs us, turn ${reader.turn}")
+                if (look != null && reader.colour != look) return null
                 scored { m -> frameAt(reader, m.copyTimeUs + shiftUs) }
             }
             is Way.Pictures -> {
@@ -214,12 +223,21 @@ internal class VideoQuality private constructor(
         }
 
         /**
-         * The original at [uri], read at [planesFor] moments of its
-         * [durationMs], frames [fps] apart for the motion term; null when too
-         * few moments could be read.
+         * The original at [uri], read in its copies' colour [look] at
+         * [planesFor] moments of its [durationMs], frames [fps] apart for the
+         * motion term; null when too few moments could be read.
          */
-        fun of(context: Context, uri: Uri, durationMs: Long, fps: Float, width: Int, height: Int): VideoQuality? =
-            read(context, uri, 0..durationMs, durationMs, planesFor(width, height), fps, width, height, fromStart = false)
+        fun of(
+            context: Context,
+            uri: Uri,
+            durationMs: Long,
+            fps: Float,
+            width: Int,
+            height: Int,
+            look: LumaReader.Colour? = null
+        ): VideoQuality? = read(
+            context, uri, 0..durationMs, durationMs, planesFor(width, height), fps, width, height, fromStart = false, look
+        )
 
         /**
          * The same for a copy of one stretch of the original, from the first
@@ -234,8 +252,9 @@ internal class VideoQuality private constructor(
             count: Int,
             fps: Float,
             width: Int,
-            height: Int
-        ): VideoQuality? = read(context, uri, windowMs, durationMs, count, fps, width, height, fromStart = true)
+            height: Int,
+            look: LumaReader.Colour? = null
+        ): VideoQuality? = read(context, uri, windowMs, durationMs, count, fps, width, height, fromStart = true, look)
 
         private fun read(
             context: Context,
@@ -246,7 +265,8 @@ internal class VideoQuality private constructor(
             fps: Float,
             width: Int,
             height: Int,
-            fromStart: Boolean
+            fromStart: Boolean,
+            look: LumaReader.Colour?
         ): VideoQuality? {
             if (durationMs <= 0 || windowMs.last <= windowMs.first) return null
             val frameUs = (1_000_000.0 / (if (fps.isFinite() && fps > 1f) fps else 30f)).toLong()
@@ -259,15 +279,16 @@ internal class VideoQuality private constructor(
             val sinceUs = if (fromStart) startUs else 0L
             val decoded = guarded {
                 LumaReader.open(context, uri)?.use { reader ->
+                    reader.into = look
                     decodedMoments(reader, times, frameUs, sinceUs).takeIf { it.size >= needed }
-                        ?.let { VideoQuality(it, Way.Decoded(reader.rotation), frameUs) }
+                        ?.let { VideoQuality(it, Way.Decoded(reader.rotation), frameUs, look) }
                 }
             }
             if (decoded != null) return decoded
             val scaled = width.toLong() * height > LumaReader.MAX_PIXELS
             return guarded {
                 pictureMoments(context, uri, times, frameUs, sinceUs, scaled).takeIf { it.size >= needed }
-                    ?.let { VideoQuality(it, Way.Pictures(scaled), frameUs) }
+                    ?.let { VideoQuality(it, Way.Pictures(scaled), frameUs, look) }
             }
         }
 

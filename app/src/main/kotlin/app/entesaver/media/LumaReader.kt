@@ -8,6 +8,7 @@ import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import app.entesaver.core.logic.Recolour
 import app.entesaver.core.logic.Vmaf
 import java.io.Closeable
 import java.io.File
@@ -30,11 +31,12 @@ import java.util.Locale
  * chip's, or an emulator's, need not: on the savings benchmark's emulator its
  * host decoder read copies about three points below libvmaf.
  *
- * Brightness is read as it is shown. Video keeps it between 16 and 235, and a
- * level outside them shows as one of them, so it is read as one; a file that
- * says it fills the whole range (some phones' cameras do) is read squeezed
- * into it. A copy whose editor clipped a level no screen shows, or made a
- * full-range original limited, is then not marked down for it.
+ * Brightness is read as stored, as libvmaf takes it - or, set [into] another
+ * file's colour (Colour), as it reads in that one: an original in its copy's,
+ * as ffmpeg brings it before the savings benchmark's libvmaf compares the two
+ * (Recolour). A copy that shows its original's colours by other proportions
+ * of red, green and blue, as Media3 writes a file that names none, is then not
+ * marked down for it.
  *
  * One decoder serves every frame of a file. A [read] decodes on from where the
  * last stopped when that is the shorter way to the time asked for, and seeks
@@ -53,9 +55,43 @@ internal class LumaReader private constructor(
     private val decoder: MediaCodec,
     /** How far the file's frames are turned, clockwise, to be shown. */
     val rotation: Int,
-    /** Each stored level as it is shown (LIMITED or FULL). */
-    private var levels: ByteArray
+    /** The file's colour: the container's word, then the decoder's (from the stream itself). */
+    colour: Colour
 ) : Closeable {
+
+    /**
+     * How a file's levels stand for colours, from MediaFormat: the proportions
+     * of red, green and blue its brightness is worked out from ([standard],
+     * a COLOR_STANDARD_), the range its levels fill ([range]) and how bright
+     * they are ([transfer]) - each 0 where the file does not say.
+     */
+    data class Colour(val standard: Int, val range: Int, val transfer: Int) {
+
+        /** As far as brightness goes; null for HDR, which is read as stored. */
+        val space: Recolour.Space?
+            get() = if (transfer == MediaFormat.COLOR_TRANSFER_ST2084 || transfer == MediaFormat.COLOR_TRANSFER_HLG) {
+                null
+            } else {
+                Recolour.Space(
+                    when (standard) {
+                        MediaFormat.COLOR_STANDARD_BT709 -> Recolour.Matrix.BT709
+                        MediaFormat.COLOR_STANDARD_BT2020 -> Recolour.Matrix.BT2020
+                        else -> Recolour.Matrix.BT601
+                    },
+                    range == MediaFormat.COLOR_RANGE_FULL
+                )
+            }
+    }
+
+    /** The file's colour, the decoder's word on it once it has one. */
+    var colour: Colour = colour
+        private set
+
+    /** The colour frames are read in: null, or the file's own, for as stored. */
+    var into: Colour? = null
+
+    /** How this file's levels read in [into], for the pair it was worked out for. */
+    private var change: Pair<Pair<Colour, Colour?>, Recolour.Change?>? = null
 
     /** One frame: when it is shown, and its brightness. */
     class Frame(val timeUs: Long, val plane: Vmaf.Plane)
@@ -117,18 +153,29 @@ internal class LumaReader private constructor(
                 }
             }
             val o = decoder.dequeueOutputBuffer(info, WAIT_US)
-            // The decoder's word on the range, from the stream itself, over the container's.
-            if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) levels = levelsOf(decoder.outputFormat, levels)
+            // The decoder's word on the colour, from the stream itself, over the container's.
+            if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) colour = colourOf(decoder.outputFormat, colour)
             if (o < 0) continue
             val end = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
             val timeUs = info.presentationTimeUs
             if (info.size > 0) shownUs = maxOf(shownUs, timeUs)
             val wanted = info.size > 0 && timeUs >= fromUs
-            val plane = if (wanted) decoder.getOutputImage(o)?.use { lumaOf(it, levels) } else null
+            val plane = if (wanted) decoder.getOutputImage(o)?.use { lumaOf(it, currentChange()) } else null
             decoder.releaseOutputBuffer(o, false)
             if (wanted && (plane == null || !more(Frame(timeUs, turned(plane, turn))))) return
             if (end) return
         }
+    }
+
+    /** How this file's levels read in [into]: null where as stored. */
+    private fun currentChange(): Recolour.Change? {
+        val key = colour to into
+        change?.let { if (it.first == key) return it.second }
+        val from = colour.space
+        val to = into?.space
+        val worked = if (from == null || to == null) null else Recolour.change(from, to)
+        change = key to worked
+        return worked
     }
 
     /** When the key frame at or before [timeUs] is shown. */
@@ -154,20 +201,28 @@ internal class LumaReader private constructor(
         /** The longest one [read] may take. */
         private const val PASS_MS = 20_000L
 
-        /** A limited-range level as it is shown: 16 to 235, anything outside them as the nearer. */
-        private val LIMITED = ByteArray(256) { it.coerceIn(16, 235).toByte() }
+        /** [format]'s word on the colour, each part of it over [otherwise]'s. */
+        private fun colourOf(format: MediaFormat, otherwise: Colour): Colour {
+            fun key(name: String, was: Int) = if (format.containsKey(name)) format.getInteger(name) else was
+            return Colour(
+                key(MediaFormat.KEY_COLOR_STANDARD, otherwise.standard),
+                key(MediaFormat.KEY_COLOR_RANGE, otherwise.range),
+                key(MediaFormat.KEY_COLOR_TRANSFER, otherwise.transfer)
+            )
+        }
 
-        /** A full-range level squeezed into 16 to 235, as a limited-range file would hold it. */
-        private val FULL = ByteArray(256) { (16 + (it * 219 + 127) / 255).toByte() }
-
-        private fun levelsOf(format: MediaFormat, otherwise: ByteArray): ByteArray =
-            if (!format.containsKey(MediaFormat.KEY_COLOR_RANGE)) {
-                otherwise
-            } else if (format.getInteger(MediaFormat.KEY_COLOR_RANGE) == MediaFormat.COLOR_RANGE_FULL) {
-                FULL
-            } else {
-                LIMITED
+        /**
+         * The colour of the video in [file] as its decoder reads it, from its
+         * first frame; null when it cannot be read.
+         */
+        fun colourOf(file: File): Colour? = open(file)?.use { reader ->
+            var read = false
+            reader.read(0) {
+                read = true
+                false
             }
+            reader.colour.takeIf { read }
+        }
 
         /** The video at [uri], ready to read; null when no decoder here will take it. */
         fun open(context: Context, uri: Uri): LumaReader? = open { setDataSource(context, uri, null) }
@@ -202,7 +257,7 @@ internal class LumaReader private constructor(
                 decoder = if (own != null) MediaCodec.createByCodecName(own) else MediaCodec.createDecoderByType(mime)
                 decoder.configure(format, null, null, 0)
                 decoder.start()
-                LumaReader(extractor, probe, decoder, rotation, levelsOf(format, LIMITED))
+                LumaReader(extractor, probe, decoder, rotation, colourOf(format, Colour(0, 0, 0)))
             } catch (e: Exception) {
                 runCatching { decoder?.release() }
                 runCatching { extractor.release() }
@@ -226,11 +281,13 @@ internal class LumaReader private constructor(
 
         /**
          * The visible part of [image]'s brightness plane, a byte a pixel, each
-         * level as [levels] shows it; of a 10-bit frame (P010, two bytes a
-         * pixel), the top eight bits, which are its second byte. Null when it
-         * cannot be read.
+         * level as [change] reads it - where it changes the proportions, from
+         * the pixel's colour too, each colour level covering its square of
+         * four; of a 10-bit frame (P010, two bytes a pixel), the top eight
+         * bits, which are its second byte, as stored. Null when it cannot be
+         * read.
          */
-        private fun lumaOf(image: Image, levels: ByteArray): Vmaf.Plane? = try {
+        private fun lumaOf(image: Image, change: Recolour.Change?): Vmaf.Plane? = try {
             val y = image.planes.first()
             val crop = image.cropRect
             val w = crop.width()
@@ -240,18 +297,52 @@ internal class LumaReader private constructor(
             } else {
                 val step = y.pixelStride
                 val high = if (step == 2) 1 else 0
+                val through = (change as? Recolour.Through)?.takeIf { step == 1 && image.planes.size >= 3 }
+                val levels = (change as? Recolour.Levels)?.table?.takeIf { step == 1 }
                 val buffer = y.buffer
                 val out = ByteArray(w * h)
                 val row = ByteArray(w * step)
+                val u = image.planes.getOrNull(1)
+                val v = image.planes.getOrNull(2)
+                val left = crop.left / 2
+                val cw = (crop.left + w + 1) / 2 - left
+                val uRow = ByteArray(if (through != null) (cw - 1) * u!!.pixelStride + 1 else 0)
+                val vRow = ByteArray(if (through != null) (cw - 1) * v!!.pixelStride + 1 else 0)
                 for (r in 0 until h) {
                     buffer.position((crop.top + r) * y.rowStride + crop.left * step)
                     buffer.get(row, 0, minOf(row.size, buffer.remaining()))
-                    for (c in 0 until w) out[r * w + c] = levels[row[c * step + high].toInt() and 0xFF]
+                    val o = r * w
+                    if (through != null) {
+                        val cr = (crop.top + r) / 2
+                        if (r == 0 || cr != (crop.top + r - 1) / 2) {
+                            rowOf(u!!, cr, left, uRow)
+                            rowOf(v!!, cr, left, vRow)
+                        }
+                        val us = u!!.pixelStride
+                        val vs = v!!.pixelStride
+                        for (c in 0 until w) {
+                            val k = (crop.left + c) / 2 - left
+                            out[o + c] = through.luma(
+                                row[c].toInt() and 0xFF, uRow[k * us].toInt() and 0xFF, vRow[k * vs].toInt() and 0xFF
+                            ).toByte()
+                        }
+                    } else if (levels != null) {
+                        for (c in 0 until w) out[o + c] = levels[row[c].toInt() and 0xFF]
+                    } else {
+                        for (c in 0 until w) out[o + c] = row[c * step + high]
+                    }
                 }
                 halved(Vmaf.Plane(out, w, h))
             }
         } catch (e: RuntimeException) {
             null
+        }
+
+        /** Row [r] of colour [plane], from its column [left], into [into]. */
+        private fun rowOf(plane: Image.Plane, r: Int, left: Int, into: ByteArray) {
+            val buffer = plane.buffer
+            buffer.position(r * plane.rowStride + left * plane.pixelStride)
+            buffer.get(into, 0, minOf(into.size, buffer.remaining()))
         }
 
         /** [plane] halved, by 2x2 averages, until it has no more than [MAX_PIXELS]. */
