@@ -131,6 +131,18 @@ class QualitySearchTest {
     }
 
     @Test
+    fun `a copy over the most only for its weight is followed by one at the most`() {
+        // Asked for the most a copy may carry, the encoder came out a tenth
+        // above it: the copy reached the target but weighed too much. That
+        // says nothing of a copy at the most itself, which is made next.
+        val tries = listOf(QualitySearch.Try(1_796_218, 2_010_000, 5_300_000, 89.77))
+        val step = QualitySearch.next(
+            tries, 87.0, maxBytes = 4_910_380, maxVideoBps = 1_796_218, minAskBps = 150_000, maxTries = 3
+        )
+        assertTrue("got $step", step is QualitySearch.Step.Encode && step.askedBps < 1_796_218)
+    }
+
+    @Test
     fun `a copy is not made again at a rate already tried`() {
         val tries = listOf(
             QualitySearch.Try(8_000_000, 8_000_000, 800, 85.9),

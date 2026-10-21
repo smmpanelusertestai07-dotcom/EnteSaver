@@ -91,10 +91,14 @@ object QualitySearch {
         var next = rate
         if (next > maxVideoBps) {
             // The target lies above the most a copy may carry: one try at that
-            // most, unless a try has been made close to it already.
-            val top = tries.maxOf { it.videoBps }
+            // most, unless a try close to it, or above it, already fell short.
+            // One above it that reached the target and was only too heavy - an
+            // encoder that came out above what it was asked - says nothing of
+            // the most itself.
             if (best != null) return Step.Keep(best)
-            if (top >= maxVideoBps * (1 - SAME_RATE)) return Step.Original
+            if (tries.any { it.videoBps >= maxVideoBps * (1 - SAME_RATE) && it.score < target + AIM_ABOVE }) {
+                return Step.Original
+            }
             next = maxVideoBps.toDouble()
         }
         if (tries.any { abs(it.videoBps - next) <= it.videoBps * SAME_RATE }) {
