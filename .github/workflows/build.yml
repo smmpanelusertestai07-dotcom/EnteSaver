@@ -274,8 +274,11 @@ jobs:
           Makes your photos and videos smaller on the phone, each at the quality
           its picture needs. A photo comes down to 16 MP at most, as in Google
           Photos' Storage saver. A video keeps its codec, size, frame rate,
-          sound, date and place; only its bitrate changes. Every file keeps its
-          format, name, album and dates, and a file is never made smaller twice.
+          sound, date and place; only its bitrate changes, and only as far as it
+          still looks like the original: every copy is measured against its
+          original on the phone (VMAF) and kept only when it does. Every file
+          keeps its format, name, album and dates, and a file is never made
+          smaller twice.
 
           Two ways to save space, in Settings › Saving space:
           - Replace on this phone (the default): the smaller version takes the
