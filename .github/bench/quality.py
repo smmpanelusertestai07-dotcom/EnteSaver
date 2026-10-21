@@ -369,6 +369,7 @@ def main():
     print(f"VMAF: {tool}", flush=True)
     diag = os.environ.get("DIAG") == "true"
     diag_left = 3
+    diag_files_left = 1
     diag_dir = os.path.join(a.out, "diag")
     if diag:
         os.makedirs(diag_dir, exist_ok=True)
@@ -411,6 +412,11 @@ def main():
                     shutil.copyfile(os.path.join(work, "vmaf.json"), base + ".frames.json")
                     frame_digests(src, s["width"], s["height"], base + ".orig.csv")
                     frame_digests(app, d["width"], d["height"], base + ".copy.csv")
+                    if diag_files_left > 0 and os.path.getsize(src) < 120_000_000:
+                        # The two files themselves, for the first of them.
+                        diag_files_left -= 1
+                        shutil.copyfile(src, base + ".orig" + os.path.splitext(src)[1])
+                        shutil.copyfile(app, base + ".copy" + os.path.splitext(app)[1])
                 # The reference is made from the original here, frame for frame.
                 want = measure("ffmpeg", vmaf, ref, src, rp, s, work, search=False)
                 shot = os.path.join(frames_dir, re.sub(r"[^A-Za-z0-9._-]", "_", m["name"]) + ".jpg")
