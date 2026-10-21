@@ -352,7 +352,12 @@ object VideoCompressor {
         // Media3 the last frames of a clip, and it ends the copy without them
         // ("frames" below). The copy is then made again, and every one after
         // it, with Android's own software decoder, which hands over every one.
-        var softwareDecoding = false
+        // The savings benchmark decodes with Android's own from the start: its
+        // emulator's decoder is its host's, which a phone does not have and
+        // which does not hand over the frames as the file holds them (the pilot
+        // read its frames three points below libvmaf), where a phone's chip,
+        // like Android's own, decodes them as the standard says.
+        var softwareDecoding = BuildConfig.DEBUG && EncoderCaps.softwareForBenchmark
         // A picture stored upright with no rotation - most screen recordings,
         // reels and forwards - is written upright too, where the encoder takes
         // it that way round. Otherwise Media3 lays it on its side and marks
