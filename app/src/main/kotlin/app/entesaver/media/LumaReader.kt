@@ -31,12 +31,14 @@ import java.util.Locale
  * chip's, or an emulator's, need not: on the savings benchmark's emulator its
  * host decoder read copies about three points below libvmaf.
  *
- * Brightness is read as stored, as libvmaf takes it - or, set [into] another
- * file's colour (Colour), as it reads in that one: an original in its copy's,
- * as ffmpeg brings it before the savings benchmark's libvmaf compares the two
- * (Recolour). A copy that shows its original's colours by other proportions
- * of red, green and blue, as Media3 writes a file that names none, is then not
- * marked down for it.
+ * Brightness is read as it is shown: video keeps it between 16 and 235, and a
+ * level outside them shows as one of them, so it is read as one - a copy whose
+ * editor clipped a level no screen shows is not marked down for it. Set [into]
+ * another file's colour (Colour), a frame is read as it shows in that one: an
+ * original in its copy's, as ffmpeg brings it before the savings benchmark's
+ * libvmaf compares the two (Recolour). A copy that shows its original's
+ * colours by other proportions of red, green and blue, as Media3 writes a file
+ * that names none, is then not marked down for that either.
  *
  * One decoder serves every frame of a file. A [read] decodes on from where the
  * last stopped when that is the shorter way to the time asked for, and seeks
@@ -87,7 +89,7 @@ internal class LumaReader private constructor(
     var colour: Colour = colour
         private set
 
-    /** The colour frames are read in: null, or the file's own, for as stored. */
+    /** The colour frames are read in: null, or the file's own, for as it shows itself. */
     var into: Colour? = null
 
     /** How this file's levels read in [into], for the pair it was worked out for. */
@@ -167,13 +169,14 @@ internal class LumaReader private constructor(
         }
     }
 
-    /** How this file's levels read in [into]: null where as stored. */
+    /** How this file's levels read in [into], or as shown in its own colour; null for a full range as stored. */
     private fun currentChange(): Recolour.Change? {
         val key = colour to into
         change?.let { if (it.first == key) return it.second }
         val from = colour.space
         val to = into?.space
-        val worked = if (from == null || to == null) null else Recolour.change(from, to)
+        val worked = (if (from == null || to == null) null else Recolour.change(from, to))
+            ?: Recolour.Levels(LIMITED).takeIf { (into ?: colour).range != MediaFormat.COLOR_RANGE_FULL }
         change = key to worked
         return worked
     }
@@ -200,6 +203,9 @@ internal class LumaReader private constructor(
 
         /** The longest one [read] may take. */
         private const val PASS_MS = 20_000L
+
+        /** A limited-range level as it is shown: 16 to 235, anything outside them as the nearer. */
+        private val LIMITED = ByteArray(256) { it.coerceIn(16, 235).toByte() }
 
         /** [format]'s word on the colour, each part of it over [otherwise]'s. */
         private fun colourOf(format: MediaFormat, otherwise: Colour): Colour {
@@ -284,8 +290,8 @@ internal class LumaReader private constructor(
          * level as [change] reads it - where it changes the proportions, from
          * the pixel's colour too, each colour level covering its square of
          * four; of a 10-bit frame (P010, two bytes a pixel), the top eight
-         * bits, which are its second byte, as stored. Null when it cannot be
-         * read.
+         * bits, which are its second byte, its proportions unchanged. Null when
+         * it cannot be read.
          */
         private fun lumaOf(image: Image, change: Recolour.Change?): Vmaf.Plane? = try {
             val y = image.planes.first()
@@ -298,7 +304,7 @@ internal class LumaReader private constructor(
                 val step = y.pixelStride
                 val high = if (step == 2) 1 else 0
                 val through = (change as? Recolour.Through)?.takeIf { step == 1 && image.planes.size >= 3 }
-                val levels = (change as? Recolour.Levels)?.table?.takeIf { step == 1 }
+                val levels = (change as? Recolour.Levels)?.table
                 val buffer = y.buffer
                 val out = ByteArray(w * h)
                 val row = ByteArray(w * step)
@@ -327,7 +333,7 @@ internal class LumaReader private constructor(
                             ).toByte()
                         }
                     } else if (levels != null) {
-                        for (c in 0 until w) out[o + c] = levels[row[c].toInt() and 0xFF]
+                        for (c in 0 until w) out[o + c] = levels[row[c * step + high].toInt() and 0xFF]
                     } else {
                         for (c in 0 until w) out[o + c] = row[c * step + high]
                     }
