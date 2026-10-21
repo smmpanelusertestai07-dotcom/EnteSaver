@@ -4,8 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.util.Log
-import app.entesaver.BuildConfig
 import app.entesaver.core.logic.Vmaf
 import java.io.File
 import kotlin.math.roundToLong
@@ -90,7 +88,6 @@ internal class VideoQuality private constructor(
             is Way.Decoded -> LumaReader.open(copy)?.use { reader ->
                 reader.turn = reader.rotation - way.rotation
                 val shiftUs = shiftOf(reader)
-                if (BuildConfig.DEBUG) Log.d(TAG, "copy ${copy.name}: shift $shiftUs us, turn ${reader.turn}")
                 if (look != null && reader.colour != look) return null
                 scored { m -> frameAt(reader, m.copyTimeUs + shiftUs) }
             }
@@ -116,16 +113,7 @@ internal class VideoQuality private constructor(
         for (m in moments) {
             val plane = planeAt(m) ?: continue
             if (plane.width != m.plane.width || plane.height != m.plane.height) continue
-            val features = Vmaf.features(m.plane, plane)
-            scores += Vmaf.score(features, m.motion2)
-            if (BuildConfig.DEBUG) {
-                Log.d(
-                    TAG,
-                    "moment ${m.copyTimeUs}: original ${digest(m.plane)} copy ${digest(plane)} motion2 ${m.motion2} " +
-                        "adm2 ${features.adm2} vif ${features.vif0} ${features.vif1} ${features.vif2} " +
-                        "${features.vif3} vmaf ${scores.last()}"
-                )
-            }
+            scores += Vmaf.score(Vmaf.features(m.plane, plane), m.motion2)
         }
         // The phone model's score is each moment's, then their mean, as
         // libvmaf pools it: its curve flattens near the top, so the curve
@@ -142,7 +130,6 @@ internal class VideoQuality private constructor(
         var plane: Vmaf.Plane? = null
         reader.read(timeUs - frameUs / 2) { f ->
             plane = f.plane
-            if (BuildConfig.DEBUG) Log.d(TAG, "copy frame for $timeUs: ${f.timeUs}")
             false
         }
         return plane
@@ -236,7 +223,8 @@ internal class VideoQuality private constructor(
             height: Int,
             look: LumaReader.Colour? = null
         ): VideoQuality? = read(
-            context, uri, 0..durationMs, durationMs, planesFor(width, height), fps, width, height, fromStart = false, look
+            context, uri, 0..durationMs, durationMs, planesFor(width, height), fps, width, height,
+            fromStart = false, look = look
         )
 
         /**
@@ -341,13 +329,6 @@ internal class VideoQuality private constructor(
                 if (here < 1 || seen.size < here + 2) continue
                 val at = seen[here]
                 val moment = momentOf(seen[here - 1].plane, at.plane, seen[here + 1].plane, at.timeUs - sinceUs)
-                if (BuildConfig.DEBUG) {
-                    Log.d(
-                        TAG,
-                        "original moment $t: before ${seen[here - 1].timeUs} here ${at.timeUs} " +
-                            "after ${seen[here + 1].timeUs} motion2 ${moment?.motion2}"
-                    )
-                }
                 moments += moment ?: continue
             }
             return moments
@@ -387,16 +368,6 @@ internal class VideoQuality private constructor(
                 Vmaf.motion(blur, Vmaf.motionBlur(after), here.width, here.height)
             )
             return Moment(copyTimeUs, here, motion2)
-        }
-
-        /** The savings benchmark's diagnostics only (debug builds): each moment as read and scored. */
-        private const val TAG = "VideoQuality"
-
-        /** A plane's size, mean and a sum of its bytes, to match against another reading of the same frame. */
-        private fun digest(p: Vmaf.Plane): String {
-            var sum = 0L
-            for (i in 0 until p.width * p.height) sum += p.pixels[i].toInt() and 0xFF
-            return "${p.width}x${p.height} sum $sum"
         }
 
         /** The mean squared difference of two planes, on every fourth pixel each way. */
