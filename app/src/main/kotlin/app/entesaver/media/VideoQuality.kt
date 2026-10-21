@@ -6,6 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import app.entesaver.core.logic.Vmaf
 import java.io.File
+import kotlin.math.roundToLong
 
 /**
  * How a copy of a video looks beside its original, measured: VMAF ([Vmaf]) on
@@ -22,10 +23,12 @@ import java.io.File
  * spends less on - and a copy's frames read a few points apart by turns. On
  * the savings benchmark's clips, moments an even number of frames apart all
  * fell on the same kind: six moments of a 20-second clip read 94 where every
- * frame read 90, twelve read 85. So each moment is moved on by up to
- * [PHASES] - 1 frames, in turn, and every place in a turn of up to [PHASES]
- * frames is read as often. Fewer moments are read where the app's memory
- * would not hold them (planesFor). Where a copy's times run a frame or two off its original's, as an
+ * frame read 90, twelve read 85. So moment number i is moved on, by up to
+ * [PHASES] - 1 frames, to a frame whose number from the start of the copy
+ * leaves i's remainder when divided by [PHASES]: every place in a turn of up
+ * to [PHASES] frames is then read as often, however far apart the moments
+ * fall. Fewer moments are read where the app's memory would not hold them
+ * (planesFor). Where a copy's times run a frame or two off its original's, as an
  * older Android can read some files' times, the copy is lined up first: at
  * the moment that moves most, the frame within [SHIFT_FRAMES] either way that
  * clearly matches best says by how much.
@@ -169,7 +172,7 @@ internal class VideoQuality private constructor(
          */
         const val MOMENTS = 24
 
-        /** Moments are moved on by 0 to this many frames less one, in turn. */
+        /** The longest turn of kinds of frame the moments are spread over (see the class). */
         const val PHASES = 4
 
         /** The original's moments may take up this share of the app's memory at most: a quarter. */
@@ -236,8 +239,7 @@ internal class VideoQuality private constructor(
             val frameUs = (1_000_000.0 / (if (fps.isFinite() && fps > 1f) fps else 30f)).toLong()
             val startUs = windowMs.first * 1000
             val lengthUs = (windowMs.last - windowMs.first) * 1000
-            val times = (0 until count)
-                .map { i -> startUs + (lengthUs * (i + 0.5) / count).toLong() + i % PHASES * frameUs }
+            val times = momentTimes(startUs, lengthUs, count, frameUs)
                 .filter { it - frameUs >= 0 && it + frameUs < durationMs * 1000 }
             val needed = minOf(MIN_MOMENTS, count)
             if (times.size < needed) return null
@@ -255,6 +257,18 @@ internal class VideoQuality private constructor(
                     ?.let { VideoQuality(it, Way.Pictures(scaled), frameUs) }
             }
         }
+
+        /**
+         * When each of [count] moments of a stretch [lengthUs] long from
+         * [startUs] is read, frames [frameUs] apart: spread evenly, and moment
+         * number i moved on to the frame whose number from [startUs] leaves
+         * i's remainder by [PHASES] (see the class).
+         */
+        fun momentTimes(startUs: Long, lengthUs: Long, count: Int, frameUs: Long): List<Long> =
+            (0 until count).map { i ->
+                val frame = (lengthUs * (i + 0.5) / count / frameUs).roundToLong()
+                startUs + (frame + Math.floorMod(i - frame, PHASES.toLong())) * frameUs
+            }
 
         private inline fun <T> guarded(block: () -> T?): T? = try {
             block()
