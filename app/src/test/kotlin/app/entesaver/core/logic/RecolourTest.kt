@@ -38,11 +38,9 @@ class RecolourTest {
     }
 
     @Test
-    fun `grey keeps its brightness whatever the proportions, less what rounding down takes`() {
+    fun `grey keeps its brightness whatever the proportions`() {
         val through = Recolour.change(bt601, bt709) as Recolour.Through
-        for (y in 16..235) assertTrue("grey $y", through.luma(y, 128, 128) in y - 1..y)
-        assertEquals(16, through.luma(16, 128, 128))
-        assertEquals(235, through.luma(235, 128, 128))
+        for (y in 16..235) assertEquals("grey $y", y, through.luma(y, 128, 128))
     }
 
     @Test

@@ -16,9 +16,11 @@ import kotlin.math.roundToInt
  * VMAF on the benchmark's clips - so ffmpeg first brings the original into the
  * copy's colour, and so is it done here: a change of range alone level for
  * level ([Levels]), and of proportions through the eight-bit red, green and
- * blue a pixel stands for, each rounded down and kept within 0 to 255
- * ([Through]), as ffmpeg's swscale converts one into the other. On the pilot's
- * clip this read 89.82 where ffmpeg's own read 89.81.
+ * blue a pixel stands for, each kept within 0 to 255 ([Through]), as ffmpeg's
+ * swscale converts one into the other. On the pilot's clip this read 89.79
+ * where ffmpeg's own read 89.81. swscale rounds the red, green and blue down
+ * where this rounds them to the nearest, as a phone's GPU does: the same
+ * score within a few hundredths, and a grey that keeps its level.
  *
  * A file that names no proportions is read as ffmpeg reads one, BT.601, and
  * one that names no range as limited.
@@ -45,7 +47,8 @@ object Recolour {
     class Through internal constructor(from: Space, into: Space) : Change {
 
         // Red, green and blue from a pixel's brightness and colour levels, in
-        // 65536ths: red is brightness plus a share of red-difference, blue of
+        // 65536ths, a half added to the brightness so each rounds to the
+        // nearest: red is brightness plus a share of red-difference, blue of
         // blue-difference, green less a share of both.
         private val base = IntArray(256)
         private val redOfV = IntArray(256)
@@ -65,7 +68,7 @@ object Recolour {
             for (level in 0..255) {
                 val y = if (from.full) level.toDouble() else (level - 16) * 255.0 / 219
                 val c = if (from.full) level - 128.0 else (level - 128) * 255.0 / 224
-                base[level] = fixed(y)
+                base[level] = fixed(y) + (1 shl (SHIFT - 1))
                 redOfV[level] = fixed(2 * (1 - m.kr) * c)
                 blueOfU[level] = fixed(2 * (1 - m.kb) * c)
                 greenOfU[level] = fixed(-2 * m.kb * (1 - m.kb) / kg * c)
