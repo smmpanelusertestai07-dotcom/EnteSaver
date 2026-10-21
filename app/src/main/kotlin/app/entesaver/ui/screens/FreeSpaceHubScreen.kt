@@ -271,6 +271,9 @@ fun FreeSpaceHubScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             EnteTools(saveMode = options.saveMode, onGuide = { vm.openEnteHelp(it) })
+            TextButton(onClick = { nav.goTo(Routes.HELP_ENTE_FEATURES) }) {
+                Text(stringResource(R.string.help_ente_features))
+            }
         }
         Spacer(Modifier.height(28.dp))
     }

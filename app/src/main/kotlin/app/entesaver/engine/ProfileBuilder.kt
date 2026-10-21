@@ -29,7 +29,7 @@ class ProfileBuilder(private val context: Context) {
         val photoKey = PlannedEncode.photoKey()
         val videoKey = PlannedEncode.videoKey()
         val photoSamples = db.items().photoRatioSamples(photoKey)
-        val videoSamples = db.items().videoRatioSamples(videoKey)
+        val videoSamples = db.items().videoRatioSamples(PlannedEncode.videoKeys())
 
         val photoMedian = MediaProfile.median(photoSamples.map { it.sizeBytes })
         val videoMedian = MediaProfile.median(videoSamples.map { it.sizeBytes })

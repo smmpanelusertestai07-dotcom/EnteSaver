@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The savings benchmark's video library (v3): one ordinary phone's worth of videos.
+"""The savings benchmark's video library (v4): one ordinary phone's worth of videos.
 
 Every kind of video is described once, in PROFILES: where Android keeps it,
 its resolution, rotation, frame rate, codec, bitrate and sound, how long such
@@ -11,7 +11,7 @@ marked in the table. A fixed seed draws the library from it - the same files
 on every run - and sizes it to LIBRARY_GB.
 
 The files themselves are made shorter than the videos they stand for (gen_s
-against real_s), so eight emulators get through the whole library in one CI
+against real_s), so sixteen emulators get through the whole library in one CI
 run. Everything the app decides by - resolution, rotation, frame rate, codec,
 bitrate, sound, container - is the real video's, and at a fixed bitrate a
 file's size grows in step with its length, so report.py can put each measured
@@ -33,22 +33,21 @@ What is in the picture is a scene, drawn per file from its profile's mix
   game    gameplay: a colourful world turning and zooming, sprites, sparks
           and a HUD, no sensor noise
 
-v3 keeps v2's 491 files and 46 GB and makes the pictures harder: more of
-the camera's clips and of the forwards are in motion or at night (camera:
-30% motion and 30% night, was 25% and 25%; forwards: 30% motion, was 20%),
-and the long function videos are 35% motion (was 30%).
-
-The v1 library was one test pattern under uniform noise in every file. When
-v2 was made, one file of every kind and scene was made both ways - same size,
-rate, bitrate and encoder - re-encoded by x264 (veryfast) at the app's
-standard bitrate and scored against its source; weighted by the library's
-real bytes, v2 loses twice v1's VMAF (92.1 down to 83.8), 1.4 times its SSIM
-(0.940 down to 0.915) and 2.3 dB more PSNR. Night, motion and gameplay are
-the hard ones; a talking head and a screen are easier than v1 was, as they
-are in life.
+v4 keeps v3's ~490 files and 46 GB and makes the library harder twice
+over. The pictures: more of the camera's clips and of the forwards are in
+motion or at night (camera: 35% motion and 35% night, was 30% and 30%;
+forwards: 35% motion and 30% night, was 30% and 25%), and a third of the
+camera's night clips run at a variable frame rate, as a phone's camera
+drops frames in the dark. The kinds: camera clips saved in HEVC (the
+camera's space-saving setting), 10-bit HLG HDR clips in HEVC, Instagram
+downloads at 1080p, and game recordings at 60 fps. And the checks: every
+camera file carries the place it was filmed (an Android camera's ©xyz box)
+and the date (the file's own creation time), and the app's copy of every
+file is read back for its codec, size, rotation, frame count, sound, date
+and place - the app's promise is that a copy keeps all of them.
 
   library.py manifest --out manifest.csv [--summary]
-  library.py make --shard 0 --shards 8 --out bench-library
+  library.py make --shard 0 --shards 16 --out bench-library
 """
 import argparse
 import concurrent.futures
@@ -58,6 +57,7 @@ import math
 import os
 import random
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -80,7 +80,7 @@ X264_ASK = 0.985
 SPREAD = 0.15
 # The quality sample: this many files of every kind, plus every file longer
 # than KEEP_LONG_S, have the app's copy kept and graded (quality.py).
-KEEP_PER_PROFILE = 2
+KEEP_PER_PROFILE = 3
 KEEP_LONG_S = 20 * 60
 # The plates the camera, screen and game scenes are cut from.
 PLATE_W, PLATE_H = 4096, 2304
@@ -115,13 +115,20 @@ CAMERA_TUNE = {
 
 # The camera's mixes: most clips are of people and places by day, evenings
 # and indoor functions, children and festivals in motion, and a few still.
-CAMERA_MIX = dict(day=0.25, night=0.30, motion=0.30, static=0.15)
-FORWARD_MIX = dict(day=0.25, night=0.25, static=0.20, motion=0.30)
+CAMERA_MIX = dict(day=0.20, night=0.35, motion=0.35, static=0.10)
+FORWARD_MIX = dict(day=0.20, night=0.30, static=0.15, motion=0.35)
+# A phone's camera drops frames in the dark: this share of the camera's night
+# clips runs at a variable frame rate, about four frames in five kept.
+NIGHT_VFR = 0.35
+# Where the camera's clips were filmed: ISO 6709, as an Android camera writes
+# it in the file's ©xyz box (Delhi, Mumbai, Jaipur, Bengaluru).
+PLACES = ["+28.6139+077.2090/", "+19.0760+072.8777/", "+26.9124+075.7873/", "+12.9716+077.5946/"]
 
 
 def P(pid, group, label, folder, count, dur, size, fps, codec, vkbps, akbps, names, scenes, rot=(), landscape=0.0,
       channels=2, rate=48000, container="mp4", exact30=0.0, hidden=False, exact=False, silent=0.0, mono=0.0,
-      variants=(), fixed=(), bframes=0, profile="", compressed=False, noise_k=1.0, era=(2023, 7, 1, 820)):
+      variants=(), fixed=(), bframes=0, profile="", compressed=False, noise_k=1.0, era=(2023, 7, 1, 820),
+      hdr=False, located=0.0):
     """One kind of video. dur is (shortest, mean, longest) in seconds; size is
     width x height as stored; rot lists (rotation, share) for the files a
     camera tags as turned; landscape is the share of a portrait profile whose
@@ -133,13 +140,16 @@ def P(pid, group, label, folder, count, dur, size, fps, codec, vkbps, akbps, nam
     sizes the kind comes in, used in turn; fixed gives the real lengths of the
     kind's longest files outright; compressed marks videos that another app
     (WhatsApp, Instagram, YouTube, Telegram) had already compressed before they
-    reached the phone; era is (year, month, day, days) of the files' dates."""
+    reached the phone; era is (year, month, day, days) of the files' dates;
+    hdr files are 10-bit HEVC in HLG, as a phone records HDR; located is the
+    share of files that carry the place they were filmed."""
     w, h = size
     return dict(id=pid, group=group, label=label, folder=folder, count=count, dur=dur, width=w, height=h,
                 fps=fps, codec=codec, video_kbps=vkbps, audio_kbps=akbps, names=names, scenes=scenes, rot=rot,
                 landscape=landscape, channels=channels, sample_rate=rate, container=container, exact30=exact30,
                 hidden=hidden, exact=exact, silent=silent, mono=mono, variants=variants, fixed=fixed,
-                bframes=bframes, profile=profile, compressed=compressed, noise_k=noise_k, era=era)
+                bframes=bframes, profile=profile, compressed=compressed, noise_k=noise_k, era=era, hdr=hdr,
+                located=located)
 
 
 CAM, WAG, SHORT, YT, SCREEN, TG, OLD = ("Camera", "WhatsApp", "Reels and short videos", "YouTube downloads",
@@ -148,22 +158,26 @@ CAM, WAG, SHORT, YT, SCREEN, TG, OLD = ("Camera", "WhatsApp", "Reels and short v
 # [E] marks an estimate; everything else was measured or is documented.
 PROFILES = [
     # Realme 11 Pro 5G rear camera, default 1080p30 H.264, 20 Mbps, AAC 256k.
-    P("cam_1080p30", CAM, "Camera 1080p 30fps (default)", "DCIM/Camera", 100, (3, 37, 300), (1920, 1080), 30,
-      "h264", 20000, 256, "camera", CAMERA_MIX, rot=((90, 0.75),)),
+    P("cam_1080p30", CAM, "Camera 1080p 30fps (default)", "DCIM/Camera", 85, (3, 37, 300), (1920, 1080), 30,
+      "h264", 20000, 256, "camera", CAMERA_MIX, rot=((90, 0.75),), located=0.8),
+    # The camera's space-saving setting ("HEVC" / "Efficient") [E: bitrate].
+    P("cam_hevc", CAM, "Camera 1080p 30fps saved as HEVC", "DCIM/Camera", 20, (3, 35, 240), (1920, 1080), 30,
+      "hevc", 12000, 256, "camera", CAMERA_MIX, rot=((90, 0.75),), located=0.8),
     # Weddings, pujas, birthdays, school functions, mostly indoors and in the
     # evening [E: lengths]; the two longest run 22 and 26 minutes in one take.
     P("cam_long", CAM, "Long function videos", "DCIM/Camera", 9, (300, 560, 1100), (1920, 1080), 30, "h264",
-      20000, 256, "camera", dict(night=0.5, motion=0.35, static=0.1, day=0.05), rot=((90, 0.4),), fixed=(1320, 1560)),
+      20000, 256, "camera", dict(night=0.5, motion=0.35, static=0.1, day=0.05), rot=((90, 0.4),), fixed=(1320, 1560),
+      located=0.8),
     P("cam_4k", CAM, "Camera 4K 30fps", "DCIM/Camera", 12, (5, 40, 180), (3840, 2160), 30, "h264", 50000, 256,
-      "camera", dict(day=0.6, motion=0.2, night=0.2)),
+      "camera", dict(day=0.6, motion=0.2, night=0.2), located=0.8),
     P("cam_1080p60", CAM, "Camera 1080p 60fps", "DCIM/Camera", 10, (5, 30, 120), (1920, 1080), 60, "h264",
-      30000, 256, "camera", dict(motion=0.5, day=0.3, night=0.2)),  # [E: bitrate]
+      30000, 256, "camera", dict(motion=0.5, day=0.3, night=0.2), located=0.8),  # [E: bitrate]
     P("cam_slowmo", CAM, "Camera slow motion 1080p 120fps", "DCIM/Camera", 6, (3, 12, 30), (1920, 1080), 120,
-      "h264", 40000, 256, "camera", dict(motion=0.8, day=0.2), rot=((90, 1.0),)),  # [E: bitrate]
+      "h264", 40000, 256, "camera", dict(motion=0.8, day=0.2), rot=((90, 1.0),), located=0.8),  # [E: bitrate]
     P("cam_front", CAM, "Front camera 1080p", "DCIM/Camera", 22, (3, 30, 180), (1920, 1080), 30, "h264", 20000,
-      256, "camera", dict(static=0.6, night=0.25, day=0.15), rot=((270, 1.0),)),  # [E: bitrate]
+      256, "camera", dict(static=0.6, night=0.25, day=0.15), rot=((270, 1.0),), located=0.8),  # [E: bitrate]
     # WhatsApp: 480p standard, 720p HD [E: bitrates].
-    P("wa_sd", WAG, "WhatsApp videos (standard)", WA + "/WhatsApp Video", 105, (3, 45, 600), (480, 848), 30,
+    P("wa_sd", WAG, "WhatsApp videos (standard)", WA + "/WhatsApp Video", 95, (3, 45, 600), (480, 848), 30,
       "h264", 1200, 96, "whatsapp", FORWARD_MIX, landscape=0.4, rate=44100, exact30=0.15, mono=0.3,
       compressed=True),
     P("wa_hd", WAG, "WhatsApp videos (HD)", WA + "/WhatsApp Video", 30, (3, 40, 300), (720, 1280), 30, "h264",
@@ -172,18 +186,27 @@ PROFILES = [
     P("wa_sent", WAG, "WhatsApp sent copies", WA + "/WhatsApp Video/Sent", 22, (3, 30, 180), (480, 848), 30,
       "h264", 1200, 96, "whatsapp", FORWARD_MIX, landscape=0.4, rate=44100, hidden=True, mono=0.3,
       compressed=True),
-    P("wa_status", WAG, "Saved WhatsApp statuses", "Pictures/Status Saver", 20, (5, 30, 90), (720, 1280), 30,
+    P("wa_status", WAG, "Saved WhatsApp statuses", "Pictures/Status Saver", 15, (5, 30, 90), (720, 1280), 30,
       "h264", 2000, 128, "status", dict(static=0.3, day=0.25, motion=0.25, screen=0.2), rate=44100, exact30=0.15,
       compressed=True),
     # Originals sent as documents are not recompressed: an iPhone's 1080p HEVC.
     P("wa_docs_iphone", WAG, "iPhone videos sent as documents", WA + "/WhatsApp Documents", 8, (30, 180, 600),
       (1920, 1080), 30, "hevc", 7800, 160, "iphone", dict(day=0.5, night=0.25, motion=0.25), rot=((90, 1.0),),
-      rate=44100, container="mov"),
+      rate=44100, container="mov", located=1.0),
+    # An iPhone records HDR (10-bit HLG) by default; sent as documents, they
+    # arrive whole [E: bitrate].
+    P("wa_docs_iphone_hdr", WAG, "iPhone HDR videos sent as documents", WA + "/WhatsApp Documents", 5,
+      (20, 90, 300), (1920, 1080), 30, "hevc", 9000, 160, "iphone", dict(day=0.6, night=0.2, motion=0.2),
+      rot=((90, 1.0),), rate=44100, container="mov", hdr=True, located=1.0),
     P("reels", SHORT, "Instagram reels (saved in the app)", "Movies/Instagram", 26, (6, 25, 180), (720, 1280),
       30, "h264", 3000, 128, "instagram", dict(motion=0.4, day=0.3, night=0.15, static=0.15), rate=44100,
       bframes=2, compressed=True),  # [E: bitrate]
-    P("short_dl", SHORT, "Reels / Shorts / Moj / ShareChat downloads", "Download", 21, (6, 22, 60),
+    P("short_dl", SHORT, "Reels / Shorts / Moj / ShareChat downloads", "Download", 18, (6, 22, 60),
       (720, 1280), 30, "h264", 1400, 72, "short", dict(motion=0.4, static=0.3, day=0.3), bframes=2,
+      compressed=True),
+    # Saved with a downloader at 1080p [E: bitrate].
+    P("ig_1080", SHORT, "Instagram reels downloaded at 1080p", "Download", 15, (6, 25, 90), (1080, 1920), 30,
+      "h264", 4500, 128, "short", dict(motion=0.45, day=0.25, night=0.15, static=0.15), rate=44100, bframes=2,
       compressed=True),
     P("yt_720", YT, "YouTube downloads 720p (Snaptube)", "snaptube/download/SnapTube Video", 12,
       (120, 600, 3600), (1280, 720), 30, "h264", 1300, 128, "youtube",
@@ -192,8 +215,10 @@ PROFILES = [
     # records no sound unless asked to.
     P("screen_apps", SCREEN, "Screen recordings (apps, calls)", "DCIM/Screenshots", 8, (10, 90, 600),
       (1080, 2412), 30, "h264", 10000, 128, "screen", dict(screen=1.0), silent=0.4),
+    # Games are often recorded at 60 fps [E: bitrate].
     P("screen_games", SCREEN, "Screen recordings (games)", "DCIM/Screenshots", 5, (120, 600, 1800),
-      (2412, 1080), 30, "h264", 10000, 128, "screen", dict(game=1.0)),
+      (2412, 1080), 30, "h264", 10000, 128, "screen", dict(game=1.0),
+      variants=(dict(), dict(fps=60, video_kbps=16000))),
     P("tg_episodes", TG, "Telegram web-series episodes 720p", "Download/Telegram", 6, (2100, 2580, 3300),
       (1280, 720), 23.976, "h264", 1000, 128, "episode", dict(static=0.4, night=0.3, day=0.15, motion=0.15),
       bframes=2, compressed=True),  # [E: bitrate]
@@ -203,12 +228,12 @@ PROFILES = [
     # What v1 did not have: the camera's other modes, clips a few seconds
     # long, files with one channel or none, and the odd sizes other phones and
     # apps leave behind.
-    P("cam_720p", CAM, "Camera 720p 30fps", "DCIM/Camera", 15, (3, 30, 240), (1280, 720), 30, "h264", 10000, 256,
-      "camera", CAMERA_MIX, rot=((90, 0.7),)),  # [E: bitrate]
+    P("cam_720p", CAM, "Camera 720p 30fps", "DCIM/Camera", 10, (3, 30, 240), (1280, 720), 30, "h264", 10000, 256,
+      "camera", CAMERA_MIX, rot=((90, 0.7),), located=0.8),  # [E: bitrate]
     P("cam_timelapse", CAM, "Camera time-lapse (no sound)", "DCIM/Camera", 5, (5, 15, 40), (1920, 1080), 30,
-      "h264", 20000, 0, "camera", dict(day=0.6, motion=0.4), rot=((90, 0.5),), silent=1.0),  # [E: bitrate]
+      "h264", 20000, 0, "camera", dict(day=0.6, motion=0.4), rot=((90, 0.5),), silent=1.0, located=0.8),  # [E: bitrate]
     P("cam_short", CAM, "Very short camera clips (1-3 s)", "DCIM/Camera", 10, (1, 2, 3), (1920, 1080), 30, "h264",
-      20000, 256, "camera", dict(day=0.4, night=0.3, motion=0.3), rot=((90, 0.75),), exact=True),
+      20000, 256, "camera", dict(day=0.4, night=0.3, motion=0.3), rot=((90, 0.75),), exact=True, located=0.8),
     P("wa_gif", WAG, "WhatsApp GIFs (MP4, no sound)", WA + "/WhatsApp Animated Gifs", 12, (1, 3, 6), (480, 270),
       25, "h264", 600, 0, "whatsapp", dict(motion=0.5, static=0.3, game=0.2), landscape=0.3, silent=1.0,
       exact=True, compressed=True),  # [E: size, bitrate]
@@ -297,12 +322,14 @@ def draw():
                 channels, akbps = 0, 0
             elif channels == 2 and rng.random() < p["mono"]:
                 channels, akbps = 1, round(akbps * 2 / 3)
+            place = PLACES[rng.randrange(len(PLACES))] if rng.random() < p["located"] else ""
+            vfr = p["group"] == CAM and scenes[i] == "night" and not p["exact"] and rng.random() < NIGHT_VFR
             files.append(dict(p=p, i=i, real_s=real, width=w, height=h, rot=rot, fps=v["fps"],
                               video_kbps=round(v["video_kbps"] * rng.uniform(1 - SPREAD, 1 + SPREAD)),
                               audio_kbps=akbps, channels=channels, sample_rate=v["sample_rate"], scene=scenes[i],
                               fixed=p["exact"] or real in fixed,
                               when=start + datetime.timedelta(seconds=rng.randrange(0, span * 86400)),
-                              n=rng.randrange(1000, 9999)))
+                              n=rng.randrange(1000, 9999), place=place, vfr=vfr))
     size = lambda f: (f["video_kbps"] + f["audio_kbps"]) * 1000 / 8 * f["real_s"]
     k = (LIBRARY_GB * 1e9 - sum(size(f) for f in files if f["fixed"])) / sum(size(f) for f in files if not f["fixed"])
     seen = set()
@@ -371,7 +398,8 @@ def manifest_rows(files, shards):
                    fps=f["fps"], codec=p["codec"], video_kbps=f["video_kbps"], audio_kbps=f["audio_kbps"],
                    in_gallery=0 if p["hidden"] else 1, shard=idx % shards, seed=f["seed"], scene=f["scene"],
                    channels=f["channels"], container=p["container"], already_compressed=int(p["compressed"]),
-                   keep=int(f["keep"]))
+                   keep=int(f["keep"]), place=f["place"], vfr=int(f["vfr"]), hdr=int(p["hdr"]),
+                   sample_rate=f["sample_rate"], when=f["when"].strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 def summary_lines(rows):
@@ -725,19 +753,31 @@ def make_one(f, out_root, work, font):
     if f["channels"]:
         cmd += ["-f", "lavfi", "-i",
                 f"anoisesrc=color=pink:amplitude=0.05:sample_rate={f['sample_rate']}:duration={s}:seed={f['seed']}"]
-    cmd += ["-filter_complex", video_graph(f, font, work), "-map", "[v]"]
+    graph = video_graph(f, font, work)
+    if f["vfr"]:
+        # Every fifth frame dropped, the rest at their own times: the gaps a
+        # camera leaves when it lengthens its exposure in the dark.
+        graph += ";[v]select='not(eq(mod(n\\,5)\\,4))'[vv]"
+    cmd += ["-filter_complex", graph, "-map", "[vv]" if f["vfr"] else "[v]"]
     if f["channels"]:
         cmd += ["-map", "1:a"]
     cmd += ["-t", f"{s}"]
+    if f["vfr"]:
+        cmd += ["-fps_mode", "vfr"]
     if p["codec"] == "hevc":
         vk = f["video_kbps"]
-        cmd += ["-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1", "-x265-params",
-                f"bitrate={vk}:vbv-maxrate={vk}:vbv-bufsize={vk}:keyint={gop}:strict-cbr=1:log-level=error"]
+        params = f"bitrate={vk}:vbv-maxrate={vk}:vbv-bufsize={vk}:keyint={gop}:strict-cbr=1:log-level=error"
+        if p["hdr"]:
+            # 10-bit HLG in BT.2020, as a phone records HDR.
+            params += ":colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc"
+            cmd += ["-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "arib-std-b67",
+                    "-colorspace", "bt2020nc"]
+        cmd += ["-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1", "-x265-params", params]
     else:
         vk = round(f["video_kbps"] * X264_ASK)
         cmd += ["-c:v", "libx264", "-preset", "superfast", "-bf", str(p["bframes"]), "-g", str(gop),
                 "-b:v", f"{vk}k", "-minrate", f"{vk}k", "-maxrate", f"{vk}k", "-bufsize", f"{vk}k",
-                "-x264-params", "nal-hrd=cbr:force-cfr=1"]
+                "-x264-params", "nal-hrd=cbr" if f["vfr"] else "nal-hrd=cbr:force-cfr=1"]
         if p["profile"]:
             cmd += ["-profile:v", p["profile"]]
     cmd += ["-threads", "2"]
@@ -751,13 +791,74 @@ def make_one(f, out_root, work, font):
     if f["rot"]:
         # A camera writes upright clips as landscape pixels plus a rotation
         # tag; ffmpeg counts the other way, so -90 here reads back as 90.
+        # The copy pass drops the date unless it is given again.
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-display_rotation:v:0",
-                        str(-f["rot"]), "-i", tmp, "-c", "copy", "-movflags", "+faststart", "-f", fmt, dest],
+                        str(-f["rot"]), "-i", tmp, "-c", "copy",
+                        "-metadata", "creation_time=" + f["when"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "-movflags", "+faststart", "-f", fmt, dest],
                        check=True)
         os.remove(tmp)
+    if f["place"]:
+        add_place(dest, f["place"])
     t = f["when"].timestamp()
     os.utime(dest, (t, t))
     return f["name"], f["gen_s"], os.path.getsize(dest), f["scene"], round(time.time() - started, 1)
+
+
+def add_place(path, iso6709):
+    """The place a clip was filmed, written as an Android camera writes it:
+    a ©xyz box in the movie's user data (MPEG4Writer.writeGeoDataBox),
+    which is what Android's own reader hands the gallery. The index sits
+    before the picture (faststart), so every chunk offset moves up by the
+    bytes added."""
+    with open(path, "rb") as fh:
+        data = bytearray(fh.read())
+    text = iso6709.encode("ascii")
+    xyz = struct.pack(">I4sHH", 12 + len(text), b"\xa9xyz", len(text), 0x15C7) + text
+
+    def boxes(start, end):
+        at = start
+        while at + 8 <= end:
+            size, kind = struct.unpack(">I4s", data[at:at + 8])
+            head = 8
+            if size == 1:
+                size, head = struct.unpack(">Q", data[at + 8:at + 16])[0], 16
+            elif size == 0:
+                size = end - at
+            yield at, size, head, kind
+            at += size
+
+    moov = next((b for b in boxes(0, len(data)) if b[3] == b"moov"), None)
+    if moov is None:
+        raise ValueError(f"{path}: no moov")
+    m_at, m_size, m_head, _ = moov
+    mdat_after = any(b[3] == b"mdat" and b[0] > m_at for b in boxes(0, len(data)))
+    udta = next((b for b in boxes(m_at + m_head, m_at + m_size) if b[3] == b"udta"), None)
+    if udta:
+        u_at, u_size, u_head, _ = udta
+        insert_at, added = u_at + u_size, xyz
+        struct.pack_into(">I", data, u_at, u_size + len(xyz))
+    else:
+        insert_at, added = m_at + m_size, struct.pack(">I4s", 8 + len(xyz), b"udta") + xyz
+    struct.pack_into(">I", data, m_at, m_size + len(added))
+    if mdat_after:
+        # Chunk offsets point into the picture after the index: move them up.
+        def walk(start, end):
+            for at, size, head, kind in boxes(start, end):
+                if kind in (b"trak", b"mdia", b"minf", b"stbl"):
+                    walk(at + head, at + size)
+                elif kind in (b"stco", b"co64"):
+                    count = struct.unpack(">I", data[at + head + 4:at + head + 8])[0]
+                    wide = kind == b"co64"
+                    for k in range(count):
+                        pos = at + head + 8 + k * (8 if wide else 4)
+                        fmt = ">Q" if wide else ">I"
+                        struct.pack_into(fmt, data, pos, struct.unpack(fmt, data[pos:pos + (8 if wide else 4)])[0]
+                                         + len(added))
+        walk(m_at + m_head, m_at + m_size)
+    data[insert_at:insert_at] = added
+    with open(path, "wb") as fh:
+        fh.write(data)
 
 
 def cost(f):
@@ -771,7 +872,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("manifest")
     m.add_argument("--out", required=True)
-    m.add_argument("--shards", type=int, default=8)
+    m.add_argument("--shards", type=int, default=16)
     m.add_argument("--summary", action="store_true", help="also print videos, GB and hours by kind and scene")
     mk = sub.add_parser("make")
     mk.add_argument("--shard", type=int, required=True)

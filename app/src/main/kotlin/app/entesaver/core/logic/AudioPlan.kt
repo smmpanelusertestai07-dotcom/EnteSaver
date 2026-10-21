@@ -1,53 +1,47 @@
 package app.entesaver.core.logic
 
 /**
- * What happens to a video's sound.
+ * What happens to a video's sound: it stays in its own codec, at its own
+ * sample rate and channels.
  *
- * Sound is copied across untouched when the copy can carry it as it is and
- * it is already lean - a WhatsApp forward's 64 kbps, an old phone's AMR - and
- * re-encoded otherwise, as HE-AAC: 48 kbps stereo, 32 kbps mono. HE-AAC
- * rebuilds the treble from a few bits of side information (spectral band
- * replication), so speech and music at those rates sound through a phone's
- * speaker or earphones as a camera's 256 kbps does, at a fifth of the size -
- * and at the picture rates BitrateCalc sets, a camera's sound would
- * otherwise be a seventh of a video. A track sampled below 32 kHz, where
- * HE-AAC has no room to work, or an encoder that will not write it ([plain]),
- * gets plain AAC at [LC_STEREO_BPS] / [LC_MONO_BPS]. Sound is never written
- * above what it was: a 64 kbps track "re-encoded" at 96 is a bigger file that
- * sounds no better.
+ * A track the copy can carry as it is is copied across untouched - a
+ * WhatsApp forward's 96 kbps, Telegram's 128, an old phone's AMR, any Opus or
+ * Vorbis - so nothing about it changes at all. Only a heavy AAC track, such
+ * as a camera's 256 kbps, is written again, and as AAC-LC, the AAC a camera
+ * writes: 128 kbps stereo, 64 kbps mono, which through a phone's speaker or
+ * earphones sounds as the original does. Sound is never written above what
+ * it was. A track in a codec the copy can neither carry nor write again
+ * keeps the whole video as it is ([Decision.KeepsVideoAsIs]), since its
+ * sound could not stay the same.
  */
 object AudioPlan {
 
-    /** HE-AAC rates a re-encode aims at. */
-    const val STEREO_BPS = 48_000
-    const val MONO_BPS = 32_000
-
-    /** Plain AAC (AAC-LC) rates, for a track or an encoder HE-AAC does not suit. */
-    const val LC_STEREO_BPS = 64_000
-    const val LC_MONO_BPS = 48_000
+    /** AAC-LC rates a heavy track is written at. */
+    const val STEREO_BPS = 128_000
+    const val MONO_BPS = 64_000
 
     /** The least a re-encode is ever given. */
     const val MIN_BPS = 24_000
 
-    /** HE-AAC needs a track sampled at this rate or above. */
-    const val HE_MIN_SAMPLE_RATE = 32_000
+    /** A track up to this rate is copied as it is. */
+    const val KEEP_STEREO_BPS = 160_000
+    const val KEEP_MONO_BPS = 96_000
 
-    /** A copyable track this lean, or up to [KEEP_HEADROOM] above it, is kept as it is. */
-    const val KEEP_STEREO_BPS = 64_000
-    const val KEEP_MONO_BPS = 48_000
-    const val KEEP_HEADROOM = 1.15
+    /** AAC: the codec phones and apps write, and the only one written again. */
+    const val AAC = "audio/mp4a-latm"
 
     /** Sound formats the MP4 writer takes as they are. */
-    private val COPYABLE = setOf(
-        "audio/mp4a-latm", "audio/3gpp", "audio/amr-wb", "audio/opus", "audio/vorbis"
-    )
+    private val COPYABLE = setOf(AAC, "audio/3gpp", "audio/amr-wb", "audio/opus", "audio/vorbis")
 
     sealed interface Decision {
         /** Copied into the new file untouched. */
         data object Keep : Decision
 
-        /** Re-encoded at [bps]: as HE-AAC when [he], as plain AAC otherwise. */
-        data class Encode(val bps: Int, val he: Boolean) : Decision
+        /** Written again as AAC-LC at [bps]. */
+        data class Encode(val bps: Int) : Decision
+
+        /** A codec the copy cannot keep: the video is left as it is. */
+        data object KeepsVideoAsIs : Decision
     }
 
     /** More than two channels share the rate two would get, twice over. */
@@ -58,24 +52,17 @@ object AudioPlan {
     }
 
     /**
-     * [mime], [channels], [sourceBps] and [sampleRate] describe the
-     * original's sound track (a rate of null or 0 when the file does not say).
+     * [mime], [channels] and [sourceBps] describe the original's sound track
+     * (a rate of null or 0 when the file does not say).
      */
-    fun decide(mime: String?, channels: Int, sourceBps: Int?, sampleRate: Int? = null): Decision {
+    fun decide(mime: String?, channels: Int, sourceBps: Int?): Decision {
+        val type = mime?.lowercase()
+        if (type == null || type !in COPYABLE) return Decision.KeepsVideoAsIs
         val known = sourceBps?.takeIf { it > 0 }
-        val copyable = mime != null && mime.lowercase() in COPYABLE
-        val keepUpTo = scaled(KEEP_STEREO_BPS, KEEP_MONO_BPS, channels)
-        if (copyable && (known == null || known <= keepUpTo * KEEP_HEADROOM)) return Decision.Keep
-        val he = sampleRate == null || sampleRate <= 0 || sampleRate >= HE_MIN_SAMPLE_RATE
-        val aim = if (he) scaled(STEREO_BPS, MONO_BPS, channels) else scaled(LC_STEREO_BPS, LC_MONO_BPS, channels)
-        val bps = if (known == null) aim else minOf(aim, known)
-        return Decision.Encode(bps.coerceAtLeast(MIN_BPS), he)
-    }
-
-    /** The same track for an encoder that would not write HE-AAC: plain AAC, still never above the source. */
-    fun plain(channels: Int, sourceBps: Int?): Decision.Encode {
-        val aim = scaled(LC_STEREO_BPS, LC_MONO_BPS, channels)
-        val known = sourceBps?.takeIf { it > 0 }
-        return Decision.Encode((if (known == null) aim else minOf(aim, known)).coerceAtLeast(MIN_BPS), he = false)
+        if (type != AAC || known == null || known <= scaled(KEEP_STEREO_BPS, KEEP_MONO_BPS, channels)) {
+            return Decision.Keep
+        }
+        val aim = scaled(STEREO_BPS, MONO_BPS, channels)
+        return Decision.Encode(minOf(aim, known).coerceAtLeast(MIN_BPS))
     }
 }

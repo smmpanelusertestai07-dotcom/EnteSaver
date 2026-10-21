@@ -503,9 +503,12 @@ class SettingsE2eTest {
             compose.onAllNodes(hasText(s(gone))).assertCountEquals(0)
         }
         compose.onNodeWithText(s(R.string.optimise_kept_whole)).performScrollTo().assertIsDisplayed()
-        // No emulator has an HEVC chip, and the card says what that means
-        // rather than quietly encoding in software.
+        // Every video keeps its own codec, size and frame rate.
+        compose.onNodeWithText(s(R.string.optimise_videos)).performScrollTo().assertIsDisplayed()
+        // No emulator has an HEVC chip, or one for 4K, and the card says
+        // what that means rather than quietly encoding in software.
         compose.onNodeWithText(s(R.string.video_hevc_none)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(s(R.string.video_4k_none)).performScrollTo().assertIsDisplayed()
 
         // The (i) beside it opens the page that explains it.
         compose.onAllNodesWithContentDescription(s(R.string.quality_explained_title))[0]

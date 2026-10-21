@@ -151,6 +151,12 @@ object MediaFixtures {
      * Encodes a small H.264 clip and inserts it. Returns null when the device
      * has no usable encoder - the caller then skips video assertions instead
      * of failing on an emulator limitation.
+     *
+     * [cameraLike] writes every frame whole, as a key frame: a camera spends
+     * far more on a picture than it needs - 20 Mbps on 1080p whatever is in
+     * front of it - and a clip as plain as these, encoded the usual way, comes
+     * out smaller than any copy could. One whose every frame is whole is as
+     * heavy for its picture as a camera's, and a copy of it has as much to save.
      */
     fun insertVideo(
         context: Context,
@@ -161,10 +167,14 @@ object MediaFixtures {
         captureMillis: Long = 1_600_000_000_000L,
         withAudio: Boolean = false,
         fps: Int = 10,
-        textured: Boolean = false
+        textured: Boolean = false,
+        mime: String = MediaFormat.MIMETYPE_VIDEO_AVC,
+        rotation: Int = 0,
+        place: Pair<Float, Float>? = null,
+        cameraLike: Boolean = false
     ): Uri? {
         val temp = File(context.cacheDir, name)
-        if (!encodeH264(temp, width, height, frames, withAudio, fps, textured)) {
+        if (!encodeVideo(temp, width, height, frames, withAudio, fps, textured, mime, rotation, place, cameraLike)) {
             temp.delete()
             return null
         }
@@ -287,14 +297,18 @@ object MediaFixtures {
      * track which went in comes out - a clip with no audio can prove nothing
      * about whether the optimiser keeps sound.
      */
-    private fun encodeH264(
+    private fun encodeVideo(
         out: File,
         width: Int,
         height: Int,
         frames: Int,
         withAudio: Boolean = false,
         fps: Int = 10,
-        textured: Boolean = false
+        textured: Boolean = false,
+        mime: String = MediaFormat.MIMETYPE_VIDEO_AVC,
+        rotation: Int = 0,
+        place: Pair<Float, Float>? = null,
+        cameraLike: Boolean = false
     ): Boolean {
         val frameUs = 1_000_000L / fps
         var codec: MediaCodec? = null
@@ -303,7 +317,7 @@ object MediaFixtures {
         // MediaMuxer refuses a track added after start().
         val audio = if (withAudio) encodeSilentAac(frames * frameUs) ?: return false else null
         return try {
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height)
+            val format = MediaFormat.createVideoFormat(mime, width, height)
                 .apply {
                     setInteger(
                         MediaFormat.KEY_COLOR_FORMAT,
@@ -311,12 +325,20 @@ object MediaFixtures {
                     )
                     setInteger(MediaFormat.KEY_BIT_RATE, 8_000_000)
                     setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    // A key frame a frame apart, for a camera-like clip; else a second.
+                    if (cameraLike) {
+                        setFloat(MediaFormat.KEY_I_FRAME_INTERVAL, 1f / fps)
+                    } else {
+                        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    }
                 }
-            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            codec = MediaCodec.createEncoderByType(mime)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // As a camera writes them: a rotation tag, and the place in the movie's ©xyz box.
+            if (rotation != 0) muxer.setOrientationHint(rotation)
+            place?.let { (lat, lon) -> muxer.setLocation(lat, lon) }
 
             val frameBytes = width * height * 3 / 2
             val frame = ByteArray(frameBytes)
@@ -456,6 +478,12 @@ object MediaFixtures {
      * in every key frame, cheap between them, the way a real scene is - so a
      * clip at a high bitrate is as large as a real one, and an encode at the
      * app's own target has something to save.
+     *
+     * In grey. These once carried a byte pattern in both colour planes - a
+     * colour no camera records, outside red, green and blue - and Media3,
+     * which edits a picture in red, green and blue, clipped it, which changed
+     * the brightness of every copy: VMAF, which reads brightness only, then
+     * read the copies as other pictures, however well they were made.
      */
     private fun fillFrame(frame: ByteArray, width: Int, height: Int, index: Int, textured: Boolean = false) {
         val ySize = width * height
@@ -468,12 +496,11 @@ object MediaFixtures {
                 }
             }
         }
-        var i = ySize
-        while (i < frame.size) {
-            frame[i] = ((i + index) and 0xFF).toByte()
-            i++
-        }
+        frame.fill(GREY, ySize, frame.size)
     }
+
+    /** 128 in both colour planes, no colour at all (a signed byte holds it as -128). */
+    private const val GREY: Byte = -128
 
     /** Removes every fixture this run created. */
     fun cleanUp(context: Context) {

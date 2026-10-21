@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -142,6 +143,7 @@ fun HelpScreen(vm: AppViewModel, nav: NavHostController) {
             nav.goTo(Routes.HELP_QUALITY)
         }
         HelpLink(stringResource(R.string.help_cloud)) { nav.goTo(Routes.HELP_CLOUD) }
+        HelpLink(stringResource(R.string.help_ente_features)) { nav.goTo(Routes.HELP_ENTE_FEATURES) }
         HelpLink(stringResource(R.string.help_gallery)) { nav.goTo(Routes.HELP_GALLERY) }
         HelpLink(stringResource(R.string.help_privacy)) { nav.goTo(Routes.HELP_PRIVACY) }
         HelpLink(stringResource(R.string.help_licenses)) { nav.goTo(Routes.HELP_LICENSES) }
@@ -332,8 +334,6 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
     val kept by vm.detailKept.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refreshMeasuredQuality() }
 
-    val plan by vm.encodePlan.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { vm.refreshEncodePlan() }
     val photoSpec = MediaSettings.PHOTO
     val videoSpec = MediaSettings.VIDEO
 
@@ -360,12 +360,7 @@ fun HelpQualityScreen(nav: NavHostController, vm: AppViewModel) {
                 )
             }
             Text(
-                stringResource(
-                    R.string.quality_current_limits,
-                    photoLimitPhrase(photoSpec),
-                    videoLimitPhrase(videoSpec),
-                    codecLabel(plan.videoCodec)
-                ),
+                stringResource(R.string.quality_current_limits, photoLimitPhrase(photoSpec)),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 10.dp)
             )
@@ -1073,5 +1068,70 @@ private fun GalleryBlock(title: Int, body: Int, extra: (@Composable () -> Unit)?
             Spacer(Modifier.padding(top = 8.dp))
             extra()
         }
+    }
+}
+
+@Composable
+fun HelpEnteFeaturesScreen(nav: NavHostController, vm: AppViewModel) {
+    HelpPage(nav, stringResource(R.string.help_ente_features)) {
+        Text(
+            stringResource(R.string.feat_intro),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
+        for (feature in ENTE_FEATURES) {
+            AppCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                Text(
+                    stringResource(feature.name),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                FeatureLine(R.string.feat_who_phone, feature.phone, feature.phoneSays)
+                FeatureLine(R.string.feat_who_ente, feature.ente, feature.enteSays)
+                FeatureLine(R.string.feat_who_saver, feature.saver, feature.saverSays)
+                feature.guide?.let { url ->
+                    TextButton(onClick = { vm.openEnteHelp(url) }) { Text(stringResource(R.string.hub_ente_guide)) }
+                }
+            }
+        }
+        Text(
+            stringResource(R.string.feat_footer),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+    }
+}
+
+/** "✓ Ente Photos: Settings › Backup › …": the mark, who, and what. */
+@Composable
+private fun FeatureLine(who: Int, has: Has, says: Int) {
+    val scheme = MaterialTheme.colorScheme
+    val (mark, word, colour) = when (has) {
+        Has.YES -> Triple("✓", stringResource(R.string.feat_yes), scheme.primary)
+        Has.PARTLY -> Triple("◐", stringResource(R.string.feat_partly), scheme.tertiary)
+        Has.NO -> Triple("✗", stringResource(R.string.feat_no), scheme.error)
+    }
+    val whoText = stringResource(who)
+    val saysText = stringResource(says)
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier
+            .padding(top = 6.dp)
+            .semantics(mergeDescendants = true) { contentDescription = "$whoText: $word. $saysText" }
+    ) {
+        Text(
+            mark,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = colour,
+            modifier = Modifier.width(22.dp)
+        )
+        Text(
+            "$whoText — $saysText",
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
     }
 }

@@ -74,6 +74,7 @@ import app.entesaver.ui.screens.FreeSpaceHubScreen
 import app.entesaver.ui.screens.HelpAboutScreen
 import app.entesaver.ui.screens.HelpCloudScreen
 import app.entesaver.ui.screens.HelpDeletedScreen
+import app.entesaver.ui.screens.HelpEnteFeaturesScreen
 import app.entesaver.ui.screens.HelpFaqScreen
 import app.entesaver.ui.screens.HelpGalleryScreen
 import app.entesaver.ui.screens.HelpLicensesScreen
@@ -112,6 +113,7 @@ object Routes {
     const val HELP_QUALITY = "help_quality"
     const val HELP_CLOUD = "help_cloud"
     const val HELP_GALLERY = "help_gallery"
+    const val HELP_ENTE_FEATURES = "help_ente_features"
     const val HELP_PRIVACY = "help_privacy"
     const val HELP_LICENSES = "help_licenses"
     const val HELP_ABOUT = "help_about"
@@ -134,7 +136,7 @@ object Routes {
     val ALL: Set<String> = setOf(
         HOME, FILES, STORAGE, OPTIONS, FREE_UP, FREE_SPACE_HUB, ACTIVITY,
         RECLAIM_HISTORY, DUPLICATES, BIGGEST, KEPT, CALCULATOR, HELP,
-        HELP_FAQ, HELP_DELETED, HELP_QUALITY, HELP_CLOUD, HELP_GALLERY,
+        HELP_FAQ, HELP_DELETED, HELP_QUALITY, HELP_CLOUD, HELP_GALLERY, HELP_ENTE_FEATURES,
         HELP_PRIVACY, HELP_LICENSES, HELP_ABOUT, PERMISSIONS
     )
 
@@ -426,6 +428,7 @@ private fun MainNav(vm: AppViewModel) {
                     composable(Routes.HELP_QUALITY) { HelpQualityScreen(nav, vm) }
                     composable(Routes.HELP_CLOUD) { HelpCloudScreen(nav) }
                     composable(Routes.HELP_GALLERY) { HelpGalleryScreen(nav) }
+                    composable(Routes.HELP_ENTE_FEATURES) { HelpEnteFeaturesScreen(nav, vm) }
                     composable(Routes.HELP_PRIVACY) { HelpPrivacyScreen(nav) }
                     composable(Routes.HELP_LICENSES) { HelpLicensesScreen(nav) }
                     composable(Routes.HELP_ABOUT) { HelpAboutScreen(vm, nav) }

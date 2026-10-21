@@ -34,9 +34,16 @@ class QualityKeptTest {
     @Test
     fun `video detail falls with the square of the long side`() {
         // 4K at 3840 capped to 1920 is half the width, so a quarter of the
-        // pixels. This is why video saves so much more than photos do.
-        assertEquals(25, QualityKept.videoDetailKeptPercent(3840, balancedVideo))
+        // pixels.
+        assertEquals(25, QualityKept.videoDetailKeptPercent(3840, VideoSpec(longSide = 1920, fpsCap = 30)))
         assertEquals(25, QualityKept.videoDetailKeptPercent(2560, smallestVideo))
+    }
+
+    @Test
+    fun `a video kept at its own size keeps every pixel, 4K too`() {
+        for (side in listOf(640, 1280, 1920, 2560, 3840, 7680)) {
+            assertEquals(100, QualityKept.videoDetailKeptPercent(side, balancedVideo))
+        }
     }
 
     @Test

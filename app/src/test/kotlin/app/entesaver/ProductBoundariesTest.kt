@@ -717,7 +717,7 @@ class ProductBoundariesTest {
         // first, the copies are gone before the tap and never in its window.
         val strings = File("src/main/res/values/strings.xml").readText()
         val none = strings.substringAfter("name=\"confirm_none_text\">").substringBefore("</string>")
-        assertTrue(none.indexOf("Tap Confirm uploads") in 0 until none.indexOf("Free up device space"))
+        assertTrue(none.indexOf("Tap Confirm uploads") in 0 until none.indexOf("Free up space"))
     }
 
     @Test
@@ -1047,7 +1047,7 @@ class ProductBoundariesTest {
         // An as-is copy is final: made because the run had five minutes
         // left, it was the full-size file Ente kept for good.
         val video = File("src/main/kotlin/app/entesaver/media/VideoCompressor.kt").readText()
-        val end = video.substringAfter("fallback?.let { return it }").substringBefore("private suspend fun runTransform")
+        val end = video.substringAfter("val best = tries.indices.filter").substringBefore("private suspend fun runTransform")
         assertTrue(
             "the cut-short case must be decided before the as-is copy",
             end.indexOf("throw OutOfTime(") in 0 until end.indexOf("copyAsIs(")

@@ -298,7 +298,7 @@ class Stager(private val context: Context, private val db: AppDb) {
                     // Grouped under how it was made, the key estimates are
                     // read back by.
                     presetUsed = if (row.isVideo) {
-                        MediaSettings.videoKey(result.codec ?: PlannedEncode.videoCodec())
+                        result.codec?.let { MediaSettings.videoKey(it) } ?: MediaSettings.videoKeyAsIs()
                     } else {
                         MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
                     },
@@ -434,7 +434,7 @@ class Stager(private val context: Context, private val db: AppDb) {
                                     srcPixels = result.srcPixels,
                                     outPixels = result.outPixels,
                                     presetUsed = if (row.isVideo) {
-                                        MediaSettings.videoKey(result.codec ?: PlannedEncode.videoCodec())
+                                        result.codec?.let { MediaSettings.videoKey(it) } ?: MediaSettings.videoKeyAsIs()
                                     } else {
                                         MediaSettings.photoKey(FormatResolver.sourceFormat(row.displayName) ?: PhotoFormat.JPEG)
                                     },

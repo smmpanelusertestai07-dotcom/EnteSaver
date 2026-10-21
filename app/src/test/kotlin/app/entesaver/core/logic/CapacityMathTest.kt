@@ -13,8 +13,8 @@ class CapacityMathTest {
     fun coldStartUsesDefaults() {
         val r = defaultRatios
         assertEquals(2.5 / 3.5, r.photoRatio, 1e-9)
-        assertEquals(45.0 / 122.0, r.videoRatio, 1e-9)
-        assertEquals(45.0, r.videoOutMBperMin, 1e-9)
+        assertEquals(60.0 / 122.0, r.videoRatio, 1e-9)
+        assertEquals(60.0, r.videoOutMBperMin, 1e-9)
         assertEquals(2_500_000.0, r.avgPhotoOutBytes, 1e-3)
         assertFalse(r.photoMeasured)
         assertFalse(r.videoMeasured)
@@ -78,11 +78,11 @@ class CapacityMathTest {
 
     @Test
     fun videosOnlyCapacity() {
-        // 10 GB cloud at 45 MB/min -> 10e9/(45e6*60) hours = 3.70 h.
+        // 10 GB cloud at 60 MB/min -> 10e9/(60e6*60) hours = 2.78 h.
         val g = CapacityMath.Gallery(0, 0, 0.0, 0, 0)
         val e = CapacityMath.estimate(10.0, CapacityMath.CalcMode.VIDEOS, 0.5, g, defaultRatios)
         assertEquals(0L, e.photoCount)
-        assertEquals(10.0e9 / (45.0e6 * 60), e.videoHours, 1e-6)
+        assertEquals(10.0e9 / (60.0e6 * 60), e.videoHours, 1e-6)
     }
 
     @Test

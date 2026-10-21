@@ -4,13 +4,16 @@ package app.entesaver.core.logic
  * How photos and videos are optimised: one way, the same on every phone,
  * with nothing to choose.
  *
- * Every file stays in its own format, at no more than Google Photos'
- * Storage saver keeps - 16 MP for a photo, 1080p for a video - and is made as
- * small as it can be while it still measures as its original does
- * ([QualityLadder], [Ssim]). A plain picture gets few bytes and a detailed
- * one the bytes it needs, which a single quality dial for every file cannot
- * do. The phone decides only what its own hardware can make: HEVC where it
- * encodes HEVC, HEIC where it encodes HEIC.
+ * A photo stays in its own format, at no more than Google Photos' Storage
+ * saver keeps - 16 MP - and is made as small as it can be while it still
+ * measures as its original does ([QualityLadder], [Ssim]). A video keeps
+ * everything but its bitrate: its codec (H.264 stays H.264, HEVC stays HEVC),
+ * its size, its frame rate, its rotation, HDR and sound, and its date and
+ * place. How many bits its picture is given is read from what it shows
+ * ([VideoShare], [BitrateCalc]) - a plain picture few, a detailed or moving
+ * one the bits it needs - which a single quality dial for every file cannot
+ * do. The phone decides only what its own hardware can write: a video its
+ * chip cannot write in its own codec, size and frame rate is left as it is.
  */
 
 /** The format a photo is in, and stays in. */
@@ -31,9 +34,9 @@ object MediaSettings {
     /** 1080p's long side: what every phone's hardware encoder takes. */
     const val FULL_HD = 1920
 
-    /** Storage saver's own limits: 16 MP photos, 1080p videos. */
+    /** Storage saver's photo limit, 16 MP; a video keeps its own size and frame rate. */
     val PHOTO = PhotoSpec(maxMp = 16)
-    val VIDEO = VideoSpec(longSide = FULL_HD, fpsCap = 30)
+    val VIDEO = VideoSpec(longSide = 0, fpsCap = 0)
 
     /** A frame rate this high or more is slow motion: kept as filmed. */
     const val SLOW_MOTION_FPS = 90f
@@ -61,12 +64,25 @@ object MediaSettings {
     /**
      * The key encode results are grouped under, so an estimate only ever
      * quotes files made the same way: format and size for a photo
-     * ("jpeg-16"), codec and size for a video ("hevc-1920"). Keys written
-     * by versions with quality presets carry a third part; it is read past.
+     * ("jpeg-16"), codec and size for a video ("h264-0", 0 for a video kept
+     * at its own size). Keys written by earlier versions - "hevc-1920" for a
+     * video made HEVC at 1080p, or with a third part from the quality presets
+     * - are read past.
      */
     fun photoKey(format: PhotoFormat, spec: PhotoSpec = PHOTO): String = "${format.name.lowercase()}-${spec.maxMp}"
 
     fun videoKey(codec: VideoCodec, spec: VideoSpec = VIDEO): String = "${codec.name.lowercase()}-${spec.longSide}"
+
+    /** The key a video left exactly as it was is grouped under: it has no new codec to name. */
+    fun videoKeyAsIs(spec: VideoSpec = VIDEO): String = "asis-${spec.longSide}"
+
+    /**
+     * Every key a video handled the way new ones are is grouped under: one
+     * per codec a copy keeps, and one for a video left as it was - a real
+     * outcome, which an estimate must count too.
+     */
+    fun videoKeys(spec: VideoSpec = VIDEO): List<String> =
+        VideoCodec.entries.map { videoKey(it, spec) } + videoKeyAsIs(spec)
 
     /** A photo key read back, for a file's details. */
     data class PhotoKey(val format: PhotoFormat, val maxMp: Int)

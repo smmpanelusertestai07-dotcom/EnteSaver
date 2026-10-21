@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -19,6 +20,7 @@ import app.entesaver.core.logic.FolderName
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
+import app.entesaver.core.logic.QualityTarget
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
@@ -29,6 +31,7 @@ import app.entesaver.media.OutputInventory
 import app.entesaver.media.Releaser
 import app.entesaver.media.Stager
 import app.entesaver.media.VideoCompressor
+import app.entesaver.media.VideoQuality
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -41,7 +44,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeFalse
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -270,14 +273,13 @@ class PipelineE2eTest {
     }
 
     /**
-     * An ordinary 60 fps clip is written at 30, the cap every copy carries:
-     * half the frames is most of the saving, and nothing a phone shows misses
-     * them. (Slow motion, 90 fps and up, keeps every frame - MediaSettingsTest.)
+     * A 60 fps clip keeps every frame: a copy keeps everything about a video
+     * but its bitrate, and its smoothness is part of it.
      */
     @Test
-    fun aSixtyFpsClipIsWrittenAtThirty() = runBlockingTest {
+    fun aSixtyFpsClipKeepsEveryFrame() = runBlockingTest {
         val uri = MediaFixtures.insertVideo(
-            context, "e2e_sixty.mp4", width = 640, height = 360, frames = 120, fps = 60, textured = true
+            context, "e2e_sixty.mp4", width = 640, height = 360, frames = 120, fps = 60, cameraLike = true
         )
         assertNotNull("the device must be able to produce a 60 fps clip", uri)
         val src = File(context.cacheDir, "sixty_out").apply { mkdirs() }
@@ -290,33 +292,188 @@ class PipelineE2eTest {
                 "the clip must be re-encoded, got ${result.reason} (${result.detail}; source ${sizeOf(uri)} bytes)",
                 result.asIs
             )
-            val fps = videoFrames(result.file.absolutePath) / 2.0
-            assertTrue("written at about 30 fps, measured $fps", fps in 25.0..35.0)
+            val frames = videoFrames(result.file.absolutePath)
+            assertTrue("every one of the 120 frames is kept, counted $frames", frames in 118..122)
+            assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, videoMime(result.file.absolutePath))
         } finally {
             result.file.delete()
         }
     }
 
     /**
-     * HEVC is never encoded in software: on a phone without an HEVC chip -
-     * every emulator - a clip comes out H.264, and Settings says so.
+     * A camera's clip comes back the same in all but its bitrate: H.264
+     * still, the same size shown the same way round, stored with the same
+     * rotation, every frame, and the place and date it was filmed.
      */
     @Test
-    fun hevcWithoutAChipFallsBackToH264() = runBlockingTest {
-        assumeFalse("this phone has an HEVC chip", EncoderCaps.hevcFits(640, 360, 10f))
-        val uri = MediaFixtures.insertVideo(context, "e2e_hevc_ask.mp4", width = 640, height = 360, frames = 30)
-        assertNotNull(uri)
-        val out = File(context.cacheDir, "hevc_out").apply { mkdirs() }
+    fun aCameraClipKeepsItsCodecSizeRotationPlaceAndDate() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_same.mp4", width = 640, height = 360, frames = 60, fps = 30,
+            rotation = 90, place = 28.6139f to 77.2090f, cameraLike = true
+        )
+        assertNotNull("the device must be able to produce a test clip", uri)
+        val out = File(context.cacheDir, "same_out").apply { mkdirs() }
         val result = VideoCompressor.compress(
-            context, uri!!, "e2e_hevc_ask.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+            context, uri!!, "e2e_same.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
         )
         try {
-            if (!result.asIs) {
-                assertEquals(VideoCodec.H264, result.codec)
-                assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, videoMime(result.file.absolutePath))
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            assertEquals(VideoCodec.H264, result.codec)
+            val copy = result.file.absolutePath
+            assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, videoMime(copy))
+            val was = meta { setDataSource(context, uri) }
+            val now = meta { setDataSource(copy) }
+            assertEquals("shown at the same size", was.shown, now.shown)
+            assertEquals("stored with the same rotation", was.rotation, now.rotation)
+            assertEquals("the place it was filmed", was.place, now.place)
+            assertTrue("the original carries a place to keep: ${was.place}", was.place.isNotEmpty())
+            assertEquals("the date it was filmed", was.date, now.date)
+            val frames = videoFrames(copy)
+            assertTrue("every one of the 60 frames is kept, counted $frames", frames in 58..62)
+        } finally {
+            result.file.delete()
+        }
+    }
+
+    /**
+     * A copy is kept only once it measures as looking like its original: the
+     * score it reached is kept with it, at the target or above. And the
+     * measure itself reads a file against an exact copy of itself as the
+     * same picture.
+     */
+    @Test
+    fun aCopyIsKeptOnlyWhenItMeasuresAsLookingLikeItsOriginal() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_vmaf.mp4", width = 640, height = 360, frames = 90, fps = 30, textured = true
+        )
+        assertNotNull("the device must be able to produce a test clip", uri)
+        val out = File(context.cacheDir, "vmaf_out").apply { mkdirs() }
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_vmaf.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
+        try {
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            val vmaf = Regex("vmaf=([0-9.]+)").find(result.reason)?.groupValues?.get(1)?.toDoubleOrNull()
+            assertNotNull("the copy's score is kept with it: ${result.reason}", vmaf)
+            assertTrue("it reaches the target: $vmaf", vmaf!! >= QualityTarget.SEARCH_VMAF)
+            val same = File(out, "same.mp4")
+            context.contentResolver.openInputStream(uri)!!.use { input -> same.outputStream().use { input.copyTo(it) } }
+            val probe = VideoCompressor.probe(context, uri)!!
+            val quality = VideoQuality.of(context, uri, probe.durationMs, probe.fps, probe.width, probe.height)
+            assertNotNull("the original's frames must be readable", quality)
+            val self = quality!!.score(same)
+            assertNotNull("an exact copy's frames must be readable", self)
+            assertTrue("an exact copy scores as the same picture, got ${self!!.vmaf}", self.vmaf > 95)
+        } finally {
+            result.file.delete()
+            out.deleteRecursively()
+        }
+    }
+
+    /**
+     * A long clip's rate is looked for on short stretches of it first, and
+     * the whole clip is copied once at what they found: the same promise as
+     * any other copy, kept a quicker way. A test clip of seconds takes that
+     * path with the length it starts at lowered for it.
+     */
+    @Test
+    fun aLongClipIsSearchedOnStretchesOfItselfFirst() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_long.mp4", width = 640, height = 360, frames = 600, fps = 30, textured = true
+        )
+        assertNotNull("the device must be able to produce a test clip", uri)
+        val out = File(context.cacheDir, "long_out").apply { mkdirs() }
+        VideoCompressor.excerptsAboveMsForTest = 1_000L
+        try {
+            val result = VideoCompressor.compress(
+                context, uri!!, "e2e_long.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+            )
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            assertTrue("its stretches were searched first: ${result.reason}", "excerpts=" in result.reason)
+            val vmaf = Regex("vmaf=([0-9.]+)").find(result.reason)?.groupValues?.get(1)?.toDoubleOrNull()
+            assertTrue("the whole copy reaches the target: $vmaf", vmaf != null && vmaf >= QualityTarget.SEARCH_VMAF)
+            val frames = videoFrames(result.file.absolutePath)
+            assertTrue("every one of the 600 frames is kept, counted $frames", frames in 594..606)
+            result.file.delete()
+        } finally {
+            VideoCompressor.excerptsAboveMsForTest = null
+            out.deleteRecursively()
+        }
+    }
+
+    /**
+     * A clip stored upright with no rotation - a screen recording, a reel -
+     * is written upright too: the same stored size and the same rotation tag,
+     * not laid on its side and marked to be turned back.
+     */
+    @Test
+    fun aPortraitClipIsStoredUprightAsItWas() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_upright.mp4", width = 360, height = 640, frames = 60, fps = 30, cameraLike = true
+        )
+        assertNotNull("the device must be able to produce a portrait clip", uri)
+        val out = File(context.cacheDir, "upright_out").apply { mkdirs() }
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_upright.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
+        try {
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            val was = meta { setDataSource(context, uri) }
+            val now = meta { setDataSource(result.file.absolutePath) }
+            assertEquals("stored the same way round", was.width to was.height, now.width to now.height)
+            assertEquals("with the same rotation tag", was.rotation, now.rotation)
+        } finally {
+            result.file.delete()
+        }
+    }
+
+    /**
+     * An HEVC clip is never written as H.264: a copy keeps its codec, so on
+     * a phone without an HEVC chip - every emulator - it stays as it is.
+     */
+    @Test
+    fun anHevcClipIsNeverWrittenAsH264() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_hevc.mp4", width = 320, height = 240, frames = 30, fps = 30,
+            mime = MediaFormat.MIMETYPE_VIDEO_HEVC
+        )
+        assumeTrue("this device cannot make an HEVC clip", uri != null)
+        val out = File(context.cacheDir, "hevc_out").apply { mkdirs() }
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_hevc.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
+        try {
+            if (result.asIs) {
+                if (!EncoderCaps.hardwareFits(MediaFormat.MIMETYPE_VIDEO_HEVC, 320, 240, 30f)) {
+                    assertEquals(VideoCompressor.CHIP_CANNOT_KEEP, result.reason)
+                }
+            } else {
+                assertEquals(VideoCodec.HEVC, result.codec)
+                assertEquals(MediaFormat.MIMETYPE_VIDEO_HEVC, videoMime(result.file.absolutePath))
             }
         } finally {
             result.file.delete()
+        }
+    }
+
+    /** A video's size, rotation, date and place, as Android's own reader gives them. */
+    private data class Meta(val width: Int, val height: Int, val rotation: Int, val date: String, val place: String) {
+        val shown: Pair<Int, Int> get() = if (rotation % 180 != 0) height to width else width to height
+    }
+
+    private fun meta(open: MediaMetadataRetriever.() -> Unit): Meta {
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.open()
+            Meta(
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0,
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0,
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0,
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE).orEmpty(),
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION).orEmpty()
+            )
+        } finally {
+            mmr.release()
         }
     }
 

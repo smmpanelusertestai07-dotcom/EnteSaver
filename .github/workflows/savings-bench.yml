@@ -11,6 +11,13 @@ name: savings-bench
 # Runs when the benchmark itself changes, or by hand.
 on:
   workflow_dispatch:
+    inputs:
+      sample:
+        description: "Make every n-th video of each shard only (1: the whole library; more for a quick pilot)"
+        default: "1"
+      only:
+        description: "Comma-separated profile ids to make (empty: every kind)"
+        default: ""
   push:
     branches:
       - "claude/**"
@@ -66,13 +73,14 @@ jobs:
     name: shard ${{ matrix.shard }}
     needs: apks
     runs-on: ubuntu-26.04
-    # Making the videos (~10 min), the emulator (at most 120 min, bounded in
-    # run-on-emulator.sh) and grading the kept copies (~20 min).
-    timeout-minutes: 175
+    # Making the videos (~10 min), the emulator (at most 240 min, bounded in
+    # run-on-emulator.sh: each clip is copied up to three times and every
+    # copy scored) and grading the kept copies (~20 min).
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -99,7 +107,12 @@ jobs:
           ffmpeg -hide_banner -version | head -1
 
       - name: Make this shard's videos
-        run: python3 .github/bench/library.py make --shard ${{ matrix.shard }} --shards 8 --out bench-library
+        env:
+          SAMPLE: ${{ inputs.sample || '1' }}
+          ONLY: ${{ inputs.only || '' }}
+        run: |
+          python3 .github/bench/library.py make --shard ${{ matrix.shard }} --shards 16 --out bench-library \
+            --sample "$SAMPLE" --only "$ONLY"
 
       - name: Enable KVM
         run: |
@@ -149,7 +162,7 @@ jobs:
       - name: Grade the kept copies
         if: ${{ !cancelled() }}
         run: |
-          python3 .github/bench/library.py manifest --shards 8 --out bench-manifest.csv
+          python3 .github/bench/library.py manifest --shards 16 --out bench-manifest.csv
           python3 .github/bench/quality.py --manifest bench-manifest.csv --library bench-library \
             --results bench-out --keep bench-keep --shard ${{ matrix.shard }} --out bench-out
 
@@ -182,7 +195,7 @@ jobs:
 
       - name: Work out the saving
         run: |
-          python3 .github/bench/library.py manifest --shards 8 --out manifest.csv
+          python3 .github/bench/library.py manifest --shards 16 --out manifest.csv
           python3 .github/bench/report.py --manifest manifest.csv --shards shards --out bench-report
           cat bench-report/summary.txt >> "$GITHUB_STEP_SUMMARY"
 

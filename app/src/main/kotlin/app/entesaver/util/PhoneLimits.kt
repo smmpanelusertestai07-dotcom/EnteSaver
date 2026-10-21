@@ -1,6 +1,7 @@
 package app.entesaver.util
 
 import android.content.Context
+import android.media.MediaFormat
 import android.os.Build
 import app.entesaver.R
 import app.entesaver.media.EncoderCaps
@@ -30,7 +31,7 @@ object PhoneLimits {
         if (EncoderCaps.hardwareEncoders(EncoderCaps.MIME_HEVC).isEmpty()) {
             out += context.getString(R.string.limit_no_hevc)
         }
-        if (tier != DeviceTier.Tier.VERY_LOW && EncoderCaps.holdsToFullHd(3840, 2160, 30f, smallestPhone = false)) {
+        if (tier != DeviceTier.Tier.VERY_LOW && !writesFourK(context)) {
             out += context.getString(R.string.limit_video_chip)
         }
         if (HeicSupport.state(context) == HeicSupport.State.FAIL) out += context.getString(R.string.limit_heic_fail)
@@ -43,4 +44,13 @@ object PhoneLimits {
         }
         return out
     }
+
+    /**
+     * Whether this phone's chip writes a 4K video in its own codec: H.264,
+     * the codec a phone films 4K in. Without it, 4K videos stay as they are
+     * - and on the smallest phones too, whose memory a 4K encode would not fit.
+     */
+    fun writesFourK(context: Context): Boolean =
+        DeviceTier.tier(context) != DeviceTier.Tier.VERY_LOW &&
+            EncoderCaps.hardwareFits(MediaFormat.MIMETYPE_VIDEO_AVC, 3840, 2160, 30f)
 }
