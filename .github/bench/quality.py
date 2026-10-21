@@ -299,35 +299,6 @@ def side_by_side(src, app, ref, d, at, dest, font):
                     "-map", "[v]", "-frames:v", "1", "-q:v", "3", dest], check=True)
 
 
-CLAMP = bytes(min(max(v, 16), 235) for v in range(256))
-
-
-def frame_digests(path, w, h, dest):
-    """The savings benchmark's diagnostics: each decoded frame's time and the
-    sum of its brightness plane, as decoded and with every level put inside
-    16-235 as the app reads it (VideoQuality logs that sum on the phone), to
-    match the frames the app read against these. w x h is the picture's
-    size either way round: the plane holds as many bytes."""
-    times = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                            "frame=best_effort_timestamp_time", "-of", "csv=p=0", path],
-                           capture_output=True, text=True, check=True).stdout.split()
-    size = w * h * 3 // 2
-    p = subprocess.Popen(["ffmpeg", "-v", "error", "-noautorotate", "-i", path, "-map", "0:v:0",
-                          "-pix_fmt", "yuv420p", "-f", "rawvideo", "-"], stdout=subprocess.PIPE)
-    with open(dest, "w") as out:
-        out.write("frame,time_s,y_sum,y_sum_16_235\n")
-        i = 0
-        while True:
-            frame = p.stdout.read(size)
-            if len(frame) < size:
-                break
-            t = times[i].split(",")[0] if i < len(times) else ""
-            y = frame[:w * h]
-            out.write(f"{i},{t},{sum(y)},{sum(y.translate(CLAMP))}\n")
-            i += 1
-    p.wait()
-
-
 def find_font():
     for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"):
         if os.path.isfile(path):
@@ -367,12 +338,6 @@ def main():
         results.update({r["name"]: r for r in read_csv(path)})
     vmaf, tool = vmaf_tool(a.vmaf, work)
     print(f"VMAF: {tool}", flush=True)
-    diag = os.environ.get("DIAG") == "true"
-    diag_left = 3
-    diag_files_left = 1
-    diag_dir = os.path.join(a.out, "diag")
-    if diag:
-        os.makedirs(diag_dir, exist_ok=True)
     font = find_font()
     rows = []
     for m in sorted(sample, key=lambda r: r["name"]):
@@ -404,19 +369,6 @@ def main():
                 ref_kbps = make_reference(src, ref, s)
                 rp = probe(ref)
                 got = measure("ffmpeg", vmaf, app, src, d, s, work)
-                if diag and diag_left > 0 and os.path.exists(os.path.join(work, "vmaf.json")):
-                    # Pilot runs only: every frame's score, and every frame of
-                    # both files, to set beside what the phone read.
-                    diag_left -= 1
-                    base = os.path.join(diag_dir, re.sub(r"[^A-Za-z0-9._-]", "_", m["name"]))
-                    shutil.copyfile(os.path.join(work, "vmaf.json"), base + ".frames.json")
-                    frame_digests(src, s["width"], s["height"], base + ".orig.csv")
-                    frame_digests(app, d["width"], d["height"], base + ".copy.csv")
-                    if diag_files_left > 0 and os.path.getsize(src) < 120_000_000:
-                        # The two files themselves, for the first of them.
-                        diag_files_left -= 1
-                        shutil.copyfile(src, base + ".orig" + os.path.splitext(src)[1])
-                        shutil.copyfile(app, base + ".copy" + os.path.splitext(app)[1])
                 # The reference is made from the original here, frame for frame.
                 want = measure("ffmpeg", vmaf, ref, src, rp, s, work, search=False)
                 shot = os.path.join(frames_dir, re.sub(r"[^A-Za-z0-9._-]", "_", m["name"]) + ".jpg")

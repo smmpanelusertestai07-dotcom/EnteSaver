@@ -15,7 +15,7 @@ of video, sets the result against the owner's old target (46 GB down to under
 Ente Saver 17.0 measures every copy it keeps. A copy keeps its original's
 codec, size, frame rate, sound, date and place, as in 16.0, but its bitrate
 is no longer worked out from a formula. The phone makes a copy, scores it
-against its original with VMAF on 6 to 12 frames from across the clip
+against its original with VMAF on two dozen frames from across the clip
 (VideoQuality in the app) and makes it again at a rate read from the score
 (QualitySearch), three copies at most, and keeps the smallest that scores 87
 or more: the target, 86 on VMAF's default model (98 on its phone model), and
@@ -510,7 +510,7 @@ def main():
 
     lines = ["## Ente Saver savings benchmark v4 (17.0: every copy measured on the phone)", ""]
     rule = (f"VMAF {SEARCH_VMAF:g} or more on the phone's own reading - the target, {TARGET_VMAF:g} "
-            f"({TARGET_PHONE:g} on VMAF's phone model), and a margin of {MARGIN:g} for reading 6 to 12 frames rather "
+            f"({TARGET_PHONE:g} on VMAF's phone model), and a margin of {MARGIN:g} for reading two dozen frames rather "
             f"than every one")
     others = n_measured - n_made
     rest = (f"; the other {counted(others, 'video')} the run reached stayed as "
@@ -744,7 +744,7 @@ def main():
                      "85-93 good, 75-85 fair). The reference is the same original at most 1080p and 30 fps, H.264 by "
                      "libx264 -preset medium at 8 Mbps for 1080p30 and in proportion below that - a yardstick for "
                      "Google Photos' Storage saver, whose bitrate Google does not publish. The phone's own score is "
-                     "the one the app kept the copy by: vmaf_v0.6.1 worked out on the device over 6 to 12 frames from "
+                     "the one the app kept the copy by: vmaf_v0.6.1 worked out on the device over two dozen frames from "
                      "across the clip. The copies here were written by the emulator's software encoder, not a "
                      "phone's chip.")
         diffs = [num(q, "app_vmaf") - device_of[q["name"]] for q in graded
