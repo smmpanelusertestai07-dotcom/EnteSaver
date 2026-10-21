@@ -465,6 +465,12 @@ object MediaFixtures {
      * in every key frame, cheap between them, the way a real scene is - so a
      * clip at a high bitrate is as large as a real one, and an encode at the
      * app's own target has something to save.
+     *
+     * In grey. These once carried a byte pattern in both colour planes - a
+     * colour no camera records, outside red, green and blue - and Media3,
+     * which edits a picture in red, green and blue, clipped it, which changed
+     * the brightness of every copy: VMAF, which reads brightness only, then
+     * read the copies as other pictures, however well they were made.
      */
     private fun fillFrame(frame: ByteArray, width: Int, height: Int, index: Int, textured: Boolean = false) {
         val ySize = width * height
@@ -477,12 +483,11 @@ object MediaFixtures {
                 }
             }
         }
-        var i = ySize
-        while (i < frame.size) {
-            frame[i] = ((i + index) and 0xFF).toByte()
-            i++
-        }
+        frame.fill(GREY, ySize, frame.size)
     }
+
+    /** 128 in both colour planes, no colour at all (a signed byte holds it as -128). */
+    private const val GREY: Byte = -128
 
     /** Removes every fixture this run created. */
     fun cleanUp(context: Context) {
