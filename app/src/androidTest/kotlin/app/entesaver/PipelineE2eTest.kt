@@ -20,6 +20,7 @@ import app.entesaver.core.logic.FolderName
 import app.entesaver.core.logic.ItemState
 import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.OutFolder
+import app.entesaver.core.logic.QualityTarget
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.data.db.AppDb
 import app.entesaver.data.prefs.OptionsRepo
@@ -30,6 +31,7 @@ import app.entesaver.media.OutputInventory
 import app.entesaver.media.Releaser
 import app.entesaver.media.Stager
 import app.entesaver.media.VideoCompressor
+import app.entesaver.media.VideoQuality
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -330,6 +332,72 @@ class PipelineE2eTest {
             assertTrue("every one of the 60 frames is kept, counted $frames", frames in 58..62)
         } finally {
             result.file.delete()
+        }
+    }
+
+    /**
+     * A copy is kept only once it measures as looking like its original: the
+     * score it reached is kept with it, at the target or above. And the
+     * measure itself reads a file against an exact copy of itself as the
+     * same picture.
+     */
+    @Test
+    fun aCopyIsKeptOnlyWhenItMeasuresAsLookingLikeItsOriginal() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_vmaf.mp4", width = 640, height = 360, frames = 90, fps = 30, textured = true
+        )
+        assertNotNull("the device must be able to produce a test clip", uri)
+        val out = File(context.cacheDir, "vmaf_out").apply { mkdirs() }
+        val result = VideoCompressor.compress(
+            context, uri!!, "e2e_vmaf.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+        )
+        try {
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            val vmaf = Regex("vmaf=([0-9.]+)").find(result.reason)?.groupValues?.get(1)?.toDoubleOrNull()
+            assertNotNull("the copy's score is kept with it: ${result.reason}", vmaf)
+            assertTrue("it reaches the target: $vmaf", vmaf!! >= QualityTarget.SEARCH_VMAF)
+            val same = File(out, "same.mp4")
+            context.contentResolver.openInputStream(uri)!!.use { input -> same.outputStream().use { input.copyTo(it) } }
+            val probe = VideoCompressor.probe(context, uri)!!
+            val quality = VideoQuality.of(context, uri, probe.durationMs, probe.fps, probe.width, probe.height)
+            assertNotNull("the original's frames must be readable", quality)
+            val self = quality!!.score(same)
+            assertNotNull("an exact copy's frames must be readable", self)
+            assertTrue("an exact copy scores as the same picture, got ${self!!.vmaf}", self.vmaf > 95)
+        } finally {
+            result.file.delete()
+            out.deleteRecursively()
+        }
+    }
+
+    /**
+     * A long clip's rate is looked for on short stretches of it first, and
+     * the whole clip is copied once at what they found: the same promise as
+     * any other copy, kept a quicker way. A test clip of seconds takes that
+     * path with the length it starts at lowered for it.
+     */
+    @Test
+    fun aLongClipIsSearchedOnStretchesOfItselfFirst() = runBlockingTest {
+        val uri = MediaFixtures.insertVideo(
+            context, "e2e_long.mp4", width = 640, height = 360, frames = 600, fps = 30, textured = true
+        )
+        assertNotNull("the device must be able to produce a test clip", uri)
+        val out = File(context.cacheDir, "long_out").apply { mkdirs() }
+        VideoCompressor.excerptsAboveMsForTest = 1_000L
+        try {
+            val result = VideoCompressor.compress(
+                context, uri!!, "e2e_long.mp4", "video/mp4", sizeOf(uri), MediaSettings.VIDEO, out
+            )
+            assertFalse("the clip must be re-encoded, got ${result.reason} (${result.detail})", result.asIs)
+            assertTrue("its stretches were searched first: ${result.reason}", "excerpts=" in result.reason)
+            val vmaf = Regex("vmaf=([0-9.]+)").find(result.reason)?.groupValues?.get(1)?.toDoubleOrNull()
+            assertTrue("the whole copy reaches the target: $vmaf", vmaf != null && vmaf >= QualityTarget.SEARCH_VMAF)
+            val frames = videoFrames(result.file.absolutePath)
+            assertTrue("every one of the 600 frames is kept, counted $frames", frames in 594..606)
+            result.file.delete()
+        } finally {
+            VideoCompressor.excerptsAboveMsForTest = null
+            out.deleteRecursively()
         }
     }
 

@@ -674,6 +674,8 @@ fun asIsReasonLabel(reason: String): String = when (reason) {
     VideoCompressor.SIZE_KEPT -> stringResource(R.string.asis_size_kept)
     VideoCompressor.CHIP_CANNOT_KEEP -> stringResource(R.string.asis_chip_cannot_keep)
     VideoCompressor.SOUND_KEPT -> stringResource(R.string.asis_sound_kept)
+    VideoCompressor.QUALITY_KEPT -> stringResource(R.string.asis_quality_kept)
+    VideoCompressor.QUALITY_UNREAD -> stringResource(R.string.asis_quality_unread)
     "removed_before_upload" -> stringResource(R.string.asis_removed_early)
     "already_optimised" -> stringResource(R.string.asis_already_optimised)
     "ultra_hdr_kept" -> stringResource(R.string.asis_ultra_hdr)

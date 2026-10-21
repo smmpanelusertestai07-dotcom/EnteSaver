@@ -243,6 +243,8 @@
     <string name="asis_size_kept">Its picture has an odd number of lines, which a video chip cannot write, and a copy would have to change its size</string>
     <string name="asis_chip_cannot_keep">This phone\u2019s chip cannot write this video in its own codec at its own size and frame rate, so it stays exactly as it is</string>
     <string name="asis_sound_kept">Its sound is in a format a copy could not keep the same</string>
+    <string name="asis_quality_kept">No smaller copy looked like the original, so it stays exactly as it is (often a forward another app had already made smaller)</string>
+    <string name="asis_quality_unread">Its frames could not be read to check a copy against it, so it stays exactly as it is</string>
     <string name="asis_other">Kept as it is to be safe</string>
     <string name="asis_already_optimised">Already optimised by Ente Saver, and a file is never optimised twice</string>
     <string name="asis_ultra_hdr">Ultra HDR photo \u2014 on this Android version only the original keeps its HDR</string>
@@ -816,7 +818,7 @@
     <string name="opt_optimise_hint">One way, the same on every phone. Each file gets only the bytes its picture needs.</string>
     <string name="optimise_value">Automatic</string>
     <string name="optimise_photos">Photos: %1$s, each in its own format — a JPEG stays a JPEG. Each gets the lowest quality that still measures like its original.</string>
-    <string name="optimise_videos">Videos keep everything but their bitrate. The codec stays (H.264 stays H.264, HEVC stays HEVC), and so do the size, frame rate, rotation, HDR and sound. So do the date and place they were filmed. Each gets the bits its picture needs: a still scene few, fast motion and night more. A video another app already made smaller still comes down by two fifths at least. A heavy sound track is written again as AAC at 128 kbps; a lighter one is copied untouched.</string>
+    <string name="optimise_videos">Videos keep everything but their bitrate. The codec stays (H.264 stays H.264, HEVC stays HEVC), and so do the size, frame rate, rotation, HDR and sound. So do the date and place they were filmed. Each copy is checked against its original on this phone, by Netflix\u2019s measure of what a viewer sees. It is made again until it is as small as it can be while it still looks like the original. A still scene ends up small, fast motion and night larger. A video another app already squeezed stays exactly as it is, since it cannot lose more without showing it. A heavy sound track is written again as AAC at 128 kbps; a lighter one is copied untouched.</string>
     <string name="optimise_kept_whole">Motion, portrait and HDR photos, and anything a copy would lose something from, are kept whole. A file is never optimised twice.</string>
     <string name="preset_best">Best</string>
     <string name="preset_balanced">Balanced</string>
@@ -1494,7 +1496,7 @@
     <string name="quality_current_title">How files are optimised</string>
     <string name="quality_current_limits">Photos %1$s, each in its own format. Videos in their own codec, at their own size and frame rate: only the bitrate changes.</string>
     <string name="quality_looks_photo">Every photo is checked against its original before it is written. It gets the lowest quality at which it still looks the same.</string>
-    <string name="quality_looks_video">Every video is read first for how much it moves and how dark it is. A still scene gets few bits, fast motion and night more.</string>
+    <string name="quality_looks_video">Every video copy is measured against its original on this phone and kept only when it still looks like the original. A still scene ends up small, fast motion and night larger.</string>
     <string name="quality_looks_note">Detail kept counts pixels; these lines describe how it looks.</string>
     <string name="quality_current_headroom">That is about %1$s times more detail than a phone screen can display.</string>
     <string name="about_quality_title">Optimisation</string>

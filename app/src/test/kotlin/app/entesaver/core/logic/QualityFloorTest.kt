@@ -55,13 +55,14 @@ class QualityFloorTest {
     }
 
     @Test
-    fun `every rate the app asks for is under the floor where the floor applies`() {
-        // Why the compressor writes in CBR there: VBR could never land on the
-        // rate BitrateCalc chose, even for the fastest motion.
+    fun `a still scene's first copy is under the floor where the floor applies`() {
+        // Why the compressor writes in CBR first there: a lean clip's copy in
+        // VBR would come out above the rate it was asked for, and the search
+        // for its rate (QualitySearch) could never bring it down.
         val sizes = listOf(1920 to 1080, 1280 to 720, 960 to 540, 854 to 480, 640 to 360)
         for ((w, h) in sizes) {
             for (codec in VideoCodec.entries) {
-                val asked = (BitrateCalc.targetBps(w, h, 30f, codec) * VideoShare.MAX).toInt()
+                val asked = (BitrateCalc.targetBps(w, h, 30f, codec) * VideoShare.MIN).toInt()
                 assertTrue("$w x $h $codec: $asked", QualityFloor.vbrBps(asked, w, h, codec) > asked)
             }
         }

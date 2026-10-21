@@ -30,10 +30,14 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import app.entesaver.BuildConfig
 import app.entesaver.core.logic.AudioPlan
 import app.entesaver.core.logic.BitrateCalc
+import app.entesaver.core.logic.Excerpts
 import app.entesaver.core.logic.MediaSettings
 import app.entesaver.core.logic.QualityFloor
+import app.entesaver.core.logic.QualitySearch
+import app.entesaver.core.logic.QualityTarget
 import app.entesaver.core.logic.RunDecider
 import app.entesaver.core.logic.VideoCodec
 import app.entesaver.core.logic.VideoCodecResolver
@@ -43,6 +47,7 @@ import app.entesaver.util.DeviceTier
 import com.google.common.collect.ImmutableList
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -56,14 +61,19 @@ import kotlinx.coroutines.withTimeout
  * HEVC), the size, the frame rate, the rotation, HDR, the sound's codec,
  * channels and sample rate, and the date and place it was filmed.
  *
- * How many bits a clip gets is read from its picture, not assumed: a few
- * pairs of its frames say how much it moves and how dark it is
- * ([MotionProbe]), and the clip is given that share of the standard rate
- * ([VideoShare], [BitrateCalc]) - a still scene little, fast motion and night
- * much more. Nothing is test-encoded first. Sound that is already lean is
- * copied across untouched, and a heavy AAC track written again as AAC
- * ([AudioPlan]). Key frames every few seconds and B-frames where the chip
- * makes them spend the bits on the picture.
+ * How many bits a clip gets is measured, not assumed: the least at which
+ * its copy still looks like the original (QualityTarget). The copy is made,
+ * scored against its original with VMAF on frames from across the clip
+ * ([VideoQuality]), and made again at a rate read from that score
+ * (QualitySearch) - at most three copies, of which the smallest that reaches
+ * the target is kept. A still scene ends low, a night scene or fast motion
+ * high, and a forward another app already squeezed, which cannot lose more
+ * without showing it, stays exactly as it is. Where the search starts is read
+ * from the picture too: a few pairs of frames say how much it moves and how
+ * dark it is ([MotionProbe], [VideoShare], [BitrateCalc]). Sound that is
+ * already lean is copied across untouched, and a heavy AAC track written
+ * again as AAC ([AudioPlan]). Key frames every few seconds and B-frames where
+ * the chip makes them spend the bits on the picture.
  *
  * A video this phone's chip cannot write in its own codec, at its own size
  * and frame rate, is left exactly as it is: nothing is converted to another
@@ -71,12 +81,12 @@ import kotlinx.coroutines.withTimeout
  * Every copy is read back before it is kept, and one that came out in
  * another codec, at another size or with frames missing is thrown away.
  *
- * Known Media3 pitfalls are handled with a mandatory result check and a
- * retry ladder in the same codec: VBR with B-frames -> VBR -> CBR (-> for
- * H.264, Android's own software encoder) -> copy as-is. Where Android's
- * quality floor would raise a VBR encode (QualityFloor), CBR comes first. A
- * rung that overshoots its target has the next one asked for less, by as far
- * as it went over. An item is never lost.
+ * Known Media3 pitfalls are handled with a mandatory read-back and a
+ * ladder of encoder rungs in the same codec: VBR with B-frames -> VBR -> CBR
+ * (-> for H.264, Android's own software encoder) -> copy as-is. Where
+ * Android's quality floor would raise a VBR encode (QualityFloor), CBR comes
+ * first. The first rung that makes a good copy makes every later one of the
+ * clip. An item is never lost.
  */
 @OptIn(UnstableApi::class)
 object VideoCompressor {
@@ -152,6 +162,16 @@ object VideoCompressor {
     const val SOUND_KEPT = "sound_kept"
 
     /**
+     * No smaller copy measured as looking like the original (QualityTarget):
+     * most often a forward or a download another app already squeezed, which
+     * cannot lose more without showing it.
+     */
+    const val QUALITY_KEPT = "quality_kept"
+
+    /** The original's frames could not be read back, so no copy could be measured against them. */
+    const val QUALITY_UNREAD = "quality_unread"
+
+    /**
      * The whole ladder's time budget, for a caller with no deadline of its own.
      *
      * This used to be the budget for one attempt, and there are three attempts,
@@ -181,6 +201,24 @@ object VideoCompressor {
 
     /** Below this there is no point starting another attempt at all. */
     private const val MIN_ATTEMPT_MS = 60_000L
+
+    /**
+     * A long clip (Excerpts.ABOVE_MS) - a wedding, a school function - may
+     * take most of its budget to copy once. Its rate is looked for on short
+     * stretches of it first; where they could not be copied or scored, its
+     * first copy is asked for [LONG_CLIP_BOOST] times the usual start - a
+     * first copy that reaches the target can be kept, one that falls short is
+     * time spent for nothing.
+     */
+    const val LONG_CLIP_BOOST = 1.25
+
+    /**
+     * Instrumented tests only: the length above which a clip is searched on
+     * stretches of itself, so a test clip of seconds takes that path too. A
+     * release build ignores it entirely.
+     */
+    @Volatile
+    var excerptsAboveMsForTest: Long? = null
 
     /**
      * Seconds between key frames. A camera writes one every second so it can
@@ -283,61 +321,36 @@ object VideoCompressor {
             return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, SOUND_KEPT)
         }
         // Android's quality floor holds a VBR encode of this picture to its
-        // own table, far above these rates (QualityFloor), so where it
-        // applies the clip is written in CBR - if the chip has CBR for this
-        // codec. Where it has not, a VBR copy at the floor is the least this
-        // phone can make, and every check below judges it as that.
+        // own table (QualityFloor), so where it applies the clip is written in
+        // CBR first - if the chip has CBR for this codec - and a lean clip can
+        // come out as lean as it looks. Where it has not, a VBR copy is what
+        // the floor makes of it, and the search below works from the rate the
+        // copy actually came out at.
         val floored = EncoderCaps.qualityFloorApplies(context, outW, outH)
         val cbrFirst = chip && floored && EncoderCaps.cbrFits(codecMime, outW, outH, outFps)
-        val heldTo = { rate: Int, cbr: Boolean ->
-            if (floored && !cbr) QualityFloor.vbrBps(rate, outW, outH, codec) else rate
-        }
-        // The standard rate for this picture; what the clip is given is a
-        // share of it read from its frames (VideoShare).
-        val base = BitrateCalc.targetBps(outW, outH, outFps, codec)
-        val srcLongSide = maxOf(upright.first, upright.second)
-
-        // Leaner already than the least any clip is given: nothing to win.
-        if (BitrateCalc.shouldCopyAsIs(
-                srcLongSide, spec.longSideLimit, probe.bitrateBps, heldTo((base * VideoShare.MIN).toInt(), cbrFirst), true
-            )
-        ) {
+        // The most picture a copy may carry: a share of what the source's own
+        // holds (BitrateCalc.MAX_OF_SOURCE). The file's own figure for its
+        // picture, or the whole file less its sound.
+        val sourceVideoBps = probe.videoBps ?: (probe.bitrateBps - (sound?.bitrateBps ?: 0)).takeIf { it > 0 }
+        val maxVideoBps = sourceVideoBps?.let { (it * BitrateCalc.MAX_OF_SOURCE).toLong() }
+            ?: BitrateCalc.CAP_BPS.toLong()
+        if (maxVideoBps < BitrateCalc.FLOOR_BPS) {
             return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
         }
-
+        // Where the search starts: the standard rate for this picture, times
+        // the share its frames ask for (VideoShare) - a still scene little,
+        // fast motion and night more. Only a start: the copies' own scores
+        // decide where it ends (QualitySearch).
         val motion = MotionProbe.read(context, uri, probe.durationMs, MOTION_FPS)
         val share = VideoShare.of(motion?.ti, motion?.meanLuma, screenRecording)
-        // Never more than the source's own picture holds, at its own size
-        // (BitrateCalc.sourceCapBps): the file's own figure for its picture,
-        // or the whole file less its sound.
-        val sourceVideoBps = probe.videoBps ?: (probe.bitrateBps - (sound?.bitrateBps ?: 0)).takeIf { it > 0 }
-        val target = run {
-            val asked = (base * share).toInt()
-            val cap = sourceVideoBps?.let {
-                BitrateCalc.sourceCapBps(
-                    it, probe.videoMime, upright.first, upright.second, probe.fps, outW, outH, outFps, codec
-                )
-            }
-            if (cap != null) minOf(asked, cap) else asked
-        }
-        // Measured, the clip needs no fewer bits than it already has.
-        if (BitrateCalc.shouldCopyAsIs(srcLongSide, spec.longSideLimit, probe.bitrateBps, heldTo(target, cbrFirst), true)) {
-            return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, "already_efficient")
-        }
+        val start = minOf(BitrateCalc.targetBps(outW, outH, outFps, codec) * share, maxVideoBps.toDouble()).toInt()
 
         var outOfTime = false
-        var notSmaller = false
         var detail = ""
-        // The smallest copy that only missed its bitrate target, kept in case
-        // no rung meets it (BitrateCalc.worthKeeping).
-        var fallback: CompressResult? = null
-        // After an encode that overshot, what the next one asks for: lowered
-        // by as far as it went over (BitrateCalc.correctedRequestBps).
-        var request: Int? = null
         val ext = displayName.substringAfterLast('.', "mp4").lowercase().ifEmpty { "mp4" }
         // Some hardware decoders - an emulator's, a few chips' - never hand
         // Media3 the last frames of a clip, and it ends the copy without them
-        // ("frames" below). The rung is then made again, and every rung after
+        // ("frames" below). The copy is then made again, and every one after
         // it, with Android's own software decoder, which hands over every one.
         var softwareDecoding = false
         // A picture stored upright with no rotation - most screen recordings,
@@ -345,126 +358,177 @@ object VideoCompressor {
         // it that way round. Otherwise Media3 lays it on its side and marks
         // the file to turn it back: shown the same, stored the other way.
         val storedUpright = probe.rotation == 0 && probe.height > probe.width
-        val attempts = ArrayDeque(attemptsFor(codec, cbrFirst, chip, software))
-        while (attempts.isNotEmpty()) {
-            val attempt = attempts.removeFirst()
-            val asked = request ?: target
-            // Under the floor a VBR rung comes out at the floor, never smaller
-            // than a copy already made that only missed its own target.
-            if (fallback != null && floored && !attempt.cbr) break
-            // Each rung gets what is left of the budget, not a fresh twenty
-            // minutes of its own, so three attempts can never cost three times
-            // the number the caller asked for.
-            val leftMs = budgetEndsAt - System.currentTimeMillis()
-            if (leftMs < MIN_ATTEMPT_MS) {
-                outOfTime = true
-                break
-            }
-            val outFile = File(tempDir, "video_${System.nanoTime()}_${attempt.label}.$ext")
-            val export = try {
-                runTransform(
-                    context, uri, outFile, asked, codecMime, attempt, leftMs,
-                    audio = audio,
-                    muxer = same.muxerFactory(),
-                    operatingRate = operatingRateFor(outFps),
-                    softwareDecoding = softwareDecoding,
-                    upright = storedUpright &&
-                        EncoderCaps.takesAsStored(codecMime, probe.width, probe.height, outFps, attempt.software),
-                    onError = { detail = "${attempt.label}: $it" }
-                )
-            } catch (ce: CancellationException) {
-                outFile.delete()
-                fallback?.file?.delete()
-                throw ce
-            } catch (e: Exception) {
-                detail = "${attempt.label}: ${e.javaClass.simpleName}"
-                null
-            }
-            if (export == null || !outFile.exists()) {
-                outFile.delete()
-                continue
-            }
-            // A MOV says it is a MOV again, a 3GP a 3GP, and the place reads
-            // as the camera wrote it.
-            same.restoreType(outFile)
-            same.restorePlace(outFile)
-            // Read back before anything else: a copy in another codec, at
-            // another size or rotation, with frames missing, or dated or
-            // placed otherwise is not a copy of this video, however small.
-            val changed = KeptCheck.changes(context, uri, probe, codecMime, outFile)
-            if (changed.isNotEmpty()) {
-                detail = "${attempt.label}: changed ${changed.joinToString(" ")}"
-                outFile.delete()
-                if (changed == listOf("frames") && !softwareDecoding) {
-                    softwareDecoding = true
-                    attempts.addFirst(attempt)
-                }
-                continue
-            }
-            val outBytes = outFile.length()
-            // Media3 renamed this to say what it always was: the muxer's
-            // own figure, close but not exact. The name changed, the
-            // number did not, and a zero still means "ask the file".
-            val outDur = if (export.approximateDurationMs > 0) {
-                export.approximateDurationMs
-            } else {
-                probeDurationMs(outFile)
-            }
-            val outBps = if (outDur > 0) outBytes * 8000L / outDur else Long.MAX_VALUE
-            // The file's bitrate counts its sound too, and at these picture
-            // rates a kept 128 kbps track is a fifth of a small clip: the
-            // check allows for the sound this rung writes, and for the floor
-            // a VBR rung is held to.
-            val rungSound = soundBps(audio, sound?.bitrateBps)
-            val rungTarget = heldTo(target, attempt.cbr) + rungSound
-            val made = CompressResult(
-                outFile,
-                outBytes,
-                asIs = false,
-                reason = "compressed_${attempt.label}${if (hdr == MediaTraits.Hdr.NONE) "" else "_hdr"}",
-                ext = ext,
-                srcPixels = upright.first.toLong() * upright.second.toLong(),
-                outPixels = outW.toLong() * outH.toLong(),
-                codec = codec
+        // The rungs, in turn, until one makes a copy that reads back as its
+        // original; that rung then makes every later copy of the clip.
+        val rungs = ArrayDeque(attemptsFor(codec, cbrFirst, chip, software))
+        val rungSound = soundBps(audio, sound?.bitrateBps)
+        // A copy must weigh less than this to be worth keeping at all.
+        val maxBytes = (srcBytes * BitrateCalc.MAX_COPY_SHARE).toLong()
+        val tries = mutableListOf<QualitySearch.Try>()
+        val copies = mutableListOf<CompressResult>()
+        val drop = { keep: Int? -> copies.forEachIndexed { i, c -> if (i != keep) c.file.delete() } }
+        // A long clip's rate is looked for on short stretches of it first
+        // (Excerpts): the whole clip is then copied at what they found, or
+        // stays as it is when they found it cannot look like the original at
+        // a rate a copy may carry. Where they could not be copied or read, its
+        // first copy is aimed higher instead (LONG_CLIP_BOOST).
+        var ask = start
+        val above = (if (BuildConfig.DEBUG) excerptsAboveMsForTest else null) ?: Excerpts.ABOVE_MS
+        val windows = Excerpts.windows(probe.durationMs, above)
+        // How many tries the stretches took, kept with the copy (QualityTarget.describe).
+        var excerptTries = 0
+        if (windows.isNotEmpty() && rungs.isNotEmpty()) {
+            val upright = storedUpright &&
+                EncoderCaps.takesAsStored(codecMime, probe.width, probe.height, outFps, rungs.first().software)
+            val found = excerptRate(
+                context, uri, probe, windows, start, maxVideoBps, codecMime, rungs.first(), budgetEndsAt, tempDir, ext,
+                muxer = { same.muxerFactory() }, operatingRate = operatingRateFor(outFps),
+                softwareDecoding = softwareDecoding, upright = upright
             )
-            if (BitrateCalc.resultAcceptable(srcBytes, outBytes, outBps, rungTarget, probe.durationMs, outDur)) {
-                // A later rung can pass at a higher target - the floor's - and
-                // still be the bigger copy.
-                val earlier = fallback
-                if (earlier != null && earlier.bytes <= outBytes) {
-                    outFile.delete()
-                    return earlier
+            when (found) {
+                is ExcerptRate.At -> {
+                    ask = found.askBps
+                    excerptTries = found.tries
                 }
-                earlier?.file?.delete()
-                return made
-            }
-            detail = "${attempt.label}: $outBytes of $srcBytes bytes, $outBps of $rungTarget bps " +
-                "(asked $asked), $outDur of ${probe.durationMs} ms"
-            // Judged against the target, asked for less: the next encode
-            // lands near the target instead of over it a second time. Not
-            // under the floor, where a VBR rung is raised whatever it asks and
-            // the floor is what overshot.
-            if (outDur > 0 && !(floored && !attempt.cbr)) {
-                request = BitrateCalc.correctedRequestBps(asked, outBps - rungSound, target) ?: request
-            }
-            if (BitrateCalc.worthKeeping(srcBytes, outBytes, probe.durationMs, outDur) &&
-                outBytes < (fallback?.bytes ?: Long.MAX_VALUE)
-            ) {
-                fallback?.file?.delete()
-                fallback = made.copy(detail = detail)
-                continue
-            }
-            outFile.delete()
-            if (outBytes >= srcBytes && outBps <= rungTarget * BitrateCalc.RESULT_BITRATE_FACTOR) {
-                // The encoder kept to its target and the copy is still no
-                // smaller: the original is already leaner than the setting,
-                // and the next rung aims at the same target. Trying it
-                // would only spend the battery a second time.
-                notSmaller = true
-                break
+                ExcerptRate.Whole ->
+                    return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, QUALITY_KEPT)
+                        .copy(detail = "excerpts")
+                null -> ask = minOf(start * LONG_CLIP_BOOST, maxVideoBps.toDouble()).toInt()
             }
         }
-        fallback?.let { return it }
+        // The original, read once at the moments every copy of the whole clip
+        // is scored at - after any stretches, so the two are never both held.
+        val quality = VideoQuality.of(context, uri, probe.durationMs, probe.fps, probe.width, probe.height)
+            ?: return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, QUALITY_UNREAD)
+        // How long the last copy took to make and score: the next is not
+        // started without that much time left, and a fifth more.
+        var lastTryMs = 0L
+        search@ while (true) {
+            var made: CompressResult? = null
+            var madeVideoBps = 0L
+            val tryStarted = System.currentTimeMillis()
+            while (made == null && rungs.isNotEmpty()) {
+                val attempt = rungs.first()
+                // Each copy gets what is left of the budget, not a fresh twenty
+                // minutes of its own, so the search can never cost more than
+                // the number the caller asked for.
+                val leftMs = budgetEndsAt - System.currentTimeMillis()
+                if (leftMs < maxOf(MIN_ATTEMPT_MS, lastTryMs * 6 / 5)) {
+                    outOfTime = true
+                    break@search
+                }
+                val outFile = File(tempDir, "video_${System.nanoTime()}_${attempt.label}.$ext")
+                val export = try {
+                    runTransform(
+                        context, uri, outFile, ask, codecMime, attempt, leftMs,
+                        audio = audio,
+                        muxer = same.muxerFactory(),
+                        operatingRate = operatingRateFor(outFps),
+                        softwareDecoding = softwareDecoding,
+                        upright = storedUpright &&
+                            EncoderCaps.takesAsStored(codecMime, probe.width, probe.height, outFps, attempt.software),
+                        onError = { detail = "${attempt.label}: $it" }
+                    )
+                } catch (ce: CancellationException) {
+                    outFile.delete()
+                    drop(null)
+                    throw ce
+                } catch (e: Exception) {
+                    detail = "${attempt.label}: ${e.javaClass.simpleName}"
+                    null
+                }
+                if (export == null || !outFile.exists()) {
+                    outFile.delete()
+                    rungs.removeFirst()
+                    continue
+                }
+                // A MOV says it is a MOV again, a 3GP a 3GP, and the place reads
+                // as the camera wrote it.
+                same.restoreType(outFile)
+                same.restorePlace(outFile)
+                // Read back before anything else: a copy in another codec, at
+                // another size or rotation, with frames missing, or dated or
+                // placed otherwise is not a copy of this video, however small.
+                val changed = KeptCheck.changes(context, uri, probe, codecMime, outFile)
+                if (changed.isNotEmpty()) {
+                    detail = "${attempt.label}: changed ${changed.joinToString(" ")}"
+                    outFile.delete()
+                    if (changed == listOf("frames") && !softwareDecoding) softwareDecoding = true else rungs.removeFirst()
+                    continue
+                }
+                // Media3 renamed this to say what it always was: the muxer's
+                // own figure, close but not exact. The name changed, the
+                // number did not, and a zero still means "ask the file".
+                val outDur = if (export.approximateDurationMs > 0) {
+                    export.approximateDurationMs
+                } else {
+                    probeDurationMs(outFile)
+                }
+                if (outDur <= 0 || !BitrateCalc.sameLength(probe.durationMs, outDur)) {
+                    detail = "${attempt.label}: $outDur of ${probe.durationMs} ms"
+                    outFile.delete()
+                    rungs.removeFirst()
+                    continue
+                }
+                val outBytes = outFile.length()
+                // The picture's own rate: the file's, less the sound this rung writes.
+                madeVideoBps = (outBytes * 8000L / outDur - rungSound).coerceAtLeast(1)
+                made = CompressResult(
+                    outFile,
+                    outBytes,
+                    asIs = false,
+                    reason = "compressed_${attempt.label}${if (hdr == MediaTraits.Hdr.NONE) "" else "_hdr"}",
+                    ext = ext,
+                    srcPixels = upright.first.toLong() * upright.second.toLong(),
+                    outPixels = outW.toLong() * outH.toLong(),
+                    codec = codec
+                )
+            }
+            val result = made ?: break
+            val score = quality.score(result.file)
+            if (score == null) {
+                detail = "${result.reason}: its frames could not be read back to score it"
+                result.file.delete()
+                break
+            }
+            tries += QualitySearch.Try(ask, madeVideoBps, result.bytes, score.vmaf)
+            lastTryMs = System.currentTimeMillis() - tryStarted
+            // How it was made and how it measured, kept with the item (Stager).
+            val measured = QualityTarget.describe(score.vmaf, score.lowest, score.phone, tries.size, excerptTries)
+            copies += result.copy(reason = "${result.reason};$measured")
+            val step = QualitySearch.next(
+                tries, QualityTarget.SEARCH_VMAF, maxBytes, maxVideoBps, BitrateCalc.FLOOR_BPS, QualityTarget.MAX_TRIES
+            )
+            when (step) {
+                is QualitySearch.Step.Encode -> {
+                    // A copy short of the target, or too heavy, can never be the
+                    // one kept: its file goes now rather than at the end.
+                    tries.forEachIndexed { i, t ->
+                        if (!QualitySearch.passes(t, QualityTarget.SEARCH_VMAF, maxBytes)) copies[i].file.delete()
+                    }
+                    ask = step.askedBps
+                }
+                is QualitySearch.Step.Keep -> {
+                    drop(step.index)
+                    return copies[step.index]
+                }
+                QualitySearch.Step.Original -> {
+                    drop(null)
+                    detail = tries.joinToString(" ") { "${it.videoBps / 1000}k:${it.score.roundToInt()}" }
+                    return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, QUALITY_KEPT)
+                        .copy(detail = detail)
+                }
+            }
+        }
+        // Out of time or out of rungs before the search settled: the smallest
+        // copy that reached the target so far, if any did.
+        val best = tries.indices.filter { QualitySearch.passes(tries[it], QualityTarget.SEARCH_VMAF, maxBytes) }
+            .minByOrNull { tries[it].bytes }
+        if (best != null) {
+            drop(best)
+            return copies[best]
+        }
+        drop(null)
         if (outOfTime && RunDecider.outOfTimeWaits(maxTotalMs, DEFAULT_TOTAL_MS)) {
             // The budget was cut short by the caller's run, not spent on a
             // clip too long for any run. An as-is copy is final, so making
@@ -476,10 +540,96 @@ object VideoCompressor {
         }
         val failReason = when {
             outOfTime -> "out_of_time"
-            notSmaller -> "not_smaller"
+            tries.isNotEmpty() -> QUALITY_KEPT
             else -> "encoder_rejected"
         }
         return PhotoCompressor.copyAsIs(context, uri, displayName, tempDir, failReason).copy(detail = detail)
+    }
+
+    /** What the stretches of a long clip found (Excerpts). */
+    private sealed interface ExcerptRate {
+        /** Copy the whole clip asking for this, found in [tries] tries of the stretches. */
+        data class At(val askBps: Int, val tries: Int) : ExcerptRate
+
+        /** No copy of them looked like the original at a rate a copy may carry: the clip stays whole. */
+        data object Whole : ExcerptRate
+    }
+
+    /** The whole clip is asked for a little more than its stretches needed, which may not hold its hardest moments. */
+    private const val EXCERPT_MARGIN = 1.05
+
+    /**
+     * The rate the stretches of a long clip ([windows]) say it needs. Each try
+     * copies every stretch with [attempt] at one rate and scores the copies
+     * against the same stretches of the original; QualitySearch reads the next
+     * rate off their pooled score, as it does for a whole clip, and the try it
+     * settles on gives the rate. Null when a stretch could not be copied or
+     * read: the whole clip is then searched on as any other.
+     */
+    private suspend fun excerptRate(
+        context: Context,
+        uri: Uri,
+        probe: Probe,
+        windows: List<LongRange>,
+        start: Int,
+        maxVideoBps: Long,
+        codecMime: String,
+        attempt: Attempt,
+        budgetEndsAt: Long,
+        tempDir: File,
+        ext: String,
+        muxer: () -> Muxer.Factory,
+        operatingRate: Int,
+        softwareDecoding: Boolean,
+        upright: Boolean
+    ): ExcerptRate? {
+        val originals = windows.map { w ->
+            VideoQuality.ofWindow(
+                context, uri, w, probe.durationMs, Excerpts.MOMENTS_EACH, probe.fps, probe.width, probe.height
+            ) ?: return null
+        }
+        val tries = mutableListOf<QualitySearch.Try>()
+        var ask = start
+        while (true) {
+            var bytes = 0L
+            var ms = 0L
+            val scores = mutableListOf<VideoQuality.Score>()
+            for ((i, w) in windows.withIndex()) {
+                val leftMs = budgetEndsAt - System.currentTimeMillis()
+                if (leftMs < MIN_ATTEMPT_MS) return null
+                val out = File(tempDir, "excerpt_${System.nanoTime()}.$ext")
+                try {
+                    val export = runTransform(
+                        context, uri, out, ask, codecMime, attempt, leftMs,
+                        audio = null,
+                        muxer = muxer(),
+                        operatingRate = operatingRate,
+                        softwareDecoding = softwareDecoding,
+                        upright = upright,
+                        onError = {},
+                        windowMs = w
+                    )
+                    if (export == null || !out.exists()) return null
+                    bytes += out.length()
+                    ms += w.last - w.first
+                    scores += originals[i].score(out) ?: return null
+                } finally {
+                    out.delete()
+                }
+            }
+            val pooled = VideoQuality.pooled(scores) ?: return null
+            tries += QualitySearch.Try(ask, bytes * 8000L / ms.coerceAtLeast(1), bytes, pooled.vmaf)
+            val step = QualitySearch.next(
+                tries, QualityTarget.SEARCH_VMAF, Long.MAX_VALUE, maxVideoBps, BitrateCalc.FLOOR_BPS,
+                QualityTarget.MAX_TRIES
+            )
+            when (step) {
+                is QualitySearch.Step.Encode -> ask = step.askedBps
+                is QualitySearch.Step.Keep ->
+                    return ExcerptRate.At((tries[step.index].askedBps * EXCERPT_MARGIN).toInt(), tries.size)
+                QualitySearch.Step.Original -> return ExcerptRate.Whole
+            }
+        }
     }
 
     /** Runs a single Transformer export; null on any export error or timeout. */
@@ -496,7 +646,8 @@ object VideoCompressor {
         operatingRate: Int,
         softwareDecoding: Boolean,
         upright: Boolean,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        windowMs: LongRange? = null
     ): ExportResult? = withContext(Dispatchers.Default) {
         // Background priority: encoding must never make the phone feel slow.
         val thread = HandlerThread("entesaver-transform", Process.THREAD_PRIORITY_BACKGROUND)
@@ -514,15 +665,21 @@ object VideoCompressor {
                 }
                 // Profile and level are left to Media3, which asks for H.264
                 // High at the highest level the chip supports (minus the chips
-                // known to break on it), and HEVC Main.
-                // Best effort at twice the clip's own frame rate, not as fast
-                // as the chip can go: Media3's default runs the encoder flat
-                // out, and that heat is what a game in the foreground feels.
+                // known to break on it), and HEVC Main - except on an H.264
+                // encoder without High, which Media3 then leaves at its own
+                // default, Baseline. Main is asked for there (h264MainLevel):
+                // the same codec, with the arithmetic coding Baseline lacks,
+                // which on Android's own encoder looks as good at a fifth
+                // less. Best effort at twice the clip's own frame rate, not as
+                // fast as the chip can go: Media3's default runs the encoder
+                // flat out, and that heat is what a game in the foreground feels.
+                val mainLevel = if (codecMime == MimeTypes.VIDEO_H264) h264MainLevel(attempt.software) else null
                 val videoSettings = VideoEncoderSettings.Builder()
                     .setBitrate(bitrateBps)
                     .setBitrateMode(bitrateMode)
                     .setiFrameIntervalSeconds(KEY_FRAME_SECONDS)
                     .setEncoderPerformanceParameters(operatingRate, NON_REALTIME)
+                    .apply { if (mainLevel != null) setEncodingProfileLevel(AVC_MAIN, mainLevel) }
                     .build()
                 // Asking for any sound settings at all makes Media3 re-encode
                 // the sound, so a track that is kept asks for none. One that is
@@ -599,7 +756,16 @@ object VideoCompressor {
                 // did. Both branches are pinned by instrumented tests against
                 // real clips, because the wrong choice fails nothing else - the
                 // copy is smaller, valid, and either silent or padded.
-                val sequence = if (audio != null) {
+                // A stretch of the clip (Excerpts) is its picture alone, from
+                // the first to the last millisecond asked for.
+                val sequence = if (windowMs != null) {
+                    val clip = MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(windowMs.first)
+                        .setEndPositionMs(windowMs.last)
+                        .build()
+                    val item = MediaItem.Builder().setUri(uri).setClippingConfiguration(clip).build()
+                    EditedMediaItemSequence.withVideoFrom(listOf(EditedMediaItem.Builder(item).setRemoveAudio(true).build()))
+                } else if (audio != null) {
                     EditedMediaItemSequence.withAudioAndVideoFrom(listOf(edited(MediaItem.fromUri(uri))))
                 } else {
                     EditedMediaItemSequence.withVideoFrom(listOf(edited(MediaItem.fromUri(uri))))
@@ -664,18 +830,36 @@ object VideoCompressor {
     }
 
     private val SOFTWARE_SELECTOR = EncoderSelector { mimeType ->
-        val all = EncoderUtil.getSupportedEncoders(mimeType)
-        val software = all.filter { info ->
-            try {
-                EncoderCaps.isSoftware(info) ||
-                    info.name.startsWith("c2.android.", ignoreCase = true) ||
-                    info.name.startsWith("OMX.google.", ignoreCase = true)
-            } catch (e: Exception) {
-                false
-            }
-        }
-        ImmutableList.copyOf(software)
+        ImmutableList.copyOf(EncoderUtil.getSupportedEncoders(mimeType).filter { isAndroidsOwn(it) })
     }
+
+    private fun isAndroidsOwn(info: MediaCodecInfo): Boolean = try {
+        EncoderCaps.isSoftware(info) ||
+            info.name.startsWith("c2.android.", ignoreCase = true) ||
+            info.name.startsWith("OMX.google.", ignoreCase = true)
+    } catch (e: Exception) {
+        false
+    }
+
+    private const val AVC_MAIN = MediaCodecInfo.CodecProfileLevel.AVCProfileMain
+
+    /**
+     * The level to ask for H.264 Main at, when the encoder a rung would use -
+     * the first Media3 lists, or the first of Android's own for the software
+     * rung - has no High but has Main; null otherwise, and the profile is
+     * Media3's to choose.
+     */
+    private fun h264MainLevel(software: Boolean): Int? = runCatching {
+        val mime = MimeTypes.VIDEO_H264
+        val all = EncoderUtil.getSupportedEncoders(mime)
+        val info = (if (software) all.filter { isAndroidsOwn(it) } else all).firstOrNull()
+        val high = MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+        if (info == null || EncoderUtil.findHighestSupportedEncodingLevel(info, mime, high) != EncoderUtil.LEVEL_UNSET) {
+            null
+        } else {
+            EncoderUtil.findHighestSupportedEncodingLevel(info, mime, AVC_MAIN).takeIf { it != EncoderUtil.LEVEL_UNSET }
+        }
+    }.getOrNull()
 
     fun probe(context: Context, uri: Uri): Probe? {
         val mmr = MediaMetadataRetriever()

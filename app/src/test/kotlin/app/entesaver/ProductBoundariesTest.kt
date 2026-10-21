@@ -1047,7 +1047,7 @@ class ProductBoundariesTest {
         // An as-is copy is final: made because the run had five minutes
         // left, it was the full-size file Ente kept for good.
         val video = File("src/main/kotlin/app/entesaver/media/VideoCompressor.kt").readText()
-        val end = video.substringAfter("fallback?.let { return it }").substringBefore("private suspend fun runTransform")
+        val end = video.substringAfter("val best = tries.indices.filter").substringBefore("private suspend fun runTransform")
         assertTrue(
             "the cut-short case must be decided before the as-is copy",
             end.indexOf("throw OutOfTime(") in 0 until end.indexOf("copyAsIs(")
