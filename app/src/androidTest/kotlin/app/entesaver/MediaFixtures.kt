@@ -151,6 +151,12 @@ object MediaFixtures {
      * Encodes a small H.264 clip and inserts it. Returns null when the device
      * has no usable encoder - the caller then skips video assertions instead
      * of failing on an emulator limitation.
+     *
+     * [cameraLike] writes every frame whole, as a key frame: a camera spends
+     * far more on a picture than it needs - 20 Mbps on 1080p whatever is in
+     * front of it - and a clip as plain as these, encoded the usual way, comes
+     * out smaller than any copy could. One whose every frame is whole is as
+     * heavy for its picture as a camera's, and a copy of it has as much to save.
      */
     fun insertVideo(
         context: Context,
@@ -164,10 +170,11 @@ object MediaFixtures {
         textured: Boolean = false,
         mime: String = MediaFormat.MIMETYPE_VIDEO_AVC,
         rotation: Int = 0,
-        place: Pair<Float, Float>? = null
+        place: Pair<Float, Float>? = null,
+        cameraLike: Boolean = false
     ): Uri? {
         val temp = File(context.cacheDir, name)
-        if (!encodeVideo(temp, width, height, frames, withAudio, fps, textured, mime, rotation, place)) {
+        if (!encodeVideo(temp, width, height, frames, withAudio, fps, textured, mime, rotation, place, cameraLike)) {
             temp.delete()
             return null
         }
@@ -300,7 +307,8 @@ object MediaFixtures {
         textured: Boolean = false,
         mime: String = MediaFormat.MIMETYPE_VIDEO_AVC,
         rotation: Int = 0,
-        place: Pair<Float, Float>? = null
+        place: Pair<Float, Float>? = null,
+        cameraLike: Boolean = false
     ): Boolean {
         val frameUs = 1_000_000L / fps
         var codec: MediaCodec? = null
@@ -317,7 +325,12 @@ object MediaFixtures {
                     )
                     setInteger(MediaFormat.KEY_BIT_RATE, 8_000_000)
                     setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    // A key frame a frame apart, for a camera-like clip; else a second.
+                    if (cameraLike) {
+                        setFloat(MediaFormat.KEY_I_FRAME_INTERVAL, 1f / fps)
+                    } else {
+                        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    }
                 }
             codec = MediaCodec.createEncoderByType(mime)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)

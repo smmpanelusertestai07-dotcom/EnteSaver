@@ -279,7 +279,7 @@ class PipelineE2eTest {
     @Test
     fun aSixtyFpsClipKeepsEveryFrame() = runBlockingTest {
         val uri = MediaFixtures.insertVideo(
-            context, "e2e_sixty.mp4", width = 640, height = 360, frames = 120, fps = 60
+            context, "e2e_sixty.mp4", width = 640, height = 360, frames = 120, fps = 60, cameraLike = true
         )
         assertNotNull("the device must be able to produce a 60 fps clip", uri)
         val src = File(context.cacheDir, "sixty_out").apply { mkdirs() }
@@ -309,7 +309,7 @@ class PipelineE2eTest {
     fun aCameraClipKeepsItsCodecSizeRotationPlaceAndDate() = runBlockingTest {
         val uri = MediaFixtures.insertVideo(
             context, "e2e_same.mp4", width = 640, height = 360, frames = 60, fps = 30,
-            rotation = 90, place = 28.6139f to 77.2090f
+            rotation = 90, place = 28.6139f to 77.2090f, cameraLike = true
         )
         assertNotNull("the device must be able to produce a test clip", uri)
         val out = File(context.cacheDir, "same_out").apply { mkdirs() }
@@ -409,7 +409,7 @@ class PipelineE2eTest {
     @Test
     fun aPortraitClipIsStoredUprightAsItWas() = runBlockingTest {
         val uri = MediaFixtures.insertVideo(
-            context, "e2e_upright.mp4", width = 360, height = 640, frames = 60, fps = 30
+            context, "e2e_upright.mp4", width = 360, height = 640, frames = 60, fps = 30, cameraLike = true
         )
         assertNotNull("the device must be able to produce a portrait clip", uri)
         val out = File(context.cacheDir, "upright_out").apply { mkdirs() }
