@@ -167,6 +167,10 @@ func _fix_materials(mi: MeshInstance3D) -> void:
 			sm.rim_tint = 0.6
 			if sm.roughness < 0.35:
 				sm.roughness = 0.55
+			# The fitted ROOKIE tee sits on the shorts' waistband; inflate it a few mm so nothing pokes through.
+			if String(mi.name).begins_with("Outfit_default_Top"):
+				sm.grow = true
+				sm.grow_amount = 0.014
 			mi.set_surface_override_material(s, sm)
 
 

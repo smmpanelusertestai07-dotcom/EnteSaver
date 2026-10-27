@@ -19,6 +19,7 @@ func _ready() -> void:
 	_build_stage()
 	_build_ui()
 	Audio.play_music("lobby_music", -4.0)
+	Game.mark("lobby ready")
 
 
 func _build_stage() -> void:

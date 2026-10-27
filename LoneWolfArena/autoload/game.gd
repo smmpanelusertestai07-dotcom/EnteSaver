@@ -177,6 +177,15 @@ func level_progress() -> float:
 	return float(int(profile.xp) % XP_PER_LEVEL) / float(XP_PER_LEVEL)
 
 
+var _marks := {}
+
+## Logs a progress marker once per session (the emulator test reads these from logcat).
+func mark(what: String) -> void:
+	if not _marks.has(what):
+		_marks[what] = true
+		print("[LoneWolf] ", what)
+
+
 func goto_lobby() -> void:
 	get_tree().paused = false
 	Engine.time_scale = 1.0

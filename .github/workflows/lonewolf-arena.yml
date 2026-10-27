@@ -13,8 +13,14 @@ permissions:
 
 jobs:
   android:
+    name: android (${{ matrix.gpu }})
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Emulator GPU back ends to try; none of them is a real phone GPU.
+        gpu: [swiftshader_indirect, guest, swangle_indirect]
     defaults:
       run:
         shell: bash
@@ -86,35 +92,32 @@ jobs:
           profile: pixel_6
           force-avd-creation: false
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-boot-timeout: 480
+          emulator-options: -no-window -gpu ${{ matrix.gpu }} -noaudio -no-boot-anim -camera-back none
           script: bash LoneWolfArena/tools/ci/emulator_test.sh LoneWolfArena/build/LoneWolfArena.apk emulator-results
 
       - name: Summarize emulator results
         if: always()
         run: |
           ls -la emulator-results || true
+          echo "== markers"; cat emulator-results/markers.txt 2>/dev/null || true
           echo "== crashes"; cat emulator-results/crashes.txt 2>/dev/null || true
-          echo "== godot errors"; head -40 emulator-results/godot_errors.txt 2>/dev/null || true
+          echo "== godot errors"; grep -v "   at: " emulator-results/godot_errors.txt 2>/dev/null | sort | uniq -c | sort -rn | head -20 || true
           python3 -m pip install -q --break-system-packages pillow 2>/dev/null || python3 -m pip install -q pillow || true
-          echo "== screenshots (stats, then base64 JPEG)"
           for f in emulator-results/*.png; do
             python3 - "$f" <<'PY' || true
-          import base64, io, sys
+          import sys
           from PIL import Image, ImageStat
-          im = Image.open(sys.argv[1]).convert("RGB")
-          g = im.convert("L")
+          g = Image.open(sys.argv[1]).convert("L")
           dark = sum(g.histogram()[:16]) / float(g.width * g.height)
-          print("STAT", sys.argv[1], "size=%dx%d" % im.size, "mean=%.1f" % ImageStat.Stat(g).mean[0], "dark=%.2f" % dark)
-          im.thumbnail((480, 480))
-          b = io.BytesIO(); im.save(b, "JPEG", quality=55)
-          print("IMG_BEGIN", sys.argv[1]); print(base64.b64encode(b.getvalue()).decode()); print("IMG_END")
+          print("STAT", sys.argv[1], "size=%dx%d" % g.size, "mean=%.1f" % ImageStat.Stat(g).mean[0], "dark=%.2f" % dark)
           PY
           done
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: lonewolf-arena-ci
+          name: lonewolf-arena-ci-${{ matrix.gpu }}
           path: |
             emulator-results
             LoneWolfArena/build/LoneWolfArena.apk

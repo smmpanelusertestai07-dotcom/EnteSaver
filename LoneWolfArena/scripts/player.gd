@@ -145,6 +145,8 @@ func _think(delta: float) -> void:
 		firing = false
 		return
 	_keyboard_fallback()
+	if move_dir.length() > 0.5:
+		Game.mark("player moved")
 	_update_aim_assist(delta)
 	if firing:
 		_try_fire()
@@ -180,6 +182,7 @@ func _try_fire() -> void:
 	var head := eye_position()
 	var start := xf.origin + fwd * maxf((head - xf.origin).dot(fwd), 0.0)
 	if perform_shot(start, fwd):
+		Game.mark("player fired")
 		_apply_recoil(w)
 
 

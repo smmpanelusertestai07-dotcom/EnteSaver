@@ -233,6 +233,7 @@ func _physics_process(delta: float) -> void:
 				Audio.play("countdown_beep", -2.0)
 			if countdown <= 0.0:
 				phase = Phase.FIGHT
+				Game.mark("match started")
 				hud.show_center("FIGHT!", 1.0, UI.ACCENT, 120)
 				Audio.play("countdown_go", 0.0)
 				for f in fighters:
@@ -280,6 +281,7 @@ func _timeout() -> void:
 	if phase == Phase.END:
 		return
 	phase = Phase.END
+	Game.mark("match over: time up")
 	if absf(player.hp - bot.hp) < 0.5:
 		_draw = true
 	else:
@@ -295,6 +297,7 @@ func _timeout() -> void:
 
 
 func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
+	Game.mark("match over: %s eliminated" % ("player" if victim == player else "bot"))
 	var weapon_name := ""
 	if killer and is_instance_valid(killer):
 		weapon_name = String(killer.weapon().def.name)
