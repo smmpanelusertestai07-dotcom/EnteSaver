@@ -13,14 +13,8 @@ permissions:
 
 jobs:
   android:
-    name: android (${{ matrix.gpu }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        # Emulator GPU back ends to try; none of them is a real phone GPU.
-        gpu: [swiftshader_indirect, guest, swangle_indirect]
     defaults:
       run:
         shell: bash
@@ -93,7 +87,10 @@ jobs:
           force-avd-creation: false
           disable-animations: true
           emulator-boot-timeout: 480
-          emulator-options: -no-window -gpu ${{ matrix.gpu }} -noaudio -no-boot-anim -camera-back none
+          # The emulator's software GL (SwiftShader) cannot link Godot's GLES3 shaders, so the screen
+          # stays blank; the test checks install, START, FIRE, joystick and stability via log markers.
+          # (guest gives the same result; swangle_indirect is too slow to start the app.)
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash LoneWolfArena/tools/ci/emulator_test.sh LoneWolfArena/build/LoneWolfArena.apk emulator-results
 
       - name: Summarize emulator results
@@ -117,7 +114,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: lonewolf-arena-ci-${{ matrix.gpu }}
+          name: lonewolf-arena-ci
           path: |
             emulator-results
             LoneWolfArena/build/LoneWolfArena.apk
