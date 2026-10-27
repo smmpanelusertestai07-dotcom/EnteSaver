@@ -1,0 +1,1195 @@
+{
+  "description": "Arena props & weapons for the Godot 4 1v1 Lone Wolf shooter. All values in meters, Godot axes (+Y up, -Z forward, +X right) = glTF axes. Blender (x,y,z) -> Godot (x, z, -y).",
+  "conventions": {
+    "weapons": "Origin = right-hand pistol-grip point (centre of the grip). Barrel points -Z (Godot forward), top +Y. Marker nodes: \"Muzzle\" = barrel tip; \"LeftHand\" = support-hand point (AR: centre of handguard just behind the hand-stop; SG: centre of the pump; pistol: on the grip, offset 1.2 cm to the left/1 cm down).",
+    "props": "Origin at bottom centre (Y=0 is the ground). Front faces -Z (Blender +Y) where it matters: lamp arm, watchtower ladder, shield convex side, sandbag convex side, house front door. Container doors are at +X.",
+    "uv": "UV0 = world-space box projection, 1 UV unit = 1 m (mountains: 1 UV unit = 10 m), for tileable textures by material name.",
+    "shading": "Smooth shading with sharp edges > ~60 deg and weighted (face-area) custom normals; bevels applied."
+  },
+  "assets": {
+    "weapon_ar.glb": {
+      "triangles": 2642,
+      "triangle_budget": 3000,
+      "within_budget": true,
+      "materials": [
+        "Accent",
+        "GunMetal",
+        "Polymer"
+      ],
+      "material_params": {
+        "GunMetal": {
+          "base_color_srgb": "#4f555d",
+          "metallic": 0.7,
+          "roughness": 0.4
+        },
+        "Accent": {
+          "base_color_srgb": "#f2781c",
+          "metallic": 0.1,
+          "roughness": 0.45
+        },
+        "Polymer": {
+          "base_color_srgb": "#1d1e21",
+          "metallic": 0,
+          "roughness": 0.62
+        }
+      },
+      "bbox": {
+        "size": [
+          0.0498,
+          0.3042,
+          0.851
+        ],
+        "center": [
+          0.0,
+          0.0284,
+          -0.1395
+        ],
+        "min": [
+          -0.0249,
+          -0.1237,
+          -0.565
+        ],
+        "max": [
+          0.0249,
+          0.1805,
+          0.286
+        ]
+      },
+      "mesh_nodes": [
+        "Weapon_AR"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true,
+      "marker_nodes": {
+        "Muzzle": [
+          0.0,
+          0.095,
+          -0.565
+        ],
+        "LeftHand": [
+          0.0,
+          0.083,
+          -0.33
+        ]
+      }
+    },
+    "weapon_sg.glb": {
+      "triangles": 1860,
+      "triangle_budget": 3000,
+      "within_budget": true,
+      "materials": [
+        "GunMetal",
+        "Polymer",
+        "Wood"
+      ],
+      "material_params": {
+        "Wood": {
+          "base_color_srgb": "#83502b",
+          "metallic": 0,
+          "roughness": 0.55
+        },
+        "Polymer": {
+          "base_color_srgb": "#1d1e21",
+          "metallic": 0,
+          "roughness": 0.62
+        },
+        "GunMetal": {
+          "base_color_srgb": "#4f555d",
+          "metallic": 0.7,
+          "roughness": 0.4
+        }
+      },
+      "bbox": {
+        "size": [
+          0.051,
+          0.1974,
+          0.9548
+        ],
+        "center": [
+          0.0,
+          0.0188,
+          -0.1214
+        ],
+        "min": [
+          -0.0255,
+          -0.0799,
+          -0.5988
+        ],
+        "max": [
+          0.0255,
+          0.1175,
+          0.356
+        ]
+      },
+      "mesh_nodes": [
+        "Weapon_SG"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true,
+      "marker_nodes": {
+        "Muzzle": [
+          0.0,
+          0.097,
+          -0.598
+        ],
+        "LeftHand": [
+          0.0,
+          0.068,
+          -0.38
+        ]
+      }
+    },
+    "weapon_pistol.glb": {
+      "triangles": 784,
+      "triangle_budget": 1200,
+      "within_budget": true,
+      "materials": [
+        "Accent",
+        "GunMetal",
+        "Polymer"
+      ],
+      "material_params": {
+        "Polymer": {
+          "base_color_srgb": "#1d1e21",
+          "metallic": 0,
+          "roughness": 0.62
+        },
+        "Accent": {
+          "base_color_srgb": "#f2781c",
+          "metallic": 0.1,
+          "roughness": 0.45
+        },
+        "GunMetal": {
+          "base_color_srgb": "#4f555d",
+          "metallic": 0.7,
+          "roughness": 0.4
+        }
+      },
+      "bbox": {
+        "size": [
+          0.0313,
+          0.1685,
+          0.2118
+        ],
+        "center": [
+          -0.0001,
+          0.0193,
+          -0.0621
+        ],
+        "min": [
+          -0.0158,
+          -0.065,
+          -0.168
+        ],
+        "max": [
+          0.0155,
+          0.1035,
+          0.0438
+        ]
+      },
+      "mesh_nodes": [
+        "Weapon_Pistol"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true,
+      "marker_nodes": {
+        "Muzzle": [
+          0.0,
+          0.0795,
+          -0.168
+        ],
+        "LeftHand": [
+          -0.012,
+          -0.01,
+          0.0
+        ]
+      }
+    },
+    "medkit.glb": {
+      "triangles": 580,
+      "triangle_budget": 600,
+      "within_budget": true,
+      "materials": [
+        "MedRed",
+        "MedWhite",
+        "Polymer"
+      ],
+      "material_params": {
+        "MedWhite": {
+          "base_color_srgb": "#ececea",
+          "metallic": 0,
+          "roughness": 0.45
+        },
+        "Polymer": {
+          "base_color_srgb": "#2a2b2e",
+          "metallic": 0,
+          "roughness": 0.6
+        },
+        "MedRed": {
+          "base_color_srgb": "#d42a2a",
+          "metallic": 0,
+          "roughness": 0.5
+        }
+      },
+      "bbox": {
+        "size": [
+          0.326,
+          0.123,
+          0.25
+        ],
+        "center": [
+          0.0,
+          0.0615,
+          -0.015
+        ],
+        "min": [
+          -0.163,
+          0.0,
+          -0.14
+        ],
+        "max": [
+          0.163,
+          0.123,
+          0.11
+        ]
+      },
+      "mesh_nodes": [
+        "Medkit"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "grenade.glb": {
+      "triangles": 444,
+      "triangle_budget": 500,
+      "within_budget": true,
+      "materials": [
+        "GrenadeBody",
+        "Metal"
+      ],
+      "material_params": {
+        "GrenadeBody": {
+          "base_color_srgb": "#4f5f32",
+          "metallic": 0.1,
+          "roughness": 0.6
+        },
+        "Metal": {
+          "base_color_srgb": "#9a9ea3",
+          "metallic": 0.85,
+          "roughness": 0.35
+        }
+      },
+      "bbox": {
+        "size": [
+          0.0762,
+          0.1034,
+          0.0665
+        ],
+        "center": [
+          0.0088,
+          0.0517,
+          -0.0027
+        ],
+        "min": [
+          -0.0293,
+          0.0,
+          -0.036
+        ],
+        "max": [
+          0.0469,
+          0.1034,
+          0.0305
+        ]
+      },
+      "mesh_nodes": [
+        "Grenade"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "shield_wall.glb": {
+      "triangles": 1632,
+      "triangle_budget": 2000,
+      "within_budget": true,
+      "materials": [
+        "ShieldFrame",
+        "ShieldGlass"
+      ],
+      "material_params": {
+        "ShieldFrame": {
+          "base_color_srgb": "#3b434d",
+          "metallic": 0.75,
+          "roughness": 0.4
+        },
+        "ShieldGlass": {
+          "base_color_srgb": "#8fe9ff",
+          "metallic": 0,
+          "roughness": 0.12,
+          "emissive": [
+            0.078,
+            0.549,
+            0.8
+          ]
+        }
+      },
+      "bbox": {
+        "size": [
+          2.4409,
+          2.0,
+          0.3422
+        ],
+        "center": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "min": [
+          -1.2204,
+          0.0,
+          -0.1711
+        ],
+        "max": [
+          1.2204,
+          2.0,
+          0.1711
+        ]
+      },
+      "mesh_nodes": [
+        "ShieldWall"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "container.glb": {
+      "triangles": 1816,
+      "triangle_budget": 2000,
+      "within_budget": true,
+      "materials": [
+        "Metal",
+        "Paint",
+        "Rubber"
+      ],
+      "material_params": {
+        "Metal": {
+          "base_color_srgb": "#5f6266",
+          "metallic": 0.8,
+          "roughness": 0.45
+        },
+        "Rubber": {
+          "base_color_srgb": "#191919",
+          "metallic": 0,
+          "roughness": 0.9
+        },
+        "Paint": {
+          "base_color_srgb": "#cfcfcc",
+          "metallic": 0.05,
+          "roughness": 0.6
+        }
+      },
+      "bbox": {
+        "size": [
+          6.058,
+          2.591,
+          2.438
+        ],
+        "center": [
+          0.0,
+          1.2955,
+          0.0
+        ],
+        "min": [
+          -3.029,
+          0.0,
+          -1.219
+        ],
+        "max": [
+          3.029,
+          2.591,
+          1.219
+        ]
+      },
+      "mesh_nodes": [
+        "Container"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "crate.glb": {
+      "triangles": 346,
+      "triangle_budget": 400,
+      "within_budget": true,
+      "materials": [
+        "Wood",
+        "WoodDark"
+      ],
+      "material_params": {
+        "WoodDark": {
+          "base_color_srgb": "#6b4524",
+          "metallic": 0,
+          "roughness": 0.75
+        },
+        "Wood": {
+          "base_color_srgb": "#a5743f",
+          "metallic": 0,
+          "roughness": 0.7
+        }
+      },
+      "bbox": {
+        "size": [
+          1.2,
+          1.2,
+          1.2
+        ],
+        "center": [
+          0.0,
+          0.6,
+          0.0
+        ],
+        "min": [
+          -0.6,
+          0.0,
+          -0.6
+        ],
+        "max": [
+          0.6,
+          1.2,
+          0.6
+        ]
+      },
+      "mesh_nodes": [
+        "Crate"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "barrier.glb": {
+      "triangles": 204,
+      "triangle_budget": 300,
+      "within_budget": true,
+      "materials": [
+        "Concrete",
+        "Stripe"
+      ],
+      "material_params": {
+        "Concrete": {
+          "base_color_srgb": "#a8a59d",
+          "metallic": 0,
+          "roughness": 0.9
+        },
+        "Stripe": {
+          "base_color_srgb": "#e8b417",
+          "metallic": 0,
+          "roughness": 0.6
+        }
+      },
+      "bbox": {
+        "size": [
+          3.0,
+          0.81,
+          0.6
+        ],
+        "center": [
+          0.0,
+          0.405,
+          0.0
+        ],
+        "min": [
+          -1.5,
+          0.0,
+          -0.3
+        ],
+        "max": [
+          1.5,
+          0.81,
+          0.3
+        ]
+      },
+      "mesh_nodes": [
+        "Barrier"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "sandbags.glb": {
+      "triangles": 1296,
+      "triangle_budget": 1500,
+      "within_budget": true,
+      "materials": [
+        "Sandbag"
+      ],
+      "material_params": {
+        "Sandbag": {
+          "base_color_srgb": "#b09a6c",
+          "metallic": 0,
+          "roughness": 0.92
+        }
+      },
+      "bbox": {
+        "size": [
+          2.4679,
+          0.9042,
+          0.527
+        ],
+        "center": [
+          0.0,
+          0.4521,
+          0.0
+        ],
+        "min": [
+          -1.234,
+          0.0,
+          -0.2635
+        ],
+        "max": [
+          1.234,
+          0.9042,
+          0.2635
+        ]
+      },
+      "mesh_nodes": [
+        "Sandbags"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "tree_pine.glb": {
+      "triangles": 467,
+      "triangle_budget": 800,
+      "within_budget": true,
+      "materials": [
+        "Bark",
+        "Leaves"
+      ],
+      "material_params": {
+        "Bark": {
+          "base_color_srgb": "#5b3d26",
+          "metallic": 0,
+          "roughness": 0.9
+        },
+        "Leaves": {
+          "base_color_srgb": "#2e6b37",
+          "metallic": 0,
+          "roughness": 0.8
+        }
+      },
+      "bbox": {
+        "size": [
+          4.2706,
+          8.1,
+          4.1019
+        ],
+        "center": [
+          -0.0165,
+          4.05,
+          -0.1243
+        ],
+        "min": [
+          -2.1518,
+          0.0,
+          -2.1752
+        ],
+        "max": [
+          2.1188,
+          8.1,
+          1.9266
+        ]
+      },
+      "mesh_nodes": [
+        "TreePine"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "tree_round.glb": {
+      "triangles": 587,
+      "triangle_budget": 800,
+      "within_budget": true,
+      "materials": [
+        "Bark",
+        "Leaves"
+      ],
+      "material_params": {
+        "Bark": {
+          "base_color_srgb": "#5b3d26",
+          "metallic": 0,
+          "roughness": 0.9
+        },
+        "Leaves": {
+          "base_color_srgb": "#3d7a34",
+          "metallic": 0,
+          "roughness": 0.8
+        }
+      },
+      "bbox": {
+        "size": [
+          5.2089,
+          7.5264,
+          5.0929
+        ],
+        "center": [
+          0.0907,
+          3.7632,
+          0.0718
+        ],
+        "min": [
+          -2.5138,
+          0.0,
+          -2.4746
+        ],
+        "max": [
+          2.6951,
+          7.5264,
+          2.6183
+        ]
+      },
+      "mesh_nodes": [
+        "TreeRound"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "rock.glb": {
+      "triangles": 274,
+      "triangle_budget": 300,
+      "within_budget": true,
+      "materials": [
+        "Rock"
+      ],
+      "material_params": {
+        "Rock": {
+          "base_color_srgb": "#7f7b74",
+          "metallic": 0,
+          "roughness": 0.85
+        }
+      },
+      "bbox": {
+        "size": [
+          1.6056,
+          0.9837,
+          1.2852
+        ],
+        "center": [
+          -0.027,
+          0.4918,
+          -0.0059
+        ],
+        "min": [
+          -0.8299,
+          0.0,
+          -0.6485
+        ],
+        "max": [
+          0.7758,
+          0.9837,
+          0.6368
+        ]
+      },
+      "mesh_nodes": [
+        "Rock"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "mountains.glb": {
+      "triangles": 3300,
+      "triangle_budget": 6000,
+      "within_budget": true,
+      "materials": [
+        "Mountain",
+        "Snow"
+      ],
+      "material_params": {
+        "Mountain": {
+          "base_color_srgb": "#6c7464",
+          "metallic": 0,
+          "roughness": 0.95
+        },
+        "Snow": {
+          "base_color_srgb": "#eef2f6",
+          "metallic": 0,
+          "roughness": 0.7
+        }
+      },
+      "bbox": {
+        "size": [
+          1399.693,
+          142.3615,
+          1400.0
+        ],
+        "center": [
+          0.0,
+          67.1807,
+          0.0
+        ],
+        "min": [
+          -699.8465,
+          -4.0,
+          -700.0
+        ],
+        "max": [
+          699.8465,
+          138.3615,
+          700.0
+        ]
+      },
+      "mesh_nodes": [
+        "Mountains"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "watchtower.glb": {
+      "triangles": 1830,
+      "triangle_budget": 2000,
+      "within_budget": true,
+      "materials": [
+        "Metal",
+        "Wood"
+      ],
+      "material_params": {
+        "Wood": {
+          "base_color_srgb": "#8a6038",
+          "metallic": 0,
+          "roughness": 0.8
+        },
+        "Metal": {
+          "base_color_srgb": "#6c7177",
+          "metallic": 0.75,
+          "roughness": 0.45
+        }
+      },
+      "bbox": {
+        "size": [
+          3.7,
+          7.35,
+          4.0845
+        ],
+        "center": [
+          0.0,
+          3.675,
+          -0.1923
+        ],
+        "min": [
+          -1.85,
+          0.0,
+          -2.2345
+        ],
+        "max": [
+          1.85,
+          7.35,
+          1.85
+        ]
+      },
+      "mesh_nodes": [
+        "Watchtower"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "lamp_post.glb": {
+      "triangles": 370,
+      "triangle_budget": 400,
+      "within_budget": true,
+      "materials": [
+        "Concrete",
+        "LampLight",
+        "Metal"
+      ],
+      "material_params": {
+        "Concrete": {
+          "base_color_srgb": "#a8a59d",
+          "metallic": 0,
+          "roughness": 0.9
+        },
+        "Metal": {
+          "base_color_srgb": "#3c4548",
+          "metallic": 0.7,
+          "roughness": 0.45
+        },
+        "LampLight": {
+          "base_color_srgb": "#fff4d6",
+          "metallic": 0,
+          "roughness": 0.3,
+          "emissive": [
+            1.0,
+            0.863,
+            0.552
+          ]
+        }
+      },
+      "bbox": {
+        "size": [
+          0.4393,
+          5.0693,
+          1.5196
+        ],
+        "center": [
+          0.0,
+          2.5346,
+          -0.5402
+        ],
+        "min": [
+          -0.2196,
+          0.0,
+          -1.3
+        ],
+        "max": [
+          0.2196,
+          5.0693,
+          0.2196
+        ]
+      },
+      "mesh_nodes": [
+        "LampPost"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true
+    },
+    "house.glb": {
+      "triangles": 580,
+      "triangle_budget": 1500,
+      "within_budget": true,
+      "materials": [
+        "Roof",
+        "Trim",
+        "Wall"
+      ],
+      "material_params": {
+        "Wall": {
+          "base_color_srgb": "#d9cdb5",
+          "metallic": 0,
+          "roughness": 0.85
+        },
+        "Trim": {
+          "base_color_srgb": "#7e7b74",
+          "metallic": 0,
+          "roughness": 0.8
+        },
+        "Roof": {
+          "base_color_srgb": "#55585c",
+          "metallic": 0,
+          "roughness": 0.9
+        }
+      },
+      "bbox": {
+        "size": [
+          7.2,
+          3.0,
+          6.7
+        ],
+        "center": [
+          0.0,
+          1.5,
+          0.0
+        ],
+        "min": [
+          -3.6,
+          0.0,
+          -3.35
+        ],
+        "max": [
+          3.6,
+          3.0,
+          3.35
+        ]
+      },
+      "mesh_nodes": [
+        "House"
+      ],
+      "has_normals": true,
+      "has_uv0": true,
+      "node_transforms_identity": true,
+      "collision_boxes": [
+        {
+          "name": "north_+Y_pier1",
+          "center": [
+            -3.05,
+            1.4,
+            -2.875
+          ],
+          "size": [
+            0.9,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_win1_below",
+          "center": [
+            -2.0,
+            0.5,
+            -2.875
+          ],
+          "size": [
+            1.2,
+            1.0,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_win1_above",
+          "center": [
+            -2.0,
+            2.4,
+            -2.875
+          ],
+          "size": [
+            1.2,
+            0.8,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_pier2",
+          "center": [
+            -1.0,
+            1.4,
+            -2.875
+          ],
+          "size": [
+            0.8,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_door_above",
+          "center": [
+            0.0,
+            2.5,
+            -2.875
+          ],
+          "size": [
+            1.2,
+            0.6,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_pier3",
+          "center": [
+            1.0,
+            1.4,
+            -2.875
+          ],
+          "size": [
+            0.8,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_win2_below",
+          "center": [
+            2.0,
+            0.5,
+            -2.875
+          ],
+          "size": [
+            1.2,
+            1.0,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_win2_above",
+          "center": [
+            2.0,
+            2.4,
+            -2.875
+          ],
+          "size": [
+            1.2,
+            0.8,
+            0.25
+          ]
+        },
+        {
+          "name": "north_+Y_pier4",
+          "center": [
+            3.05,
+            1.4,
+            -2.875
+          ],
+          "size": [
+            0.9,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_pier1",
+          "center": [
+            -3.05,
+            1.4,
+            2.875
+          ],
+          "size": [
+            0.9,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_win1_below",
+          "center": [
+            -2.0,
+            0.5,
+            2.875
+          ],
+          "size": [
+            1.2,
+            1.0,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_win1_above",
+          "center": [
+            -2.0,
+            2.4,
+            2.875
+          ],
+          "size": [
+            1.2,
+            0.8,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_pier2",
+          "center": [
+            -1.0,
+            1.4,
+            2.875
+          ],
+          "size": [
+            0.8,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_door_above",
+          "center": [
+            0.0,
+            2.5,
+            2.875
+          ],
+          "size": [
+            1.2,
+            0.6,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_pier3",
+          "center": [
+            1.0,
+            1.4,
+            2.875
+          ],
+          "size": [
+            0.8,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_win2_below",
+          "center": [
+            2.0,
+            0.5,
+            2.875
+          ],
+          "size": [
+            1.2,
+            1.0,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_win2_above",
+          "center": [
+            2.0,
+            2.4,
+            2.875
+          ],
+          "size": [
+            1.2,
+            0.8,
+            0.25
+          ]
+        },
+        {
+          "name": "south_-Y_pier4",
+          "center": [
+            3.05,
+            1.4,
+            2.875
+          ],
+          "size": [
+            0.9,
+            2.8,
+            0.25
+          ]
+        },
+        {
+          "name": "east_+X",
+          "center": [
+            3.375,
+            1.4,
+            -0.0
+          ],
+          "size": [
+            0.25,
+            2.8,
+            5.5
+          ]
+        },
+        {
+          "name": "west_-X",
+          "center": [
+            -3.375,
+            1.4,
+            -0.0
+          ],
+          "size": [
+            0.25,
+            2.8,
+            5.5
+          ]
+        },
+        {
+          "name": "roof_slab",
+          "center": [
+            0.0,
+            2.9,
+            -0.0
+          ],
+          "size": [
+            7.2,
+            0.2,
+            6.2
+          ]
+        }
+      ]
+    }
+  }
+}

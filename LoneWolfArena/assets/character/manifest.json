@@ -1,0 +1,1004 @@
+{
+ "file": "character.glb",
+ "height_m": 1.78,
+ "units": "meters; glTF Y-up; character faces +Z in glTF/Godot (Blender -Y); right hand on -X; feet at y=0",
+ "bones": {
+  "all": [
+   "root",
+   "pelvis",
+   "spine_01",
+   "spine_02",
+   "spine_03",
+   "clavicle_l",
+   "upperarm_l",
+   "lowerarm_l",
+   "hand_l",
+   "index_01_l",
+   "index_02_l",
+   "index_03_l",
+   "middle_01_l",
+   "middle_02_l",
+   "middle_03_l",
+   "pinky_01_l",
+   "pinky_02_l",
+   "pinky_03_l",
+   "ring_01_l",
+   "ring_02_l",
+   "ring_03_l",
+   "thumb_01_l",
+   "thumb_02_l",
+   "thumb_03_l",
+   "clavicle_r",
+   "upperarm_r",
+   "lowerarm_r",
+   "hand_r",
+   "index_01_r",
+   "index_02_r",
+   "index_03_r",
+   "middle_01_r",
+   "middle_02_r",
+   "middle_03_r",
+   "pinky_01_r",
+   "pinky_02_r",
+   "pinky_03_r",
+   "ring_01_r",
+   "ring_02_r",
+   "ring_03_r",
+   "thumb_01_r",
+   "thumb_02_r",
+   "thumb_03_r",
+   "neck_01",
+   "head",
+   "thigh_l",
+   "calf_l",
+   "foot_l",
+   "ball_l",
+   "thigh_r",
+   "calf_r",
+   "foot_r",
+   "ball_r"
+  ],
+  "count": 53,
+  "root": "root",
+  "pelvis": "pelvis",
+  "spine_chain": [
+   "spine_01",
+   "spine_02",
+   "spine_03"
+  ],
+  "neck": "neck_01",
+  "head": "head",
+  "clavicle_l": "clavicle_l",
+  "clavicle_r": "clavicle_r",
+  "upperarm_l": "upperarm_l",
+  "upperarm_r": "upperarm_r",
+  "lowerarm_l": "lowerarm_l",
+  "lowerarm_r": "lowerarm_r",
+  "hand_l": "hand_l",
+  "hand_r": "hand_r",
+  "thigh_l": "thigh_l",
+  "thigh_r": "thigh_r",
+  "calf_l": "calf_l",
+  "calf_r": "calf_r",
+  "foot_l": "foot_l",
+  "foot_r": "foot_r",
+  "ball_l": "ball_l",
+  "ball_r": "ball_r",
+  "fingers": [
+   "index_01_l",
+   "index_02_l",
+   "index_03_l",
+   "middle_01_l",
+   "middle_02_l",
+   "middle_03_l",
+   "pinky_01_l",
+   "pinky_02_l",
+   "pinky_03_l",
+   "ring_01_l",
+   "ring_02_l",
+   "ring_03_l",
+   "thumb_01_l",
+   "thumb_02_l",
+   "thumb_03_l",
+   "index_01_r",
+   "index_02_r",
+   "index_03_r",
+   "middle_01_r",
+   "middle_02_r",
+   "middle_03_r",
+   "pinky_01_r",
+   "pinky_02_r",
+   "pinky_03_r",
+   "ring_01_r",
+   "ring_02_r",
+   "ring_03_r",
+   "thumb_01_r",
+   "thumb_02_r",
+   "thumb_03_r"
+  ]
+ },
+ "meshes": [
+  {
+   "name": "Body_ArmsLower",
+   "triangles": 984,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_ArmsUpper",
+   "triangles": 1144,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_Feet",
+   "triangles": 1048,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_Hands",
+   "triangles": 3968,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_Head",
+   "triangles": 6962,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_LegsLower",
+   "triangles": 928,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_LegsUpper",
+   "triangles": 1314,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Body_Torso",
+   "triangles": 3122,
+   "category": "body",
+   "bundle": null
+  },
+  {
+   "name": "Eyebrows",
+   "triangles": 192,
+   "category": "face",
+   "bundle": null
+  },
+  {
+   "name": "Eyelashes",
+   "triangles": 368,
+   "category": "face",
+   "bundle": null
+  },
+  {
+   "name": "Eyes",
+   "triangles": 1060,
+   "category": "face",
+   "bundle": null
+  },
+  {
+   "name": "Hair_Default",
+   "triangles": 3460,
+   "category": "hair",
+   "bundle": null
+  },
+  {
+   "name": "Outfit_default_Shoes",
+   "triangles": 2200,
+   "category": "outfit",
+   "bundle": "default"
+  },
+  {
+   "name": "Outfit_default_Shorts",
+   "triangles": 1552,
+   "category": "outfit",
+   "bundle": "default"
+  },
+  {
+   "name": "Outfit_default_Top",
+   "triangles": 2068,
+   "category": "outfit",
+   "bundle": "default"
+  },
+  {
+   "name": "Outfit_desert_Boots",
+   "triangles": 2400,
+   "category": "outfit",
+   "bundle": "desert"
+  },
+  {
+   "name": "Outfit_desert_Cap",
+   "triangles": 1799,
+   "category": "outfit",
+   "bundle": "desert"
+  },
+  {
+   "name": "Outfit_desert_Pants",
+   "triangles": 1356,
+   "category": "outfit",
+   "bundle": "desert"
+  },
+  {
+   "name": "Outfit_desert_Shirt",
+   "triangles": 2999,
+   "category": "outfit",
+   "bundle": "desert"
+  },
+  {
+   "name": "Outfit_neon_Jacket",
+   "triangles": 5197,
+   "category": "outfit",
+   "bundle": "neon"
+  },
+  {
+   "name": "Outfit_neon_Mask",
+   "triangles": 204,
+   "category": "outfit",
+   "bundle": "neon"
+  },
+  {
+   "name": "Outfit_neon_Shoes",
+   "triangles": 2200,
+   "category": "outfit",
+   "bundle": "neon"
+  },
+  {
+   "name": "Outfit_royal_Shoes",
+   "triangles": 2200,
+   "category": "outfit",
+   "bundle": "royal"
+  },
+  {
+   "name": "Outfit_royal_Suit",
+   "triangles": 7599,
+   "category": "outfit",
+   "bundle": "royal"
+  },
+  {
+   "name": "Outfit_shadow_Boots",
+   "triangles": 2400,
+   "category": "outfit",
+   "bundle": "shadow"
+  },
+  {
+   "name": "Outfit_shadow_Gloves",
+   "triangles": 1798,
+   "category": "outfit",
+   "bundle": "shadow"
+  },
+  {
+   "name": "Outfit_shadow_Helmet",
+   "triangles": 2599,
+   "category": "outfit",
+   "bundle": "shadow"
+  },
+  {
+   "name": "Outfit_shadow_Pants",
+   "triangles": 1496,
+   "category": "outfit",
+   "bundle": "shadow"
+  },
+  {
+   "name": "Outfit_shadow_Top",
+   "triangles": 3598,
+   "category": "outfit",
+   "bundle": "shadow"
+  }
+ ],
+ "base_meshes": {
+  "body_parts": [
+   "Body_Head",
+   "Body_Torso",
+   "Body_ArmsUpper",
+   "Body_ArmsLower",
+   "Body_Hands",
+   "Body_LegsUpper",
+   "Body_LegsLower",
+   "Body_Feet"
+  ],
+  "always_on": [
+   "Eyes",
+   "Eyebrows",
+   "Eyelashes"
+  ],
+  "default_hair": "Hair_Default"
+ },
+ "bundles": [
+  {
+   "id": "default",
+   "display_name": "ROOKIE",
+   "meshes": [
+    "Outfit_default_Top",
+    "Outfit_default_Shorts",
+    "Outfit_default_Shoes"
+   ],
+   "hide": [
+    "Body_Feet"
+   ],
+   "outfit_triangles": 5820,
+   "total_triangles_with_full_body_hair": 30370,
+   "visible_triangles_when_hide_applied": 29322
+  },
+  {
+   "id": "desert",
+   "display_name": "DESERT FOX",
+   "meshes": [
+    "Outfit_desert_Shirt",
+    "Outfit_desert_Pants",
+    "Outfit_desert_Boots",
+    "Outfit_desert_Cap"
+   ],
+   "hide": [
+    "Body_LegsUpper",
+    "Body_LegsLower",
+    "Body_Feet",
+    "Hair_Default"
+   ],
+   "outfit_triangles": 8554,
+   "total_triangles_with_full_body_hair": 33104,
+   "visible_triangles_when_hide_applied": 26354
+  },
+  {
+   "id": "neon",
+   "display_name": "NEON STRIKER",
+   "meshes": [
+    "Outfit_neon_Jacket",
+    "Outfit_neon_Shoes",
+    "Outfit_neon_Mask"
+   ],
+   "hide": [
+    "Body_ArmsUpper",
+    "Body_ArmsLower",
+    "Body_LegsUpper",
+    "Body_LegsLower",
+    "Body_Feet"
+   ],
+   "outfit_triangles": 7601,
+   "total_triangles_with_full_body_hair": 32151,
+   "visible_triangles_when_hide_applied": 26733
+  },
+  {
+   "id": "shadow",
+   "display_name": "SHADOW OPS",
+   "meshes": [
+    "Outfit_shadow_Top",
+    "Outfit_shadow_Pants",
+    "Outfit_shadow_Boots",
+    "Outfit_shadow_Helmet",
+    "Outfit_shadow_Gloves"
+   ],
+   "hide": [
+    "Body_Torso",
+    "Body_ArmsUpper",
+    "Body_Hands",
+    "Body_LegsUpper",
+    "Body_LegsLower",
+    "Body_Feet",
+    "Hair_Default"
+   ],
+   "outfit_triangles": 11891,
+   "total_triangles_with_full_body_hair": 36441,
+   "visible_triangles_when_hide_applied": 21457
+  },
+  {
+   "id": "royal",
+   "display_name": "ROYAL GOLD",
+   "meshes": [
+    "Outfit_royal_Suit",
+    "Outfit_royal_Shoes"
+   ],
+   "hide": [
+    "Body_Torso",
+    "Body_ArmsUpper",
+    "Body_ArmsLower",
+    "Body_LegsUpper",
+    "Body_LegsLower",
+    "Body_Feet"
+   ],
+   "outfit_triangles": 9799,
+   "total_triangles_with_full_body_hair": 34349,
+   "visible_triangles_when_hide_applied": 25809
+  }
+ ],
+ "default_bundle": "default",
+ "animations": [
+  {
+   "name": "idle",
+   "frames": 61,
+   "frame_range": [
+    0,
+    60
+   ],
+   "seconds": 2.0,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "run_fwd",
+   "frames": 22,
+   "frame_range": [
+    0,
+    21
+   ],
+   "seconds": 0.7,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "run_back",
+   "frames": 22,
+   "frame_range": [
+    0,
+    21
+   ],
+   "seconds": 0.7,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "run_left",
+   "frames": 22,
+   "frame_range": [
+    0,
+    21
+   ],
+   "seconds": 0.7,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "run_right",
+   "frames": 22,
+   "frame_range": [
+    0,
+    21
+   ],
+   "seconds": 0.7,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "crouch_idle",
+   "frames": 61,
+   "frame_range": [
+    0,
+    60
+   ],
+   "seconds": 2.0,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "crouch_fwd",
+   "frames": 31,
+   "frame_range": [
+    0,
+    30
+   ],
+   "seconds": 1.0,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "jump",
+   "frames": 19,
+   "frame_range": [
+    0,
+    18
+   ],
+   "seconds": 0.6,
+   "fps": 30,
+   "loop": false
+  },
+  {
+   "name": "death",
+   "frames": 37,
+   "frame_range": [
+    0,
+    36
+   ],
+   "seconds": 1.2,
+   "fps": 30,
+   "loop": false
+  },
+  {
+   "name": "victory",
+   "frames": 61,
+   "frame_range": [
+    0,
+    60
+   ],
+   "seconds": 2.0,
+   "fps": 30,
+   "loop": true
+  },
+  {
+   "name": "lobby_idle",
+   "frames": 121,
+   "frame_range": [
+    0,
+    120
+   ],
+   "seconds": 4.0,
+   "fps": 30,
+   "loop": true
+  }
+ ],
+ "locomotion": {
+  "run_speed_mps_at_1x": 2.0,
+  "run_cycle_s": 0.7,
+  "run_stride_m": 1.4,
+  "crouch_fwd_speed_mps_at_1x": 1.0,
+  "crouch_pelvis_drop_m": 0.45,
+  "note": "in place; scale playback rate by (actual speed / speed_at_1x) to avoid foot sliding"
+ },
+ "rifle_pose": {
+  "description": "idle frame 0 world-space wrist (hand bone head) positions; gameplay anims keep the same grip relative to spine_03",
+  "hand_r_blender": [
+   -0.125,
+   -0.2749,
+   1.2962
+  ],
+  "hand_l_blender": [
+   -0.035,
+   -0.5551,
+   1.3288
+  ],
+  "hand_r_godot": [
+   -0.125,
+   1.2962,
+   0.2749
+  ],
+  "hand_l_godot": [
+   -0.035,
+   1.3288,
+   0.5551
+  ],
+  "design_targets_blender": {
+   "hand_r": [
+    -0.125,
+    -0.2750000059604645,
+    1.2949999570846558
+   ],
+   "hand_l": [
+    -0.03500000014901161,
+    -0.5550000071525574,
+    1.3300000429153442
+   ]
+  },
+  "gun_attach_hint": "attach gun to hand_r (trigger grip), aim its forward axis at hand_l; right palm centre is ~7 cm along hand_r's +Y (bone axis)",
+  "hand_r_axes_blender": {
+   "x_axis": [
+    -0.7166,
+    -0.4206,
+    0.5564
+   ],
+   "y_axis": [
+    0.3278,
+    -0.9072,
+    -0.2637
+   ],
+   "z_axis": [
+    0.6156,
+    -0.0066,
+    0.788
+   ]
+  },
+  "hand_l_axes_blender": {
+   "x_axis": [
+    -0.7773,
+    0.4947,
+    0.3888
+   ],
+   "y_axis": [
+    -0.461,
+    -0.8683,
+    0.183
+   ],
+   "z_axis": [
+    0.4281,
+    -0.037,
+    0.903
+   ]
+  }
+ },
+ "notes": [
+  "Built with MPFB 2.0.18 (MakeHuman) inside Blender 5.0.1: male, age 25 (age macro 0.5), muscle 0.78, weight 0.54, proportions 0.9, race mix caucasian 0.5 / asian 0.3 / african 0.2 plus face/torso detail targets; height macro solved numerically for 1.78 m. Skin = MakeHuman young_caucasian_male texture graded to medium-brown.",
+  "Rig = MPFB 'game_engine' (53 deform bones incl. fingers). MPFB names its root bone 'Root'; it was renamed to 'root'.",
+  "Body was decimated from 26.8k to ~19.5k triangles with per-region budgets (head 6.9k, hands 3.9k, feet 1k), then split by dominant bone weight into 8 parts. Seam vertices are duplicated with identical skin weights and the unsplit body's normals are stored as custom normals, so the parts are watertight and seamless when all are shown.",
+  "Body_Head uses its own 453x1024 crop of the 2048 source skin atlas (material M_Skin_Head) for a sharper face; the rest of the body uses M_Skin_Body (1024). A dark short-hair tone is painted on the scalp under the hair cards so the head still reads as short dark hair where Hair_Default is hidden.",
+  "Hair_Default is hidden in DESERT FOX (cap) and SHADOW OPS (helmet) because the hair cards clip through the cap/helmet crown; the painted scalp shows as a short buzz under them.",
+  "Body_Feet is hidden in every bundle (all have footwear; footwear soles were lifted 3-26 mm so they sit on Z=0). Bundle 'hide' lists only contain parts fully enclosed by that outfit (ray-cast coverage + MakeHuman delete groups + visual checks), so applying them never opens a hole; parts not listed may be partially covered and stay visible.",
+  "Clothes: ROOKIE = elvs crude t-shirt (flat white), toigo wool pants cut 7.5 cm above the knee into charcoal shorts (no male shorts in the packs; MakeHuman jeans shorts are hot-pants), shoes05 white sneakers. DESERT FOX = namuhekam polo (khaki), cortu cargo pants (olive, subdivided once), toigo ankle boots (brown), toigo baseball cap re-coloured plain tan (original print removed). NEON STRIKER = male_casualsuit05 jacket+shirt+jeans re-coloured black jacket / cyan striped shirt / dark jeans, shoes05 with cyan accents, medical mouth mask re-coloured black with cyan edges and tightened to the face. SHADOW OPS = fisherman sweater (black), cargo pants (black), shoes03 boots (black), M1 helmet (dense camouflage-net shell removed, shell deepened, matte black), toigo short gloves (black). ROYAL GOLD = galactic warrior uniform re-coloured white with gold panels, shoes01 re-coloured gold (metallic 0.6).",
+  "Layered garments were de-intersected in the rest pose (outer layers pushed outside inner layers / skin). Minor clipping can still appear at extreme joint angles (e.g. death pose hips, deep crouch).",
+  "All animations are 30 fps, baked FK (rotation keys on all bones, location on pelvis; root never moves). Locomotion is in place: run cycles 0.7 s / stride 1.4 m (2.0 m/s at 1x), crouch_fwd 1.0 s / 1.0 m. death translates the pelvis ~0.5 m backwards while falling (root stays at origin). Looping clips have last frame == first frame.",
+  "Gameplay clips (idle, run_*, crouch_*, jump) keep both wrists at a fixed grip relative to spine_03 (rifle follows the chest). The gun is not in the file; previews show a placeholder rifle parented to hand_r.",
+  "glTF/Godot axes: Blender (x, y, z) -> glTF (x, z, -y). The character faces +Z in Godot; *_godot rifle positions are already converted.",
+  "All outfit materials are double-sided (glTF doubleSided) because garments contain legitimate inner faces (collars, hems, liners, cap brim); body/eyes are single-sided.",
+  "Known minor artifact: the skin-tight ROOKIE t-shirt can show a few millimetre-sized specks of skin near its hem in some poses (garments were de-intersected against skin and inner layers in both directions, and tight tops use skin-transferred weights, but the tee is very close to the body).",
+  "No twist bones in the game_engine rig: forearm roll is carried by the hand bone, so extreme wrist twists can pinch slightly at the wrist."
+ ],
+ "triangles_body_head_hair_face": 24550,
+ "glb_size_mb": 4.544,
+ "textures": [
+  {
+   "name": "skin_body",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 91.5
+  },
+  {
+   "name": "skin_head",
+   "mime": "image/jpeg",
+   "size": [
+    453,
+    1024
+   ],
+   "kb": 49.3
+  },
+  {
+   "name": "eyebrows",
+   "mime": "image/png",
+   "size": [
+    256,
+    256
+   ],
+   "kb": 49.3
+  },
+  {
+   "name": "eyelashes",
+   "mime": "image/png",
+   "size": [
+    256,
+    256
+   ],
+   "kb": 50.6
+  },
+  {
+   "name": "eyes",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 23.7
+  },
+  {
+   "name": "hair",
+   "mime": "image/png",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 248.3
+  },
+  {
+   "name": "default_Shoes",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 52.5
+  },
+  {
+   "name": "default_Shorts",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 65.0
+  },
+  {
+   "name": "desert_Boots",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 15.4
+  },
+  {
+   "name": "desert_Pants",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 72.6
+  },
+  {
+   "name": "desert_Shirt",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 95.0
+  },
+  {
+   "name": "neon_Jacket",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 109.7
+  },
+  {
+   "name": "neon_Mask",
+   "mime": "image/jpeg",
+   "size": [
+    256,
+    256
+   ],
+   "kb": 13.1
+  },
+  {
+   "name": "neon_Shoes",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 55.6
+  },
+  {
+   "name": "royal_Shoes",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 51.7
+  },
+  {
+   "name": "royal_Suit",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 211.2
+  },
+  {
+   "name": "shadow_Boots",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 9.0
+  },
+  {
+   "name": "shadow_Gloves",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 6.4
+  },
+  {
+   "name": "shadow_Helmet",
+   "mime": "image/jpeg",
+   "size": [
+    512,
+    512
+   ],
+   "kb": 5.5
+  },
+  {
+   "name": "shadow_Pants",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 37.1
+  },
+  {
+   "name": "shadow_Top",
+   "mime": "image/jpeg",
+   "size": [
+    1024,
+    1024
+   ],
+   "kb": 116.0
+  }
+ ],
+ "validation": {
+  "bone_count": 53,
+  "skins": 1,
+  "skin_joints": 53,
+  "animations_reimported_frame_ranges_at_30fps": {
+   "crouch_fwd": [
+    0.0,
+    30.0
+   ],
+   "crouch_idle": [
+    0.0,
+    60.0
+   ],
+   "death": [
+    0.0,
+    36.0
+   ],
+   "idle": [
+    0.0,
+    60.0
+   ],
+   "jump": [
+    0.0,
+    18.0
+   ],
+   "lobby_idle": [
+    0.0,
+    120.0
+   ],
+   "run_back": [
+    0.0,
+    21.0
+   ],
+   "run_fwd": [
+    0.0,
+    21.0
+   ],
+   "run_left": [
+    0.0,
+    21.0
+   ],
+   "run_right": [
+    0.0,
+    21.0
+   ],
+   "victory": [
+    0.0,
+    60.0
+   ]
+  },
+  "gltf_animation_durations_s": {
+   "crouch_fwd": 1,
+   "crouch_idle": 2,
+   "death": 1.2,
+   "idle": 2,
+   "jump": 0.6,
+   "lobby_idle": 4,
+   "run_back": 0.7,
+   "run_fwd": 0.7,
+   "run_left": 0.7,
+   "run_right": 0.7,
+   "victory": 2
+  },
+  "meshes_with_morph_targets": [],
+  "materials": [
+   {
+    "name": "M_Skin_Body",
+    "alphaMode": "OPAQUE",
+    "doubleSided": false
+   },
+   {
+    "name": "M_Skin_Head",
+    "alphaMode": "OPAQUE",
+    "doubleSided": false
+   },
+   {
+    "name": "M_Eyebrows",
+    "alphaMode": "MASK",
+    "doubleSided": true
+   },
+   {
+    "name": "M_Eyelashes",
+    "alphaMode": "MASK",
+    "doubleSided": true
+   },
+   {
+    "name": "M_Eyes",
+    "alphaMode": "OPAQUE",
+    "doubleSided": false
+   },
+   {
+    "name": "M_Hair",
+    "alphaMode": "MASK",
+    "doubleSided": true
+   },
+   {
+    "name": "M_default_Shoes",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_default_Shorts",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_default_Top",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_desert_Boots",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_desert_Cap",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_desert_Pants",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_desert_Shirt",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_neon_Jacket",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_neon_Mask",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_neon_Shoes",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_royal_Shoes",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_royal_Suit",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_shadow_Boots",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_shadow_Gloves",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_shadow_Helmet",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_shadow_Pants",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   },
+   {
+    "name": "M_shadow_Top",
+    "alphaMode": "OPAQUE",
+    "doubleSided": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,121 @@
+name: Lone Wolf Arena - build APK and test on Android emulator
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "LoneWolfArena/**"
+      - ".github/workflows/lonewolf-arena.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      GODOT_VERSION: "4.7.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Install Godot and Android export templates
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          dest="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dest"
+          unzip -q -j "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" "templates/android_*" "templates/version.txt" -d "$dest"
+          rm -f ./*.tpz ./*.zip
+          godot --version
+
+      - name: Configure Godot for the Android SDK
+        run: |
+          mkdir -p "$HOME/.config/godot" "$HOME/.android"
+          keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          for f in editor_settings-4.tres editor_settings-4.7.tres; do
+            printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' \
+              "$ANDROID_HOME" "${JAVA_HOME_17_X64:-$JAVA_HOME}" "$HOME/.android/debug.keystore" > "$HOME/.config/godot/$f"
+          done
+
+      - name: Import project, unit tests, headless match simulation
+        working-directory: LoneWolfArena
+        run: |
+          godot --headless --path . --import > import.log 2>&1 || (tail -50 import.log; exit 1)
+          godot --headless --path . res://tests/check.tscn
+          godot --headless --path . res://tests/run_tests.tscn
+          godot --headless --path . -- --autotest=sim
+
+      - name: Export signed APK (throwaway CI key, emulator build)
+        working-directory: LoneWolfArena
+        run: |
+          mkdir -p build
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 1000 \
+            -storepass cipass123 -keypass cipass123 -dname "CN=CI,O=CI,C=IN"
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$RUNNER_TEMP/ci.keystore" GODOT_ANDROID_KEYSTORE_RELEASE_USER=ci \
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=cipass123 \
+            godot --headless --path . --export-release "Android-x86_64" build/LoneWolfArena.apk
+          ls -la build
+          test -s build/LoneWolfArena.apk
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and play on Android emulator (API 34, x86_64)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          force-avd-creation: false
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash LoneWolfArena/tools/ci/emulator_test.sh LoneWolfArena/build/LoneWolfArena.apk emulator-results
+
+      - name: Summarize emulator results
+        if: always()
+        run: |
+          ls -la emulator-results || true
+          echo "== crashes"; cat emulator-results/crashes.txt 2>/dev/null || true
+          echo "== godot errors"; head -40 emulator-results/godot_errors.txt 2>/dev/null || true
+          python3 -m pip install -q --break-system-packages pillow 2>/dev/null || python3 -m pip install -q pillow || true
+          echo "== screenshots (stats, then base64 JPEG)"
+          for f in emulator-results/*.png; do
+            python3 - "$f" <<'PY' || true
+          import base64, io, sys
+          from PIL import Image, ImageStat
+          im = Image.open(sys.argv[1]).convert("RGB")
+          g = im.convert("L")
+          dark = sum(g.histogram()[:16]) / float(g.width * g.height)
+          print("STAT", sys.argv[1], "size=%dx%d" % im.size, "mean=%.1f" % ImageStat.Stat(g).mean[0], "dark=%.2f" % dark)
+          im.thumbnail((480, 480))
+          b = io.BytesIO(); im.save(b, "JPEG", quality=55)
+          print("IMG_BEGIN", sys.argv[1]); print(base64.b64encode(b.getvalue()).decode()); print("IMG_END")
+          PY
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lonewolf-arena-ci
+          path: |
+            emulator-results
+            LoneWolfArena/build/LoneWolfArena.apk
+          retention-days: 14
