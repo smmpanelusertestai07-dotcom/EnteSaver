@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch / PR supersedes the running check.
+concurrency:
+  group: lonewolf-arena-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   android:
     runs-on: ubuntu-latest
