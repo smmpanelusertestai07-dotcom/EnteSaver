@@ -24,6 +24,12 @@ const CROUCH_AUTHORED := 1.0
 const PRONE_AUTHORED := 0.30
 ## Minimum time between two hit flinches, so automatic fire does not lock the upper body.
 const FLINCH_GAP := 0.6
+## Medkit pack held in the left hand while healing (the clip presses it to the belly): offset in
+## hand_l bone space (6 cm toward the fingers, 2.5 cm off the palm toward the body), flat side
+## against the palm with the cross facing out; scale of the medkit model along its long / thin /
+## wide sides.
+const KIT_OFFSET := Vector3(0.025, 0.06, 0.0)
+const KIT_SCALE := Vector3(0.42, 0.22, 0.42)
 ## Visual layer of characters and held weapons (the top-down minimap render skips it).
 const LAYER_ACTORS := 4
 const UPPER_BONES := ["spine_01", "spine_02", "spine_03", "neck_01", "head", "clavicle_l", "clavicle_r",
@@ -89,6 +95,7 @@ var _hide_gun_until := 0.0
 var _hand_to_gun := Transform3D.IDENTITY
 var _hand_to_gun_ready := false
 var _pending_equip: Array = []    # [model, tint]: swapped in at the lowest point of the swap clip
+var _kit: Node3D                  # medkit in the left hand while healing (built on first heal)
 var _equip_at := 0.0
 var _next_flinch := 0.0
 
@@ -480,6 +487,29 @@ func play_reload(seconds: float) -> void:
 
 func play_heal(on: bool) -> void:
 	_healing = on
+	if on and _kit == null and skeleton and anim.has_animation("heal"):
+		_build_kit()
+	if _kit:
+		_kit.visible = on and not _dead
+
+
+func _build_kit() -> void:
+	var path := "res://assets/props/medkit.glb"
+	if not (ResourceLoader.exists(path) and skeleton.find_bone("hand_l") >= 0):
+		return
+	var att := BoneAttachment3D.new()
+	att.name = "KitHand"
+	att.bone_name = "hand_l"
+	skeleton.add_child(att)
+	var kit: Node3D = (load(path) as PackedScene).instantiate()
+	# Kit axes in bone space: its long side along the fingers (bone Y), its thin side (model Y,
+	# the face with the cross) out of the palm's back (bone -X).
+	kit.transform = Transform3D(Basis(Vector3(0, 1, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1)) * Basis.from_scale(KIT_SCALE), KIT_OFFSET)
+	att.add_child(kit)
+	_kit = att
+	_set_layers(att)
+	for mi in att.find_children("*", "GeometryInstance3D", true, false):
+		(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## Weapon swap: the gun dips and the new model appears at the lowest point of the clip.
@@ -527,6 +557,8 @@ func play_death() -> void:
 	_dead = true
 	if weapon_node:
 		weapon_node.visible = false
+	if _kit:
+		_kit.visible = false
 	if aim_mod:
 		aim_mod.pitch = 0.0
 		aim_mod.kick = 0.0
