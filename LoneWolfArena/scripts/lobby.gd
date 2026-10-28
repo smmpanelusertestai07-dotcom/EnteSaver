@@ -1165,15 +1165,17 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 		# name strip + rarity bar
 		card.draw_rect(Rect2(0, s.y - 52, s.x, 48), Color(0, 0, 0, 0.6))
 		card.draw_rect(Rect2(0, s.y - 5, s.x, 5), rc)
-		var sel := card.button_pressed
-		if sel:
+		# equipped: yellow outline + tick; previewed: white outline
+		var equipped := id == String(Game.profile.bundle)
+		if equipped:
 			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), UI.ACCENT, false, 3.0)
-		elif card.is_hovered():
+			UI.draw_tick_corner(card, Vector2(s.x, s.y - 5), 34.0)
+		if card.button_pressed and not equipped:
+			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), Color(1, 1, 1, 0.95), false, 3.0)
+		elif card.is_hovered() and not equipped:
 			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.5), false, 2.0)
-		else:
-			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0)
-		if id == String(Game.profile.bundle):
-			UI.draw_tick_corner(card, Vector2(s.x, s.y - 5), 34.0))
+		elif not equipped:
+			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0))
 	var nm := UI.label(String(b.name), 18, UI.TEXT, "bold")
 	nm.position = Vector2(9, CARD_SIZE.y - 50)
 	nm.size = Vector2(CARD_SIZE.x - 18, 24)

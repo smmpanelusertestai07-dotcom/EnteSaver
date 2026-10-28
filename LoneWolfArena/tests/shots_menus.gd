@@ -41,6 +41,19 @@ func run(at: Node) -> int:
 	var lobby := await _wait_scene("Lobby", 30.0)
 	await _settle(2.0)
 	await at.shot("m02_lobby")
+	# Drag on the character turns it.
+	var model := lobby.get("model") as Node3D
+	var yaw0 := model.rotation.y
+	var vs := get_viewport().get_visible_rect().size
+	var fx: Transform2D = get_tree().root.get_final_transform()
+	var p0 := fx * Vector2(vs.x * 0.42, vs.y * 0.5)
+	at.touch(1, p0, true)
+	for k in 6:
+		await at.wait(0.05)
+		at.drag(1, p0 + Vector2(30 * (k + 1), 0) * fx.get_scale(), Vector2(30, 0) * fx.get_scale())
+	at.touch(1, p0 + Vector2(180, 0) * fx.get_scale(), false)
+	await at.wait(0.1)
+	_check(absf(model.rotation.y - yaw0) > 0.3, "dragging on the character turns it (%.2f rad)" % (model.rotation.y - yaw0))
 	# Name edit + how to play.
 	lobby.call("_edit_name")
 	await _settle(0.6)

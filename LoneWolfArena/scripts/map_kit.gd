@@ -89,6 +89,15 @@ func _make(key: String) -> Material:
 			# exactly one container height (2.591 m), top edge at V = 0
 			m.uv1_scale = Vector3(0.25, 1.0 / 2.591, 1.0)
 			m.uv1_offset = Vector3(0.0, 1.0 - 1.0 / 2.591, 0.0)
+		"paint_fine":
+			# the walk-through container: its walls are seen from ~1 m inside, so the paint uses
+			# the finer variant (1 tile = 2 m wide, spots about half the size)
+			m = _std(Color(1, 1, 1), 0.58, 0.18)
+			_set_tex(m, "container_paint_fine")
+			m.vertex_color_use_as_albedo = true
+			m.vertex_color_is_srgb = true
+			m.uv1_scale = Vector3(0.5, 1.0 / 2.591, 1.0)
+			m.uv1_offset = Vector3(0.0, 1.0 - 1.0 / 2.591, 0.0)
 		"barrel_paint":
 			m = _std(Color(1, 1, 1), 0.45, 0.3)
 			m.vertex_color_use_as_albedo = true

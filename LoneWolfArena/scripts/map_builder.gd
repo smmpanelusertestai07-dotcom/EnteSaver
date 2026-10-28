@@ -4,9 +4,12 @@ extends RefCounted
 ## pitched roof on steel trusses with hanging fluorescent tubes). Spawn alcoves sit in the middle
 ## of both short walls; the layout has 180-degree rotational symmetry (every piece of the west
 ## half is repeated rotated about the hall centre), so both spawns are equally fair.
-## Gameplay pieces: a central high-ground block of two 40 ft containers (steel ramps + crate
-## steps), long containers along the long walls, a walk-through container per side, a 2-high
-## stack and a tilted container per side, crates, barrels, pallets, a forklift / a tank.
+## Gameplay pieces: the high ground is a 40 ft container on each side of an open centre bay
+## (8 m of bare floor between them, so the safe zone's final 4 m circle at the hall centre is
+## open ground; each container has a steel ramp and crate steps on its outer side and blocks
+## every spawn-to-spawn sightline), long containers along the long walls, a walk-through
+## container per side, a 2-high stack and a tilted container per side, crates, barrels,
+## pallets, a forklift / a tank.
 ## Rendering: repeated meshes are MultiMeshes (per-instance container colours), static pieces are
 ## merged per material (see map_kit.gd); roof, ceiling, trusses and lamps live on visual layer 2
 ## so the top-down minimap camera (cull mask 1) sees the floor plan.
@@ -26,6 +29,8 @@ const C_H := 2.591
 const C20 := Vector3(6.058, 2.591, 2.438)
 const C40 := Vector3(12.192, 2.591, 2.438)
 const CRATE := 1.2
+const BAY_HW := 4.0              # half width of the open bay at the hall centre (between the containers)
+const RAMP_RUN := 4.76           # horizontal run of the steel ramps up to the container roofs
 const LAYER_ROOF := 2
 const LAYER_FX := 4              # same bit as CharacterModel.LAYER_ACTORS (not in the minimap)
 ## Corrugated walls, columns and lintels: excluded from the sun's cull mask (soft ambient only,
@@ -44,6 +49,7 @@ var nav: NavigationRegion3D
 var deco: Node3D
 var env: WorldEnvironment
 var sun: DirectionalLight3D
+var fill: DirectionalLight3D     # weak shadowless counter-light (see _build_environment)
 var obstacles: Array[Rect2] = []
 var cover_points: Array[Vector3] = []
 var spawn_a := Vector3(-HX - 2.0, 0, 0)
@@ -163,11 +169,27 @@ func _build_environment(parent: Node3D) -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 48.0
-	sun.directional_shadow_split_1 = 0.3
+	# a tighter first split puts more shadow texels near the camera (no stair steps up close);
+	# the filter (PCF) is set per graphics level in apply_quality()
+	sun.directional_shadow_split_1 = 0.22
 	sun.shadow_bias = 0.04
 	sun.shadow_normal_bias = 1.2
 	sun.shadow_blur = 1.2
 	parent.add_child(sun)
+	# Weak, shadowless counter-light from the other side, low (daylight bounced off the far
+	# walls): faces the sun never reaches keep some direction in their shading, so container
+	# ribs and crate edges still read on the shaded sides. Directional lights without shadows
+	# are shaded in the base pass: no extra draw calls.
+	fill = DirectionalLight3D.new()
+	fill.name = "Fill"
+	fill.rotation_degrees = Vector3(-22, 144, 0)
+	fill.light_energy = 0.34
+	fill.light_color = Color(0.88, 0.92, 1.0)
+	fill.light_specular = 0.2
+	fill.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	fill.light_cull_mask = 0xFFFFF & ~LAYER_WALLS
+	fill.shadow_enabled = false
+	parent.add_child(fill)
 
 
 ## Red spawn barriers during the prep phase: glowing wall + floor strip at both alcove mouths,
@@ -182,8 +204,11 @@ func set_barriers(on: bool) -> void:
 
 
 ## Graphics quality 0..3 (SMOOTH..MAX): minor decoration hidden on SMOOTH, small props cast
-## shadows on ULTRA / MAX only (containers, ramps and the high ground always do).
+## shadows on ULTRA / MAX only (containers, ramps and the high ground always do). Sun shadows
+## are filtered (soft PCF edges, the Compatibility renderer's 5-tap filter; 13 taps on MAX).
 func apply_quality(g: int) -> void:
+	RenderingServer.directional_soft_shadow_filter_set_quality(
+		RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM if g >= 3 else RenderingServer.SHADOW_QUALITY_SOFT_LOW)
 	for n in _minor:
 		if is_instance_valid(n):
 			n.visible = g >= 1
@@ -266,7 +291,8 @@ func _configure_sets() -> void:
 	kit.set_fallback("c40", [["paint", C40, Vector3(0, C_H * 0.5, 0)]])
 	kit.set_config("c20", "container", cont, 1, 1, true)
 	kit.set_fallback("c20", [["paint", C20, Vector3(0, C_H * 0.5, 0)]])
-	kit.set_config("copen", "container_open", cont, 1, 1, true)
+	# the walk-through container gets the finer paint (its walls are seen from close up inside)
+	kit.set_config("copen", "container_open", {"paint": "paint_fine", "metal": "metal_dark", "rubber": "rubber", "wood": "wood_floor"}, 1, 1, true)
 	kit.set_fallback("copen", [["paint", Vector3(6.058, 0.12, 2.438), Vector3(0, 2.53, 0)],
 		["paint", Vector3(6.058, 2.591, 0.07), Vector3(0, 1.3, -1.18)], ["paint", Vector3(6.058, 2.591, 0.07), Vector3(0, 1.3, 1.18)],
 		["wood_floor", Vector3(6.0, 0.12, 2.3), Vector3(0, 0.06, 0)]])
@@ -803,13 +829,19 @@ func _tilted(low: Vector3, toward: Vector3, deg: float, color: Color) -> void:
 
 func _layout_half() -> void:
 	var west := _side == 0
-	# ---- central high ground: two 40 ft containers side by side (long axis across the hall)
-	_container("c40", Vector3(-1.219, 0, 0), 90.0, LIGHT_BLUE if west else LIGHT_BLUE2)
-	_ramp(Vector3(-7.2, 0, 2.75), Vector3(-2.44, C_H, 2.75))
-	_ao(Vector3(-4.82, 0, 2.75), Vector2(4.76, 2.4), 0.0, 0.5, 0.6)
-	_hazard_strip(Vector3(-7.45, 0, 1.55), Vector3(-7.45, 0, 3.95), 0.5)
-	_crates([[-3.04, -4.7, 2, 0.0], [-4.24, -4.7, 1, 0.0]])
-	_crates([[-1.5, -4.9, 1, 8.0, C_H]])                       # cover on the high ground
+	# ---- central high ground: a 40 ft container (long axis across the hall) on this side of the
+	# open centre bay; steel ramp + crate steps up its outer face, a crate as cover on its roof
+	var cx := -(BAY_HW + C40.z * 0.5)
+	var outer := cx - C40.z * 0.5
+	_container("c40", Vector3(cx, 0, 0), 90.0, LIGHT_BLUE if west else LIGHT_BLUE2)
+	_ramp(Vector3(outer - RAMP_RUN, 0, 2.75), Vector3(outer, C_H, 2.75))
+	_ao(Vector3(outer - RAMP_RUN * 0.5, 0, 2.75), Vector2(RAMP_RUN, 2.4), 0.0, 0.5, 0.6)
+	_hazard_strip(Vector3(outer - RAMP_RUN - 0.25, 0, 1.55), Vector3(outer - RAMP_RUN - 0.25, 0, 3.95), 0.5)
+	_crates([[outer - CRATE * 0.5, -4.7, 2, 0.0], [outer - CRATE * 1.5, -4.7, 1, 0.0]])
+	_crates([[-BAY_HW - CRATE * 0.5, -5.4, 1, 0.0, C_H]])       # cover on the roof (bay side, far end)
+	_barrels([[outer - 0.45, -0.35, 1], [outer - 0.5, 0.3, 0], [outer - 1.1, 0.0, 2]])   # low cover by the wall
+	# the bay itself stays bare floor: dashed guide lines along both container bases
+	_dashed_line(Vector3(-BAY_HW + 0.45, 0, -5.6), Vector3(-BAY_HW + 0.45, 0, 5.6))
 	# ---- long container along the south wall, walk-through container in the north-west
 	_container("c40", Vector3(-4.4, 0, HZ - 1.75), 0.0, DEEP_BLUE if west else RUST)
 	_container("copen", Vector3(-9.2, 0, -8.7), 0.0, ORANGE if west else Color("e8892e"))
@@ -837,8 +869,7 @@ func _layout_half() -> void:
 	_bollard(-14.0, 11.5)
 	_bollard(-10.8, 11.5)
 	_barrels([[-3.2, 11.45, 2], [-2.55, 11.6, 1]])
-	_crates([[-6.9, 8.2, 2, 0.0], [-5.7, 8.2, 1, 0.0]])
-	_barrels([[-11.3, 2.7, 0], [-11.0, 3.35, 2], [-11.85, 3.15, 1]])
+	_crates([[-9.3, 8.6, 2, 0.0], [-8.1, 8.6, 1, 0.0]])
 	# ---- spawn approach
 	_crates([[-15.3, -0.6, 2, 0.0], [-15.3, 0.6, 1, 0.0]])
 	_crates([[-10.6, -2.9, 1, 0.0], [-10.6, -1.7, 1, 0.0]])

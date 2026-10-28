@@ -160,6 +160,8 @@ func _menu_button(text: String, idx: int) -> Button:
 func _apply(key: String, value: Variant) -> void:
 	Game.settings[key] = value
 	Game.apply_settings()
+	if key == "graphics":
+		Game.settings_changed.emit()     # the arena re-applies its quality level at once
 
 
 func _show_tab(i: int) -> void:

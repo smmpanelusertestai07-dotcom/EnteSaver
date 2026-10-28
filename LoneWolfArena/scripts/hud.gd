@@ -782,7 +782,7 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	var dim := 1.0 if gun_sel else 0.55
 	var pressed := _pressed.has("weapons:main")
 	# Near-black slots at ~70 % (the reference), the main one with its top-right corner cut.
-	HudDraw.slot_rect(self, main, s * 0.2, Color(HudDraw.SLOT_BG, (0.84 if pressed else 0.72) * o))
+	HudDraw.slot_rect(self, main, s * 0.2, Color(HudDraw.SLOT_BG, (0.86 if pressed else 0.76) * o))
 	HudDraw.vband(self, Rect2(main.position, Vector2(main.size.x - s * 0.2, main.size.y * 0.4)), Color(1, 1, 1, 0.05 * o), Color(1, 1, 1, 0.0))
 	# Ammo: big magazine number + small "/reserve".
 	var ax := main.position.x + s * 0.16
@@ -813,7 +813,7 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 		var r := slots[i]
 		var sel := (i == 0 and gun_sel) or (i == 2 and not gun_sel)
 		var sp := _pressed.has("weapons:%d" % i)
-		draw_rect(r, Color(HudDraw.SLOT_BG, (0.84 if sp else 0.7) * o))
+		draw_rect(r, Color(HudDraw.SLOT_BG, (0.86 if sp else 0.76) * o))
 		if sel:
 			HudDraw.vband(self, r, Color(HudDraw.GOLD, 0.7 * o), Color(HudDraw.GOLD.darkened(0.3), 0.62 * o))
 			draw_rect(Rect2(r.position.x, r.end.y - 2.0, r.size.x, 2.0), Color(1, 0.93, 0.6, o))
@@ -873,7 +873,7 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 				HudDraw.disk(self, c, 1.8 * sc, col)
 			_:
 				# the ring shows the real spread (reference: ~0.05-0.07 h across, blooming a little)
-				ring_r = clampf(maxf(0.026 * u, _spread_px(u) if dyn else 0.0), 0.024 * u, 0.08 * u) * sc
+				ring_r = clampf(maxf(0.026 * u, _spread_px(u) if dyn else 0.0), 0.024 * u, 0.07 * u) * sc
 				if not (w.reloading and Game.settings.get("reload_on_crosshair", true)):
 					HudDraw.ring(self, c, ring_r, outline, 3.4)
 					HudDraw.ring(self, c, ring_r, col, 1.6)
@@ -1410,8 +1410,17 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	var feed_w := HudDraw.text_parts(self, feed, feed_c, fs, 1, 3, "bold", 0.8)
 	_draw_controls(vs)
 	_draw_weapon_panel(vs)
-	# Labels under (or above) each widget, nudged so they never sit on top of each other.
+	# Labels under (or above) each widget, nudged so they never sit on top of each other or on
+	# another widget (the small corner gear's label goes beside it, not onto the weapon panel).
 	var taken: Array[Rect2] = [Rect2(feed_c - Vector2(feed_w * 0.5, fs * 0.6), Vector2(feed_w, fs * 1.2))]
+	var widgets: Array[Rect2] = []
+	for wid: String in HudLayout.ORDER:
+		var wr := HudLayout.hit_rect(wid, layout[wid], vs)
+		if wid == "minimap":
+			wr.size.y += wr.size.x * HudLayout.STRIP_H
+		elif wid == "fire_r":
+			wr = wr.grow(HudLayout.radius(layout[wid], vs) * 0.17)
+		widgets.append(wr)
 	var lfs := int(0.022 * u)
 	for id: String in HudLayout.ORDER:
 		var w: Dictionary = layout[id]
@@ -1433,7 +1442,7 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 		for sp: Vector2 in spots:
 			lr = Rect2(sp - Vector2(lw, lh) * 0.5, Vector2(lw, lh))
 			var clash := not Rect2(Vector2.ZERO, vs).encloses(lr)
-			for t in taken:
+			for t in taken + widgets:
 				if t.intersects(lr):
 					clash = true
 					break

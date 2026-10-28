@@ -1,15 +1,24 @@
 extends Node
 ## Map tour for "CARGO CAGE" (scripts/map_builder.gd):
 ##   tools/qa/capture.sh <dir> 1560x720 script:res://tests/shots_map.gd
-## Spawn views in PREP (barrier on) and FIGHT, lanes, high ground, ceiling, a 3D overview and a
-## top-down debug view with the navmesh islands, the minimap texture, per-view draw calls and
-## primitives (MAPPERF lines), navmesh path checks (MAPNAV lines) and a collider dump
-## (colliders.json) for offline gap analysis. Exit code 1 if a navmesh check fails.
+## Spawn views in PREP (barrier on) and FIGHT, lanes, high ground, the open centre bay, ceiling,
+## a 3D overview and a top-down debug view with the navmesh islands, the minimap texture,
+## per-view draw calls and primitives (MAPPERF lines: the visible pass from the renderer, the
+## shadow pass estimated - the Compatibility renderer counts shadow primitives but not shadow
+## draw calls - plus a SMOOTH..MAX quality sweep against the 220 draw call / 250k primitive
+## budget), navmesh path checks and the zone-centre open-floor check (MAPNAV lines) and a
+## collider dump (colliders.json) for offline gap analysis. Exit code 1 if a check fails.
+
+const BUDGET_DRAW_CALLS := 220
+const BUDGET_PRIMITIVES := 250000
 
 var at: Node
 var arena: Node
 var cam: Camera3D
 var fails := 0
+var map: MapBuilder
+var _mesh_tris := {}            # mesh RID -> [triangles per surface]
+var _worst := {}                # tag group -> {"dc": int, "pr": int}
 
 
 func run(autotest: Node) -> int:
@@ -19,7 +28,7 @@ func run(autotest: Node) -> int:
 	Game.goto_arena()
 	await at.wait(1.6)
 	arena = at.get_tree().current_scene
-	var map: MapBuilder = arena.get("map")
+	map = arena.get("map")
 	var p: Player = arena.get("player")
 	var b: Bot = arena.get("bot")
 	var hud: Control = arena.get("hud")
@@ -57,7 +66,8 @@ func run(autotest: Node) -> int:
 	if not out:
 		fails += 1
 	# crate steps: floor -> single crate -> 2-stack -> high ground (jump apex ~1.3 m)
-	p.global_position = Vector3(-6.2, 0.05, -4.7)
+	var roof_x := -MapBuilder.BAY_HW - MapBuilder.C40.z      # outer face of the west container
+	p.global_position = Vector3(roof_x - 4.0, 0.05, -4.7)
 	p.velocity = Vector3.ZERO
 	p.aim_yaw = -PI * 0.5
 	await at.wait(0.3)
@@ -68,18 +78,23 @@ func run(autotest: Node) -> int:
 			p.do_jump()
 		await at.get_tree().physics_frame
 		top = maxf(top, p.global_position.y)
-		if p.global_position.y > MapBuilder.C_H - 0.1 and p.global_position.x > -2.3:
+		if p.global_position.y > MapBuilder.C_H - 0.1 and p.global_position.x > roof_x + 0.15:
 			break
 	p.move_dir = Vector2.ZERO
 	var climbed: bool = p.global_position.y > MapBuilder.C_H - 0.1
 	at.log_line("MAPNAV %s crate steps reach the high ground (pos=%s, max y %.2f)" % ["OK" if climbed else "FAIL", str(p.global_position), top])
 	if not climbed:
 		fails += 1
-	# the steel ramp is walkable without jumping
-	p.global_position = Vector3(-9.0, 0.05, 2.75)
+	# the steel ramp is walkable without jumping (stop on the roof, before the bay edge)
+	p.global_position = Vector3(roof_x - MapBuilder.RAMP_RUN - 2.0, 0.05, 2.75)
 	p.velocity = Vector3.ZERO
 	await at.wait(0.3)
-	await _walk(p, 150)
+	for i in 240:
+		p.move_dir = Vector2(0, 1)
+		await at.get_tree().physics_frame
+		if p.global_position.y > MapBuilder.C_H - 0.1 and p.global_position.x > roof_x + 0.4:
+			break
+	p.move_dir = Vector2.ZERO
 	var up_ramp: bool = p.global_position.y > MapBuilder.C_H - 0.1
 	at.log_line("MAPNAV %s ramp walk reaches the high ground (pos=%s)" % ["OK" if up_ramp else "FAIL", str(p.global_position)])
 	if not up_ramp:
@@ -101,15 +116,39 @@ func run(autotest: Node) -> int:
 	map.sun.shadow_enabled = true
 	p.visible = true
 	b.visible = true
-	await _player_view(p, Vector3(-9.5, 0, -2.0), -PI * 0.5 - 0.35, -0.02, "map_ramp_a")
-	await _player_view(p, Vector3(-1.2, MapBuilder.C_H, -1.0), PI * 0.5, -0.12, "map_high_west")
-	await _player_view(p, Vector3(1.2, MapBuilder.C_H, 1.0), -PI * 0.5, -0.12, "map_high_east")
+	await _player_view(p, Vector3(-14.0, 0, 0.3), -PI * 0.5 - 0.35, -0.02, "map_ramp_a")
+	# on the west roof looking across the open bay to the east one, then the east roof outward
+	await _player_view(p, Vector3(-5.5, MapBuilder.C_H, 3.6), -PI * 0.5 + 0.12, -0.16, "map_high_west")
+	await _player_view(p, Vector3(5.5, MapBuilder.C_H, -3.6), -PI * 0.5, -0.12, "map_high_east")
+	# down in the bay (the zone's final circle), looking along it to the north lane
+	await _player_view(p, Vector3(0.0, 0, 5.2), 0.0, 0.02, "map_bay")
 	await _player_view(p, Vector3(-14.5, 0, -8.7), -PI * 0.5, 0.0, "map_open_container")
 	await _player_view(p, Vector3(-4.0, 0, -9.0), -PI * 0.5, 0.0, "map_north_lane")
 	await _player_view(p, Vector3(6.0, 0, 9.5), PI * 0.5, 0.0, "map_south_lane")
 	await _player_view(p, Vector3(-12.0, 0, 3.5), PI * 0.82, 0.05, "map_sw_corner")
 	await _player_view(p, Vector3(-12.0, 0, -5.0), PI * 0.2, 0.1, "map_nw_corner")
 	await _perf("lanes")
+	# Draw calls and primitives per quality level (visible pass + estimated shadow pass) from
+	# the views with the most on screen.
+	var views := [[map.spawn_a + Vector3(2.5, 0, 0), map.spawn_a_yaw], [Vector3(-15.5, 0, 3.2), -PI * 0.5],
+		[Vector3(-5.5, MapBuilder.C_H, 3.6), -PI * 0.5 + 0.12], [Vector3(-12.0, 0, -5.0), PI * 0.2], [Vector3(15.0, 0, -4.0), PI * 0.62]]
+	var graphics_before := int(Game.settings.graphics)
+	for g in [0, 1, 2, 3]:
+		Game.settings.graphics = g
+		arena.call("apply_graphics")
+		for v in views:
+			p.global_position = (v[0] as Vector3) + Vector3(0, 0.05, 0)
+			p.velocity = Vector3.ZERO
+			p.aim_yaw = float(v[1])
+			p.aim_pitch = 0.0
+			await at.wait(0.4)
+			await _perf("quality_%d" % g, "q%d" % g)
+		var w: Dictionary = _worst.get("q%d" % g, {"dc": 0, "pr": 0})
+		var ok: bool = int(w.dc) <= BUDGET_DRAW_CALLS and int(w.pr) <= BUDGET_PRIMITIVES
+		at.log_line("MAPPERF %s quality %d worst total (visible + shadow) draw_calls=%d primitives=%d budget %d / %d" % [
+			"OK" if ok else "OVER", g, int(w.dc), int(w.pr), BUDGET_DRAW_CALLS, BUDGET_PRIMITIVES])
+	Game.settings.graphics = graphics_before
+	arena.call("apply_graphics")
 	await _view("map_ceiling", Vector3(-10, 1.7, 2), Vector3(4, 9.5, -3), 80.0)
 	# ---- overview without the roof (layer 2 hidden)
 	cam.cull_mask = 0xFFFFF & ~2
@@ -198,7 +237,7 @@ func _player_view(p: Player, pos: Vector3, yaw: float, pitch: float, shot_name: 
 	await at.shot(shot_name)
 
 
-func _perf(tag: String) -> void:
+func _perf(tag: String, group := "") -> void:
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	var vp := at.get_viewport().get_viewport_rid()
@@ -207,12 +246,129 @@ func _perf(tag: String) -> void:
 	var dc := RenderingServer.viewport_get_render_info(vp, V, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME)
 	var pr := RenderingServer.viewport_get_render_info(vp, V, RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME)
 	var ob := RenderingServer.viewport_get_render_info(vp, V, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
-	var sdc := RenderingServer.viewport_get_render_info(vp, S, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME)
 	var spr := RenderingServer.viewport_get_render_info(vp, S, RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME)
-	at.log_line("MAPPERF %s draw_calls=%d primitives=%d objects=%d shadow_draw_calls=%d shadow_primitives=%d fps=%d" % [tag, dc, pr, ob, sdc, spr, Engine.get_frames_per_second()])
+	var est := _shadow_estimate(at.get_viewport().get_camera_3d())
+	at.log_line("MAPPERF %s draw_calls=%d primitives=%d objects=%d shadow_draw_calls_est=%d shadow_primitives=%d shadow_primitives_est=%d total_draw_calls=%d total_primitives=%d fps=%d" % [
+		tag, dc, pr, ob, est.x, spr, est.y, dc + est.x, pr + spr, Engine.get_frames_per_second()])
+	if group != "":
+		var w: Dictionary = _worst.get(group, {"dc": 0, "pr": 0})
+		w.dc = maxi(int(w.dc), dc + est.x)
+		w.pr = maxi(int(w.pr), pr + spr)
+		_worst[group] = w
+
+
+## Shadow pass of the sun (2 PSSM splits). The Compatibility renderer reports its primitives but
+## not its draw calls, so both are modelled here: each split's shadow map covers the bounding
+## sphere of its slice of the view frustum (as seen from the light), and every shadow-casting
+## surface whose bounds overlap that square is one draw call (a MultiMesh draws all its
+## instances in one). The modelled primitives are logged next to the renderer's own count, which
+## shows how far the model can be trusted. Returns (draw calls, primitives).
+func _shadow_estimate(view_cam: Camera3D) -> Vector2i:
+	var sun: DirectionalLight3D = map.sun
+	if view_cam == null or not sun.shadow_enabled or not sun.is_visible_in_tree():
+		return Vector2i.ZERO
+	var lx := sun.global_basis.x.normalized()
+	var ly := sun.global_basis.y.normalized()
+	var caster_mask := 0xFFFFF
+	var scm: Variant = sun.get("shadow_caster_mask")
+	if scm is int:
+		caster_mask = int(scm)
+	var casters := []
+	for node in arena.find_children("*", "GeometryInstance3D", true, false):
+		var g := node as GeometryInstance3D
+		if not g.is_visible_in_tree() or g.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF or (g.layers & caster_mask) == 0:
+			continue
+		var tris := _surface_tris(g)
+		if not tris.is_empty():
+			casters.append([g.global_transform * g.get_aabb(), tris])
+	var vs := at.get_viewport().get_visible_rect().size
+	var splits := [0.0, sun.directional_shadow_split_1, 1.0]
+	var dc := 0
+	var pr := 0
+	for i in 2:
+		var d0 := maxf(view_cam.near, sun.directional_shadow_max_distance * float(splits[i]))
+		var d1 := sun.directional_shadow_max_distance * float(splits[i + 1])
+		var pts: Array[Vector3] = []
+		for corner: Vector2 in [Vector2.ZERO, Vector2(vs.x, 0), vs, Vector2(0, vs.y)]:
+			pts.append(view_cam.project_position(corner, d0))
+			pts.append(view_cam.project_position(corner, d1))
+		var centre := Vector3.ZERO
+		for q in pts:
+			centre += q
+		centre /= pts.size()
+		var rad := 0.0
+		for q in pts:
+			rad = maxf(rad, q.distance_to(centre))
+		var c2 := Vector2(centre.dot(lx), centre.dot(ly))
+		var square := Rect2(c2 - Vector2(rad, rad), Vector2(rad, rad) * 2.0)
+		for cst in casters:
+			var b: AABB = cst[0]
+			var mn := Vector2(INF, INF)
+			var mx := Vector2(-INF, -INF)
+			for k in 8:
+				var e := b.get_endpoint(k)
+				var p2 := Vector2(e.dot(lx), e.dot(ly))
+				mn = mn.min(p2)
+				mx = mx.max(p2)
+			if Rect2(mn, mx - mn).intersects(square, true):
+				var tris: Array = cst[1]
+				dc += tris.size()
+				for t in tris:
+					pr += int(t)
+	return Vector2i(dc, pr)
+
+
+## Triangles per surface of a mesh / MultiMesh instance (x instance count), cached per mesh.
+func _surface_tris(g: GeometryInstance3D) -> Array:
+	var mesh: Mesh = null
+	var count := 1
+	if g is MeshInstance3D:
+		mesh = (g as MeshInstance3D).mesh
+	elif g is MultiMeshInstance3D:
+		var mm := (g as MultiMeshInstance3D).multimesh
+		if mm == null:
+			return []
+		mesh = mm.mesh
+		count = mm.visible_instance_count if mm.visible_instance_count >= 0 else mm.instance_count
+	if mesh == null:
+		return []
+	var per: Array = _mesh_tris.get(mesh.get_rid(), [])
+	if per.is_empty():
+		for si in mesh.get_surface_count():
+			var arr := mesh.surface_get_arrays(si)
+			var idx: Variant = arr[Mesh.ARRAY_INDEX]
+			var n := (idx as PackedInt32Array).size() if idx is PackedInt32Array and (idx as PackedInt32Array).size() > 0 \
+				else (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+			per.append(n / 3)
+		_mesh_tris[mesh.get_rid()] = per
+	var out := []
+	for t in per:
+		out.append(int(t) * count)
+	return out
 
 
 func _nav_checks(map: MapBuilder, ar: Node) -> void:
+	# The safe zone ends as a 4 m circle around zone_center: that must be open floor (no
+	# obstacle footprint), and so should most of the 6 m ring around it.
+	for rad: float in [4.0, 6.0]:
+		var inside := 0
+		var blocked := 0
+		var c := Vector2(map.zone_center.x, map.zone_center.z)
+		for ix in range(-40, 41):
+			for iz in range(-40, 41):
+				var q := c + Vector2(ix, iz) * (rad / 40.0)
+				if q.distance_to(c) > rad:
+					continue
+				inside += 1
+				for r: Rect2 in map.obstacles:
+					if r.has_point(q):
+						blocked += 1
+						break
+		var frac := float(blocked) / maxf(inside, 1)
+		var ok := frac <= (0.0 if rad <= 4.0 else 0.2)
+		at.log_line("MAPNAV %s zone centre r=%.0f m: obstacles cover %.1f %% of the circle" % ["OK" if ok else "FAIL", rad, frac * 100.0])
+		if not ok:
+			fails += 1
 	var t := 0.0
 	while not (ar.get("nav_map") as RID).is_valid() and t < 10.0:
 		await at.wait(0.2)
@@ -224,7 +380,8 @@ func _nav_checks(map: MapBuilder, ar: Node) -> void:
 		return
 	await at.wait(0.3)
 	var targets := {
-		"spawn_b": map.spawn_b, "high_ground": Vector3(-1.2, MapBuilder.C_H, 0.0), "high_ground_far": Vector3(1.2, MapBuilder.C_H, 5.0),
+		"spawn_b": map.spawn_b, "high_ground": Vector3(-5.2, MapBuilder.C_H, 1.0), "high_ground_far": Vector3(5.2, MapBuilder.C_H, -1.0),
+		"bay_centre": map.zone_center, "bay_north": Vector3(0.0, 0, -4.5), "bay_south": Vector3(0.0, 0, 4.5),
 		"open_container_a": Vector3(-9.2, 0.12, -8.7), "open_container_b": Vector3(9.2, 0.12, 8.7),
 		"sw_pocket": Vector3(-19.0, 0, 8.5), "ne_pocket": Vector3(19.0, 0, -8.5), "nw_pad": Vector3(-17.0, 0, -8.0),
 		"north_lane": Vector3(0.0, 0, -9.0), "south_lane": Vector3(0.0, 0, 9.0), "behind_crates_a": Vector3(-13.8, 0, 0.0),

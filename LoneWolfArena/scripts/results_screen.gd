@@ -23,6 +23,9 @@ var _built := false
 var _again: Button
 var _table: Control
 var _levelled := false
+var _xp_to := 0.0
+var _lv_before := 1
+var _xp_t0 := 0                   # ticks (ms) when the XP bar starts filling (real time)
 
 
 func setup(result: Dictionary) -> void:
@@ -37,8 +40,17 @@ func setup(result: Dictionary) -> void:
 	var draw: bool = result.get("draw", false)
 	var invalid: bool = result.get("invalid", false)
 	_kind = "invalid" if invalid else ("draw" if draw else ("victory" if won else "defeat"))
+	_hide_match_hud()
 	_build()
 	_animate_in()
+
+
+## The in-match HUD (score bar, buttons, kill feed) goes away under the results.
+func _hide_match_hud() -> void:
+	var scene := get_tree().current_scene if is_inside_tree() else null
+	var h: Variant = scene.get("hud") if scene else null
+	if h is CanvasItem:
+		(h as CanvasItem).visible = false
 
 
 static func honour(result: Dictionary) -> String:
@@ -92,7 +104,7 @@ func _build() -> void:
 	add_child(head)
 	head.add_child(UI.shadowed(UI.label(String(r.get("mode", "LONE WOLF")).to_upper(), 36, UI.TEXT, "heavy")))
 	head.add_child(UI.shadowed(UI.label(String(r.get("map", "CARGO CAGE")).to_upper(), 28, Color(0.72, 0.72, 0.74), "heavy")))
-	var sub := UI.label("VS %s  ·  BOT %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper(),
+	var sub := UI.label("VS %s  ·  %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper(),
 		String(r.get("weapon", "")).to_upper()], 16, UI.TEXT_DIM, "bold")
 	head.add_child(UI.spacer(8))
 	head.add_child(sub)
@@ -252,19 +264,21 @@ func _build_table() -> void:
 		[float(r.get("kills", 0)), "%d"], [float(r.get("damage", 0)), "%d"], [float(r.get("headshots", 0)), "%d"],
 		[float(r.get("accuracy", 0.0)), "%d%%"], [t, "time"], [float(r.get("hp_left", 0)), "%d"],
 	]
+	# Final values at once (a screenshot or a slow frame never shows placeholders); each
+	# number pops in turn.
 	var i := 0
 	for v in values:
-		var l := UI.label("0", 38, UI.TEXT, "number")
+		var l := UI.label(_fmt(float(v[0]), String(v[1])), 38, UI.TEXT, "number")
 		l.name = "Value_" + COLUMNS[i].replace(" ", "_")
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		rh.add_child(l)
-		var target: float = v[0]
-		var fmt: String = v[1]
+		l.resized.connect(func() -> void: l.pivot_offset = l.size * 0.5)
 		var tw := create_tween()
-		tw.tween_interval(0.45 + i * 0.07)
-		tw.tween_method(func(x: float) -> void: l.text = _fmt(x, fmt), 0.0, target, 0.7).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_interval(0.3 + i * 0.06)
+		tw.tween_property(l, "scale", Vector2(1.3, 1.3), 0.08)
+		tw.tween_property(l, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		i += 1
 
 
@@ -341,15 +355,9 @@ func _build_footer() -> void:
 	box.add_child(lv_note)
 	_xp_fill = _xp_from
 	_levelled = lv_after != lv_before
-	var tw := create_tween()
-	tw.tween_interval(1.0)
-	tw.tween_method(func(x: float) -> void:
-		var lv := lv_before + int(floor(x))
-		_xp_fill = x - floor(x)
-		if lv != lv_before and _level_label.text != "LV %d" % lv:
-			_level_label.text = "LV %d" % lv
-			Audio.play("kill_confirm", -8.0)
-		_xp_bar.queue_redraw(), _xp_from, to, 1.1).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	_xp_to = to
+	_lv_before = lv_before
+	_xp_t0 = Time.get_ticks_msec() + 450
 	# Buttons (bottom-right).
 	var btns := HBoxContainer.new()
 	btns.anchor_left = 1.0
@@ -374,6 +382,24 @@ func _build_footer() -> void:
 	lobby.name = "Lobby"
 	lobby.pressed.connect(Game.goto_lobby)
 	btns.add_child(lobby)
+
+
+## The XP bar fills over 0.9 s of real time (it never lags behind on slow frames).
+func _step_xp() -> void:
+	if _xp_bar == null or _xp_t0 == 0:
+		return
+	var k := clampf((Time.get_ticks_msec() - _xp_t0) / 900.0, 0.0, 1.0)
+	if k <= 0.0:
+		return
+	var x := lerpf(_xp_from, _xp_to, 1.0 - pow(1.0 - k, 2.0))
+	var lv := _lv_before + int(floor(x))
+	_xp_fill = x - floor(x)
+	if lv != _lv_before and _level_label.text != "LV %d" % lv:
+		_level_label.text = "LV %d" % lv
+		Audio.play("kill_confirm", -8.0)
+	_xp_bar.queue_redraw()
+	if k >= 1.0:
+		_xp_t0 = 0
 
 
 func _draw_xp() -> void:
@@ -460,6 +486,7 @@ func _animate_in() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	_step_xp()
 	if _medal and (_kind == "victory" or _kind == "draw"):
 		_medal.queue_redraw()
 	if _again:

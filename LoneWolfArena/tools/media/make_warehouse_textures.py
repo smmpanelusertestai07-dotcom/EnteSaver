@@ -9,6 +9,9 @@
                                              colour): 1 tile = 4 m wide x one container height (V=0 top
                                              edge, V=1 bottom edge), rust spots, top-edge rust streaks,
                                              dirt toward the bottom
+  container_paint_fine.png                   the same paint for the walk-through container, 1 tile = 2 m
+                                             wide (its walls are seen from 1 m away): spots and streaks
+                                             at about half the size
   diamond_plate.png / diamond_plate_n.png    steel tread plate for ramps, 1 tile = 1 m
   wall_grime.png                             multiply layer for the corrugated wall bays: 1 tile = one
                                              6 x 9 m bay (V=0 top), baked rib shading, streaks under the
@@ -146,20 +149,23 @@ def signs():
     return im
 
 
-def container_paint(seed=4343):
+def container_paint(seed=4343, fine=False):
     """Paint layer for the shipping containers. Width = 4 m (tiles in x), height = one container
-    (2.591 m, top edge at row 0). Mostly near-white so the instance colour shows through."""
+    (2.591 m, top edge at row 0). Mostly near-white so the instance colour shows through.
+    fine: the 2 m wide variant; features are squeezed vertically (aniso) so that on the
+    narrower tile they come out about half as big in both directions."""
     r = R(seed)
     n = 1024
+    sq = (1.0, 0.5) if fine else (1.0, 1.0)
     yy = np.linspace(0.0, 1.0, n)[:, None] * np.ones((1, n))      # 0 = top edge, 1 = bottom edge
-    base = 0.93 + 0.025 * fft_noise(n, 1.5, r, fmin=2) + 0.012 * fft_noise(n, 0.8, r, fmin=24)
+    base = 0.93 + 0.025 * fft_noise(n, 1.5, r, fmin=2, aniso=sq) + 0.012 * fft_noise(n, 0.8, r, fmin=24, aniso=sq)
     # sun-faded chalky patches
-    fade = smoothstep(0.8, 2.2, fft_noise(n, 1.4, r, fmin=2))
+    fade = smoothstep(0.8, 2.2, fft_noise(n, 1.4, r, fmin=2, aniso=sq))
     base = base + 0.05 * fade
     col = np.repeat(base[..., None], 3, axis=2)
     # rust: blotches (worley cells + noise threshold), more near the bottom and the top edge
-    F1, F2, _, _, _ = worley(n, 7, r)
-    blotch_noise = fft_noise(n, 1.2, r, fmin=3)
+    F1, F2, _, _, _ = worley(n, 10 if fine else 7, r)
+    blotch_noise = fft_noise(n, 1.2, r, fmin=3, aniso=sq)
     edge_bias = 0.9 * smoothstep(0.85, 1.0, yy) + 0.7 * smoothstep(0.08, 0.0, yy)
     rust_amt = smoothstep(1.55, 2.4, blotch_noise + edge_bias + 0.6 * smoothstep(0.35, 0.05, F1))
     rust_amt = np.clip(rust_amt * (0.75 + 0.25 * fft_noise(n, 0.4, r, fmin=60)), 0, 1)
@@ -332,6 +338,7 @@ def main():
     Image.fromarray((floor_hatch() * 255).round().astype(np.uint8), "RGBA").save(os.path.join(out, "floor_hatch.png"), optimize=True)
     signs().save(os.path.join(out, "signs.png"), optimize=True)
     save(container_paint(), os.path.join(out, "container_paint.png"))
+    save(container_paint(4349, fine=True), os.path.join(out, "container_paint_fine.png"))
     dcol, dh = diamond_plate()
     save(dcol, os.path.join(out, "diamond_plate.png"))
     save(normal_map(blur(dh, 1.2), 1.6), os.path.join(out, "diamond_plate_n.png"))
