@@ -31,21 +31,32 @@ func _ready() -> void:
 func _test_damage() -> void:
 	var ar: Dictionary = Weapons.DEFS.ar
 	_near(Weapons.damage_at(ar, 32.0, 10.0), 32.0, "AR no falloff inside falloff_start")
-	_near(Weapons.damage_at(ar, 32.0, 90.0), 32.0 * 0.62, "AR min damage at max range")
-	_check(Weapons.damage_at(ar, 32.0, 50.0) < 32.0 and Weapons.damage_at(ar, 32.0, 50.0) > 32.0 * 0.62, "AR falloff in between")
-	_near(Weapons.zone_mult(ar, "head"), 2.1, "head multiplier")
-	_near(Weapons.zone_mult(ar, "limb"), 0.85, "limb multiplier")
+	_near(Weapons.damage_at(ar, 32.0, 80.0), 18.0, "AR min damage at max range")
+	_check(Weapons.damage_at(ar, 32.0, 50.0) < 32.0 and Weapons.damage_at(ar, 32.0, 50.0) > 18.0, "AR falloff in between")
+	_near(Weapons.zone_mult(ar, "head"), 4.0, "AR head multiplier")
+	_near(Weapons.zone_mult(ar, "limb"), 1.0, "limbs count as body")
 	_near(Weapons.zone_mult(ar, "body"), 1.0, "body multiplier")
-	_near(Weapons.after_armor(100.0, "body", 0.3, 0.35), 70.0, "vest reduces 30%")
-	_near(Weapons.after_armor(100.0, "head", 0.3, 0.35), 65.0, "helmet reduces 35%")
-	_near(Weapons.after_armor(10.0, "zone", 0.3, 0.35), 10.0, "zone ignores armor")
-	# Time-to-kill sanity: AR body shots needed to kill 200 HP through a vest.
-	var per_hit := Weapons.after_armor(32.0, "body", 0.3, 0.35)
+	var smg: Dictionary = Weapons.DEFS.smg
+	_check(Weapons.zone_mult(smg, "head", 30.0) < Weapons.zone_mult(smg, "head", 5.0), "SMG headshot bonus decays with range")
+	_near(Weapons.after_armor(100.0, "body", 0.5, 0.45), 50.0, "vest Lv2 halves body damage")
+	_near(Weapons.after_armor(100.0, "head", 0.5, 0.45), 55.0, "helmet Lv2 takes 45%")
+	_near(Weapons.after_armor(10.0, "zone", 0.5, 0.45), 10.0, "zone ignores armor")
+	# Time-to-kill sanity through Lv2 armour (200 HP).
+	var per_hit := Weapons.after_armor(32.0, "body", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
 	var hits := ceili(200.0 / per_hit)
-	_check(hits >= 8 and hits <= 11, "AR body hits to kill in 8..11 (got %d)" % hits)
+	_check(hits >= 11 and hits <= 14, "AR body hits to kill 11..14 (got %d)" % hits)
+	var ar_head := Weapons.after_armor(32.0 * Weapons.zone_mult(ar, "head"), "head", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
+	_check(ceili(200.0 / ar_head) == 3, "AR: 3 headshots kill")
+	var p: Dictionary = Weapons.DEFS.pistol
+	var p_head := Weapons.after_armor(90.0 * Weapons.zone_mult(p, "head"), "head", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
+	_check(p_head >= 200.0, "hand cannon headshot is a one-tap through a Lv2 helmet")
 	var sg: Dictionary = Weapons.DEFS.sg
-	var sg_full := Weapons.after_armor(float(sg.damage) * int(sg.pellets), "body", 0.3, 0.35)
-	_check(sg_full > 100.0 and sg_full < 200.0, "shotgun point blank body = 2-shot kill")
+	var sg_full := Weapons.after_armor(float(sg.damage) * int(sg.pellets), "body", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
+	_check(sg_full > 66.0 and sg_full < 100.0, "shotgun point blank body = 3-shot kill")
+	var sn: Dictionary = Weapons.DEFS.sniper
+	_check(Weapons.after_armor(150.0 * Weapons.zone_mult(sn, "head"), "head", 0.5, 0.45) >= 200.0, "sniper headshot kills")
+	for id in Weapons.PICKABLE:
+		_check(Weapons.DEFS.has(id), "pickable weapon %s exists" % id)
 
 
 func _test_spread() -> void:
@@ -66,7 +77,7 @@ func _test_spread() -> void:
 
 func _test_weapon_state() -> void:
 	var w := WeaponState.new("ar")
-	_check(w.ammo == 30 and w.can_fire(), "AR starts full")
+	_check(w.ammo == 30 and w.reserve == 120 and w.can_fire(), "AR starts full with reserve")
 	w.on_fire()
 	_check(w.ammo == 29 and not w.can_fire(), "cooldown after shot")
 	w.tick(0.11)
@@ -84,11 +95,14 @@ func _test_weapon_state() -> void:
 		if w.tick(0.1):
 			done = true
 	_check(done and w.ammo == 30 and not w.reloading, "reload completes and refills")
+	_check(w.reserve == 90, "reload takes ammo from the reserve (got %d)" % w.reserve)
+	var f := WeaponState.new("fists")
+	_check(f.infinite() and f.can_fire() and not f.start_reload(), "fists never run dry")
 	_check(not w.start_reload(), "full mag doesn't reload")
-	var p := WeaponState.new("pistol")
-	p.on_fire()
-	p.tick(1.0)
-	_check(p.bloom == 0.0 and p.burst == 0, "bloom/burst recover")
+	var pw := WeaponState.new("pistol")
+	pw.on_fire()
+	pw.tick(1.0)
+	_check(pw.bloom == 0.0 and pw.burst == 0, "bloom/burst recover")
 
 
 func _test_hud_layout() -> void:

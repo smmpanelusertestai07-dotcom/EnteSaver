@@ -1,10 +1,10 @@
-"""Parse every GLB directly (no Blender) and write /root/work/assets/props/manifest.json.
+"""Parse every GLB directly (no Blender) and write assets/props/manifest.json.
 glTF axes == Godot axes (Y up, -Z forward), so values are reported as-is."""
 import json, struct, os, sys
 import numpy as np
 
-PROPS = '/root/work/assets/props'
-META = '/root/work/tools/props/meta'
+PROPS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'props'))
+META = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'meta')
 BUDGET = {'weapon_ar': 3000, 'weapon_sg': 3000, 'weapon_pistol': 1200, 'medkit': 600, 'grenade': 500,
           'shield_wall': 2000, 'container': 2000, 'crate': 400, 'barrier': 300, 'sandbags': 1500,
           'tree_pine': 800, 'tree_round': 800, 'rock': 300, 'mountains': 6000, 'watchtower': 2000,

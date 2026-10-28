@@ -1,6 +1,7 @@
 """tree_pine.glb / tree_round.glb - stylized low-poly trees. Origin at trunk base."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 from mathutils import noise
 

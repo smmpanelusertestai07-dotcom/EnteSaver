@@ -2,9 +2,10 @@ class_name Grenade
 extends RigidBody3D
 ## Thrown frag grenade with a fuse; damages fighters in radius with line of sight.
 
-const FUSE := 2.3
-const RADIUS := 6.5
-const MAX_DAMAGE := 135.0
+const FUSE := 3.0
+const RADIUS := 6.0
+const MAX_DAMAGE := 150.0     # at the centre
+const EDGE_DAMAGE := 60.0     # at 5 m, then fading out to RADIUS
 const MODEL := "res://assets/props/grenade.glb"
 
 var thrower: Fighter
@@ -74,7 +75,7 @@ func _explode() -> void:
 		var hit := space.intersect_ray(q)
 		if not hit.is_empty():
 			continue
-		var dmg := MAX_DAMAGE * pow(1.0 - d / RADIUS, 1.15)
+		var dmg := lerpf(MAX_DAMAGE, EDGE_DAMAGE, clampf(d / 5.0, 0.0, 1.0)) * clampf((RADIUS - d) / 1.0, 0.0, 1.0)
 		var dealt := f.take_damage(dmg, "body", thrower, pos)
 		if thrower and is_instance_valid(thrower) and f != thrower and dealt > 0.0:
 			thrower.stats.damage += dealt
@@ -83,5 +84,5 @@ func _explode() -> void:
 				thrower.stats.kills += 1
 	for w in get_tree().get_nodes_in_group("shield_walls"):
 		if (w as Node3D).global_position.distance_to(pos) < RADIUS:
-			w.take_explosion(150.0)
+			w.take_explosion(250.0)
 	queue_free()

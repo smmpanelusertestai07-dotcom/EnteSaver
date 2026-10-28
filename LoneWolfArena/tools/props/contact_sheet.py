@@ -1,7 +1,7 @@
 """Assemble previews/<name>.png strips into previews/contact_sheet.png."""
 from PIL import Image, ImageDraw
 import os
-P = '/root/work/assets/props/previews'
+P = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'props', 'previews'))
 names = ['weapon_ar', 'weapon_sg', 'weapon_pistol', 'container', 'shield_wall', 'house', 'watchtower', 'medkit', 'grenade',
          'crate', 'barrier', 'sandbags', 'tree_pine', 'tree_round', 'rock', 'lamp_post', 'mountains']
 cw = 1280

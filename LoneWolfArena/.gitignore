@@ -11,3 +11,5 @@ reference_private/
 # Written by tools/build_apk.sh at export time (certificate hash of the signing key).
 build_signer.txt
 __pycache__/
+# Scratch renders of the props pipeline
+tools/props/_render_tmp/

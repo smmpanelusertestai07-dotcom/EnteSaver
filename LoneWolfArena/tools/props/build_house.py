@@ -1,8 +1,9 @@
 """house.glb - single-storey concrete house shell 7 x 6 m (X x Y), 3 m high, 0.25 m walls,
 door (1.2 x 2.2) on +Y and -Y, two windows (1.2 x 1.0, sill 1.0 m) on each long (+/-Y) side, flat roof slab.
 Origin bottom centre. Also writes the collider boxes (Godot axes) to meta/house.json."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 WA = mat('Wall', '#d9cdb5', metallic=0.0, rough=0.85)

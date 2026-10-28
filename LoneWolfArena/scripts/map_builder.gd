@@ -11,10 +11,18 @@ const TEX := "res://assets/textures/"
 
 var nav: NavigationRegion3D
 var deco: Node3D
+var env: WorldEnvironment
+var sun: DirectionalLight3D
 var obstacles: Array[Rect2] = []
 var cover_points: Array[Vector3] = []
 var spawn_a := Vector3(0, 0, -35)
 var spawn_b := Vector3(0, 0, 35)
+var spawn_a_yaw := PI
+var spawn_b_yaw := 0.0
+var map_name := "CARGO CAGE"
+var map_rect := Rect2(-HALF, -HALF, HALF * 2.0, HALF * 2.0)
+var zone_center := Vector3.ZERO
+var zone_start_radius := 50.0
 var _scenes := {}
 var _mats := {}
 
@@ -35,11 +43,47 @@ func build(parent: Node3D) -> void:
 	deco = Node3D.new()
 	deco.name = "Decor"
 	parent.add_child(deco)
+	_build_environment(parent)
 	_ground()
 	_walls()
 	_layout()
 	_decor()
 	_make_cover_points()
+
+
+# ---------------------------------------------------------------- environment / API
+
+func _build_environment(parent: Node3D) -> void:
+	env = WorldEnvironment.new()
+	var e := Environment.new()
+	e.background_mode = Environment.BG_SKY
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(0.22, 0.45, 0.84)
+	sm.sky_horizon_color = Color(0.7, 0.81, 0.93)
+	sky.sky_material = sm
+	e.sky = sky
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	e.ambient_light_energy = 0.65
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.glow_enabled = true
+	env.environment = e
+	parent.add_child(env)
+	sun = DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-48, -35, 0)
+	sun.light_energy = 1.15
+	sun.shadow_enabled = true
+	parent.add_child(sun)
+
+
+## Red spawn barriers during the prep phase (colliders + glow).
+func set_barriers(_on: bool) -> void:
+	pass
+
+
+## Graphics quality 0..3 (SMOOTH..MAX): decoration density, shadows on small props.
+func apply_quality(_g: int) -> void:
+	pass
 
 
 # ---------------------------------------------------------------- materials

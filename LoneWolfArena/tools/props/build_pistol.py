@@ -1,6 +1,7 @@
 """weapon_pistol.glb - semi-auto pistol (~0.21 m). Origin = grip hand point."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 
 reset()

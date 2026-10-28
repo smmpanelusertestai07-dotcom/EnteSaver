@@ -2,8 +2,9 @@ class_name ShieldWall
 extends StaticBody3D
 ## Deployable energy wall: blocks bullets, movement and line of sight until broken or expired.
 
-const MAX_HP := 320.0
-const LIFETIME := 20.0
+const MAX_HP := 600.0
+const LIFETIME := 45.0
+const SIZE := Vector3(3.5, 2.0, 0.4)
 const MODEL := "res://assets/props/shield_wall.glb"
 
 var hp := MAX_HP
@@ -21,7 +22,7 @@ func _ready() -> void:
 	add_to_group("shield_walls")
 	var cs := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(2.4, 2.0, 0.32)
+	box.size = SIZE
 	cs.shape = box
 	cs.position.y = 1.0
 	add_child(cs)
@@ -57,14 +58,16 @@ func _ready() -> void:
 	if not used_model:
 		var mi := MeshInstance3D.new()
 		var bm := BoxMesh.new()
-		bm.size = Vector3(2.4, 2.0, 0.12)
+		bm.size = Vector3(SIZE.x, SIZE.y, 0.12)
 		mi.mesh = bm
 		mi.position.y = 1.0
 		mi.material_override = glass
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_visual.add_child(mi)
-	_visual.scale = Vector3(1, 0.05, 1)
-	create_tween().tween_property(_visual, "scale", Vector3.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# The modelled wall is 2.4 m wide; stretch it to the wall's real width.
+	var final_scale := Vector3(SIZE.x / 2.4, 1, 1) if used_model else Vector3.ONE
+	_visual.scale = Vector3(final_scale.x, 0.05, 1)
+	create_tween().tween_property(_visual, "scale", final_scale, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	Audio.play_at("shield_deploy", global_position, 0.0)
 
 

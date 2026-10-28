@@ -78,14 +78,14 @@ func _show_tab(i: int) -> void:
 			_body.add_child(UI.row("Vibration", _toggle("vibration")))
 			_body.add_child(_hint("Smooth = best performance on older phones. Ultra = shadows, MSAA and lighting effects."))
 		1:
-			_body.add_child(UI.row("General", UI.slider(Game.settings.sens_general, 1, 100, func(v: float) -> void: _apply("sens_general", int(v)))))
-			_body.add_child(UI.row("Red dot / scope", UI.slider(Game.settings.sens_reddot, 1, 100, func(v: float) -> void: _apply("sens_reddot", int(v)))))
-			_body.add_child(UI.row("Fire button drag", UI.slider(Game.settings.sens_fire, 1, 100, func(v: float) -> void: _apply("sens_fire", int(v)))))
+			_body.add_child(UI.row("General", UI.slider(Game.settings.sens_general, 1, 200, func(v: float) -> void: _apply("sens_general", int(v)))))
+			_body.add_child(UI.row("Red dot / scope", UI.slider(Game.settings.sens_reddot, 1, 200, func(v: float) -> void: _apply("sens_reddot", int(v)))))
+			_body.add_child(UI.row("Fire button drag", UI.slider(Game.settings.sens_fire, 1, 200, func(v: float) -> void: _apply("sens_fire", int(v)))))
 			_body.add_child(_hint("Drag anywhere on the right side to look. Hold FIRE and drag to aim while shooting."))
 		2:
 			_body.add_child(UI.row("Aim assist", _toggle("aim_assist")))
 			_body.add_child(UI.row("Aim assist strength", UI.slider(Game.settings.aim_assist_strength, 0, 100, func(v: float) -> void: _apply("aim_assist_strength", int(v)))))
-			_body.add_child(UI.row("Left fire button", _toggle("left_fire")))
+			_body.add_child(UI.row("Left fire button", UI.segmented(Game.LEFT_FIRE_NAMES, int(Game.settings.left_fire), func(v: int) -> void: _apply("left_fire", v), 16, 130.0)))
 			_body.add_child(UI.row("Dynamic crosshair", _toggle("dynamic_crosshair")))
 			_body.add_child(UI.row("Crosshair color", UI.segmented(Game.CROSSHAIR_COLOR_NAMES, int(Game.settings.crosshair_color), func(v: int) -> void: _apply("crosshair_color", v), 16, 88.0)))
 			_body.add_child(UI.row("Crosshair size", UI.slider(Game.settings.crosshair_size, 0, 100, func(v: float) -> void: _apply("crosshair_size", int(v)))))

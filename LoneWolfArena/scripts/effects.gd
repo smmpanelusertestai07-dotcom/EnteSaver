@@ -213,3 +213,19 @@ static func explosion(ctx: Node, pos: Vector3) -> void:
 		var tl := l.create_tween()
 		tl.tween_property(l, "light_energy", 0.0, 0.4)
 		tl.tween_callback(l.queue_free)
+
+
+## Spawns every effect once far below the floor so their shaders compile during the prep
+## phase instead of stuttering on the first shot/explosion.
+static func warm_up(ctx: Node) -> void:
+	load_textures()
+	var p := Vector3(0, -50, 0)
+	tracer(ctx, p, p + Vector3(0, 0, -5))
+	muzzle_flash(ctx, p, Vector3.FORWARD, false)
+	muzzle_flash(ctx, p, Vector3.FORWARD, true)
+	impact(ctx, p, Vector3.UP)
+	hit_spark(ctx, p, Vector3.UP, false)
+	hit_spark(ctx, p, Vector3.UP, true)
+	shield_hit(ctx, p, Vector3.UP)
+	shield_break(ctx, p)
+	explosion(ctx, p)

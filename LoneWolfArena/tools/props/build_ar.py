@@ -1,7 +1,8 @@
 """weapon_ar.glb - modern assault rifle (~0.85 m). Origin = pistol grip hand point.
 Barrel along +Y, top +Z, right side +X."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 
 reset()

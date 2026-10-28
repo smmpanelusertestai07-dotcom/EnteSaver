@@ -171,23 +171,27 @@ func _engage(delta: float) -> void:
 	var to := tpos - global_position
 	to.y = 0.0
 	var dist := to.length()
-	# Pick a weapon for the range.
-	if dist < float(p.get("sg_range", 7.0)) and weapons[1].ammo > 0 and current != 1 and not weapon().reloading:
-		switch_weapon(1)
-	elif dist >= 12.0 and current != 0:
+	# One gun per round (Lone Wolf): keep the range that suits it; fists only when it is dry.
+	if current != 0 and (gun().ammo > 0 or gun().reserve > 0):
 		switch_weapon(0)
+	elif current == 0 and gun().ammo <= 0 and gun().reserve <= 0 and not gun().reloading:
+		switch_weapon(1)
 	# Strafe left/right, keep a comfortable distance.
 	strafe_timer -= delta
 	if strafe_timer <= 0.0:
 		strafe_timer = rng.randf_range(0.35, 1.2)
 		if rng.randf() < 0.7:
 			strafe_dir = -strafe_dir
-		if rng.randf() < float(p.crouch):
+		var cls := String(weapon().def["class"])
+		if cls == "SNIPER" and dist > 18.0 and rng.randf() < float(p.crouch) * 1.5:
+			set_stance(Stance.PRONE if stance != Stance.PRONE else Stance.CROUCH)
+		elif rng.randf() < float(p.crouch):
 			set_crouch(not crouching)
-		elif crouching and rng.randf() < 0.5:
-			set_crouch(false)
-	var desired_min := 6.0 if current == 1 else 10.0
-	var desired_max := 10.0 if current == 1 else 22.0
+		elif stance != Stance.STAND and rng.randf() < 0.5:
+			set_stance(Stance.STAND)
+	var band := _range_band()
+	var desired_min: float = band.x
+	var desired_max: float = band.y
 	var fwd_amt := 0.0
 	if dist > desired_max:
 		fwd_amt = 1.0
@@ -233,6 +237,22 @@ func _aim_and_shoot(delta: float) -> void:
 			burst_left -= 1
 			if burst_left <= 0:
 				burst_pause = float(p.pause) * rng.randf_range(0.7, 1.4)
+
+
+## Preferred fighting distance (min, max) for the round's gun.
+func _range_band() -> Vector2:
+	match String(weapon().def["class"]):
+		"SG":
+			return Vector2(2.5, 7.0)
+		"SMG":
+			return Vector2(4.0, 12.0)
+		"PISTOL":
+			return Vector2(7.0, 18.0)
+		"SNIPER":
+			return Vector2(16.0, 32.0)
+		"MELEE":
+			return Vector2(0.8, 1.6)
+	return Vector2(9.0, 22.0)
 
 
 func _face_point(point: Vector3, delta: float, speed_mult: float) -> bool:
@@ -301,6 +321,8 @@ func _find_cover() -> Vector3:
 
 
 func _move_to(point: Vector3, _delta: float) -> void:
+	# Sprint when the destination is far and nothing is in sight (like players running in).
+	sprinting = not see_target and global_position.distance_to(point) > 8.0 and stance == Stance.STAND and not healing
 	if not nav_ready:
 		var dir := point - global_position
 		dir.y = 0.0

@@ -1,6 +1,7 @@
 """barrier.glb - concrete New-Jersey barrier 3.0 x 0.6 x 0.81 m (length X). Origin bottom centre."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 CO = mat('Concrete', '#a8a59d', metallic=0.0, rough=0.9)

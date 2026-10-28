@@ -1,6 +1,7 @@
 """lamp_post.glb - 5 m street light, arm toward +Y. Origin at the pole base centre."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 ME = mat('Metal', '#3c4548', metallic=0.7, rough=0.45)

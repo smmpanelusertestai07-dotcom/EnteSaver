@@ -7,8 +7,9 @@ import bpy, bmesh, math, os, json, random
 from mathutils import Vector, Matrix
 import numpy as np
 
-OUT_DIR = '/root/work/assets/props'
-META_DIR = '/root/work/tools/props/meta'
+_HERE = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.environ.get('PROPS_OUT', os.path.normpath(os.path.join(_HERE, '..', '..', 'assets', 'props')))
+META_DIR = os.path.join(_HERE, 'meta')
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(META_DIR, exist_ok=True)
 

@@ -66,10 +66,29 @@ func show_center(text: String, seconds: float, color := Color.WHITE, fsize := 96
 	_center_size = fsize
 
 
-func add_kill_feed(text: String, color := Color.WHITE) -> void:
-	_kill_feed.push_front({"text": text, "t": 5.0, "color": color})
+func add_kill_feed(killer: String, victim: String, weapon_name: String, _weapon_icon: String, headshot: bool, mine: bool) -> void:
+	var text := "%s  [%s]  %s" % [killer, weapon_name, victim]
+	if headshot:
+		text += "  · HEADSHOT"
+	_kill_feed.push_front({"text": text, "t": 5.0, "color": UI.ACCENT if mine else Color(1, 0.6, 0.55)})
 	if _kill_feed.size() > 4:
 		_kill_feed.pop_back()
+
+
+func show_round_banner(round_index: int, area: String) -> void:
+	show_center("ROUND %d" % round_index, 1.8, UI.ACCENT, 90, "AREA: " + area)
+
+
+func open_weapon_pick(_options: Array, preselect: String, _seconds: float, on_pick: Callable) -> void:
+	on_pick.call(preselect)
+
+
+func close_weapon_pick() -> void:
+	pass
+
+
+func kill_banner(_victim: String, _headshot: bool) -> void:
+	pass
 
 
 func reveal(f: Fighter, seconds := 2.5) -> void:
@@ -129,7 +148,7 @@ func _on_down(index: int, pos: Vector2) -> void:
 	for id: String in HudLayout.ORDER:
 		if id == "joystick":
 			continue
-		if id == "fire_l" and not Game.settings.left_fire:
+		if id == "fire_l" and int(Game.settings.left_fire) == 2:
 			continue
 		var w: Dictionary = layout[id]
 		if id == "weapons":
@@ -359,8 +378,9 @@ func _weapons_widget(w: Dictionary, vs: Vector2) -> void:
 		var sel := player != null and player.current == i
 		draw_rect(rect, Color(0, 0, 0, (0.55 if sel else 0.35) * o))
 		draw_rect(rect, Color(1, 0.74, 0.16, 0.95 * o) if sel else Color(1, 1, 1, 0.25 * o), false, 2.0 if sel else 1.0)
-		var wid: String = Weapons.LOADOUT[i]
-		var def: Dictionary = Weapons.DEFS[wid]
+		if player == null or i >= player.weapons.size():
+			continue
+		var def: Dictionary = player.weapons[i].def
 		var name_col := Color(1, 1, 1, 0.95 * o) if sel else Color(1, 1, 1, 0.6 * o)
 		_text(String(def.name), rect.position + Vector2(rect.size.x * 0.5, rect.size.y * 0.32), 18, name_col, HORIZONTAL_ALIGNMENT_CENTER, 0)
 		var ammo_txt := "%d / %d" % [int(def.mag), int(def.mag)]
@@ -406,7 +426,7 @@ func draw_controls(vs: Vector2) -> void:
 			_joystick(vs)
 		elif id == "weapons":
 			_weapons_widget(layout.weapons, vs)
-		elif id == "fire_l" and not Game.settings.left_fire and not editor_mode:
+		elif id == "fire_l" and int(Game.settings.left_fire) == 2 and not editor_mode:
 			continue
 		else:
 			var badge := ""
@@ -607,7 +627,8 @@ func _draw_minimap(vs: Vector2) -> void:
 	var c := Vector2(r + 18, r + 18)
 	draw_circle(c, r, Color(0.05, 0.08, 0.1, 0.78))
 	_ring(c, r, Color(1, 1, 1, 0.35), 2.0)
-	var half: float = arena.map_half
+	var mr: Rect2 = arena.map_rect
+	var half: float = maxf(mr.size.x, mr.size.y) * 0.5
 	var k := (r - 6.0) / (half * 1.414)
 	for rect: Rect2 in arena.obstacles:
 		var p0 := c + rect.position * k

@@ -1,20 +1,20 @@
 """Re-import exported GLBs and render preview strips.
 
-usage: xvfb-run -a python3 preview.py [--cycles] [--res 512] name [name ...]
-Writes /root/work/assets/props/previews/<name>.png
+usage: blender -b --python preview.py -- [--res 512] name [name ...]
+Writes assets/props/previews/<name>.png
 """
 import bpy, sys, os, math, json
 from mathutils import Vector
 from PIL import Image, ImageDraw
 
-PROPS = '/root/work/assets/props'
+PROPS = os.environ.get('PROPS_OUT', os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'props')))
 PREV = os.path.join(PROPS, 'previews')
 os.makedirs(PREV, exist_ok=True)
-TMP = '/root/work/tools/props/_render_tmp'
+TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_render_tmp')
 os.makedirs(TMP, exist_ok=True)
 
-args = sys.argv[1:]
-CYCLES = '--cycles' in args
+args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
+CYCLES = '--eevee' not in args    # Cycles CPU by default ('--cycles' clashes with Blender's own flags)
 CULL = '--cull' in args
 RES = 480
 if '--res' in args:

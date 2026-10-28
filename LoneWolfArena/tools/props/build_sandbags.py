@@ -1,6 +1,7 @@
 """sandbags.glb - curved sandbag wall 2.5 m wide x 0.9 m tall, convex toward +Y. Origin bottom centre of bbox."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 SB = mat('Sandbag', '#b09a6c', rough=0.92)

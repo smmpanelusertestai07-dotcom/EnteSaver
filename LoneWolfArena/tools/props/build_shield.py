@@ -1,7 +1,8 @@
 """shield_wall.glb - deployable energy barrier, curved (convex toward +Y), 2.4 x 2.0 x 0.15 m.
 Built flat, then bent around a vertical axis. Origin bottom centre of the bbox."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 GL = mat('ShieldGlass', '#8fe9ff', metallic=0.0, rough=0.12, emit='#58d8ff', emit_strength=0.8)

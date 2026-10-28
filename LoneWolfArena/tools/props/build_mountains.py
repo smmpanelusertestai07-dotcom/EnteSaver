@@ -1,7 +1,8 @@
 """mountains.glb - distant backdrop ring of low-poly mountains, inner radius ~350 m, peaks 60-140 m.
 Origin at the ring centre (arena centre), open in the middle."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 from mathutils import noise
 reset()

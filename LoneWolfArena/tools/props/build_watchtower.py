@@ -1,7 +1,8 @@
 """watchtower.glb - wooden lookout tower, 3x3 m platform at 4 m, railing, 4 legs, ladder on +Y, metal roof.
 Origin at the ground centre of the tower."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 WD = mat('Wood', '#8a6038', metallic=0.0, rough=0.8)

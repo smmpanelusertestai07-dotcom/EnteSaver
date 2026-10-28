@@ -1,6 +1,7 @@
 """rock.glb - low-poly boulder ~1.6 m. Origin bottom centre."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 RK = mat('Rock', '#7f7b74', metallic=0.0, rough=0.85)

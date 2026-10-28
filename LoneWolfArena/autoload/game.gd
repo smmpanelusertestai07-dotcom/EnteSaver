@@ -6,18 +6,26 @@ const SETTINGS_PATH := "user://settings.json"
 const PROFILE_PATH := "user://profile.json"
 const HUD_PATH := "user://hud_layout.json"
 
+const SETTINGS_VERSION := 2
 const DEFAULT_SETTINGS := {
+	"settings_version": SETTINGS_VERSION,
 	"graphics": 1,
 	"fps": 60,
 	"show_fps": false,
 	"vibration": true,
 	"damage_numbers": true,
-	"sens_general": 55,
-	"sens_reddot": 45,
-	"sens_fire": 60,
+	"sens_general": 100,
+	"sens_reddot": 100,
+	"sens_sniper": 71,
+	"sens_fire": 100,
 	"aim_assist": true,
-	"aim_assist_strength": 60,
-	"left_fire": true,
+	"aim_assist_strength": 70,
+	"aim_precision": 0,
+	"hold_fire_scope": true,
+	"left_fire": 0,
+	"reload_on_crosshair": true,
+	"run_mode": 2,
+	"dynamic_joystick": true,
 	"dynamic_crosshair": true,
 	"crosshair_color": 0,
 	"crosshair_size": 50,
@@ -25,12 +33,17 @@ const DEFAULT_SETTINGS := {
 	"vol_sfx": 90,
 	"vol_music": 45,
 	"difficulty": 1,
+	"last_pick": "ar",
 }
 
-const CROSSHAIR_COLORS := [Color(1.0, 0.18, 0.18), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(1, 1, 1), Color(0.25, 0.9, 1.0)]
-const CROSSHAIR_COLOR_NAMES := ["RED", "GREEN", "YELLOW", "WHITE", "CYAN"]
+## The crosshair's idle colour (it always turns red on an enemy).
+const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
+const CROSSHAIR_COLOR_NAMES := ["WHITE", "GREEN", "YELLOW", "CYAN"]
+const AIM_PRECISION_NAMES := ["DEFAULT", "PRECISE ON SCOPE", "FULL CONTROL"]
+const LEFT_FIRE_NAMES := ["ALWAYS", "WHEN SCOPED", "OFF"]
+const RUN_MODE_NAMES := ["TAP", "DRAG", "MIXED"]
 const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
-const GRAPHICS_NAMES := ["SMOOTH", "STANDARD", "ULTRA"]
+const GRAPHICS_NAMES := ["SMOOTH", "STANDARD", "ULTRA", "MAX"]
 const XP_PER_LEVEL := 500
 
 var settings: Dictionary = {}
@@ -48,7 +61,13 @@ signal settings_changed
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	settings = DEFAULT_SETTINGS.duplicate(true)
-	_merge_into(settings, _load_json(SETTINGS_PATH))
+	var saved: Variant = _load_json(SETTINGS_PATH)
+	if saved is Dictionary and int((saved as Dictionary).get("settings_version", 1)) < SETTINGS_VERSION:
+		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
+		for k in ["sens_general", "sens_reddot", "sens_fire", "crosshair_color", "left_fire", "aim_assist_strength", "settings_version"]:
+			(saved as Dictionary).erase(k)
+	_merge_into(settings, saved)
+	settings.settings_version = SETTINGS_VERSION
 	_load_profile()
 	var hud: Variant = _load_json(HUD_PATH)
 	hud_layout = hud if hud is Dictionary else {}

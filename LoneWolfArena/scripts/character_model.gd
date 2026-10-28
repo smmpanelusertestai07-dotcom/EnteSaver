@@ -1,10 +1,12 @@
 class_name CharacterModel
 extends Node3D
-## Visual character: loads the rigged GLB (Blender/MPFB), drives animation blending,
-## outfit bundles, upper-body aim and the held weapon. Falls back to a simple
-## procedural mannequin if the GLB is missing.
+## Visual character: loads the rigged GLB (Blender/MPFB), merges the extra animation GLB
+## (reload, pump, heal, throw, prone), drives an AnimationTree (locomotion scaled to the real
+## speed, crouch and prone layers, jump, upper-body actions), outfit bundles, upper-body aim
+## and the held weapon. Falls back to a simple procedural mannequin if the GLB is missing.
 
 const GLB := "res://assets/character/character.glb"
+const EXTRA_GLB := "res://assets/character/anims_extra.glb"
 const MANIFEST := "res://assets/character/manifest.json"
 
 const BUNDLE_INFO := [
@@ -14,7 +16,15 @@ const BUNDLE_INFO := [
 	{"id": "shadow", "name": "SHADOW OPS", "rarity": "epic", "desc": "Silent black-ops kit."},
 	{"id": "royal", "name": "ROYAL GOLD", "rarity": "legendary", "desc": "White and gold. Pure flex."},
 ]
-const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "crouch_idle", "crouch_fwd", "lobby_idle", "victory"]
+const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "crouch_idle", "crouch_fwd", "lobby_idle",
+	"victory", "heal", "prone_idle", "prone_fwd"]
+## Speeds (m/s) at which the in-place cycles were authored; playback is scaled to the real speed.
+const RUN_AUTHORED := 2.0
+const CROUCH_AUTHORED := 1.0
+const PRONE_AUTHORED := 0.75
+const UPPER_BONES := ["spine_01", "spine_02", "spine_03", "neck_01", "head", "clavicle_l", "clavicle_r",
+	"upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
+const ARM_ONLY_BONES := ["clavicle_l", "upperarm_l", "lowerarm_l", "hand_l"]
 const BONE_CANDIDATES := {
 	"pelvis": ["pelvis", "Hips", "hips", "mixamorig:Hips", "root_pelvis"],
 	"spine1": ["spine_01", "spine", "Spine", "spine01", "mixamorig:Spine"],
@@ -39,6 +49,8 @@ const BONE_CANDIDATES := {
 static var _manifest: Dictionary = {}
 static var _manifest_loaded := false
 static var _weapon_scenes := {}
+static var _extra_anims: Dictionary = {}
+static var _extra_loaded := false
 
 var root_scene: Node3D
 var skeleton: Skeleton3D
@@ -55,13 +67,23 @@ var bundle := "default"
 var show_weapon := true
 
 var _loco := Vector2.ZERO
+var _speed := 0.0
 var _crouch_amt := 0.0
+var _prone_amt := 0.0
 var _air := 0.0
+var _heal_amt := 0.0
+var _healing := false
 var _aim_dir := Vector3.FORWARD
 var _kick := 0.0
 var _dead := false
 var _phase := 0.0
 var _fb := {}
+var _track_prefix := "Armature/Skeleton3D:"
+var _hand_follow := 0.0           # 0 = gun along the aim, 1 = gun follows the right hand
+var _follow_until := 0.0
+var _hide_gun_until := 0.0
+var _hand_to_gun := Transform3D.IDENTITY
+var _hand_to_gun_ready := false
 
 
 static func manifest() -> Dictionary:
@@ -79,6 +101,21 @@ static func bundle_info(id: String) -> Dictionary:
 		if b.id == id:
 			return b
 	return BUNDLE_INFO[0]
+
+
+## Animations from anims_extra.glb (loaded once, shared by every character).
+static func extra_animations() -> Dictionary:
+	if not _extra_loaded:
+		_extra_loaded = true
+		if ResourceLoader.exists(EXTRA_GLB):
+			var ps: PackedScene = load(EXTRA_GLB)
+			if ps:
+				var inst := ps.instantiate()
+				for ap: AnimationPlayer in inst.find_children("*", "AnimationPlayer", true, false):
+					for a_name in ap.get_animation_list():
+						_extra_anims[String(a_name)] = ap.get_animation(a_name)
+				inst.free()
+	return _extra_anims
 
 
 func setup(bundle_id: String, with_weapon := true) -> void:
@@ -114,6 +151,7 @@ func _load_glb() -> void:
 		_fix_materials(mi)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	if anim:
+		_merge_extra_animations()
 		for a_name in LOOP_ANIMS:
 			if anim.has_animation(a_name):
 				anim.get_animation(a_name).loop_mode = Animation.LOOP_LINEAR
@@ -132,6 +170,21 @@ func _load_glb() -> void:
 	aim_mod.weights = w
 	skeleton.add_child(aim_mod)
 	skeleton.skeleton_updated.connect(_on_skeleton_updated)
+
+
+func _merge_extra_animations() -> void:
+	var lib := anim.get_animation_library("")
+	if lib == null:
+		return
+	var idle := anim.get_animation("idle") if anim.has_animation("idle") else null
+	if idle and idle.get_track_count() > 0:
+		var p := String(idle.track_get_path(0))
+		var colon := p.find(":")
+		if colon > 0:
+			_track_prefix = p.substr(0, colon + 1)
+	for a_name: String in extra_animations():
+		if not lib.has_animation(a_name):
+			lib.add_animation(a_name, _extra_anims[a_name])
 
 
 func _map_bones() -> void:
@@ -163,7 +216,7 @@ func _fix_materials(mi: MeshInstance3D) -> void:
 				sm.alpha_scissor_threshold = 0.45
 				sm.cull_mode = BaseMaterial3D.CULL_DISABLED
 			sm.rim_enabled = true
-			sm.rim = 0.22
+			sm.rim = 0.25
 			sm.rim_tint = 0.6
 			if sm.roughness < 0.35:
 				sm.roughness = 0.55
@@ -180,6 +233,20 @@ func _anim_node(a_name: String) -> AnimationNodeAnimation:
 	return n
 
 
+func _filter(node: AnimationNode, bones: Array) -> void:
+	node.filter_enabled = true
+	for b: String in bones:
+		node.set_filter_path(NodePath(_track_prefix + b), true)
+	# fingers follow their hand
+	if "hand_l" in bones or "hand_r" in bones:
+		for s in ["l", "r"]:
+			if not ("hand_" + s) in bones:
+				continue
+			for f in ["thumb", "index", "middle", "ring", "pinky"]:
+				for k in 3:
+					node.set_filter_path(NodePath("%s%s_0%d_%s" % [_track_prefix, f, k + 1, s]), true)
+
+
 func _build_tree() -> void:
 	if not anim.has_animation("idle"):
 		return
@@ -189,29 +256,72 @@ func _build_tree() -> void:
 	tree.anim_player = tree.get_path_to(anim)
 	var root := AnimationNodeBlendTree.new()
 	var loco := AnimationNodeBlendSpace2D.new()
-	loco.add_blend_point(_anim_node("idle"), Vector2.ZERO)
-	loco.add_blend_point(_anim_node("run_fwd"), Vector2(0, 1))
-	loco.add_blend_point(_anim_node("run_back"), Vector2(0, -1))
-	loco.add_blend_point(_anim_node("run_left"), Vector2(-1, 0))
-	loco.add_blend_point(_anim_node("run_right"), Vector2(1, 0))
+	loco.add_blend_point(_anim_node("idle"), Vector2.ZERO, -1, &"idle")
+	loco.add_blend_point(_anim_node("run_fwd"), Vector2(0, 1), -1, &"fwd")
+	loco.add_blend_point(_anim_node("run_back"), Vector2(0, -1), -1, &"back")
+	loco.add_blend_point(_anim_node("run_left"), Vector2(-1, 0), -1, &"left")
+	loco.add_blend_point(_anim_node("run_right"), Vector2(1, 0), -1, &"right")
 	var crouch := AnimationNodeBlendSpace2D.new()
-	crouch.add_blend_point(_anim_node("crouch_idle"), Vector2.ZERO)
+	crouch.add_blend_point(_anim_node("crouch_idle"), Vector2.ZERO, -1, &"idle")
+	var k := 0
 	for p in [Vector2(0, 1), Vector2(0, -1), Vector2(-1, 0), Vector2(1, 0)]:
-		crouch.add_blend_point(_anim_node("crouch_fwd"), p)
+		crouch.add_blend_point(_anim_node("crouch_fwd"), p, -1, StringName("move%d" % k))
+		k += 1
+	var prone := AnimationNodeBlendSpace1D.new()
+	prone.add_blend_point(_anim_node("prone_idle" if anim.has_animation("prone_idle") else "crouch_idle"), 0.0, -1, &"idle")
+	prone.add_blend_point(_anim_node("prone_fwd" if anim.has_animation("prone_fwd") else "crouch_fwd"), 1.0, -1, &"move")
 	root.add_node("loco", loco, Vector2(0, 0))
+	root.add_node("loco_ts", AnimationNodeTimeScale.new(), Vector2(150, 0))
 	root.add_node("crouch", crouch, Vector2(0, 200))
+	root.add_node("crouch_ts", AnimationNodeTimeScale.new(), Vector2(150, 200))
 	root.add_node("crouch_blend", AnimationNodeBlend2.new(), Vector2(300, 100))
-	root.add_node("jump", _anim_node("jump"), Vector2(300, 300))
-	root.add_node("jump_seek", AnimationNodeTimeSeek.new(), Vector2(450, 300))
-	root.add_node("air_blend", AnimationNodeBlend2.new(), Vector2(600, 150))
-	root.connect_node("crouch_blend", 0, "loco")
-	root.connect_node("crouch_blend", 1, "crouch")
+	root.add_node("prone", prone, Vector2(0, 400))
+	root.add_node("prone_ts", AnimationNodeTimeScale.new(), Vector2(150, 400))
+	root.add_node("prone_blend", AnimationNodeBlend2.new(), Vector2(450, 200))
+	root.add_node("jump", _anim_node("jump"), Vector2(300, 550))
+	root.add_node("jump_seek", AnimationNodeTimeSeek.new(), Vector2(450, 550))
+	root.add_node("air_blend", AnimationNodeBlend2.new(), Vector2(600, 300))
+	root.connect_node("loco_ts", 0, "loco")
+	root.connect_node("crouch_ts", 0, "crouch")
+	root.connect_node("prone_ts", 0, "prone")
+	root.connect_node("crouch_blend", 0, "loco_ts")
+	root.connect_node("crouch_blend", 1, "crouch_ts")
+	root.connect_node("prone_blend", 0, "crouch_blend")
+	root.connect_node("prone_blend", 1, "prone_ts")
 	root.connect_node("jump_seek", 0, "jump")
-	root.connect_node("air_blend", 0, "crouch_blend")
+	root.connect_node("air_blend", 0, "prone_blend")
 	root.connect_node("air_blend", 1, "jump_seek")
-	root.connect_node("output", 0, "air_blend")
+	var last := "air_blend"
+	# Healing loop on the upper body (blend amount follows the heal state).
+	if anim.has_animation("heal"):
+		var hb := AnimationNodeBlend2.new()
+		_filter(hb, UPPER_BONES)
+		root.add_node("heal", _anim_node("heal"), Vector2(600, 500))
+		root.add_node("heal_blend", hb, Vector2(750, 350))
+		root.connect_node("heal_blend", 0, last)
+		root.connect_node("heal_blend", 1, "heal")
+		last = "heal_blend"
+	# One-shot upper-body actions; reload is time-scaled to the weapon's reload time.
+	for action in ["reload", "throw", "pump", "punch"]:
+		var a_name := String(action)
+		if a_name == "punch" or not anim.has_animation(a_name):
+			continue
+		var os := AnimationNodeOneShot.new()
+		os.fadein_time = 0.12
+		os.fadeout_time = 0.18
+		_filter(os, ARM_ONLY_BONES if a_name == "pump" else UPPER_BONES)
+		root.add_node(a_name, _anim_node(a_name), Vector2(750, 600))
+		root.add_node(a_name + "_ts", AnimationNodeTimeScale.new(), Vector2(850, 600))
+		root.add_node(a_name + "_shot", os, Vector2(950, 400))
+		root.connect_node(a_name + "_ts", 0, a_name)
+		root.connect_node(a_name + "_shot", 0, last)
+		root.connect_node(a_name + "_shot", 1, a_name + "_ts")
+		last = a_name + "_shot"
+	root.connect_node("output", 0, last)
 	tree.tree_root = root
 	tree.active = true
+	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts"]:
+		tree.set("parameters/%s/scale" % ts, 1.0)
 
 
 # ---------------------------------------------------------------- bundles
@@ -240,22 +350,46 @@ func apply_bundle(bundle_id: String) -> void:
 
 # ---------------------------------------------------------------- per-frame API
 
-func update_locomotion(v: Vector2, crouch: bool, on_floor: bool, delta: float) -> void:
+## v = local velocity in m/s (x right, y forward); stance = Fighter.Stance.
+func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) -> void:
 	if _dead:
 		return
-	_loco = _loco.lerp(v.limit_length(1.0), 1.0 - exp(-10.0 * delta))
-	_crouch_amt = move_toward(_crouch_amt, 1.0 if crouch else 0.0, delta * 5.0)
+	var speed := v.length()
+	_speed = lerpf(_speed, speed, 1.0 - exp(-10.0 * delta))
+	var dir := v / speed if speed > 0.05 else Vector2.ZERO
+	var ref := Fighter.RUN_SPEED
+	if stance == Fighter.Stance.CROUCH:
+		ref = Fighter.CROUCH_SPEED
+	elif stance == Fighter.Stance.PRONE:
+		ref = Fighter.PRONE_SPEED
+	_loco = _loco.lerp(dir * clampf(speed / (ref * 0.6), 0.0, 1.0), 1.0 - exp(-10.0 * delta))
+	_crouch_amt = move_toward(_crouch_amt, 1.0 if stance == Fighter.Stance.CROUCH else 0.0, delta * 5.0)
+	_prone_amt = move_toward(_prone_amt, 1.0 if stance == Fighter.Stance.PRONE else 0.0, delta * 2.6)
 	_air = move_toward(_air, 0.0 if on_floor else 1.0, delta * 6.0)
+	_heal_amt = move_toward(_heal_amt, 1.0 if _healing else 0.0, delta * 4.0)
 	if tree and tree.active:
 		tree.set("parameters/loco/blend_position", _loco)
 		tree.set("parameters/crouch/blend_position", _loco)
+		tree.set("parameters/prone/blend_position", clampf(_speed / PRONE_AUTHORED, 0.0, 1.0))
 		tree.set("parameters/crouch_blend/blend_amount", _crouch_amt)
+		tree.set("parameters/prone_blend/blend_amount", _prone_amt)
 		tree.set("parameters/air_blend/blend_amount", _air)
+		tree.set("parameters/loco_ts/scale", clampf(_speed / RUN_AUTHORED, 1.0, 3.2) if _speed > 0.3 else 1.0)
+		tree.set("parameters/crouch_ts/scale", clampf(_speed / CROUCH_AUTHORED, 1.0, 2.4) if _speed > 0.2 else 1.0)
+		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 1.6) if _speed > 0.1 else 1.0)
+		if anim.has_animation("heal"):
+			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
 	elif fallback:
 		_animate_fallback(delta)
 	_kick = move_toward(_kick, 0.0, delta * 0.6)
 	if aim_mod:
 		aim_mod.kick = _kick
+		aim_mod.pitch_scale = 1.0 - 0.7 * _prone_amt
+	var now := Time.get_ticks_msec() / 1000.0
+	var want_follow := 1.0 if (now < _follow_until or _healing) else 0.0
+	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
+	if weapon_node and weapon_id != "":
+		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
 
 
 func set_aim(pitch: float, aim_dir: Vector3) -> void:
@@ -270,11 +404,40 @@ func set_aim(pitch: float, aim_dir: Vector3) -> void:
 
 func on_fire() -> void:
 	_kick = minf(_kick + 0.035, 0.09)
+	if weapon_id == "weapon_sg" and tree and anim.has_animation("pump"):
+		tree.set("parameters/pump_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+
+
+func on_punch() -> void:
+	_kick = minf(_kick + 0.08, 0.14)
 
 
 func on_jump() -> void:
 	if tree and tree.active:
 		tree.set("parameters/jump_seek/seek_request", 0.0)
+
+
+## Upper-body reload, stretched to the weapon's reload time; the gun follows the hand.
+func play_reload(seconds: float) -> void:
+	if tree and tree.active and anim.has_animation("reload"):
+		var length := anim.get_animation("reload").length
+		tree.set("parameters/reload_ts/scale", clampf(length / maxf(seconds, 0.3), 0.4, 3.0))
+		tree.set("parameters/reload_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+		_follow_until = Time.get_ticks_msec() / 1000.0 + seconds
+
+
+func play_heal(on: bool) -> void:
+	_healing = on
+
+
+func play_throw() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if tree and tree.active and anim.has_animation("throw"):
+		tree.set("parameters/throw_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+		var length := anim.get_animation("throw").length
+		_hide_gun_until = now + length * 0.85
+	else:
+		_hide_gun_until = now + 0.5
 
 
 func play_death() -> void:
@@ -297,6 +460,7 @@ func play_death() -> void:
 func play_victory() -> void:
 	if weapon_node:
 		weapon_node.visible = false
+	show_weapon = false
 	if aim_mod:
 		aim_mod.pitch = 0.0
 	if anim and anim.has_animation("victory"):
@@ -316,14 +480,28 @@ func play_lobby() -> void:
 		anim.play(a, 0.2)
 
 
+## Direction the top of the head points (used to place the head hitbox; matters when prone).
+func head_up() -> Vector3:
+	if skeleton and bone_idx.has("head"):
+		var b := (skeleton.global_transform.basis * skeleton.get_bone_global_pose(bone_idx["head"]).basis)
+		var up := b.y.normalized()
+		return up if up.length() > 0.5 else Vector3.UP
+	return Vector3.UP
+
+
 # ---------------------------------------------------------------- weapon
 
-func equip_weapon(model_name: String) -> void:
+func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 	if weapon_node:
 		weapon_node.queue_free()
 		weapon_node = null
 	weapon_id = model_name
+	_hand_to_gun_ready = false
+	if model_name == "":
+		return
 	var path := "res://assets/props/%s.glb" % model_name
+	if not ResourceLoader.exists(path):
+		path = "res://assets/props/weapon_ar.glb"   # models still being made fall back to the AR
 	var holder := Node3D.new()
 	holder.name = "Weapon"
 	holder.top_level = true
@@ -347,7 +525,15 @@ func equip_weapon(model_name: String) -> void:
 		inst = _fallback_gun(model_name)
 		holder.add_child(inst)
 	for mi in holder.find_children("*", "MeshInstance3D", true, false):
-		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		var m := mi as MeshInstance3D
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if tint != Color.WHITE and m.mesh:
+			for s in m.mesh.get_surface_count():
+				var src := m.get_active_material(s)
+				if src is StandardMaterial3D and not String(src.resource_name).to_lower().contains("metal"):
+					var dup := (src as StandardMaterial3D).duplicate() as StandardMaterial3D
+					dup.albedo_color = dup.albedo_color * tint
+					m.set_surface_override_material(s, dup)
 	holder.visible = show_weapon and not _dead
 	if fallback:
 		holder.top_level = false
@@ -380,11 +566,17 @@ func _fallback_gun(model_name: String) -> Node3D:
 func muzzle_position() -> Vector3:
 	if weapon_node and weapon_node.is_inside_tree():
 		return weapon_node.global_transform * muzzle_local
+	if bone_idx.has("hand_r"):
+		return bone_position("hand_r") + _aim_dir * 0.3
 	return global_position + Vector3.UP * 1.4
 
 
+func _hand_xf() -> Transform3D:
+	return skeleton.global_transform * skeleton.get_bone_global_pose(bone_idx["hand_r"])
+
+
 func _on_skeleton_updated() -> void:
-	if not is_inside_tree() or weapon_node == null or not weapon_node.visible or not weapon_node.top_level:
+	if not is_inside_tree() or weapon_node == null or not weapon_node.top_level:
 		return
 	if not (bone_idx.has("hand_r") and bone_idx.has("lowerarm_r")):
 		return
@@ -395,7 +587,16 @@ func _on_skeleton_updated() -> void:
 	if dir.length() < 0.5:
 		dir = -global_basis.z
 	var up := Vector3.UP if absf(dir.y) < 0.97 else global_basis.z
-	weapon_node.global_transform = Transform3D(Basis.looking_at(dir, up), grip)
+	var aimed := Transform3D(Basis.looking_at(dir, up), grip)
+	var hand_xf := _hand_xf()
+	if _hand_follow < 0.001:
+		# Remember how the gun sits in the hand while aiming, for reload/heal hand-following.
+		_hand_to_gun = hand_xf.affine_inverse() * aimed
+		_hand_to_gun_ready = true
+		weapon_node.global_transform = aimed
+		return
+	var followed := hand_xf * _hand_to_gun if _hand_to_gun_ready else aimed
+	weapon_node.global_transform = aimed.interpolate_with(followed, clampf(_hand_follow, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------- anchors (hitboxes, camera)

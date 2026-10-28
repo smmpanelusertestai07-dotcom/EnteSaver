@@ -247,7 +247,7 @@ func _run_pose() -> void:
 		cam.current = true
 		await _wait(0.6)
 		await _shot(String(v[0]))
-	p.crouching = false
+	p.set_stance(Fighter.Stance.STAND, true)
 	p.set_crouch(true)
 	await _wait(0.8)
 	cam.global_position = p.global_position + p.global_basis.x * 2.4 + Vector3.UP * 1.2
