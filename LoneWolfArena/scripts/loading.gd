@@ -55,6 +55,7 @@ var _tip: Label
 var _art: TextureRect
 var _arena_scene: Resource
 var _leaving := false
+var _start_ms := 0
 
 
 ## Shows the match loading overlay above `host` and then starts the match.
@@ -72,6 +73,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	UI.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_start_ms = Time.get_ticks_msec()
 	_tip_i = randi() % TIPS.size()
 	if mode == "boot":
 		if Game.autotest != "" and not hold_for_test:
@@ -399,7 +401,7 @@ func _process_boot(delta: float) -> void:
 			done = true
 			_status.text = "READY"
 			_finish_boot()
-		elif _t > TIMEOUT_S:
+		elif (Time.get_ticks_msec() - _start_ms) / 1000.0 > TIMEOUT_S:   # real time: never hangs
 			done = true
 			Game.mark("boot timeout")
 		else:
@@ -424,7 +426,8 @@ func _process_match(delta: float) -> void:
 	var goal := clampf(_t / MATCH_MIN_S, 0.0, 1.0) * (1.0 if loaded else 0.85)
 	progress = maxf(progress, lerpf(progress, goal, minf(1.0, delta * 8.0)))
 	_status.text = "PREPARING WEAPONS" if progress < 0.5 else "ENTERING THE ARENA"
-	if not _leaving and ((loaded and _t >= MATCH_MIN_S) or _t >= MATCH_MAX_S):
+	var real_s := (Time.get_ticks_msec() - _start_ms) / 1000.0
+	if not _leaving and ((loaded and _t >= MATCH_MIN_S) or real_s >= MATCH_MAX_S):
 		_leaving = true
 		progress = 1.0
 		_pct.text = "100%"

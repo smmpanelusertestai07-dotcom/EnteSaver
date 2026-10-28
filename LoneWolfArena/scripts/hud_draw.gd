@@ -27,6 +27,7 @@ const HEAL_GREEN := Color(0.36, 0.86, 0.42)
 const PANEL_BG := Color(0.035, 0.04, 0.05, 0.9)
 const CARD_BG := Color(0.11, 0.12, 0.14, 0.92)
 const SHADOW := Color(0, 0, 0, 0.7)
+const SLOT_BG := Color(0.035, 0.04, 0.05)        # weapon panel slots: near-black at ~0.7 alpha
 
 static var _tex := {}
 
@@ -54,9 +55,21 @@ static func preload_icons(names: Array) -> void:
 		tex(String(n))
 
 
-## Weapon silhouette for a weapon definition (missing icons fall back to the AR).
+## Icon name of a weapon definition. The lever shotgun shares the pump gun's model (and, until
+## Weapons.DEFS names its own icon, its icon name): it gets its own lever-action silhouette here.
+static func weapon_icon_name(def: Dictionary) -> String:
+	var icon := String(def.get("icon", "weapon_ar"))
+	if icon == "weapon_sg":
+		var lever: Dictionary = Weapons.DEFS.get("lever", {})
+		if not lever.is_empty() and String(def.get("name", "")) == String(lever.get("name", "")):
+			return "weapon_sg_lever"
+	return icon
+
+
+## Weapon silhouette for a weapon definition (missing icons fall back to the pump gun / the AR).
 static func weapon_tex(def: Dictionary) -> Texture2D:
-	return tex(String(def.get("icon", "weapon_ar")), "weapon_ar")
+	var icon := weapon_icon_name(def)
+	return tex(icon, "weapon_sg" if icon == "weapon_sg_lever" else "weapon_ar")
 
 
 static func font(kind := "bold") -> Font:
@@ -141,6 +154,29 @@ static func button(ci: CanvasItem, c: Vector2, r: float, glyph: Texture2D, opaci
 		gc = Color(1, 1, 1, 0.38)
 	var gs := r * 2.0 * glyph_scale * (0.92 if pressed else 1.0)
 	icon(ci, glyph, c, Vector2(gs, gs), Color(gc, gc.a * opacity))
+
+
+## Small corner button (the settings gear): a soft dark disk under a bare white glyph.
+static func glyph_button(ci: CanvasItem, c: Vector2, r: float, glyph: Texture2D, opacity: float, pressed := false) -> void:
+	disk(ci, c, r * 1.05, Color(0, 0, 0, (0.5 if pressed else 0.3) * opacity))
+	var gs := r * 2.0 * (0.74 if pressed else 0.8)
+	icon(ci, glyph, c, Vector2(gs, gs), Color(1, 1, 1, 0.96 * opacity))
+
+
+## Weapon slot background with its top-right corner cut off (the reference panel shape).
+static func slot_rect(ci: CanvasItem, r: Rect2, chamfer: float, col: Color) -> void:
+	if col.a <= 0.003:
+		return
+	var c := minf(chamfer, minf(r.size.x, r.size.y) * 0.5)
+	ci.draw_colored_polygon(PackedVector2Array([r.position, Vector2(r.end.x - c, r.position.y), Vector2(r.end.x, r.position.y + c),
+		r.end, Vector2(r.position.x, r.end.y)]), col)
+
+
+## Dark name plate: a horizontal band fading out to both ends (kill badge, prep match-up).
+static func plate(ci: CanvasItem, r: Rect2, alpha := 0.7) -> void:
+	var half := Rect2(r.position, Vector2(r.size.x * 0.5, r.size.y))
+	band(ci, half, Color(0, 0, 0, 0.0), Color(0, 0, 0, alpha))
+	band(ci, Rect2(half.position + Vector2(half.size.x, 0), half.size), Color(0, 0, 0, alpha), Color(0, 0, 0, 0.0))
 
 
 ## Small count at the lower right inside a button ("2" medkits).

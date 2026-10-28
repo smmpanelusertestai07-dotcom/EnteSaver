@@ -54,7 +54,8 @@ static func font(kind := "bold") -> Font:
 			fv.base_font = font("number" if kind == "number_italic" else "title")
 			fv.variation_embolden = 0.5 if kind != "number_italic" else 0.3
 			if kind != "heavy":
-				fv.variation_transform = Transform2D(Vector2(1, 0), Vector2(0.2, 1), Vector2.ZERO)
+				# slant (Godot's documented italic: Transform2D(1, slant, 0, 1, 0, 0))
+				fv.variation_transform = Transform2D(Vector2(1.0, 0.2), Vector2(0.0, 1.0), Vector2.ZERO)
 			f = fv
 		_:
 			var base: String = FONT_FILES.get(kind, "")
@@ -535,6 +536,23 @@ static func spacer(h := 8.0) -> Control:
 static func full_rect(c: Control) -> Control:
 	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	return c
+
+
+## Thin scrollbar in the kit's look (dark track, light grip that turns yellow when dragged).
+static func style_scroll(sc: ScrollContainer) -> void:
+	var bar := sc.get_v_scroll_bar()
+	var track := box(Color(1, 1, 1, 0.06), 2, 0, Color.TRANSPARENT, 0.0)
+	track.content_margin_left = 3
+	track.content_margin_right = 3
+	var grip := box(Color(1, 1, 1, 0.35), 2, 0, Color.TRANSPARENT, 0.0)
+	var grip_hi := box(Color(1, 1, 1, 0.55), 2, 0, Color.TRANSPARENT, 0.0)
+	var grip_on := box(ACCENT, 2, 0, Color.TRANSPARENT, 0.0)
+	bar.add_theme_stylebox_override("scroll", track)
+	bar.add_theme_stylebox_override("scroll_focus", track)
+	bar.add_theme_stylebox_override("grabber", grip)
+	bar.add_theme_stylebox_override("grabber_highlight", grip_hi)
+	bar.add_theme_stylebox_override("grabber_pressed", grip_on)
+	bar.custom_minimum_size = Vector2(8, 0)
 
 
 ## A white glyph from assets/ui/icons/ (tinted), fitted into `size` px.

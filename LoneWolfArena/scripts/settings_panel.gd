@@ -104,6 +104,7 @@ func _ready() -> void:
 	_scroll.offset_top = 74
 	_scroll.offset_bottom = -64
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	UI.style_scroll(_scroll)
 	add_child(_scroll)
 	_body = VBoxContainer.new()
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL

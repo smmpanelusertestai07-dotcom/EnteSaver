@@ -2,10 +2,11 @@ extends Node
 ## HUD screenshot tour:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_hud.gd
 ## Prep with the weapon pick panel (pick + SELECT by touch), PREPARE countdown, round banner,
-## the bot in view (red crosshair), firing (damage numbers, hit marker), red-dot ADS, reload ring,
-## fists, sniper scope, sprint (stick past the ring and the button), the settings gear,
-## scoreboard, healing, low HP with damage arcs, the elimination (red X, badge, kill feed) and
-## the HUD editor (select + drag). Returns 0, or 1 if a check failed.
+## the bot in view (red crosshair), firing (damage numbers that stack into one, hit marker),
+## red-dot ADS, reload ring, fists, the lever shotgun's own silhouette, sniper scope, sprint
+## (stick past the ring and the button), the settings gear, scoreboard (clear of the weapon
+## panel), healing, low HP with damage arcs, the elimination (red X, badge, kill feed) and the
+## HUD editor (select + drag). Returns 0, or 1 if a check failed.
 
 var _fails := 0
 
@@ -29,6 +30,10 @@ func run(at: Node) -> int:
 	await at.wait(0.5)
 	await at.shot("hud_01_pick")
 	_check(hud.panels.pick_open, "pick panel open in prep", at)
+	_check(HudDraw.weapon_tex(Weapons.DEFS.lever) != HudDraw.weapon_tex(Weapons.DEFS.sg), "lever and pump shotguns have different silhouettes", at)
+	var main0 := HudLayout.weapon_main(hud.layout.weapons, vs)
+	_check(absf(main0.position.y / vs.y - 0.05) < 0.012 and absf(main0.end.y / vs.y - 0.155) < 0.012,
+		"weapon panel main slot at y 0.05 .. 0.155 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
 	await _tap(at, hud.panels.card_rect(1).get_center())
 	await at.wait(0.3)
 	await at.shot("hud_02_pick_smg")
@@ -64,6 +69,11 @@ func run(at: Node) -> int:
 		_drag(at, 5, fire_c + Vector2(1, 0), Vector2(1, 0))
 		await at.wait(0.06)
 	await at.shot("hud_06_firing")
+	var numbers := 0
+	for n: Dictionary in hud._dmg_numbers:
+		if float(n.t) < 0.6:
+			numbers += 1
+	_check(numbers <= 2, "rapid hits stack into one damage number (%d showing)" % numbers, at)
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
 	b.hp = maxf(b.hp, 150.0)
@@ -88,6 +98,10 @@ func run(at: Node) -> int:
 	_check(p.current == 1, "fist slot selects the fists", at)
 	await _tap(at, HudLayout.weapon_main(hud.layout.weapons, vs).get_center())
 	await at.wait(0.3)
+	# The lever shotgun in the weapon panel (its own silhouette, not the pump gun's).
+	p.set_loadout("lever")
+	await at.wait(0.6)
+	await at.shot("hud_09b_lever")
 	# Sniper scope.
 	p.set_loadout("sniper")
 	await at.wait(0.8)
@@ -140,6 +154,8 @@ func run(at: Node) -> int:
 	await at.wait(0.5)
 	await at.shot("hud_12_scoreboard")
 	_check(hud.panels.board_open, "scoreboard opens", at)
+	var panel_r := HudLayout.weapon_main(hud.layout.weapons, vs).merge(HudLayout.weapon_slots(hud.layout.weapons, vs)[2])
+	_check(not hud.panels.board_rect().intersects(panel_r), "scoreboard keeps clear of the weapon panel", at)
 	await _tap(at, hud.panels.board_close_rect().get_center())
 	await at.wait(0.2)
 	_check(not hud.panels.board_open, "scoreboard closes", at)

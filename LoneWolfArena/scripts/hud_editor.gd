@@ -243,7 +243,7 @@ func _widget_at(pos: Vector2, vs: Vector2) -> String:
 			if r.grow(6).has_point(pos):
 				return id
 			continue
-		var rad := r.size.x * 0.5
+		var rad := maxf(r.size.x * 0.5, HudLayout.MIN_TOUCH * HudLayout.unit(vs))
 		var d := pos.distance_to(r.get_center()) / maxf(rad, 1.0)
 		if d <= 1.2 and d < best_d:
 			best = id

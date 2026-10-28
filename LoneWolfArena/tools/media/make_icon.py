@@ -1,7 +1,12 @@
 """App icon + title emblem for LONE WOLF ARENA (original low-poly wolf over a crosshair).
 
+The emblem (draw_emblem) comes in two palettes: "amber" (title emblem, logo lockup in
+tools/media/make_keyart.py) and "steel" (the launcher icon: a white-steel wolf with glowing amber
+eyes and a dark crosshair, which stays readable at 48 px on the icon's orange burst background).
 Drawn with Pillow at 4x and downsampled with Lanczos for anti-aliasing.
-Usage: python3 make_icon.py [out_dir]
+Writes assets/icon/ (icon_512, icon_192, adaptive icon_fg_432 / icon_bg_432, emblem_1024) and the
+project icon (icon.png = icon_512).
+Usage: python3 make_icon.py [out_dir] [preview.png]
 """
 from __future__ import annotations
 
@@ -14,9 +19,15 @@ from scipy import ndimage
 
 SS = 4
 CHARCOAL = (18, 19, 23)
-TOP = np.array([255, 214, 84], float)      # amber-yellow
-BOTTOM = np.array([232, 74, 22], float)     # deep orange
-RING = (236, 112, 38)
+PALETTES = {
+    # facet gradient top / bottom, crosshair ring colour (top, bottom), inner ear, eye, glint
+    "amber": {"top": (255, 214, 84), "bottom": (232, 74, 22), "ring": ((255, 150, 60), (200, 70, 20)),
+              "ear": (150, 46, 16), "eye": CHARCOAL, "glint": (255, 236, 170), "seam": (110, 36, 8)},
+    "steel": {"top": (255, 255, 255), "bottom": (172, 182, 198), "ring": ((40, 40, 48), (16, 16, 20)),
+              "ear": (226, 98, 34), "eye": (255, 176, 20), "glint": (255, 250, 220), "seam": (80, 88, 104)},
+}
+TOP = np.array(PALETTES["amber"]["top"], float)
+BOTTOM = np.array(PALETTES["amber"]["bottom"], float)
 
 # ---------------------------------------------------------------- geometry
 # right half (x >= 0.5) in a unit box, y down; mirrored for the left half
@@ -51,16 +62,24 @@ def mirror(pts):
     return [(1.0 - x, y) for x, y in pts]
 
 
-def grad_color(y, shade):
+def shrink(pts, k):
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    return [(cx + (x - cx) * k, cy + (y - cy) * k) for x, y in pts]
+
+
+def grad_color(y, shade, pal=None):
+    pal = pal or PALETTES["amber"]
     t = np.clip((y - 0.03) / 0.92, 0, 1)
-    c = TOP * (1 - t) + BOTTOM * t
+    c = np.array(pal["top"], float) * (1 - t) + np.array(pal["bottom"], float) * t
     return tuple(int(v) for v in np.clip(c * shade, 0, 255))
 
 
 # ---------------------------------------------------------------- drawing
-def draw_emblem(size, outline=True, crosshair=True):
+def draw_emblem(size, outline=True, crosshair=True, palette="amber"):
     """Return an RGBA emblem of `size` px (drawn at 4x).  The artwork spans the
     central circle of radius 0.48*size."""
+    pal = PALETTES[palette]
     S = size * SS
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -103,10 +122,12 @@ def draw_emblem(size, outline=True, crosshair=True):
         dist = ndimage.distance_transform_edt(~ra)
         key = (dist < 0.012 * S) & ~ra
         layer = np.zeros((S, S, 4), np.uint8)
-        layer[key] = (*CHARCOAL, 255)
+        layer[key] = (*CHARCOAL, 255) if palette == "amber" else (255, 236, 200, 255)
         rr = np.asarray(ring).astype(float) / 255
-        yy = np.linspace(0, 1, S)[:, None]
-        col = (TOP * 0.25 + BOTTOM * 0.75) * (1 - yy[..., None] * 0.15) + np.array([20, 10, 0]) * (1 - yy[..., None])
+        yy = np.linspace(0, 1, S)[:, None, None]
+        r_top = np.array(pal["ring"][0], float)
+        r_bot = np.array(pal["ring"][1], float)
+        col = r_top * (1 - yy) + r_bot * yy
         col = np.broadcast_to(np.clip(col, 0, 255), (S, S, 3))
         m = rr > 0
         layer[m, :3] = col[m].astype(np.uint8)
@@ -132,7 +153,7 @@ def draw_emblem(size, outline=True, crosshair=True):
         dark = Image.new("RGBA", (S, S), (*CHARCOAL, 255))
         img.paste(dark, (0, 0), st)
         d = ImageDraw.Draw(img)
-    d.polygon(tp(sil), fill=grad_color(0.5, 0.85))
+    d.polygon(tp(sil), fill=grad_color(0.5, 0.85, pal))
     for side in (0, 1):
         for pts_k, shade in FACETS:
             pts = [P[k] for k in pts_k]
@@ -140,7 +161,7 @@ def draw_emblem(size, outline=True, crosshair=True):
                 pts = mirror(pts)
                 shade *= 0.9
             yc = np.mean([p[1] for p in pts])
-            d.polygon(tp(pts), fill=grad_color(yc, shade))
+            d.polygon(tp(pts), fill=grad_color(yc, shade, pal))
     # facet edge lines (subtle low-poly seams), composited so alpha is preserved
     seams = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     sd = ImageDraw.Draw(seams)
@@ -150,7 +171,7 @@ def draw_emblem(size, outline=True, crosshair=True):
             if side:
                 pts = mirror(pts)
             q = tp(pts)
-            sd.line(q + [q[0]], fill=(110, 36, 8, 255), width=max(1, int(0.0028 * S)))
+            sd.line(q + [q[0]], fill=(*pal["seam"], 255), width=max(1, int(0.0028 * S)))
     sil_mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(sil_mask).polygon(tp(sil), fill=255)
     sa = np.asarray(seams).copy()
@@ -159,33 +180,56 @@ def draw_emblem(size, outline=True, crosshair=True):
     d = ImageDraw.Draw(img)
     for side in (0, 1):
         f = mirror if side else (lambda p: p)
-        d.polygon(tp(f(INNER_EAR)), fill=(150, 46, 16))
-        d.polygon(tp(f(EYE)), fill=CHARCOAL)
-        d.polygon(tp(f(GLINT)), fill=(255, 236, 170))
+        d.polygon(tp(f(INNER_EAR)), fill=pal["ear"])
+        d.polygon(tp(f(EYE)), fill=pal["eye"] if palette == "amber" else CHARCOAL)
+        if palette != "amber":
+            # glowing eye: the slit filled with amber, a hot core
+            d.polygon(tp(f(shrink(EYE, 0.78))), fill=pal["eye"])
+        d.polygon(tp(f(GLINT)), fill=pal["glint"])
         d.line(tp(f(MOUTH)), fill=CHARCOAL, width=int(0.0075 * S), joint="curve")
-    d.polygon(tp(BROW_MARK), fill=grad_color(0.33, 0.86))
+    d.polygon(tp(BROW_MARK), fill=grad_color(0.33, 0.86, pal) if palette == "amber" else (232, 104, 36))
     d.polygon(tp(NOSE), fill=CHARCOAL)
     return img.resize((size, size), Image.LANCZOS)
 
 
 def background(size, glow=True, hexes=True):
+    """Dynamic orange background: diagonal amber -> red-orange gradient, a ray burst from behind
+    the emblem, slanted light streaks and a soft vignette (no text, no corner tab)."""
     S = size
     yy, xx = np.mgrid[0:S, 0:S].astype(float) + 0.5
+    u = xx / S
+    v = yy / S
+    t = np.clip((u * 0.45 + (1 - v) * 0.55), 0, 1)          # top-right bright
+    c_hi = np.array([255, 190, 46], float)
+    c_lo = np.array([214, 58, 18], float)
+    col = c_lo * (1 - t[..., None]) + c_hi * t[..., None]
+    # ray burst
+    ang = np.arctan2(yy - S * 0.5, xx - S * 0.5)
+    rays = (np.cos(ang * 14) > 0.55).astype(float)
     r = np.hypot(xx - S / 2, yy - S / 2) / (S / 2)
-    base_in = np.array([44, 46, 53], float)
-    base_out = np.array([14, 15, 18], float)
-    t = np.clip(r / 1.3, 0, 1) ** 1.2
-    col = base_in * (1 - t[..., None]) + base_out * t[..., None]
-    if hexes:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from make_textures import hex_pattern  # noqa: E402
-        hx = np.asarray(Image.fromarray((hex_pattern(512)[..., 0] * 255).astype(np.uint8)).resize(
-            (S, S), Image.LANCZOS)).astype(float) / 255
-        col += hx[..., None] * np.array([255, 140, 60]) * 0.05 * np.clip(1.1 - r, 0, 1)[..., None]
+    col += rays[..., None] * np.array([255, 230, 160]) * 0.10 * np.clip(r, 0, 1)[..., None]
+    # slanted streaks
+    s_ = (u + v * 0.6)
+    for k, w, a in ((0.38, 0.018, 0.22), (0.47, 0.008, 0.18), (1.18, 0.022, 0.2), (1.27, 0.01, 0.15)):
+        m = np.exp(-((s_ - k) / w) ** 2)
+        col += m[..., None] * np.array([255, 245, 210]) * a
     if glow:
-        g = np.exp(-(r / 0.55) ** 2)
-        col += g[..., None] * np.array([235, 92, 24]) * 0.32
+        g = np.exp(-(r / 0.62) ** 2)
+        col += g[..., None] * np.array([255, 220, 140]) * 0.22
+    # vignette toward the corners
+    vig = np.clip(1.0 - 0.28 * np.clip(r - 0.75, 0, None) ** 1.2, 0.6, 1)
+    col *= vig[..., None]
     return Image.fromarray(np.clip(col, 0, 255).astype(np.uint8), "RGB")
+
+
+def drop_shadow(img, offset, blur, alpha=150):
+    a = img.getchannel("A").filter(ImageFilter.GaussianBlur(blur))
+    sh = Image.new("RGBA", img.size, (40, 8, 0, 0))
+    sh.putalpha(a.point(lambda x: x * alpha // 255))
+    out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    out.alpha_composite(sh, offset)
+    out.alpha_composite(img)
+    return out
 
 
 def build(out):
@@ -194,8 +238,9 @@ def build(out):
     emblem.save(os.path.join(out, "emblem_1024.png"), optimize=True)
     for size in (512, 192):
         bg = background(size).convert("RGBA")
-        art = int(round(size * 0.86))
-        e = draw_emblem(art if size >= 256 else 512).resize((art, art), Image.LANCZOS)
+        art = int(round(size * 0.9))
+        e = draw_emblem(art if size >= 256 else 512, palette="steel").resize((art, art), Image.LANCZOS)
+        e = drop_shadow(e, (0, max(2, size // 90)), max(2, size // 60))
         off = (size - art) // 2
         bg.alpha_composite(e, (off, off))
         bg.convert("RGB").save(os.path.join(out, f"icon_{size}.png"), optimize=True)
@@ -204,7 +249,7 @@ def build(out):
     background(S).save(os.path.join(out, "icon_bg_432.png"), optimize=True)
     art = int(0.326 * S / 0.495)                 # artwork (incl. keyline) radius is ~0.495 of its box
     fg = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    fg.alpha_composite(draw_emblem(art), ((S - art) // 2, (S - art) // 2))
+    fg.alpha_composite(drop_shadow(draw_emblem(art, palette="steel"), (0, 3), 4), ((S - art) // 2, (S - art) // 2))
     fg.save(os.path.join(out, "icon_fg_432.png"), optimize=True)
     a = np.asarray(fg)[..., 3]
     ys, xs = np.nonzero(a > 8)
@@ -242,7 +287,12 @@ def preview(out, path):
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "icon")
+    here = os.path.dirname(os.path.abspath(__file__))
+    default_out = os.path.join(here, "..", "..", "assets", "icon")
+    out = sys.argv[1] if len(sys.argv) > 1 else default_out
     build(out)
+    if os.path.abspath(out) == os.path.abspath(default_out):
+        # the project icon (project.godot config/icon) is the 512 px launcher icon
+        Image.open(os.path.join(out, "icon_512.png")).save(os.path.join(here, "..", "..", "icon.png"), optimize=True)
     if len(sys.argv) > 2:
         preview(out, sys.argv[2])

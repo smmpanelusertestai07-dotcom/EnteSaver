@@ -107,6 +107,8 @@ func _build() -> void:
 	_medal.pivot_offset = Vector2(190, 85)
 	_medal.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_medal.draw.connect(_draw_medal)
+	if _kind == "defeat":
+		_medal.material = _desaturate()
 	add_child(_medal)
 	var title := UI.shadowed(UI.outlined(UI.label(_title_text(), 104, Color.WHITE, "italic"), 12, Color(0.06, 0.04, 0.02, 0.95)), Vector2(0, 6), Color(0, 0, 0, 0.45))
 	title.name = "Title"
@@ -429,6 +431,15 @@ func _draw_medal() -> void:
 	var outline := hexo.duplicate()
 	outline.append(hexo[0])
 	_medal.draw_polyline(outline, Color(1, 1, 1, 0.5), 2.0, true)
+
+
+## Grey-out for the DEFEAT medal (the emblem art is orange).
+static func _desaturate() -> ShaderMaterial:
+	var sh := Shader.new()
+	sh.code = "shader_type canvas_item;\nvoid fragment() {\n\tvec4 c = texture(TEXTURE, UV) * COLOR;\n\tfloat l = dot(c.rgb, vec3(0.299, 0.587, 0.114));\n\tCOLOR = vec4(vec3(l) * vec3(0.95, 0.97, 1.0), c.a);\n}\n"
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	return m
 
 
 func _animate_in() -> void:

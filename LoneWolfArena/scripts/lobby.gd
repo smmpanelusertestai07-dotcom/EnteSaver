@@ -1,18 +1,52 @@
 extends Node3D
-## Lobby: the hero on a lit stage, profile, bundles (wardrobe), settings, difficulty
-## and the START button that drops straight into a Lone Wolf match.
+## Lobby: our character large on a lit hexagonal podium in a container yard at sunset (cheap
+## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
+## UI in the battle-royale lobby layout (original art): player card (avatar, name + EDIT, level,
+## XP line) and an offline coin strip top-left, logo + glyph buttons top-right, a text menu on
+## the left (BUNDLES, CUSTOM HUD, SETTINGS, HOW TO PLAY, CREDITS), the mode card
+## "LONE WOLF / CARGO CAGE" with difficulty chips, match stats and the big START bottom-right.
+## BUNDLES opens the wardrobe (vault-like: rarity tabs, item cards with rarity glow and bar,
+## preview on the podium, EQUIP / BACK). START shows the match loading overlay
+## (Loading.start_match) and then enters the arena.
+## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton,
+## CreditsButton, Bundle_<id>, EquipButton.
+
+const PODIUM_TOP := 0.24
+const CAM_MAIN_POS := Vector3(0.66, 0.98, 3.55)
+const CAM_MAIN_LOOK := Vector3(0.66, 1.12, 0.0)
+const CAM_WARD_POS := Vector3(-1.5, 1.0, 3.75)
+const CAM_WARD_LOOK := Vector3(-1.5, 1.13, 0.0)
+const MODEL_YAW := PI - 0.32
+const RARITY_ORDER := ["legendary", "epic", "rare", "common"]
+const CARD_SIZE := Vector2(168, 222)
 
 var model: CharacterModel
 var camera: Camera3D
 var ui: CanvasLayer
 var start_btn: Button
 var wardrobe: Control
+var _main_ui: Control
 var _preview_bundle := ""
 var _drag_index := -1
-var _turntable := 0.0
+var _idle_t := 0.0
 var _name_label: Label
 var _bundle_label: Label
+var _name_plate: Control
+var _plate_label: Label
 var _time := 0.0
+var _cam_t := 1.0
+var _cam_from_pos := CAM_MAIN_POS
+var _cam_from_look := CAM_MAIN_LOOK
+var _cam_to_pos := CAM_MAIN_POS
+var _cam_to_look := CAM_MAIN_LOOK
+var _modal: Control
+var _ward_grid: GridContainer
+var _ward_filter := "all"
+var _ward_info_name: Label
+var _ward_info_rarity: Label
+var _ward_info_desc: Label
+var _ward_equip: Button
+var _ward_tabs := {}
 
 
 func _ready() -> void:
@@ -29,242 +63,705 @@ func _mark_start() -> void:
 	Game.mark_ui("start", start_btn, start_btn.size / 2.0)
 
 
+# ---------------------------------------------------------------- 3D stage
+
 func _build_stage() -> void:
+	var hi := int(Game.settings.graphics) >= 1
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
 	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.04, 0.05, 0.12)
-	sm.sky_horizon_color = Color(0.28, 0.17, 0.33)
-	sm.ground_horizon_color = Color(0.2, 0.12, 0.22)
-	sm.ground_bottom_color = Color(0.02, 0.02, 0.04)
-	sm.sun_angle_max = 1.0
+	sm.sky_top_color = Color(0.07, 0.08, 0.26)
+	sm.sky_horizon_color = Color(1.0, 0.52, 0.30)
+	sm.sky_curve = 0.09
+	sm.sky_energy_multiplier = 1.0
+	sm.ground_horizon_color = Color(0.40, 0.24, 0.24)
+	sm.ground_bottom_color = Color(0.05, 0.04, 0.05)
+	sm.sun_angle_max = 30.0
+	sm.sun_curve = 0.1
 	sky.sky_material = sm
 	e.sky = sky
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.7
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.58, 0.5, 0.62)
+	e.ambient_light_energy = 0.5
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	e.glow_enabled = true
-	e.glow_intensity = 0.6
-	e.glow_bloom = 0.08
-	e.glow_hdr_threshold = 0.9
+	e.tonemap_exposure = 0.95
+	e.tonemap_white = 4.0                 # roll off highlights (white outfits) instead of clipping
+	e.glow_enabled = hi
+	e.glow_intensity = 0.55
+	e.glow_bloom = 0.06
+	e.glow_hdr_threshold = 1.0
 	e.fog_enabled = true
-	e.fog_light_color = Color(0.18, 0.12, 0.25)
-	e.fog_density = 0.035
+	e.fog_light_color = Color(0.86, 0.58, 0.5)
+	e.fog_density = 0.0045
+	e.adjustment_enabled = true
+	e.adjustment_contrast = 1.1
+	e.adjustment_saturation = 1.18
+	e.fog_sky_affect = 0.0
 	env.environment = e
 	add_child(env)
+	var sun := DirectionalLight3D.new()
+	sun.light_color = Color(1.0, 0.62, 0.38)
+	sun.light_energy = 1.1
+	sun.shadow_enabled = false
+	add_child(sun)
+	# low sun behind the yard, to the right: backlight + the sky's sun disc
+	sun.look_at(Vector3(-0.85, -0.17, 1.0))
+	# Ground: polished concrete.
 	var floor_m := StandardMaterial3D.new()
-	floor_m.albedo_color = Color(0.05, 0.05, 0.07)
-	floor_m.roughness = 0.25
-	floor_m.metallic = 0.5
+	floor_m.albedo_color = Color(0.30, 0.28, 0.29)
+	floor_m.roughness = 0.62
+	floor_m.metallic = 0.15
+	var ft := UI.texture("res://assets/textures/floor_concrete.png")
+	if ft:
+		floor_m.albedo_texture = ft
+		floor_m.uv1_scale = Vector3(14, 14, 1)
+		var fn := UI.texture("res://assets/textures/floor_concrete_n.png")
+		if fn:
+			floor_m.normal_enabled = true
+			floor_m.normal_texture = fn
 	var floor_mi := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(60, 60)
+	pm.size = Vector2(80, 80)
 	floor_mi.mesh = pm
 	floor_mi.material_override = floor_m
 	add_child(floor_mi)
-	var stage := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 1.25
-	cm.bottom_radius = 1.35
-	cm.height = 0.22
-	cm.radial_segments = 48
-	stage.mesh = cm
-	var stage_m := StandardMaterial3D.new()
-	stage_m.albedo_color = Color(0.12, 0.12, 0.15)
-	stage_m.metallic = 0.7
-	stage_m.roughness = 0.35
-	stage.material_override = stage_m
-	stage.position = Vector3(-0.7, 0.11, 0)
-	add_child(stage)
-	var ring := MeshInstance3D.new()
-	var tm := TorusMesh.new()
-	tm.inner_radius = 1.28
-	tm.outer_radius = 1.34
-	tm.rings = 48
-	ring.mesh = tm
-	var ring_m := StandardMaterial3D.new()
-	ring_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ring_m.albedo_color = Color(1.0, 0.72, 0.2) * 2.2
-	ring.material_override = ring_m
-	ring.position = Vector3(-0.7, 0.22, 0)
-	add_child(ring)
-	for i in 7:
-		var bar := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.12, 7.0, 0.12)
-		bar.mesh = bm
-		var bmat := StandardMaterial3D.new()
-		bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		var c := Color(1.0, 0.6, 0.15) if i % 2 == 0 else Color(0.2, 0.75, 1.0)
-		bmat.albedo_color = c * 1.8
-		bar.material_override = bmat
-		bar.position = Vector3(-6.5 + i * 2.2, 3.5, -6.0 - (i % 3) * 1.5)
-		add_child(bar)
+	_build_podium()
+	_build_backdrop()
+	# Character.
 	model = CharacterModel.new()
 	add_child(model)
-	model.position = Vector3(-0.7, 0.22, 0)
-	model.rotation.y = PI - 0.25
+	model.position = Vector3(0, PODIUM_TOP, 0)
+	model.rotation.y = MODEL_YAW
 	model.setup(String(Game.profile.bundle), false)
 	model.play_lobby()
+	# Lights: warm key with the only shadow, cool + warm rims, soft fill.
 	var key := SpotLight3D.new()
-	key.position = Vector3(1.5, 4.0, 3.5)
-	key.light_energy = 6.0
+	key.position = Vector3(2.2, 4.2, 3.6)
+	key.light_energy = 2.7
 	key.spot_range = 12.0
-	key.spot_angle = 30.0
-	key.light_color = Color(1.0, 0.92, 0.82)
-	key.shadow_enabled = true
+	key.spot_angle = 28.0
+	key.light_color = Color(1.0, 0.9, 0.8)
+	key.shadow_enabled = hi
 	add_child(key)
-	key.look_at(Vector3(-0.7, 1.0, 0))
+	key.look_at(Vector3(0, 1.0, 0))
 	var rim := SpotLight3D.new()
-	rim.position = Vector3(-2.5, 3.0, -3.0)
-	rim.light_energy = 5.0
+	rim.position = Vector3(-2.6, 3.0, -2.6)
+	rim.light_energy = 6.0
 	rim.spot_range = 10.0
-	rim.spot_angle = 35.0
-	rim.light_color = Color(0.3, 0.75, 1.0)
+	rim.spot_angle = 30.0
+	rim.light_color = Color(0.3, 0.72, 1.0)
 	add_child(rim)
-	rim.look_at(Vector3(-0.7, 1.2, 0))
+	rim.look_at(Vector3(0, 1.25, 0))
+	var rim2 := SpotLight3D.new()
+	rim2.position = Vector3(2.8, 2.6, -2.4)
+	rim2.light_energy = 5.0
+	rim2.spot_range = 10.0
+	rim2.spot_angle = 30.0
+	rim2.light_color = Color(1.0, 0.55, 0.25)
+	add_child(rim2)
+	rim2.look_at(Vector3(0, 1.2, 0))
 	var fill := OmniLight3D.new()
-	fill.position = Vector3(-0.2, 1.6, 2.4)
-	fill.light_energy = 0.6
+	fill.position = Vector3(-1.6, 1.5, 2.6)
+	fill.light_energy = 0.55
 	fill.omni_range = 6.0
-	fill.light_color = Color(1.0, 0.75, 0.6)
+	fill.light_color = Color(0.75, 0.8, 1.0)
 	add_child(fill)
 	camera = Camera3D.new()
-	camera.fov = 40.0
-	camera.position = Vector3(0.35, 1.35, 4.6)
+	camera.fov = 38.0
 	add_child(camera)
-	camera.look_at(Vector3(0.35, 1.05, 0))
+	camera.position = CAM_MAIN_POS
+	camera.look_at(CAM_MAIN_LOOK)
 	camera.current = true
 
+
+func _unshaded(c: Color, additive := false, tex: Texture2D = null) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = c
+	if tex:
+		m.albedo_texture = tex
+	if additive:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.disable_fog = true
+	return m
+
+
+## Hexagonal podium: diamond-plate top, dark steel side, glowing yellow edge, a warm light pool.
+func _build_podium() -> void:
+	var top_m := StandardMaterial3D.new()
+	top_m.albedo_color = Color(0.42, 0.42, 0.44)
+	top_m.metallic = 0.75
+	top_m.roughness = 0.38
+	var dp := UI.texture("res://assets/textures/diamond_plate.png")
+	if dp:
+		top_m.albedo_texture = dp
+		top_m.uv1_scale = Vector3(2.5, 2.5, 1)
+		var dn := UI.texture("res://assets/textures/diamond_plate_n.png")
+		if dn:
+			top_m.normal_enabled = true
+			top_m.normal_texture = dn
+	var hex := CylinderMesh.new()
+	hex.top_radius = 1.0
+	hex.bottom_radius = 1.1
+	hex.height = PODIUM_TOP
+	hex.radial_segments = 6
+	hex.rings = 1
+	var pod := MeshInstance3D.new()
+	pod.mesh = hex
+	pod.material_override = top_m
+	pod.position = Vector3(0, PODIUM_TOP * 0.5, 0)
+	pod.rotation.y = PI / 6.0
+	add_child(pod)
+	# glowing edge: a thin, slightly larger hex just under the top
+	var edge := CylinderMesh.new()
+	edge.top_radius = 1.035
+	edge.bottom_radius = 1.035
+	edge.height = 0.03
+	edge.cap_top = false
+	edge.cap_bottom = false
+	edge.radial_segments = 6
+	edge.rings = 1
+	var em := MeshInstance3D.new()
+	em.mesh = edge
+	em.material_override = _unshaded(Color(1.0, 0.72, 0.12) * 2.4)
+	em.position = Vector3(0, PODIUM_TOP - 0.03, 0)
+	em.rotation.y = PI / 6.0
+	add_child(em)
+	# light pool on the floor around the podium
+	var glow := UI.texture("res://assets/textures/glow.png")
+	if glow:
+		var q := MeshInstance3D.new()
+		var qm := PlaneMesh.new()
+		qm.size = Vector2(5.5, 5.5)
+		q.mesh = qm
+		q.material_override = _unshaded(Color(1.0, 0.55, 0.25, 0.55), true, glow)
+		q.position = Vector3(0, 0.01, 0)
+		add_child(q)
+
+
+## The yard: container stacks either side, a long container behind with our emblem, a gantry
+## crane and warehouse blocks on the skyline and two floodlight masts.
+func _build_backdrop() -> void:
+	var c20: PackedScene = load("res://assets/props/container.glb") if ResourceLoader.exists("res://assets/props/container.glb") else null
+	var c40: PackedScene = load("res://assets/props/container_40.glb") if ResourceLoader.exists("res://assets/props/container_40.glb") else null
+	var paint_tex := UI.texture("res://assets/textures/container_paint.png")
+	var corr_n := UI.texture("res://assets/textures/corrugated_n.png")
+	var stacks := [
+		# [scene, position, yaw, colour]: two-high stacks either side, singles further out,
+		# a long one far behind carrying our emblem.
+		[c20, Vector3(-9.6, 0, -17.0), 10.0, Color(0.10, 0.34, 0.62)],
+		[c20, Vector3(-9.6, 2.59, -17.0), 6.0, Color(0.72, 0.18, 0.12)],
+		[c20, Vector3(-16.5, 0, -24.0), -4.0, Color(0.85, 0.50, 0.10)],
+		[c20, Vector3(10.6, 0, -18.0), -8.0, Color(0.88, 0.48, 0.10)],
+		[c20, Vector3(10.6, 2.59, -18.0), -12.0, Color(0.10, 0.45, 0.50)],
+		[c20, Vector3(17.0, 0, -26.0), 4.0, Color(0.60, 0.14, 0.12)],
+		[c40, Vector3(2.0, 0, -33.0), 0.0, Color(0.86, 0.80, 0.68)],
+	]
+	for s in stacks:
+		var ps: PackedScene = s[0]
+		var pos: Vector3 = s[1]
+		var col: Color = s[3]
+		var node: Node3D
+		if ps:
+			node = ps.instantiate()
+			for mi in node.find_children("*", "MeshInstance3D", true, false):
+				var m := mi as MeshInstance3D
+				for i in m.mesh.get_surface_count():
+					var mat := m.mesh.surface_get_material(i)
+					if mat and mat.resource_name.to_lower().contains("paint"):
+						var pmat := StandardMaterial3D.new()
+						pmat.albedo_color = col
+						pmat.roughness = 0.62
+						pmat.metallic = 0.25
+						if paint_tex:
+							pmat.albedo_texture = paint_tex
+						if corr_n:
+							pmat.normal_enabled = true
+							pmat.normal_texture = corr_n
+						m.set_surface_override_material(i, pmat)
+		else:
+			var box := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(6.06, 2.59, 2.44)
+			box.mesh = bm
+			box.position.y = 1.295
+			var mat := StandardMaterial3D.new()
+			mat.albedo_color = col
+			box.material_override = mat
+			node = Node3D.new()
+			node.add_child(box)
+		add_child(node)
+		node.position = pos
+		node.rotation.y = deg_to_rad(float(s[2]))
+	# our emblem painted on the long container behind
+	var emb := UI.texture("emblem.png")
+	if emb:
+		var spr := Sprite3D.new()
+		spr.texture = emb
+		spr.pixel_size = 2.4 / 256.0
+		spr.position = Vector3(2.0, 1.32, -31.76)
+		spr.shaded = false
+		spr.modulate = Color(1, 0.92, 0.85, 0.95)
+		add_child(spr)
+	# skyline: a gantry crane and low warehouse blocks on the horizon, hazy in the fog
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.10, 0.07, 0.11)
+	dark.roughness = 0.9
+	for b in [[Vector3(8, 12, -66), Vector3(1.6, 24, 1.6)], [Vector3(44, 12, -66), Vector3(1.6, 24, 1.6)],
+			[Vector3(26, 24.6, -66), Vector3(46, 2.2, 2.4)], [Vector3(14, 25.6, -56), Vector3(2.0, 1.2, 20)],
+			[Vector3(30, 22.4, -65), Vector3(4, 2.6, 3)],
+			[Vector3(-46, 4, -80), Vector3(34, 8, 12)], [Vector3(-10, 3, -86), Vector3(26, 6, 12)],
+			[Vector3(34, 5, -82), Vector3(30, 10, 12)], [Vector3(62, 3.5, -76), Vector3(20, 7, 12)]]:
+		var bi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = b[1]
+		bi.mesh = bm
+		bi.material_override = dark
+		bi.position = b[0]
+		bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(bi)
+	var lamp := _unshaded(Color(1.0, 0.8, 0.5) * 3.0)
+	for x in [12.0, 24.0, 38.0]:
+		var li := MeshInstance3D.new()
+		var lm := BoxMesh.new()
+		lm.size = Vector3(1.2, 0.4, 0.4)
+		li.mesh = lm
+		li.material_override = lamp
+		li.position = Vector3(x, 23.2, -64.6)
+		add_child(li)
+	# floodlight masts with bright lamp heads (the glow does the rest)
+	for side: float in [-1.0, 1.0]:
+		var mast := MeshInstance3D.new()
+		var mm := BoxMesh.new()
+		mm.size = Vector3(0.3, 12.0, 0.3)
+		mast.mesh = mm
+		mast.material_override = dark
+		mast.position = Vector3(side * 13.5, 6.0, -21.0)
+		add_child(mast)
+		for k in 2:
+			var head := MeshInstance3D.new()
+			var hm := BoxMesh.new()
+			hm.size = Vector3(0.9, 0.55, 0.25)
+			head.mesh = hm
+			head.material_override = _unshaded(Color(1.0, 0.93, 0.78) * 3.2)
+			head.position = Vector3(side * 13.5 + (k - 0.5) * 1.05, 12.1, -20.8)
+			add_child(head)
+
+
+# ---------------------------------------------------------------- UI
 
 func _build_ui() -> void:
 	ui = CanvasLayer.new()
 	add_child(ui)
-	var root := Control.new()
-	UI.full_rect(root)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(root)
-	# Profile card (top-left).
-	var prof := UI.panel(Color(0, 0, 0, 0.45), 12)
-	prof.position = Vector2(20, 18)
-	root.add_child(prof)
-	var ph := HBoxContainer.new()
-	ph.add_theme_constant_override("separation", 12)
-	prof.add_child(ph)
-	var avatar := PanelContainer.new()
-	avatar.custom_minimum_size = Vector2(58, 58)
-	avatar.add_theme_stylebox_override("panel", UI.box(UI.ACCENT, 29, 0, Color.TRANSPARENT, 0.0))
-	var initial := UI.label(String(Game.profile.name).substr(0, 1), 32, UI.INK, "title")
-	initial.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	initial.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	avatar.add_child(initial)
-	ph.add_child(avatar)
-	var pv := VBoxContainer.new()
-	pv.add_theme_constant_override("separation", 2)
-	ph.add_child(pv)
-	var name_row := HBoxContainer.new()
-	name_row.add_theme_constant_override("separation", 12)
-	_name_label = UI.label(String(Game.profile.name), 26, UI.TEXT, "bold")
-	name_row.add_child(_name_label)
-	var edit := UI.button("EDIT", 14, "ghost", Vector2(56, 30))
+	_main_ui = Control.new()
+	UI.full_rect(_main_ui)
+	_main_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_main_ui)
+	var root := _main_ui
+	# soft vignette so text reads over the 3D
+	var top := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.5)], [0.16, Color(0, 0, 0, 0.0)], [0.8, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.55)]])
+	UI.full_rect(top)
+	root.add_child(top)
+	var left := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.45)], [0.25, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
+	UI.full_rect(left)
+	root.add_child(left)
+	_build_top_bar(root)
+	_build_feature_card(root)
+	_build_left_menu(root)
+	_build_right_column(root)
+	_build_bottom_left(root)
+	_build_name_plate(root)
+
+
+func _build_top_bar(root: Control) -> void:
+	# Player card: avatar with level badge, name + EDIT, level and a thin XP line.
+	var card := Control.new()
+	card.position = Vector2(0, 0)
+	card.size = Vector2(300, 62)
+	card.custom_minimum_size = card.size
+	card.draw.connect(func() -> void:
+		var pts := PackedVector2Array([Vector2(0, 0), Vector2(300, 0), Vector2(286, 62), Vector2(0, 62)])
+		card.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, 0.78), Color(0.1, 0.1, 0.12, 0.55), Color(0.1, 0.1, 0.12, 0.55), Color(0, 0, 0, 0.78)]))
+		card.draw_rect(Rect2(0, 60, 286, 2), Color(UI.ACCENT, 0.9)))
+	root.add_child(card)
+	var av := Panel.new()
+	av.position = Vector2(8, 5)
+	av.size = Vector2(52, 52)
+	av.add_theme_stylebox_override("panel", UI.box(Color(0.1, 0.1, 0.12), 0, 2, UI.ACCENT, 0.0))
+	card.add_child(av)
+	var em := UI.texture("emblem.png")
+	if em:
+		var t := TextureRect.new()
+		t.texture = em
+		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		t.position = Vector2(3, 3)
+		t.size = Vector2(46, 46)
+		av.add_child(t)
+	var lvb := PanelContainer.new()
+	lvb.add_theme_stylebox_override("panel", UI.box(UI.ACCENT, 0, 0, Color.TRANSPARENT, 3.0))
+	var lvl := UI.label(str(Game.level()), 14, UI.INK, "heavy")
+	lvl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lvb.add_child(lvl)
+	lvb.position = Vector2(42, 40)
+	lvb.custom_minimum_size = Vector2(22, 18)
+	card.add_child(lvb)
+	_name_label = UI.label(String(Game.profile.name), 24, UI.TEXT, "bold")
+	_name_label.position = Vector2(72, 4)
+	_name_label.size = Vector2(170, 30)
+	_name_label.clip_text = true
+	card.add_child(_name_label)
+	var edit := _pencil_button()
+	edit.name = "EditName"
+	edit.position = Vector2(248, 8)
 	edit.pressed.connect(_edit_name)
-	name_row.add_child(edit)
-	pv.add_child(name_row)
-	pv.add_child(UI.label("LEVEL %d" % Game.level(), 16, UI.ACCENT, "semi"))
-	var xp := ProgressBar.new()
-	xp.show_percentage = false
-	xp.custom_minimum_size = Vector2(190, 7)
-	xp.value = Game.level_progress() * 100.0
-	xp.add_theme_stylebox_override("background", UI.box(Color(1, 1, 1, 0.12), 3, 0, Color.TRANSPARENT, 0.0))
-	xp.add_theme_stylebox_override("fill", UI.box(UI.ACCENT, 3, 0, Color.TRANSPARENT, 0.0))
-	pv.add_child(xp)
-	# Stats + settings (top-right).
-	var top_r := HBoxContainer.new()
-	top_r.add_theme_constant_override("separation", 10)
-	top_r.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	top_r.position = Vector2(-560, 22)
-	top_r.size = Vector2(540, 60)
-	top_r.alignment = BoxContainer.ALIGNMENT_END
-	root.add_child(top_r)
-	for s in [["MATCHES", Game.profile.matches], ["WINS", Game.profile.wins], ["KILLS", Game.profile.kills]]:
-		var chip := UI.panel(Color(0, 0, 0, 0.45), 10)
-		var cv := VBoxContainer.new()
-		cv.add_theme_constant_override("separation", 0)
-		var val := UI.label(str(int(s[1])), 24, UI.TEXT, "number")
-		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		var cap := UI.label(String(s[0]), 13, UI.TEXT_DIM, "semi")
-		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		cv.add_child(val)
-		cv.add_child(cap)
-		chip.add_child(cv)
-		top_r.add_child(chip)
-	var gear := UI.button("SETTINGS", 18, "dark", Vector2(130, 58))
+	card.add_child(edit)
+	var lv_txt := UI.label("LV %d" % Game.level(), 14, UI.ACCENT, "bold")
+	lv_txt.position = Vector2(72, 34)
+	card.add_child(lv_txt)
+	var xp := Control.new()
+	xp.position = Vector2(110, 42)
+	xp.size = Vector2(140, 4)
+	xp.draw.connect(func() -> void:
+		xp.draw_rect(Rect2(Vector2.ZERO, xp.size), Color(1, 1, 1, 0.15))
+		xp.draw_rect(Rect2(Vector2.ZERO, Vector2(xp.size.x * Game.level_progress(), xp.size.y)), UI.ACCENT))
+	card.add_child(xp)
+	# Coin strip with a slanted end (offline, cosmetic).
+	var strip := Control.new()
+	strip.position = Vector2(292, 0)
+	strip.size = Vector2(330, 46)
+	strip.draw.connect(func() -> void:
+		var s := strip.size
+		strip.draw_colored_polygon(PackedVector2Array([Vector2(14, 0), Vector2(s.x, 0), Vector2(s.x - 22, s.y), Vector2(0, s.y)]), Color(0.16, 0.18, 0.22, 0.72))
+		strip.draw_line(Vector2(s.x, 0), Vector2(s.x - 22, s.y), Color(1, 1, 1, 0.25), 1.5, true))
+	root.add_child(strip)
+	var sh := HBoxContainer.new()
+	sh.position = Vector2(26, 5)
+	sh.add_theme_constant_override("separation", 8)
+	strip.add_child(sh)
+	sh.add_child(UI.icon("v_coin", 30, Color(1.0, 0.82, 0.25)))
+	var coins := UI.label(_fmt_thousands(_coins()), 26, UI.TEXT, "number")
+	coins.name = "Coins"
+	sh.add_child(coins)
+	sh.add_child(UI.spacer(0))
+	var div := ColorRect.new()
+	div.color = Color(1, 1, 1, 0.18)
+	div.custom_minimum_size = Vector2(1, 28)
+	div.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sh.add_child(div)
+	sh.add_child(UI.icon("v_trophy", 26, UI.TEXT))
+	var wins := UI.label("%d WINS" % int(Game.profile.wins), 20, UI.TEXT, "bold")
+	wins.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	wins.custom_minimum_size = Vector2(0, 34)
+	sh.add_child(wins)
+	var off := PanelContainer.new()
+	off.add_theme_stylebox_override("panel", UI.chamfer(Color(UI.ACCENT, 0.18), 4, 1, Color(UI.ACCENT, 0.6), 6.0, ["br"]))
+	off.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	off.add_child(UI.label("OFFLINE", 13, UI.ACCENT, "bold"))
+	sh.add_child(off)
+	# Top-right: logo + glyph buttons.
+	var tr := HBoxContainer.new()
+	tr.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	tr.offset_left = -420
+	tr.offset_right = -10
+	tr.offset_top = 6
+	tr.offset_bottom = 56
+	tr.alignment = BoxContainer.ALIGNMENT_END
+	tr.add_theme_constant_override("separation", 8)
+	root.add_child(tr)
+	var lg := UI.texture("logo.png")
+	if lg:
+		var lr := TextureRect.new()
+		lr.texture = lg
+		lr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		lr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		lr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		lr.custom_minimum_size = Vector2(46.0 * lg.get_width() / lg.get_height(), 46)
+		lr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tr.add_child(lr)
+		tr.add_child(UI.spacer(0))
+	var info := UI.glyph_button("v_info", 46, "?")
+	info.name = "HelpButton"
+	info.pressed.connect(_how_to_play)
+	tr.add_child(info)
+	var gear := UI.glyph_button("v_settings", 46, "SET")
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
-	top_r.add_child(gear)
-	# Title.
-	var title := UI.outlined(UI.label("LONE WOLF ARENA", 44, UI.TEXT, "title"), 6)
-	title.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	title.position = Vector2(-title.get_minimum_size().x * 0.5, 96)
-	title.add_theme_color_override("font_color", Color(1, 1, 1))
-	root.add_child(title)
-	var sub := UI.label("OFFLINE  ·  1 VS 1", 16, UI.ACCENT, "semi")
-	sub.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	sub.position = Vector2(-sub.get_minimum_size().x * 0.5, 146)
-	root.add_child(sub)
-	# Left menu.
+	tr.add_child(gear)
+
+
+func _pencil_button() -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(30, 26)
+	b.size = Vector2(30, 26)
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", UI.chamfer(Color(1, 1, 1, 0.08), 4, 1, Color(1, 1, 1, 0.25), 0.0, ["br"]))
+	b.add_theme_stylebox_override("hover", UI.chamfer(Color(1, 1, 1, 0.16), 4, 1, Color(1, 1, 1, 0.4), 0.0, ["br"]))
+	b.add_theme_stylebox_override("pressed", UI.chamfer(Color(UI.ACCENT, 0.4), 4, 1, UI.ACCENT, 0.0, ["br"]))
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var c := b.size * 0.5
+		var d := Vector2(1, -1).normalized()
+		var n := Vector2(1, 1).normalized()
+		var a := c - d * 7.0
+		var e := c + d * 6.0
+		b.draw_colored_polygon(PackedVector2Array([a + n * 2.2, e + n * 2.2, e - n * 2.2, a - n * 2.2]), UI.TEXT)
+		b.draw_colored_polygon(PackedVector2Array([a + n * 2.2, a - n * 2.2, a - d * 4.0]), UI.ACCENT))
+	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
+	return b
+
+
+func _coins() -> int:
+	return 500 + int(Game.profile.wins) * 120 + int(Game.profile.kills) * 15 + int(Game.profile.matches) * 25
+
+
+func _fmt_thousands(n: int) -> String:
+	var s := str(n)
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.substr(s.length() - 3) + out
+		s = s.substr(0, s.length() - 3)
+	return s + out
+
+
+## Featured card above the menu: the duel art with the mode pitch (opens HOW TO PLAY).
+func _build_feature_card(root: Control) -> void:
+	var tex := UI.texture("mode_lonewolf.jpg")
+	var b := Button.new()
+	b.name = "FeatureCard"
+	b.position = Vector2(10, 76)
+	b.size = Vector2(300, 132)
+	b.focus_mode = Control.FOCUS_NONE
+	for st in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, b.size)
+		if tex:
+			b.draw_texture_rect_region(tex, r, Rect2(40, 40, 560, 246))
+		b.draw_rect(Rect2(0, r.size.y - 50, r.size.x, 50), Color(0, 0, 0, 0.55))
+		b.draw_rect(r, Color(1, 1, 1, 0.25) if not b.is_hovered() else UI.ACCENT, false, 2.0))
+	b.pressed.connect(_how_to_play)
+	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
+	root.add_child(b)
+	var t1 := UI.shadowed(UI.label("1V1 DUEL", 26, UI.TEXT, "italic"))
+	t1.position = Vector2(12, 80)
+	b.add_child(t1)
+	var t2 := UI.label("BEAT THE BOT IN CARGO CAGE", 14, UI.ACCENT, "bold")
+	t2.position = Vector2(14, 108)
+	b.add_child(t2)
+	var tag := PanelContainer.new()
+	tag.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 5, 0, Color.TRANSPARENT, 6.0, ["br"]))
+	tag.add_child(UI.label("NEW MAP", 13, UI.INK, "heavy"))
+	tag.position = Vector2(8, 8)
+	b.add_child(tag)
+
+
+func _build_left_menu(root: Control) -> void:
 	var menu := VBoxContainer.new()
-	menu.add_theme_constant_override("separation", 12)
-	menu.position = Vector2(20, 210)
+	menu.name = "Menu"
+	menu.position = Vector2(0, 236)
+	menu.add_theme_constant_override("separation", 6)
 	root.add_child(menu)
-	var b1 := UI.button("BUNDLES", 22, "dark", Vector2(210, 60))
-	b1.name = "BundlesButton"
-	b1.pressed.connect(_open_wardrobe)
-	menu.add_child(b1)
-	var b2 := UI.button("CUSTOM HUD", 22, "dark", Vector2(210, 60))
-	b2.pressed.connect(Game.goto_hud_editor)
-	menu.add_child(b2)
-	var b3 := UI.button("HOW TO PLAY", 22, "dark", Vector2(210, 60))
-	b3.pressed.connect(_how_to_play)
-	menu.add_child(b3)
-	var b4 := UI.button("CREDITS", 22, "dark", Vector2(210, 60))
-	b4.name = "CreditsButton"
-	b4.pressed.connect(func() -> void: add_child(CreditsPanel.new()))
-	menu.add_child(b4)
-	# Equipped bundle (bottom-left).
-	var info := CharacterModel.bundle_info(String(Game.profile.bundle))
-	_bundle_label = UI.outlined(UI.label("", 20, UI.RARITY_COLORS[info.rarity], "bold"), 4)
-	_bundle_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	_bundle_label.position = Vector2(24, -70)
-	root.add_child(_bundle_label)
-	_update_bundle_label(String(Game.profile.bundle))
-	var ver := UI.label("v%s  ·  Made with Godot (open source)" % ProjectSettings.get_setting("application/config/version", "1.0"), 14, UI.TEXT_DIM, "semi")
-	ver.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	ver.position = Vector2(24, -36)
-	root.add_child(ver)
-	# Mode + START (bottom-right).
-	var mode := UI.panel(Color(0, 0, 0, 0.5), 12)
-	mode.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	mode.position = Vector2(-420, -268)
-	mode.custom_minimum_size = Vector2(400, 0)
-	root.add_child(mode)
-	var mv := VBoxContainer.new()
-	mv.add_theme_constant_override("separation", 8)
-	mode.add_child(mv)
-	mv.add_child(UI.label("LONE WOLF", 30, UI.TEXT, "title"))
-	mv.add_child(UI.label("1 VS 1  ·  1 ROUND  ·  BOT OPPONENT", 15, UI.TEXT_DIM, "semi"))
-	mv.add_child(UI.segmented(Game.DIFFICULTY_NAMES, int(Game.settings.difficulty), func(v: int) -> void:
-		Game.settings.difficulty = v
-		Game.save_settings(), 18, 118.0))
-	start_btn = UI.button("START", 44, "primary", Vector2(400, 92))
+	var items := [
+		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
+		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
+		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
+		["HOW TO PLAY", "v_info", "HowToPlayButton", _how_to_play],
+		["CREDITS", "v_star", "CreditsButton", _open_credits],
+	]
+	for it in items:
+		menu.add_child(_menu_row(String(it[0]), String(it[1]), String(it[2]), it[3]))
+
+
+func _menu_row(text: String, icon_name: String, node_name: String, action: Callable) -> Button:
+	var b := Button.new()
+	b.name = node_name
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(262, 50)
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.icon = UI.icon_texture(icon_name)
+	b.expand_icon = true
+	b.add_theme_constant_override("icon_max_width", 30)
+	b.add_theme_constant_override("h_separation", 12)
+	b.add_theme_font_override("font", UI.font("bold"))
+	b.add_theme_font_size_override("font_size", 25)
+	var empty := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
+	empty.content_margin_left = 22
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, empty)
+	b.add_theme_color_override("font_color", UI.TEXT)
+	b.add_theme_color_override("font_hover_color", UI.ACCENT)
+	b.add_theme_color_override("font_pressed_color", UI.ACCENT)
+	b.add_theme_constant_override("outline_size", 4)
+	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.55))
+	b.add_theme_color_override("icon_normal_color", UI.TEXT)
+	b.add_theme_color_override("icon_hover_color", UI.ACCENT)
+	b.add_theme_color_override("icon_pressed_color", UI.ACCENT)
+	b.draw.connect(func() -> void:
+		var s := b.size
+		# dark plate fading to the right, accent tick on the left
+		var pts := PackedVector2Array([Vector2(0, 2), Vector2(s.x, 2), Vector2(s.x - 14, s.y - 2), Vector2(0, s.y - 2)])
+		b.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, 0.78), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.78)]))
+		b.draw_rect(Rect2(0, 2, 4, s.y - 4), UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.3)))
+	b.mouse_entered.connect(b.queue_redraw)
+	b.mouse_exited.connect(b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		action.call())
+	return b
+
+
+func _build_right_column(root: Control) -> void:
+	# START (bottom-right): the hero button.
+	start_btn = UI.hero_button("START", 52, Vector2(330, 78))
 	start_btn.name = "StartButton"
-	start_btn.add_theme_font_override("font", UI.font("title"))
 	start_btn.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	start_btn.position = Vector2(-420, -112)
+	start_btn.offset_left = -342
+	start_btn.offset_top = -90
+	start_btn.offset_right = -12
+	start_btn.offset_bottom = -12
 	start_btn.pressed.connect(_start)
 	root.add_child(start_btn)
+	# Mode card above it.
+	var card := Control.new()
+	card.name = "ModeCard"
+	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	card.offset_left = -430
+	card.offset_right = -12
+	card.offset_top = -170
+	card.offset_bottom = -98
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var thumb := UI.texture("mode_lonewolf.jpg")
+	card.draw.connect(func() -> void:
+		var s := card.size
+		var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
+		card.draw_polygon(pts, PackedColorArray([Color(0.16, 0.12, 0.07, 0.92), Color(0.16, 0.12, 0.07, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.12, 0.09, 0.06, 0.92)]))
+		if thumb:
+			card.draw_texture_rect_region(thumb, Rect2(s.x - 128, 6, 120, s.y - 12), Rect2(150, 40, 420, 250))
+			card.draw_rect(Rect2(s.x - 128, 6, 120, s.y - 12), Color(1, 1, 1, 0.35), false, 1.5)
+		card.draw_rect(Rect2(0, s.y - 2, s.x, 2), Color(UI.AMBER, 0.8)))
+	root.add_child(card)
+	var mode_l := UI.shadowed(UI.label("LONE WOLF", 32, UI.AMBER, "heavy"))
+	mode_l.position = Vector2(20, 2)
+	card.add_child(mode_l)
+	var map_l := UI.label("CARGO CAGE", 22, UI.TEXT, "heavy")
+	map_l.position = Vector2(22, 38)
+	card.add_child(map_l)
+	var sub := UI.label("1 VS 1  ·  1 ROUND", 14, UI.TEXT_DIM, "bold")
+	sub.position = Vector2(138, 44)
+	card.add_child(sub)
+	# Difficulty chips above the card.
+	var diff := HBoxContainer.new()
+	diff.name = "Difficulty"
+	diff.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	diff.offset_left = -430
+	diff.offset_right = -12
+	diff.offset_top = -214
+	diff.offset_bottom = -178
+	diff.add_theme_constant_override("separation", 6)
+	diff.alignment = BoxContainer.ALIGNMENT_END
+	root.add_child(diff)
+	var cap := UI.label("BOT", 15, UI.TEXT_DIM, "bold")
+	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cap.custom_minimum_size = Vector2(0, 36)
+	diff.add_child(cap)
+	var group := ButtonGroup.new()
+	for i in Game.DIFFICULTY_NAMES.size():
+		diff.add_child(_diff_chip(String(Game.DIFFICULTY_NAMES[i]), i, group))
+	# Match stats chips.
+	var stats := HBoxContainer.new()
+	stats.name = "Stats"
+	stats.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	stats.offset_left = -430
+	stats.offset_right = -12
+	stats.offset_top = -258
+	stats.offset_bottom = -222
+	stats.add_theme_constant_override("separation", 6)
+	stats.alignment = BoxContainer.ALIGNMENT_END
+	root.add_child(stats)
+	for s in [["v_player", "MATCHES", Game.profile.matches], ["v_trophy", "WINS", Game.profile.wins], ["v_skull", "KILLS", Game.profile.kills]]:
+		var p := PanelContainer.new()
+		p.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.55), 6, 1, Color(1, 1, 1, 0.12), 10.0, ["br"]))
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 6)
+		h.add_child(UI.icon(String(s[0]), 20, UI.TEXT_DIM))
+		var v := UI.label(str(int(s[2])), 22, UI.TEXT, "number")
+		v.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		h.add_child(v)
+		var c := UI.label(String(s[1]), 13, UI.TEXT_DIM, "bold")
+		c.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		h.add_child(c)
+		p.add_child(h)
+		stats.add_child(p)
+
+
+func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
+	var b := Button.new()
+	b.name = "Diff_" + text
+	b.toggle_mode = true
+	b.button_group = group
+	b.button_pressed = idx == int(Game.settings.difficulty)
+	b.focus_mode = Control.FOCUS_NONE
+	b.text = text
+	b.custom_minimum_size = Vector2(104, 36)
+	b.add_theme_font_override("font", UI.font("bold"))
+	b.add_theme_font_size_override("font_size", 17)
+	var off := UI.chamfer(Color(0, 0, 0, 0.55), 8, 1, Color(1, 1, 1, 0.2), 8.0, ["tl", "br"], 0.0)
+	var hov := UI.chamfer(Color(1, 1, 1, 0.1), 8, 1, Color(1, 1, 1, 0.35), 8.0, ["tl", "br"], 0.0)
+	var on := UI.chamfer(UI.ACCENT, 8, 0, Color.TRANSPARENT, 8.0, ["tl", "br"], 0.0)
+	b.add_theme_stylebox_override("normal", off)
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", on)
+	b.add_theme_stylebox_override("hover_pressed", on)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_color_override("font_color", UI.TEXT)
+	b.add_theme_color_override("font_hover_color", UI.TEXT)
+	b.add_theme_color_override("font_pressed_color", UI.INK)
+	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		Game.settings.difficulty = idx
+		Game.save_settings())
+	return b
+
+
+func _build_bottom_left(root: Control) -> void:
+	var info := CharacterModel.bundle_info(String(Game.profile.bundle))
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	box.offset_left = 22
+	box.offset_right = 420
+	box.offset_top = -78
+	box.offset_bottom = -12
+	box.add_theme_constant_override("separation", 2)
+	root.add_child(box)
+	var cap := UI.label("OUTFIT", 13, UI.TEXT_DIM, "bold")
+	box.add_child(cap)
+	_bundle_label = UI.shadowed(UI.label("", 22, UI.RARITY_COLORS[info.rarity], "bold"))
+	box.add_child(_bundle_label)
+	_update_bundle_label(String(Game.profile.bundle))
+	var ver := UI.label("v%s  ·  offline  ·  made with Godot" % ProjectSettings.get_setting("application/config/version", "1.0"), 13, Color(1, 1, 1, 0.45), "semi")
+	box.add_child(ver)
+
+
+## Name plate under the character's feet (follows the projected position).
+func _build_name_plate(root: Control) -> void:
+	_name_plate = PanelContainer.new()
+	_name_plate.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.6), 6, 1, Color(1, 1, 1, 0.14), 14.0, ["tl", "br"]))
+	_name_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 8)
+	h.add_child(UI.icon("v_player", 18, UI.ACCENT))
+	_plate_label = UI.label(String(Game.profile.name), 18, UI.TEXT, "bold")
+	h.add_child(_plate_label)
+	_name_plate.add_child(h)
+	root.add_child(_name_plate)
 
 
 func _update_bundle_label(id: String) -> void:
@@ -274,44 +771,207 @@ func _update_bundle_label(id: String) -> void:
 
 
 func _start() -> void:
+	if start_btn.disabled:
+		return
 	start_btn.disabled = true
-	start_btn.text = "LOADING..."
-	Audio.play("ui_select", 0.0)
-	await get_tree().create_timer(0.15).timeout
-	Game.goto_arena()
+	UI.set_caption(start_btn, "MATCHING")
+	Loading.start_match(self)
 
 
 func _open_settings() -> void:
+	if _find_settings():
+		return
 	var sp := SettingsPanel.new()
 	ui.add_child(sp)
 
 
+func _find_settings() -> SettingsPanel:
+	for c in ui.get_children():
+		if c is SettingsPanel:
+			return c
+	return null
+
+
+func _open_credits() -> void:
+	for c in get_children():
+		if c is CreditsPanel:
+			return
+	add_child(CreditsPanel.new())
+
+
+# ---------------------------------------------------------------- modals (how to play, name)
+
+func _open_modal(title: String, width := 980.0) -> VBoxContainer:
+	_close_modal()
+	_modal = Control.new()
+	UI.full_rect(_modal)
+	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui.add_child(_modal)
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.72)
+	UI.full_rect(shade)
+	_modal.add_child(shade)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UI.chamfer(Color(0.085, 0.08, 0.07, 0.97), 16, 1, Color(1, 1, 1, 0.12), 26.0, ["tl", "br"]))
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -width * 0.5
+	panel.offset_right = width * 0.5
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_modal.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	panel.add_child(v)
+	var head := HBoxContainer.new()
+	var sec := UI.section(title, 28)
+	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(sec)
+	var close := UI.close_button(46)
+	close.name = "Close"
+	close.pressed.connect(_close_modal)
+	head.add_child(close)
+	v.add_child(head)
+	var hz := Control.new()
+	hz.custom_minimum_size = Vector2(0, 5)
+	hz.draw.connect(func() -> void: UI.draw_hazard(hz, Rect2(Vector2.ZERO, Vector2(120, 5)), 6.0))
+	v.add_child(hz)
+	_modal.modulate.a = 0.0
+	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.15)
+	return v
+
+
+func _close_modal() -> void:
+	if _modal:
+		_modal.queue_free()
+		_modal = null
+
+
+const HOW_TO := [
+	["MOVE & LOOK", [
+		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
+		["v_eye", "LOOK", "Drag anywhere on the right side to turn the camera."],
+		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
+		["v_crosshair", "LEFT FIRE", "A second fire button for your left thumb (Settings > Controls)."],
+		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
+		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
+		["v_reload", "RELOAD", "Tap reload (or it reloads by itself when the magazine is empty)."],
+	]],
+	["ITEMS", [
+		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
+		["v_wall", "SHIELD WALL  x2", "Throws up cover that soaks 600 damage for 45 seconds."],
+		["item_grenade", "FRAG GRENADE  x1", "Up to 150 damage at the centre, 3-second fuse."],
+	]],
+	["THE MATCH", [
+		["v_player", "ONE ROUND VS A BOT", "1 vs 1, 200 HP each, Lv2 helmet and vest. Eliminate the bot to win."],
+		["v_timer", "PREP: PICK A WEAPON", "10 seconds behind the red barrier: the gun you pick is used by both of you."],
+		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
+	]],
+]
+
+
 func _how_to_play() -> void:
-	var dlg := AcceptDialog.new()
-	dlg.title = "HOW TO PLAY"
-	dlg.dialog_text = "Left side: move with the joystick.\nRight side: drag to look around.\nFIRE: hold to shoot - keep holding and drag to aim while firing.\nSCOPE: red-dot aim.  CROUCH / JUMP / RELOAD as labelled.\nHEAL: medkit (+75 HP, 3 s).  WALL: deploy a shield wall.\nGRENADE: throw a frag.\nWin the round by eliminating the bot before the zone closes."
-	dlg.add_theme_font_override("font", UI.font("semi"))
-	ui.add_child(dlg)
-	dlg.popup_centered(Vector2i(760, 420))
+	var v := _open_modal("HOW TO PLAY", 1040.0)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 470)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v.add_child(scroll)
+	var cols := HBoxContainer.new()
+	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_theme_constant_override("separation", 24)
+	scroll.add_child(cols)
+	var left := VBoxContainer.new()
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.add_theme_constant_override("separation", 6)
+	var right := VBoxContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.add_theme_constant_override("separation", 6)
+	cols.add_child(left)
+	cols.add_child(right)
+	for gi in HOW_TO.size():
+		var g: Array = HOW_TO[gi]
+		var col := left if gi == 0 else right
+		if gi > 1:
+			col.add_child(UI.spacer(6))
+		col.add_child(UI.section(String(g[0]), 18))
+		for it in g[1]:
+			col.add_child(_howto_item(String(it[0]), String(it[1]), String(it[2])))
+
+
+func _howto_item(icon_name: String, title: String, text: String) -> Control:
+	var p := PanelContainer.new()
+	var st := UI.chamfer(Color(1, 1, 1, 0.045), 6, 0, Color.TRANSPARENT, 10.0, ["br"])
+	st.content_margin_top = 5
+	st.content_margin_bottom = 5
+	p.add_theme_stylebox_override("panel", st)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 12)
+	var ic := PanelContainer.new()
+	var ics := UI.box(Color(0, 0, 0, 0.45), 21, 1, Color(1, 1, 1, 0.18), 0.0)
+	ics.set_content_margin_all(7)
+	ic.add_theme_stylebox_override("panel", ics)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ic.add_child(UI.icon(icon_name, 28, UI.TEXT))
+	h.add_child(ic)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", -3)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_child(UI.label(title, 17, UI.ACCENT, "bold"))
+	var t := UI.label(text, 15, UI.TEXT, "semi")
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(380, 0)
+	v.add_child(t)
+	h.add_child(v)
+	p.add_child(h)
+	return p
 
 
 func _edit_name() -> void:
-	var dlg := ConfirmationDialog.new()
-	dlg.title = "PLAYER NAME"
+	var v := _open_modal("PLAYER NAME", 560.0)
+	v.add_child(UI.label("Up to 14 letters or digits. Shown in matches and results.", 16, UI.TEXT_DIM, "semi"))
 	var le := LineEdit.new()
+	le.name = "NameEdit"
 	le.text = String(Game.profile.name)
 	le.max_length = 14
-	le.custom_minimum_size = Vector2(320, 48)
-	dlg.add_child(le)
-	ui.add_child(dlg)
-	dlg.confirmed.connect(func() -> void:
-		var n := le.text.strip_edges().to_upper()
+	le.custom_minimum_size = Vector2(0, 54)
+	le.add_theme_font_override("font", UI.font("bold"))
+	le.add_theme_font_size_override("font_size", 26)
+	le.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.25), 14.0, ["br"]))
+	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
+	le.add_theme_color_override("font_color", UI.TEXT)
+	le.add_theme_color_override("caret_color", UI.ACCENT)
+	v.add_child(le)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 12)
+	var cancel := UI.button("CANCEL", 20, "light", Vector2(170, 52))
+	cancel.pressed.connect(_close_modal)
+	var ok := UI.button("OK", 22, "primary", Vector2(170, 52))
+	ok.name = "NameOk"
+	var apply := func() -> void:
+		var n := _clean_name(le.text)
 		if n != "":
 			Game.profile.name = n
 			Game.save_profile()
-			_name_label.text = n)
-	dlg.popup_centered(Vector2i(420, 160))
+			_name_label.text = n
+			_plate_label.text = n
+		_close_modal()
+	ok.pressed.connect(apply)
+	le.text_submitted.connect(func(_t: String) -> void: apply.call())
+	row.add_child(cancel)
+	row.add_child(ok)
+	v.add_child(row)
 	le.grab_focus()
+	le.caret_column = le.text.length()
+
+
+func _clean_name(t: String) -> String:
+	var out := ""
+	for ch in t.strip_edges().to_upper():
+		if (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch in [" ", "_", "-", "."]:
+			out += ch
+	return out.strip_edges().substr(0, 14)
 
 
 # ---------------------------------------------------------------- wardrobe
@@ -319,119 +979,331 @@ func _edit_name() -> void:
 func _open_wardrobe() -> void:
 	if wardrobe:
 		return
+	_close_modal()
 	_preview_bundle = String(Game.profile.bundle)
 	wardrobe = Control.new()
+	wardrobe.name = "Wardrobe"
 	UI.full_rect(wardrobe)
 	wardrobe.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(wardrobe)
-	var panel := UI.panel(UI.PANEL, 14)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
-	panel.offset_left = -470
-	panel.offset_right = -16
-	panel.offset_top = 16
-	panel.offset_bottom = -16
-	wardrobe.add_child(panel)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 10)
-	panel.add_child(v)
-	v.add_child(UI.label("BUNDLES", 38, UI.TEXT, "title"))
+	_main_ui.visible = false
+	_move_camera(CAM_WARD_POS, CAM_WARD_LOOK)
+	var shade := UI.gradient_rect([[0.0, Color(0.03, 0.03, 0.04, 0.94)], [0.5, Color(0.03, 0.03, 0.04, 0.88)], [0.66, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
+	UI.full_rect(shade)
+	wardrobe.add_child(shade)
+	# Header.
+	var head := HBoxContainer.new()
+	head.position = Vector2(26, 16)
+	head.add_theme_constant_override("separation", 16)
+	wardrobe.add_child(head)
+	head.add_child(UI.section("BUNDLES", 30))
+	var note := UI.label("ALL OUTFITS UNLOCKED  ·  OFFLINE", 15, UI.TEXT_DIM, "bold")
+	note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	note.custom_minimum_size = Vector2(0, 36)
+	head.add_child(note)
+	# Rarity tabs (left).
+	var tabs := VBoxContainer.new()
+	tabs.position = Vector2(0, 76)
+	tabs.add_theme_constant_override("separation", 4)
+	wardrobe.add_child(tabs)
+	_ward_tabs.clear()
+	for f in ["all", "legendary", "epic", "rare", "common"]:
+		var tb := _ward_tab(f)
+		tabs.add_child(tb)
+		_ward_tabs[f] = tb
+	# Item grid with the item info strip under it.
+	var col := VBoxContainer.new()
+	col.anchor_bottom = 1.0
+	col.offset_left = 196
+	col.offset_right = 196 + 3 * CARD_SIZE.x + 2 * 10
+	col.offset_top = 74
+	col.offset_bottom = -16
+	col.add_theme_constant_override("separation", 10)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wardrobe.add_child(col)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	v.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 10)
-	scroll.add_child(list)
-	var group := ButtonGroup.new()
-	for b in CharacterModel.BUNDLE_INFO:
-		var card := Button.new()
-		card.toggle_mode = true
-		card.button_group = group
-		card.button_pressed = b.id == _preview_bundle
-		card.custom_minimum_size = Vector2(0, 84)
-		card.focus_mode = Control.FOCUS_NONE
-		card.name = "Bundle_" + String(b.id)
-		var rc: Color = UI.RARITY_COLORS[b.rarity]
-		var normal := UI.box(Color(rc.r * 0.25, rc.g * 0.25, rc.b * 0.25, 0.9), 10, 2, Color(rc, 0.5))
-		var pressed := UI.box(Color(rc.r * 0.45, rc.g * 0.45, rc.b * 0.45, 0.95), 10, 3, rc)
-		card.add_theme_stylebox_override("normal", normal)
-		card.add_theme_stylebox_override("hover", normal)
-		card.add_theme_stylebox_override("pressed", pressed)
-		card.add_theme_stylebox_override("hover_pressed", pressed)
-		card.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-		var cv := VBoxContainer.new()
-		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cv.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		cv.offset_left = 16
-		cv.offset_top = 10
-		var nm := UI.label(String(b.name), 26, UI.TEXT, "bold")
-		var tag := "%s  ·  %s" % [String(b.rarity).to_upper(), String(b.desc)]
-		if b.id == String(Game.profile.bundle):
-			tag += "  ·  EQUIPPED"
-		cv.add_child(nm)
-		cv.add_child(UI.label(tag, 15, rc, "semi"))
-		card.add_child(cv)
-		var id := String(b.id)
-		card.pressed.connect(func() -> void:
-			Audio.play("ui_select", -6.0)
-			_preview_bundle = id
-			model.apply_bundle(id)
-			_update_bundle_label(id))
-		list.add_child(card)
+	col.add_child(scroll)
+	_ward_grid = GridContainer.new()
+	_ward_grid.columns = 3
+	_ward_grid.add_theme_constant_override("h_separation", 10)
+	_ward_grid.add_theme_constant_override("v_separation", 10)
+	scroll.add_child(_ward_grid)
+	var info := VBoxContainer.new()
+	info.add_theme_constant_override("separation", 0)
+	col.add_child(info)
+	var ih := PanelContainer.new()
+	ih.add_theme_stylebox_override("panel", UI.chamfer(Color(0.05, 0.42, 0.48, 0.95), 8, 0, Color.TRANSPARENT, 14.0, ["tl"]))
+	var ihh := HBoxContainer.new()
+	ihh.add_theme_constant_override("separation", 12)
+	ihh.add_child(UI.icon("v_wardrobe", 24, UI.TEXT))
+	_ward_info_name = UI.label("", 24, UI.TEXT, "bold")
+	_ward_info_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ihh.add_child(_ward_info_name)
+	_ward_info_rarity = UI.label("", 16, UI.TEXT, "heavy")
+	_ward_info_rarity.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	ihh.add_child(_ward_info_rarity)
+	ih.add_child(ihh)
+	info.add_child(ih)
+	var ib := PanelContainer.new()
+	ib.add_theme_stylebox_override("panel", UI.chamfer(Color(0.06, 0.06, 0.07, 0.9), 8, 0, Color.TRANSPARENT, 14.0, ["br"]))
+	_ward_info_desc = UI.label("", 17, UI.TEXT, "semi")
+	_ward_info_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ib.add_child(_ward_info_desc)
+	info.add_child(ib)
+	# EQUIP / BACK under the preview.
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	v.add_child(row)
-	var equip := UI.button("EQUIP", 24, "primary", Vector2(220, 60))
-	equip.name = "EquipButton"
-	equip.pressed.connect(func() -> void:
-		Game.profile.bundle = _preview_bundle
-		Game.save_profile()
-		_close_wardrobe())
-	row.add_child(equip)
-	var back := UI.button("BACK", 22, "dark", Vector2(180, 60))
+	row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	row.offset_left = -460
+	row.offset_right = -20
+	row.offset_top = -80
+	row.offset_bottom = -14
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 14)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wardrobe.add_child(row)
+	var back := UI.button("BACK", 26, "light", Vector2(170, 64))
+	back.name = "BackButton"
 	back.pressed.connect(func() -> void:
 		model.apply_bundle(String(Game.profile.bundle))
 		_update_bundle_label(String(Game.profile.bundle))
 		_close_wardrobe())
 	row.add_child(back)
+	_ward_equip = UI.hero_button("EQUIP", 38, Vector2(240, 64))
+	_ward_equip.name = "EquipButton"
+	_ward_equip.pressed.connect(func() -> void:
+		Game.profile.bundle = _preview_bundle
+		Game.save_profile()
+		_update_bundle_label(_preview_bundle)
+		_close_wardrobe())
+	row.add_child(_ward_equip)
+	_fill_wardrobe()
+	wardrobe.modulate.a = 0.0
+	wardrobe.create_tween().tween_property(wardrobe, "modulate:a", 1.0, 0.2)
+
+
+func _ward_tab(f: String) -> Button:
+	var b := Button.new()
+	b.name = "Tab_" + f
+	b.toggle_mode = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(190, 52)
+	b.text = f.to_upper()
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.button_pressed = f == _ward_filter
+	b.add_theme_font_override("font", UI.font("bold"))
+	b.add_theme_font_size_override("font_size", 22)
+	var normal := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
+	var hover := UI.box(Color(1, 1, 1, 0.06), 0, 0, Color.TRANSPARENT, 0.0)
+	var on := UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 0.0, ["br"])
+	for st in [normal, hover, on]:
+		st.content_margin_left = 30
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", on)
+	b.add_theme_stylebox_override("hover_pressed", on)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_color_override("font_color", UI.TEXT if f == "all" else UI.RARITY_COLORS.get(f, UI.TEXT))
+	b.add_theme_color_override("font_hover_color", UI.TEXT)
+	b.add_theme_color_override("font_pressed_color", UI.INK)
+	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
+	b.draw.connect(func() -> void:
+		if b.button_pressed:
+			UI.draw_hazard(b, Rect2(0, 0, 9, b.size.y), 5.0, UI.INK))
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		_ward_filter = f
+		for k in _ward_tabs:
+			(_ward_tabs[k] as Button).set_pressed_no_signal(k == f)
+			(_ward_tabs[k] as Button).queue_redraw()
+		_fill_wardrobe())
+	return b
+
+
+func _fill_wardrobe() -> void:
+	for c in _ward_grid.get_children():
+		_ward_grid.remove_child(c)
+		c.queue_free()
+	var group := ButtonGroup.new()
+	var list := []
+	for r in RARITY_ORDER:
+		for b in CharacterModel.BUNDLE_INFO:
+			if b.rarity == r and (_ward_filter == "all" or _ward_filter == r):
+				list.append(b)
+	for b in list:
+		_ward_grid.add_child(_bundle_card(b, group))
+	_update_ward_info()
+
+
+func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
+	var id := String(b.id)
+	var rc: Color = UI.RARITY_COLORS[b.rarity]
+	var card := Button.new()
+	card.name = "Bundle_" + id
+	card.toggle_mode = true
+	card.button_group = group
+	card.button_pressed = id == _preview_bundle
+	card.focus_mode = Control.FOCUS_NONE
+	card.custom_minimum_size = CARD_SIZE
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var portrait := UI.texture("bundle_%s.png" % id)
+	card.draw.connect(func() -> void:
+		var s := card.size
+		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.11, 0.105, 0.1, 0.96))
+		# rarity glow: soft concentric discs behind the outfit
+		var c := Vector2(s.x * 0.5, s.y * 0.44)
+		for i in 7:
+			var rr := s.x * (0.62 - i * 0.07)
+			card.draw_circle(c, rr, Color(rc, 0.05 + i * 0.012))
+		card.draw_rect(Rect2(0, 0, s.x, s.y * 0.5), Color(1, 1, 1, 0.02))
+		if portrait:
+			var ph := s.y - 58
+			var pw := ph * 0.75
+			card.draw_texture_rect(portrait, Rect2((s.x - pw) * 0.5, 8, pw, ph), false)
+		# name strip + rarity bar
+		card.draw_rect(Rect2(0, s.y - 52, s.x, 48), Color(0, 0, 0, 0.6))
+		card.draw_rect(Rect2(0, s.y - 5, s.x, 5), rc)
+		var sel := card.button_pressed
+		if sel:
+			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), UI.ACCENT, false, 3.0)
+		elif card.is_hovered():
+			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.5), false, 2.0)
+		else:
+			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0)
+		if id == String(Game.profile.bundle):
+			UI.draw_tick_corner(card, Vector2(s.x, s.y - 5), 34.0))
+	var nm := UI.label(String(b.name), 18, UI.TEXT, "bold")
+	nm.position = Vector2(9, CARD_SIZE.y - 50)
+	nm.size = Vector2(CARD_SIZE.x - 18, 24)
+	nm.clip_text = true
+	card.add_child(nm)
+	var rl := UI.label(String(b.rarity).to_upper(), 14, rc, "bold")
+	rl.position = Vector2(9, CARD_SIZE.y - 28)
+	card.add_child(rl)
+	card.mouse_entered.connect(card.queue_redraw)
+	card.mouse_exited.connect(card.queue_redraw)
+	card.toggled.connect(func(_on: bool) -> void: card.queue_redraw())
+	card.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		_preview_bundle = id
+		model.apply_bundle(id)
+		_update_bundle_label(id)
+		_update_ward_info()
+		for other in _ward_grid.get_children():
+			(other as Control).queue_redraw())
+	return card
+
+
+func _update_ward_info() -> void:
+	if _ward_info_name == null:
+		return
+	var info := CharacterModel.bundle_info(_preview_bundle)
+	_ward_info_name.text = String(info.name)
+	_ward_info_rarity.text = String(info.rarity).to_upper()
+	_ward_info_rarity.add_theme_color_override("font_color", UI.RARITY_COLORS[info.rarity].lightened(0.25))
+	var equipped := _preview_bundle == String(Game.profile.bundle)
+	_ward_info_desc.text = String(info.desc) + ("   EQUIPPED" if equipped else "")
+	if _ward_equip:
+		UI.set_caption(_ward_equip, "EQUIPPED" if equipped else "EQUIP")
 
 
 func _close_wardrobe() -> void:
 	if wardrobe:
 		wardrobe.queue_free()
 		wardrobe = null
+		_ward_grid = null
+		_ward_info_name = null
+		_ward_equip = null
+	_main_ui.visible = true
+	_move_camera(CAM_MAIN_POS, CAM_MAIN_LOOK)
+
+
+func _move_camera(pos: Vector3, look: Vector3) -> void:
+	# start from where the camera looks now (also mid-transition)
+	_cam_from_pos = camera.position
+	_cam_from_look = camera.position + (-camera.global_basis.z) * camera.position.distance_to(_cam_to_look)
+	_cam_to_pos = pos
+	_cam_to_look = look
+	_cam_t = 0.0
 
 
 # ---------------------------------------------------------------- input / anim
 
+func _modal_open() -> bool:
+	if _modal or _find_settings():
+		return true
+	for c in get_children():
+		if c is CreditsPanel:
+			return true
+	return false
+
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
-		var vs := get_viewport().get_visible_rect().size
-		if t.pressed and t.position.x < vs.x * 0.55 and t.position.y > vs.y * 0.25 and t.position.y < vs.y * 0.85:
+		if t.pressed and _drag_index == -1 and not _modal_open() and _in_drag_zone(t.position):
 			_drag_index = t.index
 		elif not t.pressed and t.index == _drag_index:
 			_drag_index = -1
 	elif event is InputEventScreenDrag:
 		var d := event as InputEventScreenDrag
 		if d.index == _drag_index:
-			model.rotation.y += d.relative.x * 0.01
-			_turntable = 2.0
+			var vs := get_viewport().get_visible_rect().size
+			model.rotation.y += d.relative.x / maxf(vs.x, 1.0) * 6.0
+			_idle_t = 0.0
+
+
+## Where a drag turns the character: around it, between the menus.
+func _in_drag_zone(p: Vector2) -> bool:
+	var vs := get_viewport().get_visible_rect().size
+	var x := p.x / vs.x
+	var y := p.y / vs.y
+	if wardrobe:
+		return x > 0.62 and y > 0.1 and y < 0.68
+	return x > 0.24 and x < 0.66 and y > 0.1 and y < 0.86
 
 
 func _process(delta: float) -> void:
 	_time += delta
-	_turntable -= delta
+	_idle_t += delta
+	if _cam_t < 1.0:
+		_cam_t = minf(1.0, _cam_t + delta / 0.45)
+		var k := 1.0 - pow(1.0 - _cam_t, 3.0)
+		camera.position = _cam_from_pos.lerp(_cam_to_pos, k)
+		camera.look_at(_cam_from_look.lerp(_cam_to_look, k))
+	# back to the hero angle a while after a drag
+	if _drag_index == -1 and _idle_t > 4.0:
+		model.rotation.y = lerp_angle(model.rotation.y, MODEL_YAW, minf(1.0, delta * 2.0))
 	if start_btn and not start_btn.disabled:
-		var s := 1.0 + sin(_time * 3.0) * 0.015
+		var s := 1.0 + sin(_time * 3.2) * 0.012
 		start_btn.pivot_offset = start_btn.size * 0.5
 		start_btn.scale = Vector2(s, s)
+	if start_btn:
+		start_btn.queue_redraw()
+	if _ward_equip:
+		_ward_equip.queue_redraw()
+	if _name_plate and _main_ui.visible and camera:
+		var feet := Vector3(model.global_position.x, PODIUM_TOP, 0.55)
+		if not camera.is_position_behind(feet):
+			var p := camera.unproject_position(feet)
+			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5, 0)).round()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if wardrobe:
+		if _find_settings():
+			return                  # the panel closes itself
+		for c in get_children():
+			if c is CreditsPanel:
+				c.queue_free()
+				return
+		if _modal:
+			_close_modal()
+		elif wardrobe:
+			model.apply_bundle(String(Game.profile.bundle))
+			_update_bundle_label(String(Game.profile.bundle))
 			_close_wardrobe()
 		else:
 			get_tree().quit()

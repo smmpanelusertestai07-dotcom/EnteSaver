@@ -37,7 +37,8 @@ PROPS = os.path.join(ROOT, "assets", "props")
 #       the sprint button sits on the left and runs right.
 # options: "rifle" (pose icons hold the AR, default True), "bold" (thickening, fraction of the
 #          canvas height; default 0.022 for poses, 0 for props), "margin" (default 0.06 / 0.04),
-#          "aim" (pose tweaks after the frame is set: [(bone, world direction of the bone)]).
+#          "aim" (pose tweaks after the frame is set: [(bone, world direction of the bone)]),
+#          "mod" (prop edits before rendering: "lever" = lever_action()).
 SPRINT_POSE = [
     ("spine_01", (0, -0.45, 1)),
     ("thigh_l", (0, -0.95, -0.30)), ("calf_l", (0, 0.25, -1)),
@@ -52,11 +53,15 @@ LEAP_POSE = [("spine_01", (0, -0.2, 1)), ("thigh_l", (0, -0.75, -0.65)), ("calf_
 ICONS = {
     "stance_sprint": ("pose", "idle", 0, "side_r", (256, 256), {"rifle": False, "aim": SPRINT_POSE}),
     "stance_stand": ("pose", "idle", 0, "side_l", (256, 256)),
-    "stance_crouch": ("pose", "crouch_idle", 0, "side_l", (256, 256)),
+    # jump / crouch: extra thickening so the right-column buttons stay crisp down to ~45 px
+    "stance_crouch": ("pose", "crouch_idle", 0, "side_l", (256, 256), {"bold": 0.034}),
     "stance_prone": ("pose", "prone_idle", 0, "side_l", (256, 256)),
-    "stance_jump": ("pose", "idle", 0, "side_l", (256, 256), {"aim": LEAP_POSE}),
+    "stance_jump": ("pose", "idle", 0, "side_l", (256, 256), {"aim": LEAP_POSE, "bold": 0.034}),
     "weapon_ar": ("prop", "weapon_ar", None, "side_l", (512, 192)),
     "weapon_sg": ("prop", "weapon_sg", None, "side_l", (512, 192)),
+    # The lever shotgun uses the pump gun's 3D model in the game; its icon is that model turned
+    # into a lever action (see lever_action) so the two pick cards never look the same.
+    "weapon_sg_lever": ("prop", "weapon_sg", None, "side_l", (512, 192), {"mod": "lever"}),
     "weapon_smg": ("prop", "weapon_smg", None, "side_l", (512, 192)),
     "weapon_sniper": ("prop", "weapon_sniper", None, "side_l", (512, 192)),
     "weapon_pistol": ("prop", "weapon_pistol", None, "side_l", (320, 192)),
@@ -277,6 +282,69 @@ def attach_rifle(arm):
         o.matrix_world = M @ o.matrix_world
 
 
+def _new_object(name, bm):
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    return ob
+
+
+def _box(lo, hi):
+    import bmesh
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    for v in bm.verts:
+        v.co = Vector(((lo[0] + hi[0]) * 0.5 + v.co.x * (hi[0] - lo[0]), (lo[1] + hi[1]) * 0.5 + v.co.y * (hi[1] - lo[1]),
+                       (lo[2] + hi[2]) * 0.5 + v.co.z * (hi[2] - lo[2])))
+    return _new_object("LeverPart", bm)
+
+
+def _loop(center, ry, rz, thick, seg=48, ring=10):
+    """Elliptic ring in the Y-Z plane (seen from the side: an oval loop)."""
+    import bmesh
+    bm = bmesh.new()
+    rows = []
+    for i in range(seg):
+        a = 2.0 * math.pi * i / seg
+        c = Vector((0.0, center[1] + ry * math.cos(a), center[2] + rz * math.sin(a)))
+        n = Vector((0.0, math.cos(a) / ry, math.sin(a) / rz)).normalized()
+        rows.append([bm.verts.new(c + n * (thick * math.cos(b)) + Vector((thick * math.sin(b), 0.0, 0.0)))
+                     for b in [2.0 * math.pi * j / ring for j in range(ring)]])
+    for i in range(seg):
+        for j in range(ring):
+            r0, r1 = rows[i], rows[(i + 1) % seg]
+            bm.faces.new((r0[j], r1[j], r1[(j + 1) % ring], r0[(j + 1) % ring]))
+    return _new_object("LeverLoop", bm)
+
+
+def lever_action(meshes):
+    """Lever-action shotgun from the pump gun's mesh (world space, muzzle +Y, metres): the grooved
+    wooden pump is cut away, barrel and magazine tube end 9 cm sooner, a smooth wooden forend and
+    a barrel band go on, and a finger-lever loop hangs under the receiver in front of the grip."""
+    import bmesh
+    for ob in meshes:
+        me = ob.data
+        M = ob.matrix_world
+        Mi = M.inverted()
+        wood = {i for i, m in enumerate(me.materials) if m and "wood" in m.name.lower()}
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        pump = [f for f in bm.faces if f.material_index in wood and (M @ f.calc_center_median()).y > 0.15]
+        bmesh.ops.delete(bm, geom=pump, context="FACES")
+        for v in bm.verts:
+            w = M @ v.co
+            if w.y > 0.47:
+                w.y -= 0.09
+                v.co = Mi @ w
+        bm.to_mesh(me)
+        bm.free()
+    _box((-0.021, 0.252, 0.05), (0.021, 0.372, 0.106))      # forend
+    _box((-0.014, 0.40, 0.054), (0.014, 0.414, 0.112))      # barrel band
+    _loop((0.0, 0.098, -0.012), 0.058, 0.034, 0.0065)       # finger lever
+
+
 def prop_icon(name, prop, view, canvas, opts=None):
     opts = opts or {}
     src = os.path.join(PROPS, prop + ".glb")
@@ -285,6 +353,8 @@ def prop_icon(name, prop, view, canvas, opts=None):
         return
     sc = reset()
     bpy.ops.import_scene.gltf(filepath=src)
+    if opts.get("mod") == "lever":
+        lever_action([o for o in bpy.data.objects if o.type == "MESH"])
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
     apply_white(meshes)
     lo, hi = world_bounds(meshes)

@@ -5,7 +5,9 @@ extends Control
 ##    ROUND n", a "| WEAPON" label, a 4-column grid of gun cards (silhouette, name, class; the
 ##    choice gets a yellow outline and a tick), a countdown and a yellow SELECT button. It calls
 ##    on_pick exactly once: SELECT or the close X confirm the current choice, so does the timer;
-##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs.
+##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs. It stays
+##    between the widgets listed in `avoid` (the HUD passes the minimap and the weapon panel),
+##    so on 16:9 it gets narrower and its header and columns shrink to fit instead of covering them.
 ## The HUD sends taps here first (tap() returns true when a panel used the tap).
 
 const CLASS_NAMES := {"AR": "ASSAULT RIFLE", "SMG": "SUBMACHINE GUN", "SG": "SHOTGUN", "PISTOL": "HAND CANNON",
@@ -20,6 +22,7 @@ var pick_left := 0.0
 var pick_total := 1.0
 var pick_round := 1
 var board_open := false
+var avoid: Array[Rect2] = []      # screen rects the scoreboard keeps clear of (set by the HUD)
 var _pick_cb := Callable()
 var _pick_done := true
 var _anim := 0.0
@@ -162,9 +165,20 @@ func pick_close_rect() -> Rect2:
 
 func board_rect() -> Rect2:
 	var u := _u()
-	var w := minf(1.34 * u, size.x - 0.1 * u)
 	var h := (0.155 + maxi(_rows.size(), 2) * 0.085 + 0.075) * u
-	return Rect2(Vector2((size.x - w) * 0.5, 0.17 * size.y), Vector2(w, h))
+	var y0 := 0.17 * size.y
+	var lo := 0.05 * u
+	var hi := size.x - 0.05 * u
+	for r: Rect2 in avoid:
+		if r.end.y <= y0 or r.position.y >= y0 + h:
+			continue
+		if r.get_center().x < size.x * 0.5:
+			lo = maxf(lo, r.end.x + 0.02 * u)
+		else:
+			hi = minf(hi, r.position.x - 0.02 * u)
+	var w := clampf(hi - lo, 0.8 * u, 1.34 * u)
+	var x := clampf((size.x - w) * 0.5, lo, maxf(hi - w, lo))
+	return Rect2(Vector2(x, y0), Vector2(w, h))
 
 
 func board_close_rect() -> Rect2:
@@ -296,23 +310,43 @@ func _draw_board() -> void:
 		map_name = String(arena.get("map_name"))
 		round_i = int(arena.get("round_index"))
 		goal = int(arena.get("rounds_to_win"))
+	# Header: title on the left, round / objective on the right; on a narrow board the mode
+	# name goes first, then the title shrinks, so the two never run into each other.
 	var hy := r.position.y + 0.045 * u
 	draw_rect(Rect2(Vector2(r.position.x + 0.03 * u, hy - 0.016 * u), Vector2(0.007 * u, 0.032 * u)), Color(HudDraw.YELLOW, a))
-	HudDraw.text_parts(self, [["SCOREBOARD   ", Color(1, 1, 1)], [mode + "  ·  " + map_name, Color(0.72, 0.76, 0.82)]],
-		Vector2(r.position.x + 0.05 * u, hy), int(0.032 * u), 0, 0, "bold", a)
-	HudDraw.text_parts(self, [["ROUND %d   ·   OBJECTIVE " % round_i, Color(1, 1, 1, 0.85)], [str(goal), HudDraw.YELLOW]],
-		Vector2(r.end.x - 0.1 * u, hy), int(0.026 * u), 2, 0, "semi", a)
+	var rfs := int(0.026 * u)
+	var right_parts := [["ROUND %d   ·   OBJECTIVE " % round_i, Color(1, 1, 1, 0.85)], [str(goal), HudDraw.YELLOW]]
+	var right_w := _parts_width(right_parts, rfs, "semi")
+	var right_x := r.end.x - 0.1 * u
+	var title_x := r.position.x + 0.05 * u
+	var room := right_x - right_w - 0.03 * u - title_x
+	var tfs := int(0.032 * u)
+	var title := [["SCOREBOARD   ", Color(1, 1, 1)], [mode + "  ·  " + map_name, Color(0.72, 0.76, 0.82)]]
+	if _parts_width(title, tfs, "bold") > room:
+		title = [["SCOREBOARD   ", Color(1, 1, 1)], [map_name, Color(0.72, 0.76, 0.82)]]
+	var tw := _parts_width(title, tfs, "bold")
+	if tw > room:
+		tfs = maxi(10, int(tfs * room / tw))
+	HudDraw.text_parts(self, title, Vector2(title_x, hy), tfs, 0, 0, "bold", a)
+	HudDraw.text_parts(self, right_parts, Vector2(right_x, hy), rfs, 2, 0, "semi", a)
 	var xr := board_close_rect()
 	HudDraw.close_button(self, xr.get_center(), xr.size.x * 0.5, a)
-	# Columns.
+	# Columns (header and value fonts fit the column width).
 	var cols := ["ROUNDS", "KILLS", "DAMAGE", "HEADSHOTS", "ACCURACY", "HP"]
 	var name_w := r.size.x * 0.33
 	var col_w := (r.size.x - name_w - 0.06 * u) / cols.size()
+	var hfs := int(0.022 * u)
+	var widest := 0.0
+	for c in cols:
+		widest = maxf(widest, HudDraw.text_width(String(c), hfs, "semi"))
+	if widest > col_w * 0.92:
+		hfs = maxi(8, int(hfs * col_w * 0.92 / widest))
+	var vfs := mini(int(0.032 * u), int(col_w * 0.92 / maxf(HudDraw.text_width("100%", 100, "number") / 100.0, 0.01)))
 	var x0 := r.position.x + 0.03 * u
 	var hy2 := r.position.y + 0.125 * u
-	HudDraw.text(self, "PLAYER", Vector2(x0 + 0.03 * u, hy2), int(0.022 * u), Color(0.7, 0.74, 0.8, a), 0, 0, "semi")
+	HudDraw.text(self, "PLAYER", Vector2(x0 + 0.03 * u, hy2), hfs, Color(0.7, 0.74, 0.8, a), 0, 0, "semi")
 	for c in cols.size():
-		HudDraw.text(self, String(cols[c]), Vector2(x0 + name_w + col_w * (c + 0.5), hy2), int(0.022 * u), Color(0.7, 0.74, 0.8, a), 1, 0, "semi")
+		HudDraw.text(self, String(cols[c]), Vector2(x0 + name_w + col_w * (c + 0.5), hy2), hfs, Color(0.7, 0.74, 0.8, a), 1, 0, "semi")
 	var row_h := 0.085 * u
 	var y := r.position.y + 0.155 * u
 	var rows := _rows
@@ -326,16 +360,25 @@ func _draw_board() -> void:
 		HudDraw.band(self, rr, Color(team, 0.3 * a), Color(team, 0.06 * a))
 		draw_rect(Rect2(rr.position, Vector2(0.008 * u, rr.size.y)), Color(team, a))
 		var cy := rr.get_center().y
-		var nw := HudDraw.text(self, String(row.get("name", "?")), Vector2(x0 + 0.03 * u, cy), int(0.032 * u), Color(1, 1, 1, a), 0, 0, "bold")
+		var nfs := int(0.032 * u)
+		var nm := String(row.get("name", "?"))
+		var nw0 := HudDraw.text_width(nm, nfs, "bold")
+		if nw0 > name_w - 0.07 * u:
+			nfs = maxi(10, int(nfs * (name_w - 0.07 * u) / nw0))
+		var nw := HudDraw.text(self, nm, Vector2(x0 + 0.03 * u, cy), nfs, Color(1, 1, 1, a), 0, 0, "bold")
 		if not bool(row.get("alive", true)):
-			HudDraw.text(self, "ELIMINATED", Vector2(x0 + 0.045 * u + nw, cy), int(0.02 * u), Color(1, 0.4, 0.35, a), 0, 0, "bold")
+			var tag_x := x0 + 0.045 * u + nw
+			if tag_x + HudDraw.text_width("ELIMINATED", int(0.02 * u), "bold") < x0 + name_w - 0.01 * u:
+				HudDraw.text(self, "ELIMINATED", Vector2(tag_x, cy), int(0.02 * u), Color(1, 0.4, 0.35, a), 0, 0, "bold")
+			else:
+				HudDraw.icon(self, HudDraw.tex("v_skull"), Vector2(tag_x + 0.012 * u, cy), Vector2(0.026, 0.026) * u, Color(1, 0.4, 0.35, a))
 		var vals := [str(row.get("rounds", 0)), str(row.get("kills", 0)), str(row.get("damage", 0)), str(row.get("headshots", 0)),
 			"%d%%" % int(row.get("accuracy", 0)), str(row.get("hp", 0))]
 		for c in vals.size():
 			var vc := Color(1, 1, 1, a)
 			if c == 0:
 				vc = Color(team.lightened(0.35), a)
-			HudDraw.text(self, String(vals[c]), Vector2(x0 + name_w + col_w * (c + 0.5), cy - (0.008 * u if c == 5 else 0.0)), int(0.032 * u), vc, 1, 0, "number")
+			HudDraw.text(self, String(vals[c]), Vector2(x0 + name_w + col_w * (c + 0.5), cy - (0.008 * u if c == 5 else 0.0)), vfs, vc, 1, 0, "number")
 		# HP mini bar under the number.
 		var hpf := clampf(float(row.get("hp", 0)) / Fighter.MAX_HP, 0.0, 1.0)
 		var bw := col_w * 0.6
@@ -345,3 +388,10 @@ func _draw_board() -> void:
 		y += row_h
 	HudDraw.text(self, "TAP THE SCORE BAR OR THE LIST BUTTON TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
 		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")
+
+
+func _parts_width(parts: Array, fs: int, kind: String) -> float:
+	var w := 0.0
+	for p in parts:
+		w += HudDraw.text_width(String(p[0]), fs, kind)
+	return w

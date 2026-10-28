@@ -143,8 +143,13 @@ ICONS["timer"] = svg(ring(64, 70, 44, 8) + '<rect x="54" y="8" width="20" height
 # Safe zone.
 ICONS["zone"] = svg(ring(64, 64, 46, 7) + dot(64, 64, 9) + path("M64 30 L56 44 H72 Z") + path("M64 98 L56 84 H72 Z")
                     + path("M30 64 L44 56 V72 Z") + path("M98 64 L84 56 V72 Z"))
-# Vest (body armor) and helmet.
-ICONS["vest"] = svg(path("M40 14 L52 14 C54 24 74 24 76 14 L88 14 L110 30 L104 60 L96 56 V114 H32 V56 L24 60 L18 30 Z"))
+# Vest (body armour): a sleeveless plate carrier - shoulder straps, V-neck, front seam, belt
+# band and two chest pouches (reads as armour, not as a T-shirt, down to ~22 px) - and helmet.
+ICONS["vest"] = svg(path("M36 10 H52 L64 32 L76 10 H92 Q94 42 114 48 V108 Q114 118 104 118 H24 Q14 118 14 108 V48 Q34 42 36 10 Z")
+                    + '<rect x="61.5" y="34" width="5" height="84" fill="#000"/>'
+                    + '<rect x="14" y="82" width="100" height="6" fill="#000"/>'
+                    + '<rect x="24" y="56" width="28" height="18" rx="3" fill="#000"/><rect x="76" y="56" width="28" height="18" rx="3" fill="#000"/>'
+                    + '<rect x="28" y="60" width="20" height="10" rx="2" fill="%s"/><rect x="80" y="60" width="20" height="10" rx="2" fill="%s"/>' % (W, W))
 ICONS["helmet"] = svg(path("M14 86 C14 46 36 22 66 22 C96 22 114 44 114 74 V86 H96 V96 H34 V86 Z"))
 # Eye (free look).
 ICONS["eye"] = svg(path("M6 64 C26 30 102 30 122 64 C102 98 26 98 6 64 Z") + '<circle cx="64" cy="64" r="22" fill="#000"/>' + dot(64, 64, 11))

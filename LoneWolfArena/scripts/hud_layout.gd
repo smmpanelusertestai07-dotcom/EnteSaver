@@ -9,8 +9,11 @@ extends RefCounted
 ## screen heights, so the 20:9 layout keeps its look from 16:9 to 22:9; on screens narrower than
 ## 16:9 (tablets) the whole HUD shrinks to fit. Editor overrides live in Game.hud_layout (saved
 ## JSON, tagged with "_v"; layouts from older versions are ignored).
+## v3: the weapon panel sits at the top like the reference (main slot y 0.05 .. 0.155, small
+## slots 0.166 .. 0.266) under a small corner gear; the scoreboard button moved left of the
+## panel; sprint and wall buttons 0.148 h.
 
-const VERSION := 2
+const VERSION := 3
 const REF_ASPECT := 20.0 / 9.0
 const MIN_ASPECT := 16.0 / 9.0
 const SIZE_MIN := 0.5            # editor size range relative to the default (50 .. 200 %)
@@ -19,6 +22,7 @@ const OPACITY_MIN := 0.1         # editor opacity range 10 .. 100 %
 const PANEL_W := 3.3             # weapon panel width in slot heights
 const PANEL_H := 2.05            # main slot (1) + gap + the row of small slots
 const STRIP_H := 0.17            # zone status strip under the minimap, in minimap sides
+const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button
 
 ## Hit-test order (first wins when two widgets overlap) and editor list.
 const ORDER := ["settings", "scoreboard", "weapons", "fire_r", "fire_l", "scope", "jump", "crouch", "prone",
@@ -31,14 +35,14 @@ const DEFAULTS := {
 	"jump": {"x": 0.932, "y": 0.725, "s": 0.115, "o": 0.85, "a": "r"},
 	"crouch": {"x": 0.932, "y": 0.925, "s": 0.11, "o": 0.85, "a": "r"},
 	"prone": {"x": 0.859, "y": 0.925, "s": 0.11, "o": 0.85, "a": "r"},
-	"sprint": {"x": 0.174, "y": 0.475, "s": 0.13, "o": 0.85, "a": "l"},
+	"sprint": {"x": 0.174, "y": 0.475, "s": 0.148, "o": 0.85, "a": "l"},
 	"reload": {"x": 0.735, "y": 0.8, "s": 0.1, "o": 0.85, "a": "r"},
 	"medkit": {"x": 0.28, "y": 0.925, "s": 0.11, "o": 0.85, "a": "l"},
-	"wall": {"x": 0.29, "y": 0.7, "s": 0.13, "o": 0.85, "a": "l"},
+	"wall": {"x": 0.29, "y": 0.7, "s": 0.148, "o": 0.85, "a": "l"},
 	"grenade": {"x": 0.648, "y": 0.925, "s": 0.11, "o": 0.85, "a": "c"},
-	"settings": {"x": 0.977, "y": 0.055, "s": 0.072, "o": 0.85, "a": "r"},
-	"scoreboard": {"x": 0.94, "y": 0.055, "s": 0.072, "o": 0.85, "a": "r"},
-	"weapons": {"x": 0.891, "y": 0.208, "s": 0.105, "o": 0.92, "a": "r"},
+	"settings": {"x": 0.952, "y": 0.027, "s": 0.046, "o": 0.9, "a": "r"},
+	"scoreboard": {"x": 0.785, "y": 0.216, "s": 0.062, "o": 0.85, "a": "r"},
+	"weapons": {"x": 0.891, "y": 0.158, "s": 0.105, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.1, "y": 0.155, "s": 0.26, "o": 0.95, "a": "l"},
 }
 const LABELS := {
@@ -111,6 +115,11 @@ static func size_px(w: Dictionary, vs: Vector2) -> float:
 
 static func radius(w: Dictionary, vs: Vector2) -> float:
 	return size_px(w, vs) * 0.5
+
+
+## Touch radius of a round button: never smaller than MIN_TOUCH (the small corner gear).
+static func touch_radius(w: Dictionary, vs: Vector2) -> float:
+	return maxf(radius(w, vs), MIN_TOUCH * unit(vs))
 
 
 ## Half size of the widget's box (keeps it on screen, used for hit tests).
