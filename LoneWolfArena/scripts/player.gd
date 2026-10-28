@@ -448,7 +448,19 @@ func _process(delta: float) -> void:
 	camera.fov = _fov
 	_update_fade(scoped)
 	var shoulder := 0.0 if (victory_cam or scoped) else (0.42 if ads else CAM_SHOULDER)
-	spring.position.x = lerpf(spring.position.x, shoulder, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
+	# Keep the shoulder offset out of walls (right side against a container): the spring arm
+	# only guards the line behind the shoulder, not the sideways step to it.
+	var walled := false
+	if shoulder > 0.0:
+		var origin := pitch_node.global_position
+		var res := trace(origin, pitch_node.global_basis.x, shoulder + 0.2, LAYER_WORLD)
+		if not res.is_empty():
+			shoulder = maxf(origin.distance_to(res.position) - 0.2, 0.0)
+			walled = true
+	if walled and shoulder < spring.position.x:
+		spring.position.x = shoulder        # pull in at once, ease back out
+	else:
+		spring.position.x = lerpf(spring.position.x, shoulder, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
 
 
 ## Finds an orbit angle with a clear 3 m view of the character (avoids walls).
