@@ -23,6 +23,7 @@ func _ready() -> void:
 	_test_spread()
 	_test_weapon_state()
 	_test_hud_layout()
+	_test_guard()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -104,3 +105,23 @@ func _test_hud_layout() -> void:
 	var tall := HudLayout.resolve({})
 	var wide := Vector2(1560, 720)
 	_check(HudLayout.center(tall.fire_r, wide).x > 1200.0, "layout scales to wide (19.5:9) screens")
+
+
+func _test_guard() -> void:
+	var n := SecureNum.new(200.0)
+	_near(n.value(), 200.0, "secure number keeps its value")
+	n.set_value(n.value() - 37.5)
+	_near(n.value(), 162.5, "secure number arithmetic")
+	var flags_before := Guard.flags.size()
+	n.set("_enc", int(n.get("_enc")) ^ 0x5A5A)
+	_near(n.value(), 0.0, "tampered secure number reads as 0")
+	_check(Guard.flags.has("memory"), "tampering is flagged")
+	Guard.flags.resize(flags_before)
+	var data := {"name": "ROOKIE", "xp": 1250, "wins": 3}
+	var signed := Guard.sign_dict(data)
+	_check(signed.has("_sig"), "profile gets a signature")
+	var parsed: Dictionary = JSON.parse_string(JSON.stringify(signed))
+	_check(Guard.verify_dict(parsed).ok, "signature survives a JSON round trip (ints become floats)")
+	parsed["xp"] = 999999
+	_check(not Guard.verify_dict(parsed).ok, "edited profile is rejected")
+	_check(Guard.verify_dict({"name": "OLD"}).unsigned, "old unsigned profile is accepted once")

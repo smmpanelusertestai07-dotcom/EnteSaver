@@ -384,7 +384,7 @@ func muzzle_position() -> Vector3:
 
 
 func _on_skeleton_updated() -> void:
-	if weapon_node == null or not weapon_node.visible or not weapon_node.top_level:
+	if not is_inside_tree() or weapon_node == null or not weapon_node.visible or not weapon_node.top_level:
 		return
 	if not (bone_idx.has("hand_r") and bone_idx.has("lowerarm_r")):
 		return

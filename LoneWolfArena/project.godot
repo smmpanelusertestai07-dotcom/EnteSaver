@@ -15,6 +15,7 @@ boot_splash/show_image=false
 
 [autoload]
 
+Guard="*res://autoload/guard.gd"
 Game="*res://autoload/game.gd"
 Audio="*res://autoload/audio.gd"
 

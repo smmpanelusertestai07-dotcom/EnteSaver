@@ -49,7 +49,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	settings = DEFAULT_SETTINGS.duplicate(true)
 	_merge_into(settings, _load_json(SETTINGS_PATH))
-	_merge_into(profile, _load_json(PROFILE_PATH))
+	_load_profile()
 	var hud: Variant = _load_json(HUD_PATH)
 	hud_layout = hud if hud is Dictionary else {}
 	for arg in OS.get_cmdline_user_args():
@@ -112,8 +112,27 @@ func reset_settings() -> void:
 	save_settings()
 
 
+## The profile (level, XP, wins) is signed with a device-bound HMAC; an edited file is
+## rejected and the profile starts fresh (keeping only the player name).
+func _load_profile() -> void:
+	var raw: Variant = _load_json(PROFILE_PATH)
+	if not raw is Dictionary or (raw as Dictionary).is_empty():
+		return
+	var check := Guard.verify_dict(raw)
+	if check.ok:
+		_merge_into(profile, check.data)
+		if check.unsigned:
+			save_profile()
+	else:
+		var keep_name: Variant = (raw as Dictionary).get("name", profile.name)
+		if typeof(keep_name) == TYPE_STRING:
+			profile.name = String(keep_name).substr(0, 14)
+		Guard.flag("save")
+		save_profile()
+
+
 func save_profile() -> void:
-	_save_json(PROFILE_PATH, profile)
+	_save_json(PROFILE_PATH, Guard.sign_dict(profile))
 
 
 func save_hud_layout(layout: Dictionary) -> void:

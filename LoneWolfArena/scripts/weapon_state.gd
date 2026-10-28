@@ -4,7 +4,12 @@ extends RefCounted
 
 var id: String
 var def: Dictionary
-var ammo: int
+var ammo: int:
+	get:
+		return int(_ammo.value())
+	set(v):
+		_ammo.set_value(v)
+var _ammo := SecureNum.new(0)
 var cooldown := 0.0
 var reloading := false
 var reload_left := 0.0

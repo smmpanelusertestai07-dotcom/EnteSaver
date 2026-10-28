@@ -32,7 +32,11 @@ const CROUCH_HEIGHT := 1.25
 
 var display_name := "PLAYER"
 var is_player := false
-var hp := MAX_HP
+var hp: float:
+	get:
+		return _hp.value()
+	set(v):
+		_hp.set_value(v)
 var alive := true
 var vest_reduction := 0.30
 var helmet_reduction := 0.35
@@ -40,9 +44,21 @@ var weapons: Array[WeaponState] = []
 var current := 0
 var crouching := false
 var ads := false
-var medkits := 2
-var shields := 2
-var grenades := 1
+var medkits: int:
+	get:
+		return int(_medkits.value())
+	set(v):
+		_medkits.set_value(v)
+var shields: int:
+	get:
+		return int(_shields.value())
+	set(v):
+		_shields.set_value(v)
+var grenades: int:
+	get:
+		return int(_grenades.value())
+	set(v):
+		_grenades.set_value(v)
 var healing := false
 var heal_left := 0.0
 var aim_yaw := 0.0
@@ -60,6 +76,11 @@ var last_damage_time := -99.0
 var last_shot_time := -99.0
 var invulnerable := false
 
+# HP and item counts are kept masked in memory (see SecureNum / Guard).
+var _hp := SecureNum.new(MAX_HP)
+var _medkits := SecureNum.new(2)
+var _shields := SecureNum.new(2)
+var _grenades := SecureNum.new(1)
 var _exclude: Array[RID] = []
 var _collider: CollisionShape3D
 var _capsule: CapsuleShape3D

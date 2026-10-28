@@ -24,6 +24,8 @@ func _ready() -> void:
 			_run_pose.call_deferred()
 		"victory":
 			_run_victory.call_deferred()
+		"perf":
+			_run_perf.call_deferred()
 
 
 func _log(t: String) -> void:
@@ -329,4 +331,38 @@ func _run_victory() -> void:
 		waited += 0.5
 	await _wait(1.0)
 	await _shot("v3_results")
+	get_tree().quit(0)
+
+
+## Renders the arena from a few spots and prints draw calls / primitives / objects per frame
+## and node counts after two back-to-back matches (leak check). Needs a real renderer (Xvfb).
+func _run_perf() -> void:
+	var report := {}
+	for round_i in 2:
+		Game.goto_arena()
+		var arena: Node = null
+		for i in 300:
+			await _wait(0.1)
+			arena = _scene()
+			if arena and arena.get("phase") == 1:
+				break
+		var p: Player = arena.get("player")
+		var worst := {"draw_calls": 0, "primitives": 0, "objects": 0}
+		for k in 8:
+			p.aim_yaw = k * TAU / 8.0
+			await _wait(0.4)
+			var vp := get_viewport().get_viewport_rid()
+			var dc := RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME)
+			var pr := RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME)
+			var ob := RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+			worst.draw_calls = maxi(worst.draw_calls, dc)
+			worst.primitives = maxi(worst.primitives, pr)
+			worst.objects = maxi(worst.objects, ob)
+		report["round_%d" % round_i] = {"worst": worst, "nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
+				"objects": Performance.get_monitor(Performance.OBJECT_COUNT), "orphans": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
+				"static_mem_mb": snappedf(Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, 0.1)}
+		_log("PERF round %d %s" % [round_i, JSON.stringify(report["round_%d" % round_i])])
+	Game.goto_lobby()
+	await _wait(1.0)
+	_log("PERF lobby nodes=%d orphans=%d" % [Performance.get_monitor(Performance.OBJECT_NODE_COUNT), Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)])
 	get_tree().quit(0)
