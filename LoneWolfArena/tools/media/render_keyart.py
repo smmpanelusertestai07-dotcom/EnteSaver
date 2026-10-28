@@ -192,6 +192,15 @@ def camera(loc, look, lens, fstop=None, focus=None):
     return cam
 
 
+def srgb(c):
+    """8-bit sRGB colour -> linear RGBA (shader colours are linear)."""
+    out = []
+    for v in c:
+        v = v / 255.0
+        out.append(v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4)
+    return (*out, 1.0)
+
+
 def sunset_world(sun_dir):
     """Sky by view direction: warm horizon -> rose -> violet zenith, a glow around the sun and
     faint streaky clouds above the horizon."""
@@ -204,14 +213,14 @@ def sunset_world(sun_dir):
     sep = nt.nodes.new("ShaderNodeSeparateXYZ")
     nt.links.new(tex.outputs["Generated"], sep.inputs[0])
     ramp = nt.nodes.new("ShaderNodeValToRGB")
+    stops = [(0.0, (255, 176, 84)), (0.05, (255, 124, 52)), (0.14, (236, 84, 84)), (0.27, (132, 62, 150)),
+             (0.42, (52, 58, 150)), (0.66, (18, 30, 92))]
     els = ramp.color_ramp.elements
-    els[0].position = 0.0
-    els[0].color = (1.0, 0.50, 0.16, 1)
-    els[1].position = 0.62
-    els[1].color = (0.10, 0.07, 0.30, 1)
-    for pos, col in ((0.07, (1.0, 0.34, 0.12, 1)), (0.2, (0.85, 0.20, 0.30, 1)), (0.38, (0.36, 0.12, 0.42, 1))):
-        e = els.new(pos)
-        e.color = col
+    while len(els) < len(stops):
+        els.new(0.5)
+    for e, (pos, col) in zip(els, stops):
+        e.position = pos
+        e.color = srgb(col)
     nt.links.new(sep.outputs["Z"], ramp.inputs[0])
     # sun glow: (dot(view, sun) ^ k) in warm yellow
     dot = nt.nodes.new("ShaderNodeVectorMath")
@@ -224,13 +233,26 @@ def sunset_world(sun_dir):
     nt.links.new(dot.outputs["Value"], clamp.inputs[0])
     pw = nt.nodes.new("ShaderNodeMath")
     pw.operation = "POWER"
-    pw.inputs[1].default_value = 18.0
+    pw.inputs[1].default_value = 48.0
     nt.links.new(clamp.outputs[0], pw.inputs[0])
+    halo = nt.nodes.new("ShaderNodeMixRGB")
+    halo.blend_type = "ADD"
+    halo.inputs["Color2"].default_value = srgb((255, 150, 60))
+    nt.links.new(pw.outputs[0], halo.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], halo.inputs["Color1"])
+    pw2 = nt.nodes.new("ShaderNodeMath")
+    pw2.operation = "POWER"
+    pw2.inputs[1].default_value = 900.0
+    nt.links.new(clamp.outputs[0], pw2.inputs[0])
+    core = nt.nodes.new("ShaderNodeMath")
+    core.operation = "MULTIPLY"
+    core.inputs[1].default_value = 6.0
+    nt.links.new(pw2.outputs[0], core.inputs[0])
     glow = nt.nodes.new("ShaderNodeMixRGB")
     glow.blend_type = "ADD"
-    glow.inputs["Color2"].default_value = (1.0, 0.62, 0.22, 1)
-    nt.links.new(pw.outputs[0], glow.inputs["Fac"])
-    nt.links.new(ramp.outputs["Color"], glow.inputs["Color1"])
+    glow.inputs["Color2"].default_value = srgb((255, 236, 190))
+    nt.links.new(core.outputs[0], glow.inputs["Fac"])
+    nt.links.new(halo.outputs["Color"], glow.inputs["Color1"])
     # clouds: stretched noise, only in a band above the horizon
     mapping = nt.nodes.new("ShaderNodeMapping")
     mapping.inputs["Scale"].default_value = (1.2, 1.2, 9.0)
@@ -263,11 +285,11 @@ def sunset_world(sun_dir):
     nt.links.new(cm.outputs[0], cm2.inputs[0])
     clouds = nt.nodes.new("ShaderNodeMixRGB")
     clouds.blend_type = "MIX"
-    clouds.inputs["Color2"].default_value = (1.0, 0.70, 0.55, 1)
+    clouds.inputs["Color2"].default_value = srgb((255, 196, 160))
     nt.links.new(cm2.outputs[0], clouds.inputs["Fac"])
     nt.links.new(glow.outputs["Color"], clouds.inputs["Color1"])
     bg = nt.nodes.new("ShaderNodeBackground")
-    bg.inputs[1].default_value = 1.5
+    bg.inputs[1].default_value = 1.0
     out = nt.nodes.new("ShaderNodeOutputWorld")
     nt.links.new(clouds.outputs["Color"], bg.inputs[0])
     nt.links.new(bg.outputs[0], out.inputs[0])
@@ -310,7 +332,7 @@ def hero():
     stripe = flat_material("Stripe", (0.85, 0.55, 0.04, 1), 0.5)
     add_box("Lane", (1.7, 8.0, 0.004), (0.2, 26.0, 0.01), stripe).rotation_euler = (0, 0, math.radians(-10))
 
-    sun_dir = (0.13, 1.0, 0.055)
+    sun_dir = (0.21, 1.0, 0.085)
     sunset_world(sun_dir)
     light("Sun", "SUN", (20, 40, 6), (0, 0, 1), 2.4, (1.0, 0.62, 0.36), 2.0)
     light("Key", "AREA", (2.4, -2.9, 2.6), (0, 0, 1.3), 520, (1.0, 0.86, 0.72), 2.4)
@@ -319,7 +341,7 @@ def hero():
     light("RimCool", "AREA", (-2.2, 0.9, 2.1), (0, 0, 1.25), 2200, (0.25, 0.70, 1.0), 0.9)
     light("OppRim", "AREA", (5.0, 17.0, 6.0), (3.6, 14.6, 3.6), 700, (1.0, 0.45, 0.2), 1.5)
     # Low hero angle; the character on the left third, the yard opening to the right.
-    camera((0.68, -4.4, 0.55), (0.72, 0.0, 1.16), 40, 2.2, (0.0, 0.0, 1.3))
+    camera((0.68, -4.4, 0.55), (0.72, 0.0, 1.16), 40, 1.6, (0.0, 0.0, 1.3))
 
 
 def portrait():
@@ -334,7 +356,7 @@ def portrait():
     light("Fill", "AREA", (-2.4, -2.0, 1.4), (0, 0, 1.0), 160, (0.7, 0.8, 1.0), 2.5)
     light("Rim", "AREA", (-1.2, 2.2, 2.4), (0, 0, 1.3), 900, (0.9, 0.95, 1.0), 1.2)
     light("Rim2", "AREA", (1.6, 2.0, 1.8), (0, 0, 1.1), 600, (1.0, 0.8, 0.6), 1.0)
-    camera((0.25, -5.6, 1.0), (0.12, 0.0, 0.93), 50)
+    camera((0.2, -3.0, 1.05), (0.08, 0.0, 0.92), 50)
 
 
 if SCENE == "portrait":
