@@ -4,6 +4,8 @@ extends Node
 ##   --autotest=sim     : headless full match simulation (scripted player vs bot), prints results.
 ## Pass with: godot --path . -- --autotest=screens --shots=/abs/dir
 
+const BOOT_SCENE := "res://scenes/loading.tscn"
+
 var shots_dir := ""
 var log_lines: PackedStringArray = []
 
@@ -13,6 +15,10 @@ func _ready() -> void:
 	shots_dir = Game.shots_dir if Game.shots_dir != "" else OS.get_user_data_dir().path_join("shots")
 	DirAccess.make_dir_recursive_absolute(shots_dir)
 	_log("autotest mode=%s shots=%s" % [Game.autotest, shots_dir])
+	# The boot screen hands over to the lobby by itself. Start once it has, so that a test's own
+	# scene change is not undone by that handover.
+	while get_tree().current_scene == null or get_tree().current_scene.scene_file_path == BOOT_SCENE:
+		await get_tree().process_frame
 	match Game.autotest:
 		"screens":
 			_run_screens.call_deferred()
