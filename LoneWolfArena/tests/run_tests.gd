@@ -25,6 +25,7 @@ func _ready() -> void:
 	_test_hud_layout()
 	_test_guard()
 	_test_apk_signature()
+	_test_settings_sanitize()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -198,3 +199,21 @@ func _test_apk_signature() -> void:
 	if FileAccess.file_exists(real):
 		var hashes := Guard.apk_signer_hashes(real)
 		_check(hashes.size() >= 1 and hashes[0].length() == 64, "shipped APK's signer certificate is read")
+
+
+func _test_settings_sanitize() -> void:
+	var saved := Game.settings.duplicate(true)
+	Game.settings.aim_assist_strength = 5000
+	Game.settings.sens_general = -40
+	Game.settings.difficulty = 9
+	Game.settings.graphics = -1
+	Game.settings.fps = 7
+	Game.settings.last_pick = "railgun"
+	Game._sanitize_settings()
+	_check(Game.settings.aim_assist_strength == 100, "edited aim assist strength is clamped to 100")
+	_check(Game.settings.sens_general == 1, "edited sensitivity is clamped to 1..200")
+	_check(Game.settings.difficulty == 2 and Game.DIFFICULTY_NAMES.size() > Game.settings.difficulty, "difficulty stays a valid index")
+	_check(Game.settings.graphics == 0, "graphics level clamped")
+	_check(Game.settings.fps == 60, "unknown frame rate falls back to 60")
+	_check(Game.settings.last_pick == Weapons.DEFAULT_PICK, "unknown weapon pick falls back to the default")
+	Game.settings = saved

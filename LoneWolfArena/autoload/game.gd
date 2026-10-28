@@ -36,6 +36,16 @@ const DEFAULT_SETTINGS := {
 	"last_pick": "ar",
 }
 
+## Valid ranges of the numeric settings. Values outside them (an edited or corrupted settings
+## file) are clamped on load and on save, so nothing can index past a list or overdrive a value.
+const SETTING_RANGES := {
+	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_sniper": [1, 200],
+	"sens_fire": [1, 200], "aim_assist_strength": [0, 100], "aim_precision": [0, 2], "left_fire": [0, 2],
+	"run_mode": [0, 2], "crosshair_color": [0, 3], "crosshair_size": [0, 100], "vol_master": [0, 100],
+	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2],
+}
+const FPS_OPTIONS := [30, 60, 90]
+
 ## The crosshair's idle colour (it always turns red on an enemy).
 const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
 const CROSSHAIR_COLOR_NAMES := ["WHITE", "GREEN", "YELLOW", "CYAN"]
@@ -51,7 +61,8 @@ var profile: Dictionary = {"name": "ROOKIE", "bundle": "default", "matches": 0, 
 var hud_layout: Dictionary = {}
 var last_result: Dictionary = {}
 
-## Automation (used by tests / screenshot runs): passed as user args after "--".
+## Automation (tests / screenshot runs from the editor binary): user args after "--".
+## Ignored in exported builds, so an installed game can't be started in a test mode.
 var autotest := ""
 var shots_dir := ""
 
@@ -68,14 +79,16 @@ func _ready() -> void:
 			(saved as Dictionary).erase(k)
 	_merge_into(settings, saved)
 	settings.settings_version = SETTINGS_VERSION
+	_sanitize_settings()
 	_load_profile()
 	var hud: Variant = _load_json(HUD_PATH)
 	hud_layout = hud if hud is Dictionary else {}
-	for arg in OS.get_cmdline_user_args():
-		if arg.begins_with("--autotest="):
-			autotest = arg.substr(11)
-		elif arg.begins_with("--shots="):
-			shots_dir = arg.substr(8)
+	if not OS.has_feature("template"):
+		for arg in OS.get_cmdline_user_args():
+			if arg.begins_with("--autotest="):
+				autotest = arg.substr(11)
+			elif arg.begins_with("--shots="):
+				shots_dir = arg.substr(8)
 	_setup_audio_buses()
 	apply_settings()
 	if autotest != "":
@@ -104,6 +117,16 @@ func _merge_into(target: Dictionary, src: Variant) -> void:
 					target[k] = v
 
 
+func _sanitize_settings() -> void:
+	for k in SETTING_RANGES:
+		var r: Array = SETTING_RANGES[k]
+		settings[k] = clampi(int(settings[k]), int(r[0]), int(r[1]))
+	if not int(settings.fps) in FPS_OPTIONS:
+		settings.fps = 60
+	if not String(settings.last_pick) in Weapons.PICKABLE:
+		settings.last_pick = Weapons.DEFAULT_PICK
+
+
 func _load_json(path: String) -> Variant:
 	if not FileAccess.file_exists(path):
 		return {}
@@ -121,6 +144,7 @@ func _save_json(path: String, data: Dictionary) -> void:
 
 
 func save_settings() -> void:
+	_sanitize_settings()
 	_save_json(SETTINGS_PATH, settings)
 	apply_settings()
 	settings_changed.emit()

@@ -36,6 +36,11 @@ func _ready() -> void:
 
 
 func _run_script(path: String) -> void:
+	# Only the project's own test scripts (never a file from elsewhere on the device).
+	if not path.begins_with("res://tests/") or ".." in path:
+		_log("refusing script outside res://tests/: " + path)
+		get_tree().quit(2)
+		return
 	var scr: Script = load(path)
 	if scr == null:
 		_log("cannot load " + path)
