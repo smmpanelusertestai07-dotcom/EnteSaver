@@ -141,11 +141,14 @@ func _build_environment(parent: Node3D) -> void:
 	e.glow_bloom = 0.0
 	e.glow_hdr_threshold = 1.05
 	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	# light indoor haze: depth cue across the 42 m hall
+	# light indoor haze on long views only: it starts beyond 38 m, so the top-down minimap
+	# render (camera 30 m above the floor) stays crisp
 	e.fog_enabled = true
-	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+	e.fog_mode = Environment.FOG_MODE_DEPTH
 	e.fog_light_color = Color(0.78, 0.8, 0.83)
-	e.fog_density = 0.0045
+	e.fog_density = 0.35
+	e.fog_depth_begin = 38.0
+	e.fog_depth_end = 75.0
 	e.fog_sky_affect = 0.0
 	env.environment = e
 	parent.add_child(env)
