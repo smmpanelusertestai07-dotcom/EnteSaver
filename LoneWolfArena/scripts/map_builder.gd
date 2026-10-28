@@ -300,7 +300,8 @@ func _configure_sets() -> void:
 	kit.set_config("c20", "container", cont, 1, 1, true)
 	kit.set_fallback("c20", [["paint", C20, Vector3(0, C_H * 0.5, 0)]])
 	# the walk-through container gets the finer paint (its walls are seen from close up inside)
-	kit.set_config("copen", "container_open", {"paint": "paint_fine", "metal": "metal_dark", "rubber": "rubber", "wood": "wood_floor"}, 1, 1, true)
+	# and a darker inside (see _container_material in map_kit.gd)
+	kit.set_config("copen", "container_open", {"paint": "paint_fine", "metal": "metal_dark", "rubber": "rubber", "wood": "wood_open"}, 1, 1, true)
 	kit.set_fallback("copen", [["paint", Vector3(6.058, 0.12, 2.438), Vector3(0, 2.53, 0)],
 		["paint", Vector3(6.058, 2.591, 0.07), Vector3(0, 1.3, -1.18)], ["paint", Vector3(6.058, 2.591, 0.07), Vector3(0, 1.3, 1.18)],
 		["wood_floor", Vector3(6.0, 0.12, 2.3), Vector3(0, 0.06, 0)]])

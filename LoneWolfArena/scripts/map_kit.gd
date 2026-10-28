@@ -13,6 +13,7 @@ const TEX := "res://assets/textures/"
 
 var _mats := {}
 var _texs := {}
+var _container_shader: Shader
 var _parts := {}        # prop file -> [[Mesh, Transform3D], ...] ([] if the file is missing)
 var _batches := {}      # batch name -> {"st": {mat_key: SurfaceTool}, "layers": int, "shadow": bool, "order": []}
 var _sets := {}         # set name -> {"file", "xforms", "colors", "overrides", "shadow", "layers", "colors_on"}
@@ -80,24 +81,20 @@ func _make(key: String) -> Material:
 			m = _std(Color(0.74, 0.74, 0.75), 0.6)
 			_set_tex(m, "floor_concrete", "floor_concrete_n", 0.55)
 		"paint":
-			# container paint: near-white texture x per-instance colour (MultiMesh colours)
-			m = _std(Color(1, 1, 1), 0.58, 0.18)
-			_set_tex(m, "container_paint")
-			m.vertex_color_use_as_albedo = true
-			m.vertex_color_is_srgb = true
-			# box-projected prop UVs are in metres (V = 1 - height): one tile = 4 m wide and
-			# exactly one container height (2.591 m), top edge at V = 0
-			m.uv1_scale = Vector3(0.25, 1.0 / 2.591, 1.0)
-			m.uv1_offset = Vector3(0.0, 1.0 - 1.0 / 2.591, 0.0)
+			# container paint: near-white texture x per-instance colour (MultiMesh colours), the
+			# rib slopes shaded a little darker. Box-projected prop UVs are in metres (V = 1 -
+			# height): one tile = 4 m wide and exactly one container height (2.591 m), top at V = 0.
+			return _container_material("container_paint", Color.WHITE, Vector2(0.25, 1.0 / 2.591),
+				Vector2(0.0, 1.0 - 1.0 / 2.591), true, 0.58, 0.18, false)
 		"paint_fine":
 			# the walk-through container: its walls are seen from ~1 m inside, so the paint uses
-			# the finer variant (1 tile = 2 m wide, spots about half the size)
-			m = _std(Color(1, 1, 1), 0.58, 0.18)
-			_set_tex(m, "container_paint_fine")
-			m.vertex_color_use_as_albedo = true
-			m.vertex_color_is_srgb = true
-			m.uv1_scale = Vector3(0.5, 1.0 / 2.591, 1.0)
-			m.uv1_offset = Vector3(0.0, 1.0 - 1.0 / 2.591, 0.0)
+			# the finer variant (1 tile = 2 m wide, spots about half the size), and the inside
+			# faces get darker away from the open ends
+			return _container_material("container_paint_fine", Color.WHITE, Vector2(0.5, 1.0 / 2.591),
+				Vector2(0.0, 1.0 - 1.0 / 2.591), true, 0.58, 0.18, true)
+		"wood_open":
+			# plank floor of the walk-through container (as wood_floor, darker inside)
+			return _container_material("wood_planks", Color(0.78, 0.6, 0.42), Vector2(0.6, 0.6), Vector2.ZERO, false, 0.8, 0.0, true)
 		"barrel_paint":
 			m = _std(Color(1, 1, 1), 0.45, 0.3)
 			m.vertex_color_use_as_albedo = true
@@ -243,6 +240,83 @@ func _make(key: String) -> Material:
 		_:
 			m = _std(Color(0.6, 0.6, 0.6))
 	return m
+
+
+## Container paint (and the walk-through container's floor): the StandardMaterial3D look it
+## replaces (texture x tint x per-instance colour, same roughness / metallic / specular), plus
+##  - rib shading: faces of the corrugation that slope away from the wall plane (or the roof
+##    plane) are up to `rib` darker, so the ribs read under the soft indoor light even on the
+##    deep-blue paint (geometry normals in the prop's own space, so it costs no texture);
+##  - for the walk-through container (`open_inside`), a fake ambient occlusion on the inside
+##    faces: they only see the sky through the open ends, so they darken with the distance from
+##    the nearest end and toward the ceiling (prop space: 6.06 m along X, 2.44 m along Z).
+func _container_material(albedo: String, tint: Color, uv_scale: Vector2, uv_offset: Vector2, instance_colors: bool,
+		rough: float, metal: float, open_inside: bool) -> ShaderMaterial:
+	if _container_shader == null:
+		_container_shader = Shader.new()
+		_container_shader.code = """
+shader_type spatial;
+render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform vec4 tint : source_color = vec4(1.0);
+uniform vec2 uv_scale = vec2(1.0);
+uniform vec2 uv_offset = vec2(0.0);
+uniform bool instance_colors = true;
+uniform float roughness_value = 0.6;
+uniform float metallic_value = 0.0;
+uniform float specular_value = 0.45;
+uniform float rib = 0.0;
+uniform bool open_inside = false;
+varying vec3 local_pos;
+varying vec3 local_nrm;
+
+void vertex() {
+	UV = UV * uv_scale + uv_offset;
+	if (!OUTPUT_IS_SRGB) {
+		COLOR.rgb = mix(pow((COLOR.rgb + vec3(0.055)) * (1.0 / (1.0 + 0.055)), vec3(2.4)), COLOR.rgb * (1.0 / 12.92),
+			lessThan(COLOR.rgb, vec3(0.04045)));
+	}
+	local_pos = VERTEX;
+	local_nrm = NORMAL;
+}
+
+void fragment() {
+	vec3 base = texture(albedo_tex, UV).rgb * tint.rgb;
+	if (instance_colors) {
+		base *= COLOR.rgb;
+	}
+	vec3 n = normalize(local_nrm);
+	vec2 h = normalize(n.xz + vec2(0.0001, 0.0));
+	float slope = abs(n.y) > 0.7 ? length(n.xz) * 1.6 : min(abs(h.x), abs(h.y));
+	float shade = 1.0 - rib * smoothstep(0.03, 0.3, slope);
+	if (open_inside) {
+		vec3 p = local_pos;
+		float walls = step(0.4, -sign(p.z) * n.z) * step(abs(p.z), 1.2);
+		float ceil_in = step(0.4, -n.y) * step(1.0, p.y) * step(p.y, 2.53);
+		float floor_in = step(0.4, n.y) * step(p.y, 0.3) * step(abs(p.z), 1.2);
+		float deep = smoothstep(0.1, 1.9, 3.03 - abs(p.x));
+		float up = smoothstep(0.4, 2.45, p.y);
+		shade *= 1.0 - max(walls, ceil_in) * (0.16 + 0.34 * deep) * (0.8 + 0.2 * up) - floor_in * 0.3 * deep;
+	}
+	ALBEDO = base * shade;
+	ROUGHNESS = roughness_value;
+	METALLIC = metallic_value;
+	SPECULAR = specular_value;
+}
+"""
+	var sm := ShaderMaterial.new()
+	sm.shader = _container_shader
+	sm.set_shader_parameter("albedo_tex", tex(albedo))
+	sm.set_shader_parameter("tint", tint)
+	sm.set_shader_parameter("uv_scale", uv_scale)
+	sm.set_shader_parameter("uv_offset", uv_offset)
+	sm.set_shader_parameter("instance_colors", instance_colors)
+	sm.set_shader_parameter("roughness_value", rough)
+	sm.set_shader_parameter("metallic_value", metal)
+	sm.set_shader_parameter("specular_value", 0.45)
+	sm.set_shader_parameter("rib", 0.22 if instance_colors else 0.0)
+	sm.set_shader_parameter("open_inside", open_inside)
+	return sm
 
 
 func _barrier_shader(floor_strip: bool) -> ShaderMaterial:

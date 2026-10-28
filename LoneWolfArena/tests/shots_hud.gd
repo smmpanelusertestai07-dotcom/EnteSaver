@@ -3,10 +3,11 @@ extends Node
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_hud.gd
 ## Prep with the weapon pick panel (pick + SELECT by touch), PREPARE countdown, round banner,
 ## the bot in view (red crosshair), firing (damage numbers that stack into one, hit marker),
-## red-dot ADS, reload ring, fists, the lever shotgun's own silhouette, sniper scope, sprint
-## (stick past the ring and the button), the settings gear, scoreboard (clear of the weapon
-## panel), healing, low HP with damage arcs, the elimination (red X, badge, kill feed) and the
-## HUD editor (select + drag). Returns 0, or 1 if a check failed.
+## separate damage numbers in a row (never on top of each other), red-dot ADS, reload ring,
+## fists, the lever shotgun's own silhouette, sniper scope, sprint (stick past the ring and the
+## button), the settings gear, scoreboard (clear of the weapon panel), healing, low HP with
+## damage arcs, the elimination (red X, badge, kill feed) and the HUD editor (select + drag).
+## Returns 0, or 1 if a check failed.
 
 var _fails := 0
 
@@ -79,10 +80,17 @@ func run(at: Node) -> int:
 	var burst_hits := int(p.stats.hits) - hits0
 	_check(burst_hits < 2 or (most >= 1 and most <= 2),
 		"rapid hits stack into one damage number (%d hits, at most %d numbers at once)" % [burst_hits, most], at)
+	_check(_numbers_apart(hud, p, vs), "damage numbers never cover each other", at)
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
 	b.hp = maxf(b.hp, 150.0)
 	_check(int(p.stats.hits) > 0, "shots hit the bot", at)
+	# Three hits that cannot merge (body, head, another source) at one point: a row, not a pile.
+	hud._dmg_numbers.clear()
+	for hit: Array in [[b, 22.0, false], [b, 41.0, true], [null, 22.0, false]]:
+		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
+	_check(hud._dmg_numbers.size() == 3 and _numbers_apart(hud, p, vs), "separate damage numbers line up side by side", at)
+	await at.shot("hud_06b_number_row")
 	# Red-dot ADS.
 	p.toggle_ads()
 	for i in 5:
@@ -207,6 +215,20 @@ func run(at: Node) -> int:
 	_check(eh.selected_id == "jump", "editor selects the dragged control", at)
 	at.log_line("HUD TOUR fails=%d" % _fails)
 	return 1 if _fails > 0 else 0
+
+
+## True when no two damage numbers on screen overlap.
+func _numbers_apart(hud: HUD, p: Player, vs: Vector2) -> bool:
+	var u := HudLayout.unit(vs)
+	var rects: Array[Rect2] = []
+	for n: Dictionary in hud._dmg_numbers:
+		if float(n.t) < HUD.DMG_LIFE - 0.1 and not p.camera.is_position_behind(n.pos):
+			var r: Rect2 = hud._dmg_rect(n, u).grow(-1.0)
+			for o in rects:
+				if o.intersects(r):
+					return false
+			rects.append(r)
+	return true
 
 
 ## Moves the player to the mouth of the spawn alcove and the bot to a nav point in plain sight.

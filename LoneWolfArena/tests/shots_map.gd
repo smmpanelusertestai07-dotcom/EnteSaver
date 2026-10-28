@@ -15,6 +15,26 @@ extends Node
 
 const BUDGET_DRAW_CALLS := 220
 const BUDGET_PRIMITIVES := 250000
+## Third-person views of the tour: name -> [player position, aim yaw, aim pitch].
+## LW_MAP_ONLY=<name,name> (environment) shoots just those views and skips every check (quick
+## look while tuning materials); LW_MAP_ONLY=all shoots them all.
+const PLAYER_VIEWS := {
+	"map_hall_a": [Vector3(-15.5, 0, 3.2), -PI * 0.5, -0.05],
+	"map_ramp_a": [Vector3(-14.0, 0, 0.3), -PI * 0.5 - 0.35, -0.02],
+	# on the west roof looking across the open bay to the east one, then the east roof outward
+	"map_high_west": [Vector3(-5.5, MapBuilder.C_H, 3.6), -PI * 0.5 + 0.12, -0.16],
+	"map_high_east": [Vector3(5.5, MapBuilder.C_H, -3.6), -PI * 0.5, -0.12],
+	# down in the bay (the zone's final circle), looking along it to the north lane
+	"map_bay": [Vector3(0.0, 0, 5.2), 0.0, 0.02],
+	"map_open_container": [Vector3(-14.5, 0, -8.7), -PI * 0.5, 0.0],
+	# standing in the walk-through container: the camera looks along its inside
+	"map_container_inside": [Vector3(-9.6, 0.12, -8.7), -PI * 0.5, 0.0],
+	"map_north_lane": [Vector3(-4.0, 0, -9.0), -PI * 0.5, 0.0],
+	# at the mouth of the east walk-through container: the camera ends up inside it
+	"map_south_lane": [Vector3(6.0, 0, 9.5), PI * 0.5, 0.0],
+	"map_sw_corner": [Vector3(-12.0, 0, 3.5), PI * 0.82, 0.05],
+	"map_nw_corner": [Vector3(-12.0, 0, -5.0), PI * 0.2, 0.1],
+}
 
 var at: Node
 var arena: Node
@@ -42,6 +62,17 @@ func run(autotest: Node) -> int:
 	cam.fov = 70.0
 	cam.far = 300.0
 	arena.add_child(cam)
+	var only := OS.get_environment("LW_MAP_ONLY")
+	if only != "":
+		hud.visible = false
+		hud.process_mode = Node.PROCESS_MODE_DISABLED
+		arena.set("prep_left", 0.3)
+		await at.wait_for_phase(arena, 1)
+		b.frozen = true
+		for view_name: String in PLAYER_VIEWS:
+			if only == "all" or view_name in only.split(","):
+				await _named_view(p, view_name)
+		return 0
 	# ---- PREP: barrier on
 	await at.shot("map_prep_a_hud")
 	hud.visible = false
@@ -110,7 +141,7 @@ func run(autotest: Node) -> int:
 	await at.shot("map_fight_a")
 	await _view("map_fight_b", map.spawn_b + _back(map.spawn_b_yaw, 3.3) + Vector3(0, 2.0, 0), map.spawn_b + _fwd(map.spawn_b_yaw, 10.0) + Vector3(0, 1.2, 0))
 	_use_player_cam(p)
-	await _player_view(p, Vector3(-15.5, 0, 3.2), -PI * 0.5, -0.05, "map_hall_a")
+	await _named_view(p, "map_hall_a")
 	# cost breakdown at the same view: without the fighters, then without sun shadows
 	p.visible = false
 	b.visible = false
@@ -122,17 +153,9 @@ func run(autotest: Node) -> int:
 	at.log_line("MAPPERF shadow pass: switching sun shadows off removes %d draw calls from the frame count (model: %d)" % [with_shadows - without, model])
 	p.visible = true
 	b.visible = true
-	await _player_view(p, Vector3(-14.0, 0, 0.3), -PI * 0.5 - 0.35, -0.02, "map_ramp_a")
-	# on the west roof looking across the open bay to the east one, then the east roof outward
-	await _player_view(p, Vector3(-5.5, MapBuilder.C_H, 3.6), -PI * 0.5 + 0.12, -0.16, "map_high_west")
-	await _player_view(p, Vector3(5.5, MapBuilder.C_H, -3.6), -PI * 0.5, -0.12, "map_high_east")
-	# down in the bay (the zone's final circle), looking along it to the north lane
-	await _player_view(p, Vector3(0.0, 0, 5.2), 0.0, 0.02, "map_bay")
-	await _player_view(p, Vector3(-14.5, 0, -8.7), -PI * 0.5, 0.0, "map_open_container")
-	await _player_view(p, Vector3(-4.0, 0, -9.0), -PI * 0.5, 0.0, "map_north_lane")
-	await _player_view(p, Vector3(6.0, 0, 9.5), PI * 0.5, 0.0, "map_south_lane")
-	await _player_view(p, Vector3(-12.0, 0, 3.5), PI * 0.82, 0.05, "map_sw_corner")
-	await _player_view(p, Vector3(-12.0, 0, -5.0), PI * 0.2, 0.1, "map_nw_corner")
+	for view_name: String in PLAYER_VIEWS:
+		if view_name != "map_hall_a":
+			await _named_view(p, view_name)
 	await _perf("lanes")
 	# Draw calls and primitives per quality level (visible pass + estimated shadow pass) from
 	# the views with the most on screen.
@@ -229,6 +252,11 @@ func _view(shot_name: String, from: Vector3, to: Vector3, fov := 70.0) -> void:
 
 func _use_player_cam(p: Player) -> void:
 	p.camera.current = true
+
+
+func _named_view(p: Player, view_name: String) -> void:
+	var v: Array = PLAYER_VIEWS[view_name]
+	await _player_view(p, v[0], v[1], v[2], view_name)
 
 
 func _player_view(p: Player, pos: Vector3, yaw: float, pitch: float, shot_name: String) -> void:
