@@ -26,6 +26,29 @@ listed here. If a part needs something new from the core, add it in its own file
 - `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills)
 - `reveal(f: Fighter, seconds)` (enemy shows on the minimap), `match_over: bool`, `tips_time: float`
 - `editor_mode`, `selected_id`, `layout` (used by the HUD editor)
+- read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
+  ({Fighter: bool} line of sight, refreshed 10x per second)
+- helpers live in their own files: `hud_draw.gd` (HudDraw: icons, buttons, text, shapes shared
+  with the editor), `hud_minimap.gd` (HudMinimap), `hud_panels.gd` (HudPanels)
+
+## HUD layout (scripts/hud_layout.gd, version 2)
+- A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
+  screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
+  "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
+  (`HudLayout.DEFAULTS`) are the reference phone's places.
+- `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
+  dropped), `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
+  `to_save(layout)` -> what `Game.save_hud_layout()` stores.
+- Pixels: `center(w, vs)`, `place(w, pos, vs)` (picks the anchor from the screen third),
+  `hit_rect(id, w, vs)`, `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
+
+## Android log lines (read by tools/ci/emulator_test.sh)
+- `[LoneWolf] lobby ready`, `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
+  `player moved`, `match over: <why>`, `results shown`, `signature <state>` (Guard, "ok" when the
+  package manager confirms the signer in build_signer.txt).
+- `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
+  (start, fire, joystick) so the test taps controls where the current layout puts them;
+  `[LoneWolf] first touch <x> <y> window <size> screen <size>` checks the tap mapping.
 
 ## Player (scripts/player.gd) -> called by the HUD's touch controls
 - movement `move_dir: Vector2` (joystick, length 0..1, y forward), `set_sprint(on)`
@@ -64,7 +87,10 @@ listed here. If a part needs something new from the core, add it in its own file
 - `PauseMenu.new()` (Control, works while paused): signal `closed`.
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close.
+- `CreditsPanel.new()` (CanvasLayer 60): credits and the licence notices the shipped parts need
+  (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL in
+  assets/fonts/LICENSE.txt); signal `closed`. Opened by the lobby's `CreditsButton`.
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
-  `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`, `PlayAgain`,
-  `Lobby`, `Close`, `SaveButton`.
+  `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`, `CreditsButton`,
+  `PlayAgain`, `Lobby`, `Close`, `SaveButton`.
