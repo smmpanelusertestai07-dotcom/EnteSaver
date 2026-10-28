@@ -36,7 +36,9 @@ keytool -list -v -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -storepass "$LW
   | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f' > build_signer.txt
 test "$(wc -c < build_signer.txt)" -ge 64 || { echo "could not read the certificate fingerprint"; exit 1; }
 
-godot --headless --path . --import > build_import.log 2>&1 || { tail -30 build_import.log; exit 1; }
+# A fresh checkout's first import can exit non-zero before the class cache exists; retry once.
+godot --headless --path . --import > build_import.log 2>&1 || godot --headless --path . --import > build_import.log 2>&1 \
+  || { tail -30 build_import.log; exit 1; }
 rm -f build_import.log
 godot --headless --path . res://tests/check.tscn
 godot --headless --path . res://tests/run_tests.tscn

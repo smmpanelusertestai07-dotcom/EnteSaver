@@ -112,10 +112,10 @@ part(drop_faces(bm_box(-HX, HX, YB, YV, Z_BAND, Z_FLASH), ('+y', '-z', '+z')), W
 base = [(YV, 0.0), (0.075, 0.0), (0.075, 0.085), (0.045, Z_BASE), (YV, Z_BASE)]
 part(drop_faces(bm_prism(base, 'X', -HX, HX), ('-z',)), ST, bevel=0.006, name='base_trim')
 g0, g1 = GIRT
-girt = [(YV, g0), (YG - 0.012, g0), (YG, g0 + 0.012), (YG, g1 - 0.075), (0.055, g1), (YV, g1)]
+girt = [(YV, g0), (YG - 0.012, g0), (YG, g0 + 0.012), (YG, g0 + 0.045), (YG - 0.022, g0 + 0.045),   # lower lip
+        (YG - 0.022, g1 - 0.09), (YG, g1 - 0.09), (YG, g1 - 0.068), (0.058, g1), (YV, g1)]       # recessed web, sloped cap
 part(bm_prism(girt, 'X', -HX, HX), ST, bevel=0.008, name='girt')
-flash = [(YB - 0.005, Z_FLASH + 0.06), (YB - 0.005, H), (0.085, H), (0.095, H - 0.012), (0.095, Z_FLASH),
-         (0.06, Z_FLASH), (YV, Z_FLASH + 0.035)]
+flash = [(YB, Z_FLASH), (YB, H), (0.085, H), (0.095, H - 0.012), (0.095, Z_FLASH)]
 part(bm_prism(flash, 'X', -HX, HX), ST, bevel=0.006, name='flashing')
 
 # ---------------------------------------------------------------- windows

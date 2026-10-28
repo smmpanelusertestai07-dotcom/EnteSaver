@@ -38,12 +38,13 @@ const FALL_SAFE := 4.0
 const FALL_DMG_PER_M := 12.0
 const EYE_HEIGHT := 1.6
 const CROUCH_EYE := 1.12
-const PRONE_EYE := 0.45
+const PRONE_EYE := 0.40
 const STAND_HEIGHT := 1.8
 const CROUCH_HEIGHT := 1.25
 const PRONE_HEIGHT := 0.7
 const STANCE_TIME := [0.0, 0.2, 0.45]
 const MELEE_RANGE := 2.0
+const THROW_RELEASE := 0.43      # s from the throw input to the grenade leaving the hand
 
 var display_name := "PLAYER"
 var is_player := false
@@ -107,6 +108,7 @@ var _shields := SecureNum.new(2)
 var _grenades := SecureNum.new(1)
 var _heal_t := 0.0
 var _heal_used := false
+var _throwing := false
 var _exclude: Array[RID] = []
 var _collider: CollisionShape3D
 var _capsule: CapsuleShape3D
@@ -164,6 +166,7 @@ func reset_for_round() -> void:
 	healing = false
 	ads = false
 	sprinting = false
+	_throwing = false
 	for w in weapons:
 		w.ammo = int(w.def.mag)
 		w.reserve = int(w.def.get("reserve", 0))
@@ -272,6 +275,8 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	if hp <= 0.001:
 		hp = 0.0
 		die(attacker, zone == "head")
+	elif attacker != null and dmg > 0.0:
+		model.play_hit()
 	return dmg
 
 
@@ -470,7 +475,7 @@ func switch_weapon(index: int) -> void:
 	current = index
 	var w := weapon()
 	w.cooldown = maxf(w.cooldown, float(w.def.equip))
-	model.equip_weapon(String(w.def.model), w.def.get("tint", Color.WHITE))
+	model.play_swap(String(w.def.model), w.def.get("tint", Color.WHITE), float(w.def.equip))
 	Audio.play_at("ui_select", global_position, -10.0)
 	weapon_switched.emit()
 
@@ -544,11 +549,22 @@ func deploy_shield(toward := Vector3.ZERO) -> bool:
 
 
 func throw_grenade() -> bool:
-	if grenades <= 0 or not alive or healing or hold_fire:
+	if grenades <= 0 or not alive or healing or hold_fire or _throwing:
 		return false
 	grenades -= 1
 	sprinting = false
+	_throwing = true
 	model.play_throw()
+	# The grenade leaves the hand at the release frame of the throw clip, aimed where the
+	# thrower aims at that moment; a thrower killed during the wind-up drops nothing.
+	get_tree().create_timer(THROW_RELEASE, false).timeout.connect(_release_grenade)
+	return true
+
+
+func _release_grenade() -> void:
+	_throwing = false
+	if not alive or not is_inside_tree():
+		return
 	var g := Grenade.new()
 	g.thrower = self
 	get_tree().current_scene.add_child(g)
@@ -556,7 +572,6 @@ func throw_grenade() -> bool:
 	g.global_position = eye_position() + dir * 0.6 + global_basis.x * 0.25
 	g.linear_velocity = dir * 17.0 + Vector3.UP * 4.0 + Vector3(velocity.x, 0, velocity.z) * 0.5
 	Audio.play_at("grenade_throw", global_position, -4.0)
-	return true
 
 
 # ---------------------------------------------------------------- stances

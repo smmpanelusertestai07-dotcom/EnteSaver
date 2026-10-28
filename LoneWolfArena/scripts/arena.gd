@@ -128,6 +128,7 @@ void fragment() {
 	m.shader = sh
 	_zone_mesh.material_override = m
 	_zone_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_zone_mesh.layers = CharacterModel.LAYER_ACTORS
 	_zone_mesh.visible = false
 	add_child(_zone_mesh)
 
@@ -204,16 +205,12 @@ func _render_minimap() -> void:
 	var c := map_rect.get_center()
 	cam.global_transform = Transform3D(Basis(Vector3.RIGHT, -PI * 0.5), Vector3(c.x, 30.0, c.y))
 	cam.current = true
-	var hidden: Array[Node3D] = []
-	for f in fighters:
-		if f.visible:
-			f.visible = false
-			hidden.append(f)
+	# Characters, weapons and the zone wall live on visual layer 3, so the minimap camera
+	# (cull mask 1) sees only the floor plan.
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
-	for n in hidden:
-		if is_instance_valid(n):
-			n.visible = true
+	if not is_inside_tree() or not is_instance_valid(vp):
+		return
 	var img := vp.get_texture().get_image()
 	if img and not img.is_empty():
 		minimap_texture = ImageTexture.create_from_image(img)

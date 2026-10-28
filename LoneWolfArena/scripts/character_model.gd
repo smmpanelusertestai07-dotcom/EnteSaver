@@ -21,7 +21,11 @@ const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "cr
 ## Speeds (m/s) at which the in-place cycles were authored; playback is scaled to the real speed.
 const RUN_AUTHORED := 2.0
 const CROUCH_AUTHORED := 1.0
-const PRONE_AUTHORED := 0.75
+const PRONE_AUTHORED := 0.30
+## Minimum time between two hit flinches, so automatic fire does not lock the upper body.
+const FLINCH_GAP := 0.6
+## Visual layer of characters and held weapons (the top-down minimap render skips it).
+const LAYER_ACTORS := 4
 const UPPER_BONES := ["spine_01", "spine_02", "spine_03", "neck_01", "head", "clavicle_l", "clavicle_r",
 	"upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
 const ARM_ONLY_BONES := ["clavicle_l", "upperarm_l", "lowerarm_l", "hand_l"]
@@ -84,6 +88,9 @@ var _follow_until := 0.0
 var _hide_gun_until := 0.0
 var _hand_to_gun := Transform3D.IDENTITY
 var _hand_to_gun_ready := false
+var _pending_equip: Array = []    # [model, tint]: swapped in at the lowest point of the swap clip
+var _equip_at := 0.0
+var _next_flinch := 0.0
 
 
 static func manifest() -> Dictionary:
@@ -113,7 +120,9 @@ static func extra_animations() -> Dictionary:
 				var inst := ps.instantiate()
 				for ap: AnimationPlayer in inst.find_children("*", "AnimationPlayer", true, false):
 					for a_name in ap.get_animation_list():
-						_extra_anims[String(a_name)] = ap.get_animation(a_name)
+						var a := ap.get_animation(a_name)
+						a.set_meta("toes_fixed", true)
+						_extra_anims[String(a_name)] = a
 				inst.free()
 	return _extra_anims
 
@@ -125,6 +134,12 @@ func setup(bundle_id: String, with_weapon := true) -> void:
 	if skeleton == null:
 		_build_fallback()
 	apply_bundle(bundle_id)
+	_set_layers(self)
+
+
+func _set_layers(node: Node) -> void:
+	for mi in node.find_children("*", "VisualInstance3D", true, false):
+		(mi as VisualInstance3D).layers = LAYER_ACTORS
 
 
 # ---------------------------------------------------------------- GLB character
@@ -151,6 +166,8 @@ func _load_glb() -> void:
 		_fix_materials(mi)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	if anim:
+		_detect_track_prefix()
+		_fix_base_toes()
 		_merge_extra_animations()
 		for a_name in LOOP_ANIMS:
 			if anim.has_animation(a_name):
@@ -172,16 +189,46 @@ func _load_glb() -> void:
 	skeleton.skeleton_updated.connect(_on_skeleton_updated)
 
 
-func _merge_extra_animations() -> void:
-	var lib := anim.get_animation_library("")
-	if lib == null:
-		return
+func _detect_track_prefix() -> void:
 	var idle := anim.get_animation("idle") if anim.has_animation("idle") else null
 	if idle and idle.get_track_count() > 0:
 		var p := String(idle.track_get_path(0))
 		var colon := p.find(":")
 		if colon > 0:
 			_track_prefix = p.substr(0, colon + 1)
+
+
+## The base clips in character.glb bend the toes the wrong way in heel-up frames (a sign slip in
+## tools/character/animate.py legs(); the toe tips went up to 12 cm into the floor while running).
+## Flips each ball bone's rotation about its own X axis, once per clip (the clips are shared by
+## every character). Clips from anims_extra.glb are authored right and carry the same mark.
+func _fix_base_toes() -> void:
+	var balls := {}
+	for b in ["ball_l", "ball_r"]:
+		var i := skeleton.find_bone(b)
+		if i >= 0:
+			balls[_track_prefix + b] = skeleton.get_bone_rest(i).basis.get_rotation_quaternion()
+	if balls.is_empty():
+		return
+	for a_name in anim.get_animation_list():
+		var a := anim.get_animation(a_name)
+		if a.has_meta("toes_fixed"):
+			continue
+		a.set_meta("toes_fixed", true)
+		for t in a.get_track_count():
+			var path := String(a.track_get_path(t))
+			if a.track_get_type(t) != Animation.TYPE_ROTATION_3D or not balls.has(path):
+				continue
+			var rest: Quaternion = balls[path]
+			for k in a.track_get_key_count(t):
+				var d: Quaternion = rest.inverse() * (a.track_get_key_value(t, k) as Quaternion)
+				a.track_set_key_value(t, k, rest * Quaternion(-d.x, d.y, d.z, d.w))
+
+
+func _merge_extra_animations() -> void:
+	var lib := anim.get_animation_library("")
+	if lib == null:
+		return
 	for a_name: String in extra_animations():
 		if not lib.has_animation(a_name):
 			lib.add_animation(a_name, _extra_anims[a_name])
@@ -301,14 +348,15 @@ func _build_tree() -> void:
 		root.connect_node("heal_blend", 0, last)
 		root.connect_node("heal_blend", 1, "heal")
 		last = "heal_blend"
-	# One-shot upper-body actions; reload is time-scaled to the weapon's reload time.
-	for action in ["reload", "throw", "pump", "punch"]:
+	# One-shot upper-body actions (later ones override earlier ones while they play); reload and
+	# swap are time-scaled to the weapon's reload / equip time.
+	for action in ["reload", "throw", "pump", "swap", "hit_react"]:
 		var a_name := String(action)
-		if a_name == "punch" or not anim.has_animation(a_name):
+		if not anim.has_animation(a_name):
 			continue
 		var os := AnimationNodeOneShot.new()
-		os.fadein_time = 0.12
-		os.fadeout_time = 0.18
+		os.fadein_time = 0.05 if a_name == "hit_react" else 0.12
+		os.fadeout_time = 0.12 if a_name == "hit_react" else 0.18
 		_filter(os, ARM_ONLY_BONES if a_name == "pump" else UPPER_BONES)
 		root.add_node(a_name, _anim_node(a_name), Vector2(750, 600))
 		root.add_node(a_name + "_ts", AnimationNodeTimeScale.new(), Vector2(850, 600))
@@ -320,8 +368,9 @@ func _build_tree() -> void:
 	root.connect_node("output", 0, last)
 	tree.tree_root = root
 	tree.active = true
-	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts"]:
-		tree.set("parameters/%s/scale" % ts, 1.0)
+	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "hit_react_ts"]:
+		if anim.has_animation(ts.trim_suffix("_ts")) or ts in ["loco_ts", "crouch_ts", "prone_ts"]:
+			tree.set("parameters/%s/scale" % ts, 1.0)
 
 
 # ---------------------------------------------------------------- bundles
@@ -354,6 +403,9 @@ func apply_bundle(bundle_id: String) -> void:
 func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) -> void:
 	if _dead:
 		return
+	if not _pending_equip.is_empty() and Time.get_ticks_msec() / 1000.0 >= _equip_at:
+		equip_weapon(String(_pending_equip[0]), _pending_equip[1])
+		_pending_equip = []
 	var speed := v.length()
 	_speed = lerpf(_speed, speed, 1.0 - exp(-10.0 * delta))
 	var dir := v / speed if speed > 0.05 else Vector2.ZERO
@@ -376,7 +428,7 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 		tree.set("parameters/air_blend/blend_amount", _air)
 		tree.set("parameters/loco_ts/scale", clampf(_speed / RUN_AUTHORED, 1.0, 3.2) if _speed > 0.3 else 1.0)
 		tree.set("parameters/crouch_ts/scale", clampf(_speed / CROUCH_AUTHORED, 1.0, 2.4) if _speed > 0.2 else 1.0)
-		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 1.6) if _speed > 0.1 else 1.0)
+		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 2.6) if _speed > 0.08 else 1.0)
 		if anim.has_animation("heal"):
 			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
 	elif fallback:
@@ -428,6 +480,37 @@ func play_reload(seconds: float) -> void:
 
 func play_heal(on: bool) -> void:
 	_healing = on
+
+
+## Weapon swap: the gun dips and the new model appears at the lowest point of the clip.
+## seconds = the weapon's equip time; "" = fists (the gun goes away at the lowest point).
+func play_swap(model_name: String, tint: Color, seconds: float) -> void:
+	if not (tree and tree.active and anim.has_animation("swap")) or (weapon_id == "" and model_name == ""):
+		_pending_equip = []
+		equip_weapon(model_name, tint)
+		return
+	var length := anim.get_animation("swap").length
+	var scale := clampf(length / maxf(seconds, 0.15), 0.8, 3.0)
+	tree.set("parameters/swap_ts/scale", scale)
+	tree.set("parameters/swap_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	var now := Time.get_ticks_msec() / 1000.0
+	_follow_until = maxf(_follow_until, now + length / scale)
+	if weapon_id == "":
+		_pending_equip = []
+		equip_weapon(model_name, tint)    # coming from fists: the gun rises from low
+	else:
+		_pending_equip = [model_name, tint]
+		_equip_at = now + 0.5 * length / scale
+
+
+## Short upper-body flinch when hit; the gun follows the hands while it plays.
+func play_hit() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if _dead or now < _next_flinch or not (tree and tree.active and anim.has_animation("hit_react")):
+		return
+	_next_flinch = now + FLINCH_GAP
+	tree.set("parameters/hit_react_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	_follow_until = maxf(_follow_until, now + anim.get_animation("hit_react").length)
 
 
 func play_throw() -> void:
@@ -496,7 +579,7 @@ func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 		weapon_node.queue_free()
 		weapon_node = null
 	weapon_id = model_name
-	_hand_to_gun_ready = false
+	# _hand_to_gun stays valid: every gun model's origin is its grip point.
 	if model_name == "":
 		return
 	var path := "res://assets/props/%s.glb" % model_name
@@ -535,6 +618,7 @@ func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 					dup.albedo_color = dup.albedo_color * tint
 					m.set_surface_override_material(s, dup)
 	holder.visible = show_weapon and not _dead
+	_set_layers(holder)
 	if fallback:
 		holder.top_level = false
 		holder.reparent(_fb.gun_socket, false)

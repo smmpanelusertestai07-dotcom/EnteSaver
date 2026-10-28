@@ -104,6 +104,8 @@ func _sensitivity() -> float:
 
 ## Whether aim assist applies right now (Aim Precision: default / precise on scope / full control).
 func _assist_active() -> bool:
+	if not Game.settings.aim_assist:
+		return false
 	match int(Game.settings.aim_precision):
 		1:
 			return not ads

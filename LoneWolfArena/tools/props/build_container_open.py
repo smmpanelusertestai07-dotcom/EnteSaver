@@ -145,9 +145,10 @@ for sy in (-1, 1):
         part(box_y(min(xa, xb), max(xa, xb), sy * (hw - 0.004), sy * YI, CZ - 0.01, H - CZ + 0.01), PA, name='post')
 yr0, yr1 = -hw + CY - 0.01, hw - CY + 0.01
 XR = hl - 0.045                       # rear sill / header outer face (recessed: cam keepers sit on it)
-part(bm_box(-hl + 0.004, -hl + 0.12, yr0, yr1, 0.012, FL), PA, name='front_sill')
+XS = hl - CX                          # end sills reach the castings' inner face (planks stop there)
+part(bm_box(-hl + 0.004, -XS, yr0, yr1, 0.012, FL), PA, name='front_sill')
 part(bm_box(-hl + 0.004, -hl + 0.12, yr0, yr1, CE, H - 0.012), PA, name='front_header')
-part(bm_box(hl - 0.12, XR, yr0, yr1, 0.012, FL), PA, name='rear_sill')
+part(bm_box(XS, XR, yr0, yr1, 0.012, FL), PA, name='rear_sill')
 part(bm_box(hl - 0.12, XR, yr0, yr1, CE, H - 0.012), PA, name='rear_header')
 
 # ---------------------------------------------------------------- walls: outer + inner corrugated sheets
@@ -168,7 +169,7 @@ widths = [1.0, 0.86, 1.08, 0.94, 1.04, 0.9, 1.1, 0.96, 1.02, 0.9]
 sc_ = 2 * YI / sum(widths)
 c = 0.008                              # chamfer -> V-grooves between planks
 fb = bmesh.new()
-x0f, x1f = -hl + 0.12, hl - 0.12
+x0f, x1f = -XS, XS
 ya = -YI
 for wk in widths:
     yb = ya + wk * sc_

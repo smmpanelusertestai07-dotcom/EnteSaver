@@ -1,7 +1,8 @@
 """rollup_door.glb - closed industrial roll-up shutter door for a 4.4 x 5.0 m opening, made to be
 mounted flush on a wall face. Horizontal ribbed slats ('Shutter'), side guide rails, top roll housing
 box and bottom bar ('Steel'), rubber seal ('Black'), yellow/black diagonal hazard bands wrapped around
-the lower 1.2 m of both guide rails ('Yellow', 'Black').
+the lower 1.2 m of both guide rails ('Yellow', 'Black'), small push-button control box on the +X side
+(= the viewer's LEFT when facing the door front).
 FRONT toward Blender +Y (Godot -Z). Origin: bottom centre of the opening ON THE BACK (mounting) PLANE:
 x = 0 opening centre, y = 0 wall face, z = 0 floor. Everything sits in y 0..0.48."""
 import os
@@ -97,7 +98,7 @@ def area2(poly):
 
 
 def rail(sx):
-    """Guide rail at side sx (+1 right, -1 left). Faces are unfolded into one strip coordinate u
+    """Guide rail at side sx (+1 = +X side, -1 = -X side). Faces are unfolded into one strip coordinate u
     (inner side -> front -> outer side) so the diagonal bands wrap continuously around the corners."""
     xi, xo = sx * HW, sx * (HW + RW)
     yf, yfl = RD, 0.012
@@ -144,6 +145,18 @@ part(bm_prism(prof, 'X', -HXW, HXW), ST, bevel=0.008, name='housing')
 for sx in (-1, 1):
     xa, xb = sorted((sx * HXW, sx * (HXW + 0.03)))
     part(bm_box(xa, xb, 0.0, HD + 0.02, HB0 - 0.05, HB1 + 0.02), ST, bevel=0.006, name='end_plate')
+# two vertical cover strips split the hood front into three sheet panels
+for xs in (-HXW / 3, HXW / 3):
+    part(drop_faces(bm_box(xs - 0.03, xs + 0.03, HD - 0.01, HD + 0.012, HB0 + 0.05, HB1 - 0.06), ('-y',)), ST,
+         name='hood_strip')
+
+# ---------------------------------------------------------------- control box (open / close buttons) on the +X side
+cx0, cx1 = HW + RW + 0.08, HW + RW + 0.26
+part(bm_box(cx0, cx1, 0.0, 0.09, 1.30, 1.62), ST, bevel=0.006, name='ctrl_box')
+part(drop_faces(bm_box(cx0 + 0.02, cx1 - 0.02, 0.09, 0.097, 1.32, 1.60), ('-y',)), YE, name='ctrl_plate')
+for bz in (1.40, 1.52):
+    xm = (cx0 + cx1) / 2
+    part(drop_faces(bm_box(xm - 0.025, xm + 0.025, 0.097, 0.118, bz - 0.025, bz + 0.025), ('-y',)), BK, name='button')
 
 # ---------------------------------------------------------------- bottom bar, seal, handles
 bar = [(0.06, 0.03), (0.152, 0.03), (0.165, 0.043), (0.165, 0.125), (0.14, ZBAR), (0.06, ZBAR)]

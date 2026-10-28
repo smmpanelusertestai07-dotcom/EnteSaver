@@ -28,6 +28,51 @@ func _ready() -> void:
 			_run_perf.call_deferred()
 		"aim":
 			_run_aim.call_deferred()
+		_:
+			# --autotest=script:res://tests/shots_xxx.gd runs that script's run(autotest)
+			# coroutine (screenshot tours owned by the HUD, map and menu work).
+			if Game.autotest.begins_with("script:"):
+				_run_script.call_deferred(Game.autotest.substr(7))
+
+
+func _run_script(path: String) -> void:
+	var scr: Script = load(path)
+	if scr == null:
+		_log("cannot load " + path)
+		get_tree().quit(2)
+		return
+	var runner: Node = scr.new()
+	add_child(runner)
+	var code: Variant = await runner.call("run", self)
+	get_tree().quit(int(code) if typeof(code) == TYPE_INT else 0)
+
+
+## Helpers for tour scripts: shot(name), wait(sec), touch(index, pos, pressed), drag(index, pos, rel).
+func shot(shot_name: String) -> void:
+	await _shot(shot_name)
+
+
+func wait(sec: float) -> void:
+	await _wait(sec)
+
+
+func touch(index: int, pos: Vector2, pressed: bool) -> void:
+	_touch(index, pos, pressed)
+
+
+func drag(index: int, pos: Vector2, rel: Vector2) -> void:
+	_drag(index, pos, rel)
+
+
+func log_line(t: String) -> void:
+	_log(t)
+
+
+func wait_for_phase(arena: Node, want: int, timeout := 60.0) -> void:
+	var t := 0.0
+	while arena.get("phase") != want and t < timeout:
+		await _wait(0.1)
+		t += 0.1
 
 
 func _log(t: String) -> void:

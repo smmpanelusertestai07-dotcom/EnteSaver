@@ -37,6 +37,8 @@ ICONS = {
     "stance_jump": ("pose", "jump", 7, "side_r", (256, 256)),
     "weapon_ar": ("prop", "weapon_ar", None, "side_l", (512, 192)),
     "weapon_sg": ("prop", "weapon_sg", None, "side_l", (512, 192)),
+    "weapon_smg": ("prop", "weapon_smg", None, "side_l", (512, 192)),
+    "weapon_sniper": ("prop", "weapon_sniper", None, "side_l", (512, 192)),
     "weapon_pistol": ("prop", "weapon_pistol", None, "side_l", (320, 192)),
     "item_grenade": ("prop", "grenade", None, "front3q", (256, 256)),
     "item_medkit": ("prop", "medkit", None, "front3q", (256, 256)),
@@ -148,11 +150,11 @@ def pose_icon(name, action, frame, view, canvas):
     arm = bpy.data.objects["Armature"]
     act = bpy.data.actions.get(action)
     if act is None and os.path.exists(EXTRA):
-        before = set(bpy.data.actions.keys())
+        # Only the actions are wanted from the extra file: drop every object it brings along.
+        keep = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=EXTRA)
-        for ob in list(bpy.data.objects):
-            if ob.name.startswith("Armature.") or (ob.parent and ob.parent.name.startswith("Armature.")):
-                bpy.data.objects.remove(ob, do_unlink=True)
+        for ob in [o for o in bpy.data.objects if o not in keep]:
+            bpy.data.objects.remove(ob, do_unlink=True)
         act = bpy.data.actions.get(action)
     if act is None:
         print("SKIP", name, "missing action", action)

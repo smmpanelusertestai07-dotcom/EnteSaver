@@ -13,3 +13,5 @@ build_signer.txt
 __pycache__/
 # Scratch renders of the props pipeline
 tools/props/_render_tmp/
+# Prop preview renders (tools/props/preview.py), not game assets
+assets/props/previews/
