@@ -482,12 +482,15 @@ func _pick_victory_yaw() -> float:
 
 
 func _update_fade(scoped := false) -> void:
-	var close := (spring.get_hit_length() < 0.95 or scoped) and alive
+	# The scope is a first-person view: the own model (head, hair, gun) would fill it.
+	if model.visible == scoped:
+		model.visible = not scoped
+	var close := spring.get_hit_length() < 0.95 and alive and not scoped
 	if close == _faded:
 		return
 	_faded = close
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
-		(mi as MeshInstance3D).transparency = (1.0 if scoped else 0.75) if close else 0.0
+		(mi as MeshInstance3D).transparency = 0.75 if close else 0.0
 
 
 func add_shake(amount: float) -> void:

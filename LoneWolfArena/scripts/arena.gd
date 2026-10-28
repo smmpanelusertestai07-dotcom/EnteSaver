@@ -252,7 +252,6 @@ func _start_prep() -> void:
 	for f in fighters:
 		f.hold_fire = true
 	bot.frozen = true
-	hud.show_center("LONE WOLF", 1.6, UI.ACCENT, 84, "%s  vs  %s" % [player.display_name, bot.display_name])
 	hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), PREP_TIME - 1.0, _on_weapon_picked)
 	if int(Game.profile.matches) < 3:
 		hud.tips_time = 9.0
@@ -297,8 +296,7 @@ func _physics_process(delta: float) -> void:
 			prep_left -= delta
 			var n := ceili(prep_left)
 			if prep_left <= 3.0 and n != _last_count and n > 0:
-				_last_count = n
-				hud.show_center(str(n), 0.9, UI.BAD, 140)
+				_last_count = n      # the HUD draws the prep countdown; this only beeps
 				Audio.play("countdown_beep", -2.0)
 			if prep_left <= 0.0:
 				_start_fight()

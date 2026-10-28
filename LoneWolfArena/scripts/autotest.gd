@@ -61,12 +61,18 @@ func wait(sec: float) -> void:
 	await _wait(sec)
 
 
+## touch()/drag() take window pixels (what Input.parse_input_event expects); see _win().
 func touch(index: int, pos: Vector2, pressed: bool) -> void:
 	_touch(index, pos, pressed)
 
 
 func drag(index: int, pos: Vector2, rel: Vector2) -> void:
 	_drag(index, pos, rel)
+
+
+## Canvas (viewport) coordinates -> window pixels: differ on stretched windows (e.g. 2400x1080).
+func _win(canvas_pos: Vector2) -> Vector2:
+	return get_tree().root.get_final_transform() * canvas_pos
 
 
 func log_line(t: String) -> void:
@@ -175,13 +181,13 @@ func _run_screens() -> void:
 	var vs := get_viewport().get_visible_rect().size
 	var fire_c := HudLayout.center(HudLayout.current().fire_r, vs)
 	_aim_at(p, b.chest_position())
-	_touch(5, fire_c, true)
+	_touch(5, _win(fire_c), true)
 	for i in 30:
 		await _wait(0.05)
 		if not b.alive:
 			break
 		_aim_at(p, b.chest_position() + Vector3(0, randf_range(-0.05, 0.12), 0))
-		_drag(5, fire_c + Vector2(randf_range(-2, 2), randf_range(-2, 2)), Vector2(randf_range(-1, 1), randf_range(-1, 1)))
+		_drag(5, _win(fire_c + Vector2(randf_range(-2, 2), randf_range(-2, 2))), get_tree().root.get_final_transform().basis_xform(Vector2(randf_range(-1, 1), randf_range(-1, 1))))
 		if i == 12:
 			await _shot("08_firing")
 	var t := 0.0
@@ -189,7 +195,7 @@ func _run_screens() -> void:
 		_aim_at(p, b.head_position() if randf() < 0.3 else b.chest_position())
 		await _wait(0.05)
 		t += 0.05
-	_touch(5, fire_c, false)
+	_touch(5, _win(fire_c), false)
 	await _wait(1.2)
 	await _shot("09_end")
 	var waited := 0.0
@@ -347,14 +353,14 @@ func _run_victory() -> void:
 			_aim_at(p, b.head_position() if randf() < 0.25 else b.chest_position())
 			p.move_dir = Vector2(sin(t * 2.0) * 0.6, 0.0)
 			if not firing:
-				_touch(6, fire_c, true)
+				_touch(6, _win(fire_c), true)
 				firing = true
 			if not shot_taken and t > 1.0:
 				shot_taken = true
 				await _shot("v1_fight")
 		else:
 			if firing:
-				_touch(6, fire_c, false)
+				_touch(6, _win(fire_c), false)
 				firing = false
 			path_t -= 0.05
 			var nav_map: RID = arena.get("nav_map")
@@ -373,7 +379,7 @@ func _run_victory() -> void:
 					p.aim_pitch = 0.0
 					p.move_dir = Vector2(0, 1)
 	if firing:
-		_touch(6, fire_c, false)
+		_touch(6, _win(fire_c), false)
 	_log("victory run: player_hp=%d bot_hp=%d t=%.1f" % [roundi(p.hp), roundi(b.hp), t])
 	await _wait(1.5)
 	await _shot("v2_end")

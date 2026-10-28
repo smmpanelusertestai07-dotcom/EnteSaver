@@ -1,14 +1,14 @@
 Fonts in this folder are licensed under the SIL Open Font License, Version 1.1.
 Fonts by their respective authors; downloaded from the Fontsource CDN (cdn.jsdelivr.net).
-Files are unmodified 'latin' subset static instances.
+Files are unmodified 'latin' subset static instances, saved under the names the game loads.
 
-Rajdhani-SemiBold.ttf, Rajdhani-Bold.ttf
+ui_semibold.ttf (Rajdhani SemiBold), ui_bold.ttf (Rajdhani Bold)
   Copyright (c) 2014 Indian Type Foundry (info@indiantypefoundry.com)
   https://fonts.google.com/specimen/Rajdhani
-Teko-SemiBold.ttf
+number.ttf (Teko SemiBold)
   Copyright 2023 The Teko Project Authors (https://www.github.com/googlefonts/teko)
   (original design by Indian Type Foundry)
-BebasNeue-Regular.ttf
+title.ttf (Bebas Neue Regular)
   Copyright 2019 The Bebas Neue Project Authors (https://github.com/dharmatype/Bebas-Neue)
   (Bebas Neue by Ryoichi Tsunekawa, Dharma Type)
 

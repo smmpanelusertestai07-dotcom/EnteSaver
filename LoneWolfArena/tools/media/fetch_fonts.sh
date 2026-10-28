@@ -17,10 +17,11 @@ fetch() { # family-slug weight out-name
     curl -fsS -o "$OUT/$3.woff2" "$url"; echo "ok  $3.woff2 <- $url"
   fi
 }
-fetch rajdhani   600 Rajdhani-SemiBold
-fetch rajdhani   700 Rajdhani-Bold
-fetch teko       600 Teko-SemiBold
-fetch bebas-neue 400 BebasNeue-Regular
+# Saved under the names scripts/ui.gd loads.
+fetch rajdhani   600 ui_semibold
+fetch rajdhani   700 ui_bold
+fetch teko       600 number
+fetch bebas-neue 400 title
 
 for p in rajdhani teko bebas-neue; do
   curl -fsS -o "$TMP/LICENSE-$p" "https://cdn.jsdelivr.net/npm/@fontsource/$p@5/LICENSE"
@@ -29,15 +30,15 @@ done
 {
   echo "Fonts in this folder are licensed under the SIL Open Font License, Version 1.1."
   echo "Fonts by their respective authors; downloaded from the Fontsource CDN (cdn.jsdelivr.net)."
-  echo "Files are unmodified 'latin' subset static instances."
+  echo "Files are unmodified 'latin' subset static instances, saved under the names the game loads."
   echo
-  echo "Rajdhani-SemiBold.ttf, Rajdhani-Bold.ttf"
+  echo "ui_semibold.ttf (Rajdhani SemiBold), ui_bold.ttf (Rajdhani Bold)"
   echo "  Copyright (c) 2014 Indian Type Foundry (info@indiantypefoundry.com)"
   echo "  https://fonts.google.com/specimen/Rajdhani"
-  echo "Teko-SemiBold.ttf"
+  echo "number.ttf (Teko SemiBold)"
   echo "  Copyright 2023 The Teko Project Authors (https://www.github.com/googlefonts/teko)"
   echo "  (original design by Indian Type Foundry)"
-  echo "BebasNeue-Regular.ttf"
+  echo "title.ttf (Bebas Neue Regular)"
   echo "  Copyright 2019 The Bebas Neue Project Authors (https://github.com/dharmatype/Bebas-Neue)"
   echo "  (Bebas Neue by Ryoichi Tsunekawa, Dharma Type)"
   echo
