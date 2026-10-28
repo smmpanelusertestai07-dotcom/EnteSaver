@@ -93,6 +93,12 @@ func _ready() -> void:
 	Effects.warm_up(self)
 	_render_minimap.call_deferred()
 	_start_prep()
+	# A detection from before this match (a speed hack switched on in the lobby, a re-signed
+	# APK) voids it too: Guard reports each reason only once per session.
+	for reason in ["signature", "speed", "memory"]:
+		if reason in Guard.flags:
+			_on_tampered.call_deferred(reason)
+			break
 
 
 func _exit_tree() -> void:
