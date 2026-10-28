@@ -166,8 +166,8 @@ func _signature_state() -> String:
 		return "not android"
 	if not FileAccess.file_exists(SIGNER_FILE):
 		return "unknown (no signer file)"
-	var expected := signer_digest(FileAccess.get_file_as_string(SIGNER_FILE))
-	if expected.is_empty():
+	var accepted := signer_digests(FileAccess.get_file_as_string(SIGNER_FILE))
+	if accepted.is_empty():
 		return "unknown (bad signer file)"
 	# The installed APK can't be read directly: Godot only opens files in the app's own storage.
 	if not Engine.has_singleton("AndroidRuntime"):
@@ -178,18 +178,26 @@ func _signature_state() -> String:
 	var pm: Variant = (ctx as JavaObject).call("getPackageManager")
 	if not pm is JavaObject or not (pm as JavaObject).has_java_method("hasSigningCertificate"):
 		return "unknown (android < 9)"
-	# Also true for an older key of a rotated signing lineage.
-	var signed: Variant = (pm as JavaObject).call("hasSigningCertificate",
-			(ctx as JavaObject).call("getPackageName"), expected, CERT_INPUT_SHA256)
-	if typeof(signed) != TYPE_BOOL:
-		return "unknown (no answer)"
-	return "ok" if signed else "mismatch"
+	var package: Variant = (ctx as JavaObject).call("getPackageName")
+	for digest in accepted:
+		# Also true for an older key of a rotated signing lineage.
+		var signed: Variant = (pm as JavaObject).call("hasSigningCertificate", package, digest, CERT_INPUT_SHA256)
+		if typeof(signed) != TYPE_BOOL:
+			return "unknown (no answer)"
+		if signed:
+			return "ok"
+	return "mismatch"
 
 
-## The certificate SHA-256 in build_signer.txt (hex, with or without colons) as 32 bytes, or
-## empty when the text is not one.
-static func signer_digest(text: String) -> PackedByteArray:
-	var hex := text.strip_edges().to_lower().replace(":", "")
-	if hex.length() != 64 or not hex.is_valid_hex_number():
-		return PackedByteArray()
-	return hex.hex_decode()
+## The certificate SHA-256s in build_signer.txt, one per line (hex, with or without colons), as
+## 32-byte arrays; empty when any line is not one.
+static func signer_digests(text: String) -> Array[PackedByteArray]:
+	var out: Array[PackedByteArray] = []
+	for line in text.split("\n", false):
+		var hex := line.strip_edges().to_lower().replace(":", "")
+		if hex.is_empty():
+			continue
+		if hex.length() != 64 or not hex.is_valid_hex_number():
+			return []
+		out.append(hex.hex_decode())
+	return out

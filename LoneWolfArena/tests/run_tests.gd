@@ -24,7 +24,7 @@ func _ready() -> void:
 	_test_weapon_state()
 	_test_hud_layout()
 	_test_guard()
-	_test_signer_digest()
+	_test_signer_digests()
 	_test_settings_sanitize()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
@@ -143,14 +143,16 @@ func _test_guard() -> void:
 	_check(Guard.verify_dict({"name": "OLD"}).unsigned, "old unsigned profile is accepted once")
 
 
-func _test_signer_digest() -> void:
+func _test_signer_digests() -> void:
 	var hex := "0123456789abcdef".repeat(4)
 	var colons := ":".join(PackedStringArray(Array(range(0, 64, 2)).map(func(i: int) -> String: return hex.substr(i, 2).to_upper())))
-	var d := Guard.signer_digest(hex)
-	_check(d.size() == 32 and d[0] == 0x01 and d[31] == 0xef, "signer file: plain hex digest becomes 32 bytes")
-	_check(Guard.signer_digest(colons + "\n") == d, "signer file: keytool's AB:CD:.. form gives the same bytes")
-	_check(Guard.signer_digest("").is_empty() and Guard.signer_digest(hex.left(62)).is_empty(), "signer file: short text is rejected")
-	_check(Guard.signer_digest(hex.left(63) + "z").is_empty(), "signer file: non-hex text is rejected")
+	var d := Guard.signer_digests(hex)
+	_check(d.size() == 1 and d[0].size() == 32 and d[0][0] == 0x01 and d[0][31] == 0xef, "signer file: a hex digest becomes 32 bytes")
+	_check(Guard.signer_digests(colons + "\n") == d, "signer file: keytool's AB:CD:.. form gives the same bytes")
+	var two := Guard.signer_digests(hex + "\n\n" + "ab".repeat(32) + "\n")
+	_check(two.size() == 2 and two[1][0] == 0xab, "signer file: one accepted certificate per line")
+	_check(Guard.signer_digests("").is_empty() and Guard.signer_digests(hex.left(62)).is_empty(), "signer file: empty or short text is rejected")
+	_check(Guard.signer_digests(hex + "\n" + hex.left(63) + "z").is_empty(), "signer file: a non-hex line rejects the file")
 	_check(Guard._signature_state() == "not android", "signature check only runs on Android")
 
 

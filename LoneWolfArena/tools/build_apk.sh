@@ -8,6 +8,8 @@
 # to it, both outside the repository). Never commit keystores or passwords.
 # The certificate's SHA-256 is written to build_signer.txt (git-ignored) and packed into the
 # game, which refuses to count matches when it runs from an APK re-signed with another key.
+# Stores that re-sign the APKs they deliver (Google Play App Signing) use their own key: list
+# its SHA-256 (from the store's console) in LW_EXTRA_SIGNERS, space-separated, so it counts too.
 # The save-signing secret (~/.lonewolf/save_secret, created once and kept with the key so saves
 # stay valid across updates) is copied to build_secret.txt (git-ignored) and packed too.
 # Needs: godot 4.7.2 + Android export templates, Android SDK build-tools (apksigner, aapt),
@@ -26,17 +28,25 @@ if [ -z "${LW_KEYSTORE:-}" ]; then
     head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$HOME/.lonewolf/release.pass"
     chmod 600 "$HOME/.lonewolf/release.pass"
     keytool -genkeypair -noprompt -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -keyalg RSA -keysize 4096 \
-      -validity 10000 -storepass "$(cat "$HOME/.lonewolf/release.pass")" \
-      -keypass "$(cat "$HOME/.lonewolf/release.pass")" -dname "CN=Lone Wolf Arena, O=LoneWolf, C=IN" 2>/dev/null
+      -validity 10000 -storepass:file "$HOME/.lonewolf/release.pass" \
+      -keypass:file "$HOME/.lonewolf/release.pass" -dname "CN=Lone Wolf Arena, O=LoneWolf, C=IN" 2>/dev/null
     echo "created new release key: $LW_KEYSTORE"
   fi
   LW_KEY_PASS="$(cat "$HOME/.lonewolf/release.pass")"
 fi
 
 # Certificate fingerprint of the signing key -> build_signer.txt (read by autoload/guard.gd).
-keytool -list -v -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -storepass "$LW_KEY_PASS" 2>/dev/null \
-  | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f' > build_signer.txt
-test "$(wc -c < build_signer.txt)" -ge 64 || { echo "could not read the certificate fingerprint"; exit 1; }
+# Passwords go through the environment, not the command line (where other processes see them).
+export LW_KEY_PASS
+SIGNER="$(keytool -list -v -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -storepass:env LW_KEY_PASS 2>/dev/null \
+  | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
+[[ "$SIGNER" =~ ^[0-9a-f]{64}$ ]] || { echo "could not read the certificate fingerprint"; exit 1; }
+echo "$SIGNER" > build_signer.txt
+for extra in ${LW_EXTRA_SIGNERS:-}; do
+  extra="$(echo "$extra" | tr -d ':' | tr 'A-F' 'a-f')"
+  [[ "$extra" =~ ^[0-9a-f]{64}$ ]] || { echo "LW_EXTRA_SIGNERS: not a SHA-256: $extra"; exit 1; }
+  echo "$extra" >> build_signer.txt
+done
 
 # Save-signing secret: one per signing key, kept beside it (LW_SAVE_SECRET overrides).
 SECRET_SRC="${LW_SAVE_SECRET:-$(dirname "$LW_KEYSTORE")/save_secret}"
@@ -65,6 +75,9 @@ test -s "$OUT"
 SDK="$(grep -m1 android_sdk_path "$HOME/.config/godot/editor_settings-4.7.tres" | sed 's/.*= *"\(.*\)"/\1/')"
 BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
 "$BT/apksigner" verify --print-certs "$OUT" 2>/dev/null | grep -E "Signer #1 certificate (DN|SHA-256)"
+# The game must accept its own signature, or every match would be voided.
+SIGNED="$("$BT/apksigner" verify --print-certs "$OUT" 2>/dev/null | grep -m1 "Signer #1 certificate SHA-256" | sed 's/.*: *//')"
+[ "$SIGNED" = "$SIGNER" ] || { echo "ERROR: APK signer $SIGNED is not the one in build_signer.txt"; exit 1; }
 "$BT/aapt" dump badging "$OUT" | grep -E "^package:|uses-permission|sdkVersion|native-code"
 if "$BT/aapt" dump badging "$OUT" | grep -q "android.permission.INTERNET"; then
   echo "ERROR: the APK requests INTERNET permission"; exit 1
