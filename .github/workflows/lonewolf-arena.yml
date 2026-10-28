@@ -6,6 +6,10 @@ on:
     paths:
       - "LoneWolfArena/**"
       - ".github/workflows/lonewolf-arena.yml"
+  pull_request:
+    paths:
+      - "LoneWolfArena/**"
+      - ".github/workflows/lonewolf-arena.yml"
   workflow_dispatch:
 
 permissions:
@@ -51,13 +55,18 @@ jobs:
               "$ANDROID_HOME" "${JAVA_HOME_17_X64:-$JAVA_HOME}" "$HOME/.android/debug.keystore" > "$HOME/.config/godot/$f"
           done
 
-      - name: Import project, unit tests, headless match simulation
+      - name: Import project, unit tests, headless match simulation and gameplay checks
         working-directory: LoneWolfArena
         run: |
-          godot --headless --path . --import > import.log 2>&1 || (tail -50 import.log; exit 1)
+          # A fresh checkout's first import can exit non-zero before the class cache exists.
+          godot --headless --path . --import > import.log 2>&1 || godot --headless --path . --import > import.log 2>&1 \
+            || (tail -50 import.log; exit 1)
           godot --headless --path . res://tests/check.tscn
           godot --headless --path . res://tests/run_tests.tscn
           godot --headless --path . -- --autotest=sim
+          godot --headless --path . -- --autotest=aim
+          godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
+          godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
 
       - name: Export signed APK (throwaway CI key, emulator build)
         working-directory: LoneWolfArena
@@ -65,6 +74,11 @@ jobs:
           mkdir -p build
           keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 1000 \
             -storepass cipass123 -keypass cipass123 -dname "CN=CI,O=CI,C=IN"
+          # The game checks its own signing certificate against build_signer.txt (autoload/guard.gd);
+          # the emulator test expects "[LoneWolf] signature ok".
+          keytool -list -v -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -storepass cipass123 \
+            | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f' > build_signer.txt
+          test "$(wc -c < build_signer.txt)" -ge 64
           GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$RUNNER_TEMP/ci.keystore" GODOT_ANDROID_KEYSTORE_RELEASE_USER=ci \
           GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=cipass123 \
             godot --headless --path . --export-release "Android-x86_64" build/LoneWolfArena.apk

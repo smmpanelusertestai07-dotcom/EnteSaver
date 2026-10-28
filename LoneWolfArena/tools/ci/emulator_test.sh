@@ -62,7 +62,7 @@ grep -iE " godot " "$OUT/logcat.txt" | grep -iE "error|script|OpenGL API" | head
 log "markers:"; cat "$OUT/markers.txt"
 log "crash lines: $(wc -l < "$OUT/crashes.txt")  godot error lines: $(wc -l < "$OUT/godot_errors.txt")"
 status=0
-for m in "lobby ready" "match started" "player fired" "player moved"; do
+for m in "lobby ready" "match started" "player fired" "player moved" "signature ok"; do
   grep -q "\] $m" "$OUT/markers.txt" || { log "MISSING marker: $m"; status=3; }
 done
 if [ "$(alive)" != "yes" ]; then log "GAME NOT RUNNING AT END"; status=2; fi
