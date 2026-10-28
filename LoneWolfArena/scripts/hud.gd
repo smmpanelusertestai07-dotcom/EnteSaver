@@ -492,7 +492,7 @@ func _process(delta: float) -> void:
 		_fps_smooth = lerpf(_fps_smooth, 1.0 / real, 0.05)
 	panels.tick(delta, real)
 	_place_minimap(size)
-	if not _ui_marked and player != null and size.x > 0.0:
+	if not _ui_marked and player != null and size.y >= 240.0:
 		# Where FIRE and the joystick are on screen, for the on-device CI test (logged once).
 		_ui_marked = true
 		if Game.has_method("mark_ui"):
@@ -1351,13 +1351,16 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 		var sel := id == selected_id
 		var label := String(SHORT_LABELS.get(id, HudLayout.LABELS.get(id, id)))
 		var lw := HudDraw.text_width(label, lfs, "bold") + 8.0
-		var below := r.end.y + (r.size.y * HudLayout.STRIP_H if HudLayout.kind(id) == "square" else 0.0) + 0.018 * u
-		var above := r.position.y - 0.018 * u
-		var spots := [below, above] if below < vs.y - 0.015 * u else [above, below]
+		var lh := lfs * 1.2
+		var below := Vector2(r.get_center().x, r.end.y + (r.size.y * HudLayout.STRIP_H if HudLayout.kind(id) == "square" else 0.0) + 0.018 * u)
+		var above := Vector2(r.get_center().x, r.position.y - 0.018 * u)
+		var left := Vector2(r.position.x - lw * 0.5 - 2.0, r.get_center().y)
+		var right := Vector2(r.end.x + lw * 0.5 + 2.0, r.get_center().y)
+		var spots := [below, above, left, right] if below.y < vs.y - lh * 0.5 else [above, left, right, below]
 		var lr := Rect2()
-		for y: float in spots:
-			lr = Rect2(Vector2(r.get_center().x - lw * 0.5, y - lfs * 0.6), Vector2(lw, lfs * 1.2))
-			var clash := false
+		for sp: Vector2 in spots:
+			lr = Rect2(sp - Vector2(lw, lh) * 0.5, Vector2(lw, lh))
+			var clash := not Rect2(Vector2.ZERO, vs).encloses(lr)
 			for t in taken:
 				if t.intersects(lr):
 					clash = true

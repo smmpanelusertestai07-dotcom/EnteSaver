@@ -15,6 +15,7 @@ func run(at: Node) -> int:
 	Game.settings.damage_numbers = true
 	Game.settings.reload_on_crosshair = true
 	Game.settings.left_fire = 0
+	await at.wait(1.5)            # let the lobby finish starting before switching scenes
 	Game.goto_arena()
 	await at.wait(1.0)
 	var arena: Node = at.get_tree().current_scene

@@ -15,6 +15,7 @@ var fails := 0
 func run(autotest: Node) -> int:
 	at = autotest
 	Game.settings.difficulty = 0
+	await at.wait(2.0)          # let the lobby finish its _ready before switching scenes
 	Game.goto_arena()
 	await at.wait(1.6)
 	arena = at.get_tree().current_scene
@@ -54,6 +55,34 @@ func run(autotest: Node) -> int:
 	var out: bool = p.global_position.x > -MapBuilder.HX + 0.5
 	at.log_line("MAPNAV %s barrier released in FIGHT (x=%.2f)" % ["OK" if out else "FAIL", p.global_position.x])
 	if not out:
+		fails += 1
+	# crate steps: floor -> single crate -> 2-stack -> high ground (jump apex ~1.3 m)
+	p.global_position = Vector3(-6.2, 0.05, -4.7)
+	p.velocity = Vector3.ZERO
+	p.aim_yaw = -PI * 0.5
+	await at.wait(0.3)
+	var top := 0.0
+	for i in 360:
+		p.move_dir = Vector2(0, 1)
+		if i % 12 == 0:
+			p.do_jump()
+		await at.get_tree().physics_frame
+		top = maxf(top, p.global_position.y)
+		if p.global_position.y > MapBuilder.C_H - 0.1 and p.global_position.x > -2.3:
+			break
+	p.move_dir = Vector2.ZERO
+	var climbed: bool = p.global_position.y > MapBuilder.C_H - 0.1
+	at.log_line("MAPNAV %s crate steps reach the high ground (pos=%s, max y %.2f)" % ["OK" if climbed else "FAIL", str(p.global_position), top])
+	if not climbed:
+		fails += 1
+	# the steel ramp is walkable without jumping
+	p.global_position = Vector3(-9.0, 0.05, 2.75)
+	p.velocity = Vector3.ZERO
+	await at.wait(0.3)
+	await _walk(p, 150)
+	var up_ramp: bool = p.global_position.y > MapBuilder.C_H - 0.1
+	at.log_line("MAPNAV %s ramp walk reaches the high ground (pos=%s)" % ["OK" if up_ramp else "FAIL", str(p.global_position)])
+	if not up_ramp:
 		fails += 1
 	p.global_position = map.spawn_a
 	p.aim_yaw = map.spawn_a_yaw

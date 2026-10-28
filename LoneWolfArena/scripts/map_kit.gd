@@ -90,11 +90,9 @@ func _make(key: String) -> Material:
 			m.uv1_scale = Vector3(0.25, 1.0 / 2.591, 1.0)
 			m.uv1_offset = Vector3(0.0, 1.0 - 1.0 / 2.591, 0.0)
 		"barrel_paint":
-			m = _std(Color(1, 1, 1), 0.5, 0.3)
-			_set_tex(m, "metal_painted")
+			m = _std(Color(1, 1, 1), 0.45, 0.3)
 			m.vertex_color_use_as_albedo = true
 			m.vertex_color_is_srgb = true
-			m.uv1_scale = Vector3(0.6, 0.6, 1.0)
 		"wall_lower", "wall_upper":
 			m = _std(Color("eb9a32") if key == "wall_lower" else Color("e6eaf0"), 0.68, 0.05)
 			_set_tex(m, "wall_grime")
@@ -102,9 +100,9 @@ func _make(key: String) -> Material:
 			m.uv1_scale = Vector3(1.0 / 6.0, 1.0 / 9.0, 1.0)
 			m.uv1_offset = Vector3(0.5, 8.0 / 9.0, 0.0)
 		"header":
-			# corrugated cladding on the flat lintel boxes above the spawn doors
+			# flat cladding (lintels, gables): the grime texture carries the baked ribs
 			m = _std(Color("e6eaf0"), 0.68, 0.05)
-			_set_tex(m, "wall_grime", "corrugated_n", 0.9)
+			_set_tex(m, "wall_grime")
 			m.uv1_scale = Vector3(1.0 / 6.0, 1.0 / 9.0, 1.0)
 		"steel":
 			m = _std(Color(0.3, 0.32, 0.35), 0.45, 0.55)
@@ -135,13 +133,13 @@ func _make(key: String) -> Material:
 			_set_tex(m, "crate_wood")
 			m.uv1_scale = Vector3(0.8, 0.8, 1.0)
 		"pallet":
-			m = _std(Color(0.95, 0.8, 0.58), 0.8)
-			_set_tex(m, "wood_planks")
-			m.uv1_scale = Vector3(1.2, 1.2, 1.0)
+			m = _std(Color(1.15, 1.05, 0.9), 0.82)
+			_set_tex(m, "crate_wood")
+			m.uv1_scale = Vector3(1.4, 1.4, 1.0)
 		"pallet_dark":
-			m = _std(Color(0.62, 0.47, 0.32), 0.85)
-			_set_tex(m, "wood_planks")
-			m.uv1_scale = Vector3(1.2, 1.2, 1.0)
+			m = _std(Color(0.75, 0.68, 0.6), 0.85)
+			_set_tex(m, "crate_wood")
+			m.uv1_scale = Vector3(1.4, 1.4, 1.0)
 		"wood_floor":
 			m = _std(Color(0.78, 0.6, 0.42), 0.8)
 			_set_tex(m, "wood_planks")
@@ -389,10 +387,6 @@ func build_batches(parent: Node3D) -> Dictionary:
 
 # ---------------------------------------------------------------- GLB props as MultiMeshes
 
-func has_prop(file: String) -> bool:
-	return not prop_parts(file).is_empty()
-
-
 ## Mesh parts of a prop GLB: [[Mesh, local Transform3D], ...]; [] when the file is missing.
 func prop_parts(file: String) -> Array:
 	if _parts.has(file):
@@ -442,10 +436,6 @@ func add(set_name: String, xf: Transform3D, color := Color.WHITE) -> void:
 	var s: Dictionary = _sets[set_name]
 	(s.xforms as Array).append(xf)
 	(s.colors as Array).append(color)
-
-
-func count(set_name: String) -> int:
-	return (_sets[set_name].xforms as Array).size() if _sets.has(set_name) else 0
 
 
 func _override_key(mname: String, overrides: Dictionary) -> String:

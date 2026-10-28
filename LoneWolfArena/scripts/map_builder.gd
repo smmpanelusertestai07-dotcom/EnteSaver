@@ -39,7 +39,6 @@ const DEEP_BLUE := Color("2c5aa6")
 const RUST := Color("a63f2c")
 const ORANGE := Color("e27a24")
 const CREAM := Color("e4d5aa")
-const TEAL := Color("3f8f8a")
 
 var nav: NavigationRegion3D
 var deco: Node3D
@@ -57,7 +56,7 @@ var map_rect := Rect2(-HX - AL_D - 0.6, -HZ - 0.6, (HX + AL_D + 0.6) * 2.0, (HZ 
 var zone_center := Vector3.ZERO
 var zone_start_radius := 27.6    # covers the hall corners (25.8 m) and the alcoves (27.2 m)
 
-var kit = Kit.new()
+var kit: Kit = Kit.new()
 var _S := Transform3D.IDENTITY   # current half: identity (west / A) or 180 degrees (east / B)
 var _side := 0
 var _barrier_vis: Array[Node3D] = []
@@ -142,6 +141,12 @@ func _build_environment(parent: Node3D) -> void:
 	e.glow_bloom = 0.0
 	e.glow_hdr_threshold = 1.05
 	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	# light indoor haze: depth cue across the 42 m hall
+	e.fog_enabled = true
+	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+	e.fog_light_color = Color(0.78, 0.8, 0.83)
+	e.fog_density = 0.0045
+	e.fog_sky_affect = 0.0
 	env.environment = e
 	parent.add_child(env)
 	sun = DirectionalLight3D.new()
@@ -192,9 +197,6 @@ func _collect_quality_groups(batches: Dictionary, sets: Dictionary) -> void:
 		if sets.has(key):
 			for n in sets[key]:
 				_small.append(n)
-	for key in ["props_small"]:
-		if batches.has(key):
-			_small.append(batches[key])
 	for key in ["barrier", "barrier_fog"]:
 		if batches.has(key):
 			var mi: MeshInstance3D = batches[key]
@@ -429,7 +431,7 @@ func _stain(cell: int, c: Vector3, size: Vector2, yaw_deg: float, strength := 1.
 
 ## One wall run along a straight line: bays (MultiMesh), a collider, a white top cap for the
 ## minimap. a/b are the run ends ON the inner wall line, n = inward normal (all authored coords).
-func _wall_run(a: Vector3, b: Vector3, n: Vector3, bays := true) -> void:
+func _wall_run(a: Vector3, b: Vector3, n: Vector3) -> void:
 	var length := a.distance_to(b)
 	var along := (b - a) / length
 	var wa := _p(a)
@@ -438,11 +440,8 @@ func _wall_run(a: Vector3, b: Vector3, n: Vector3, bays := true) -> void:
 	var wal := _dir(along)
 	var yaw := atan2(-wn.x, -wn.z)       # bay front (-Z) faces the hall
 	var basis := Basis(Vector3.UP, yaw)
-	if bays:
-		var nb := int(round(length / BAY))
-		for i in nb:
-			var c := wa + wal * (BAY * (i + 0.5)) - wn * 0.045
-			kit.add("bay", Transform3D(basis, c))
+	for i in int(round(length / BAY)):
+		kit.add("bay", Transform3D(basis, wa + wal * (BAY * (i + 0.5)) - wn * 0.045))
 	# collider: inner face 0.08 in front of the cladding crests, 0.7 thick
 	var mid := (wa + wb) * 0.5 + wn * (0.08 - 0.35) + Vector3(0, WALL_H * 0.5, 0)
 	var cb := Basis(Vector3.UP, yaw)
@@ -831,7 +830,7 @@ func _layout_half() -> void:
 	_collider(Vector3(3.5, 2.4, 2.4), _xf(Vector3(-12.4, 1.2, 13.7)), true)
 	_ao(Vector3(-12.4, 0, 13.4), Vector2(3.3, 1.9), 0.0, 0.5, 0.7)
 	_hatch_pad(Vector3(-18.9, 0, 8.9), Vector2(3.4, 4.4))
-	_pallets(-19.6, 10.1, 2, 0.0)
+	_pallets(-20.3, 8.4, 2, 90.0)
 	_bollard(-14.0, 11.5)
 	_bollard(-10.8, 11.5)
 	_barrels([[-3.2, 11.45, 2], [-2.55, 11.6, 1]])
@@ -840,7 +839,7 @@ func _layout_half() -> void:
 	# ---- spawn approach
 	_crates([[-15.3, -0.6, 2, 0.0], [-15.3, 0.6, 1, 0.0]])
 	_crates([[-10.6, -2.9, 1, 0.0], [-10.6, -1.7, 1, 0.0]])
-	_crates([[-0.6, -9.4, 1, 0.0]])
+	_barrels([[-1.05, -9.05, 0], [-0.4, -8.95, 2]])        # low cover mid-lane (lane stays > 2.4 m)
 	_pallets(-9.6, 5.8, 2, 0.0)
 	for z in [-3.75, 3.75]:
 		_bollard(-HX + 0.55, z)
