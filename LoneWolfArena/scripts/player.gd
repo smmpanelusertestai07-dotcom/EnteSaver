@@ -177,7 +177,7 @@ func do_jump() -> void:
 		want_jump = true
 
 
-## FF-style: crouch toggles stand <-> crouch (from prone it goes to crouch).
+## Crouch button: toggles stand <-> crouch (from prone it goes to crouch), like the reference mode.
 func toggle_crouch() -> void:
 	if input_enabled:
 		set_stance(Stance.STAND if stance == Stance.CROUCH else Stance.CROUCH)

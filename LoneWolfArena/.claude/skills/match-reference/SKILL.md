@@ -19,5 +19,5 @@ Read `LoneWolfArena/CLAUDE.md` first (scope, privacy, originality rules).
 5. Repeat 3-4 until both agents report no blockers/majors, then build the APK with
    `tools/build_apk.sh` and run the gameplay-tester's APK checks.
 
-Never commit `reference_private/`, keystores or passwords; ask the owner before pushing while the
-repository is public.
+Never commit `reference_private/`, keystores, passwords, personal data or machine-specific paths:
+the repository is public (see CLAUDE.md).
