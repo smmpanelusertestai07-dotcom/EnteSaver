@@ -10,8 +10,10 @@ app (Ente Saver) and must not be touched for game work.
 ## Privacy and safety (owner's standing instruction)
 - Develop privately: no personal data in web searches, no uploading code, assets, logs or chat
   content to any third-party service (pastebins, online converters, AI tools, file hosts).
-- The GitHub repository is PUBLIC (checked 2026-10-28). Do not push without the owner's OK
-  until it is made private; never commit signing keys, passwords or `export_credentials.cfg`.
+- The GitHub repository is PUBLIC. The owner approved publishing the game's source there
+  (2026-10-28) on condition that it stays clean: never commit personal data, signing keys,
+  passwords, `export_credentials.cfg`, machine-specific paths or private reference material, and
+  review a branch for these (and for exploitable debug hooks) before pushing.
 - Reference screenshots of other games are for private analysis only: keep them outside the
   repo (or in a git-ignored `reference_private/` folder) and never ship or commit them.
 - The game must stay offline: no INTERNET permission, no ads/analytics SDKs, no downloads at
