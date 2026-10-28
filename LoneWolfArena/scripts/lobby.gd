@@ -20,6 +20,10 @@ func _ready() -> void:
 	_build_ui()
 	Audio.play_music("lobby_music", -4.0)
 	Game.mark("lobby ready")
+	# Where START is on screen, for the emulator test (after the layout has settled).
+	await get_tree().process_frame
+	await get_tree().process_frame
+	Game.mark_ui("start", start_btn, start_btn.size / 2.0)
 
 
 func _build_stage() -> void:

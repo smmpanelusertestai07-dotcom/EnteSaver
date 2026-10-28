@@ -26,6 +26,10 @@ wait_mark() { # wait_mark <text> <seconds>
 adb install -r -g "$APK" || { log "INSTALL FAILED"; exit 1; }
 adb shell settings put system screen_off_timeout 1800000
 adb shell svc power stayon true
+# The emulator renders in software (SwiftShader): at the pixel_6's 2400x1080 the game runs at
+# 1-2 FPS and a 10 s prep takes minutes. A 1280x720 display cuts the pixels about 3x.
+adb shell wm size 720x1280
+adb shell wm density 280
 # Skip the one-time "Viewing full screen" immersive-mode hint, which covers the game.
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb logcat -c
@@ -45,7 +49,8 @@ log "tap START at $SX,$SY"
 adb shell input tap "$SX" "$SY"
 sleep 6
 shot 02_countdown
-wait_mark "match started" 120
+# Game time runs slower than real time at a few FPS (physics catches up 6 steps per frame).
+wait_mark "match started" 420
 sleep 2
 shot 03_fight_start
 # Hold FIRE (right fire button), then push the joystick forward, then drag to look.
@@ -67,6 +72,7 @@ log "alive after test=$(alive)"
 adb logcat -d > "$OUT/logcat.txt"
 grep -o "\[LoneWolf\].*" "$OUT/logcat.txt" > "$OUT/markers.txt" || true
 grep -E "FATAL EXCEPTION|SIGSEGV|SIGABRT|Abort message" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
+log "script errors:"; grep -E "SCRIPT ERROR|Parse Error|Invalid call|Invalid access" "$OUT/logcat.txt" | head -40 || true
 grep -iE " godot " "$OUT/logcat.txt" | grep -iE "error|script|OpenGL API" | head -200 > "$OUT/godot_errors.txt" || true
 log "markers:"; cat "$OUT/markers.txt"
 log "crash lines: $(wc -l < "$OUT/crashes.txt")  godot error lines: $(wc -l < "$OUT/godot_errors.txt")"

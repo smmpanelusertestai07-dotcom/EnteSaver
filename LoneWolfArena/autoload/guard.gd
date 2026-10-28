@@ -148,28 +148,28 @@ func verify_dict(data: Dictionary) -> Dictionary:
 # ---------------------------------------------------------------- APK signature (Android)
 
 func _check_signature() -> void:
-	if OS.get_name() != "Android":
-		signature_state = "not android"
-		return
-	if not FileAccess.file_exists(SIGNER_FILE):
-		signature_state = "unknown (no signer file)"
-		return
-	var expected := FileAccess.get_file_as_string(SIGNER_FILE).strip_edges().to_lower().replace(":", "")
-	if expected.length() != 64:
-		signature_state = "unknown (bad signer file)"
-		return
-	var apk := _apk_path()
-	if apk == "":
-		signature_state = "unknown (no apk path)"
-		return
-	var certs := apk_signer_hashes(apk)
-	if certs.is_empty():
-		signature_state = "unknown (no signing block)"
-		return
-	signature_state = "ok" if expected in certs else "mismatch"
-	print("[LoneWolf] signature ", signature_state)
+	signature_state = _signature_state()
+	if OS.get_name() == "Android":
+		print("[LoneWolf] signature ", signature_state)
 	if signature_state == "mismatch":
 		flag("signature")
+
+
+func _signature_state() -> String:
+	if OS.get_name() != "Android":
+		return "not android"
+	if not FileAccess.file_exists(SIGNER_FILE):
+		return "unknown (no signer file)"
+	var expected := FileAccess.get_file_as_string(SIGNER_FILE).strip_edges().to_lower().replace(":", "")
+	if expected.length() != 64:
+		return "unknown (bad signer file)"
+	var apk := _apk_path()
+	if apk == "":
+		return "unknown (no apk path)"
+	var certs := apk_signer_hashes(apk)
+	if certs.is_empty():
+		return "unknown (no signing block)"
+	return "ok" if expected in certs else "mismatch"
 
 
 ## Path of the installed APK (Context.getPackageCodePath()), or "" when unavailable.
