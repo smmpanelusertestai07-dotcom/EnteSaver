@@ -179,14 +179,41 @@ func _signature_state() -> String:
 	if not pm is JavaObject or not (pm as JavaObject).has_java_method("hasSigningCertificate"):
 		return "unknown (android < 9)"
 	var package: Variant = (ctx as JavaObject).call("getPackageName")
+	var uid: Variant = null
 	for digest in accepted:
 		# Also true for an older key of a rotated signing lineage.
 		var signed: Variant = (pm as JavaObject).call("hasSigningCertificate", package, digest, CERT_INPUT_SHA256)
 		if typeof(signed) != TYPE_BOOL:
-			return "unknown (no answer)"
+			# The same question by the app's uid (the method's other overload).
+			if uid == null:
+				uid = JavaClassWrapper.wrap("android.os.Process").call("myUid")
+			signed = (pm as JavaObject).call("hasSigningCertificate", uid, digest, CERT_INPUT_SHA256)
+		if typeof(signed) != TYPE_BOOL:
+			return "unknown (no answer: %s)" % _bridge_view(pm, "hasSigningCertificate", [package, uid])
 		if signed:
 			return "ok"
 	return "mismatch"
+
+
+## What Godot's Java bridge sees for a call that went unanswered (argument types, the method's
+## overloads per class, a pending Java exception), for the log line.
+static func _bridge_view(obj: JavaObject, method: String, args: Array) -> String:
+	var out := PackedStringArray()
+	for a in args:
+		out.append(type_string(typeof(a)))
+	var c := obj.get_java_class()
+	while c != null:
+		for m: Dictionary in c.get_java_method_list():
+			if m.name == method:
+				var types := PackedStringArray()
+				for a: Dictionary in m.args:
+					types.append(type_string(a.type))
+				out.append("%s(%s)" % [c.get_java_class_name(), ",".join(types)])
+		c = c.get_java_parent_class()
+	var e := JavaClassWrapper.get_exception()
+	if e != null:
+		out.append(str(e))
+	return " ".join(out)
 
 
 ## The certificate SHA-256s in build_signer.txt, one per line (hex, with or without colons), as
