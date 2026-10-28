@@ -15,3 +15,7 @@ __pycache__/
 tools/props/_render_tmp/
 # Prop preview renders (tools/props/preview.py), not game assets
 assets/props/previews/
+# Character pipeline intermediates and scratch renders (tools/character/*.py)
+tools/character/work/
+tools/character/scratch/
+*.log

@@ -15,7 +15,7 @@ import make_sfx  # noqa: E402
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else "/root/work/assets/audio"
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "..", "assets", "audio")
     os.makedirs(out, exist_ok=True)
     print("SFX:")
     entries = make_sfx.build(out)

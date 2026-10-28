@@ -674,4 +674,4 @@ def build(out_dir):
 
 if __name__ == "__main__":
     import sys
-    build(sys.argv[1] if len(sys.argv) > 1 else "/root/work/assets/audio")
+    build(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "audio"))

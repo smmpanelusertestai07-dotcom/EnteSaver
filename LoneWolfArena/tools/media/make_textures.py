@@ -15,8 +15,9 @@ from texlib import (WrapCanvas, ao_from_height, blur, fft_noise, lerp, norm01, n
                     rgb, save, scatter_ellipses, seam_score, smoothstep, warp, worley)
 
 N = 1024
-OUT = "/root/work/assets/textures"
-FONT = "/root/work/assets/fonts/Rajdhani-SemiBold.ttf"
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+OUT = os.path.join(ROOT, "assets", "textures")
+FONT = os.path.join(ROOT, "assets", "fonts", "Rajdhani-SemiBold.ttf")
 
 
 def R(seed):

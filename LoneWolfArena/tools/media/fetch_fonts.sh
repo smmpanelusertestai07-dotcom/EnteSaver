@@ -3,7 +3,7 @@
 # and writes a combined SIL OFL 1.1 license file.
 # Usage: bash fetch_fonts.sh [out_dir]
 set -euo pipefail
-OUT="${1:-/root/work/assets/fonts}"
+OUT="${1:-$(cd "$(dirname "$0")/../.." && pwd)/assets/fonts}"
 mkdir -p "$OUT"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
