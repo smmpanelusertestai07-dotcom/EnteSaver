@@ -35,7 +35,7 @@ func _ready() -> void:
 	var title := UI.label("CREDITS & LICENCES", 34, UI.TEXT, "title")
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	var close := UI.button("CLOSE", 22, "dark", Vector2(150, 54))
+	var close := UI.close_button()
 	close.name = "Close"
 	close.pressed.connect(func() -> void:
 		closed.emit()

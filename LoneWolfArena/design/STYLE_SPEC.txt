@@ -85,13 +85,22 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; head stop error -1.5..+0.8 deg; on-target % with assist > without; red crosshair only on the body |
 
 ## 5. Screens
-- Loading: full-screen key art (our character), logo top-left, slim progress bar at the bottom
-  with tips text.
-- Lobby: character centred on a lit stage; top bar (avatar, name, level/XP, offline coins,
-  settings); left column menu (BUNDLES, CUSTOM HUD, SETTINGS, HOW TO PLAY); right: mode card
-  "LONE WOLF / CARGO CAGE" + big yellow START button bottom-right.
-- Result: mode/map text top-left, big gold "VICTORY" / grey "DEFEAT", stats card (ELIMINATIONS,
-  DAMAGE, HEADSHOTS, ACCURACY, TIME), honour tag, XP bar, PLAY AGAIN / LOBBY.
-- Settings tabs: BASIC (graphics SMOOTH/STANDARD/ULTRA, frame rate, aim precision, show FPS,
-  damage numbers, vibration), SENSITIVITY (general, red dot, 2x, 4x, sniper, fire-button drag),
-  CONTROLS (custom HUD, left fire, crosshair colour/size), SOUND.
+- Loading (boot, the main scene): full-bleed key art of our own character in a container yard
+  at sunset (slow push-in), logo top-left, a thin gold progress bar near the bottom with the
+  percentage, status text and rotating tips, the version.
+- Match loading (START / PLAY AGAIN): key-art backdrop, LONE WOLF / CARGO CAGE mode card with
+  chips (ROUNDS 1, 1 VS BOT, bot difficulty), big map wordmark, the bar.
+- Lobby: character large on a lit podium in a 3D container yard; top bar (emblem avatar, level,
+  name with EDIT, XP line, offline coins and wins); left text menu (BUNDLES, CUSTOM HUD,
+  SETTINGS, HOW TO PLAY, CREDITS); featured duel card top-left; right: stats chips, bot
+  difficulty, mode card "LONE WOLF / CARGO CAGE" and the big yellow START bottom-right.
+- Wardrobe (BUNDLES): rarity tabs, 3-column item cards with the rendered outfit portrait and a
+  rarity bar, live preview on the podium, EQUIP and BACK.
+- Result: mode/map text top-left, our medal with gold "VICTORY" / grey "DEFEAT" / white "DRAW" /
+  red "INVALID", round score plates, stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY,
+  TIME, HP LEFT), honour tag, XP bar, PLAY AGAIN / LOBBY.
+- Settings: tab column BASIC (graphics SMOOTH .. MAX, 30/60/90 FPS, show FPS, damage numbers,
+  vibration), CONTROLS (aim precision, aim assist and strength, left fire, custom HUD, ...),
+  SENSITIVITY (general, red dot, sniper scope, fire-button drag), SOUND; per-tab RESET.
+- Pause: full-width dark band, PAUSED, score / time left / HP chips, RESUME, SETTINGS, QUIT MATCH
+  (asks again).

@@ -45,8 +45,8 @@ log "screen ${W}x${H}"
 S=$(python3 -c "print($H/720.0)")
 VW=$(python3 -c "print($W/($H/720.0))")
 px() { python3 -c "print(int(round($1)))"; }
-# START: bottom-right anchored, 400x92 at offset (-420,-112) => centre (VW-220, 654).
-read -r SX SY < <(ui_pos start "$(px "($VW-220)*$S")" "$(px "654*$S")")
+# START: bottom-right anchored, spans VW-342..VW-12 x 630..708 => centre (VW-177, 669).
+read -r SX SY < <(ui_pos start "$(px "($VW-177)*$S")" "$(px "669*$S")")
 log "tap START at $SX,$SY"
 # Software rendering makes frames slow; tap again if the match did not begin loading.
 for try in 1 2 3; do

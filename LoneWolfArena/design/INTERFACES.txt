@@ -43,7 +43,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `hit_rect(id, w, vs)`, `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
 
 ## Android log lines (read by tools/ci/emulator_test.sh)
-- `[LoneWolf] lobby ready`, `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
+- `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout`), `lobby ready`,
+  `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
   `player moved`, `match over: <why>`, `results shown`, `signature <state>` (Guard, "ok" when the
   package manager confirms the signer in build_signer.txt).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
@@ -81,12 +82,22 @@ listed here. If a part needs something new from the core, add it in its own file
   top-down minimap render (camera cull_mask 1) sees the floor plan; everything else layer 1.
 
 ## Menus
+- Main scene: `scenes/loading.tscn` (`Loading`, scripts/loading.gd). The boot screen preloads
+  the character, animation and prop GLBs, the sounds and the lobby on worker threads, keeps
+  them referenced by the root node `LoadingCache` (meta `resources`) for the app's lifetime,
+  then calls `Game.goto_lobby()` (after `TIMEOUT_S` at the latest). Automated runs skip it;
+  `Loading.hold_for_test = true` keeps it up for a screenshot tour.
+- `Loading.start_match(host)`: match-loading overlay (CanvasLayer 100, mode + map card) that
+  loads the arena on a thread, then `Game.goto_arena()`. Used by START and PLAY AGAIN.
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
   damage, headshots, accuracy, time, xp, enemy, mode, map, weapon, score_player, score_bot,
-  hp_left, difficulty, taken. Buttons: PLAY AGAIN (`Game.goto_arena`), LOBBY (`Game.goto_lobby`).
+  hp_left, difficulty, taken. Hides the arena's `hud` while shown. Buttons: PLAY AGAIN (match
+  overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`). `ResultsScreen.honour(result)`
+  (static) picks the honour tag.
 - `PauseMenu.new()` (Control, works while paused): signal `closed`.
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
-  `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close.
+  `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics
+  change emits `Game.settings_changed` so the arena re-applies its quality at once.
 - `CreditsPanel.new()` (CanvasLayer 60): credits and the licence notices the shipped parts need
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL in
   assets/fonts/LICENSE.txt); signal `closed`. Opened by the lobby's `CreditsButton`.
