@@ -4,7 +4,7 @@ Measurable targets for the game, distilled from private reference research (fact
 words; the reference screenshots themselves are never stored in the repo). Everything here is
 implemented with ORIGINAL assets and names. Positions are fractions of screen width/height
 (x, y of the centre) on a landscape phone; sizes are fractions of screen height.
-QA agents (`.claude/agents/visual-qa.md`, `gameplay-tester.md`) check against this file.
+QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check against this file.
 
 ## 1. Mode and round flow (reference: 1v1 "Lone Wolf" duels)
 | Item | Target |

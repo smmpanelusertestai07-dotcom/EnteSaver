@@ -12,9 +12,9 @@ Rules
 - Save downloaded reference images ONLY under LoneWolfArena/reference_private/<topic>/ (git-ignored).
   Only image files; never run anything downloaded. No video downloads (platform ToS); official
   thumbnails are fine as stills. Look at every image you keep with the Read tool.
-- Write findings as facts and numbers in your own words to LoneWolfArena/design/research/<topic>.md:
+- Write findings as facts and numbers in your own words to LoneWolfArena/design/research/<topic>.txt:
   element, value, confidence (HIGH/MEDIUM/LOW), source URL. Never copy art, icons or text blocks.
 - Positions are fractions of screen width/height (x, y of the centre), sizes are fractions of the
   screen height, colours are hex with an opacity.
 - Never edit code or assets. Finish with a short list of concrete, testable targets for
-  design/STYLE_SPEC.md (what to measure, the target value, tolerance).
+  design/STYLE_SPEC.txt (what to measure, the target value, tolerance).

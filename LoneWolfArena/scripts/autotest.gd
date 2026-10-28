@@ -441,10 +441,28 @@ func _run_aim() -> void:
 	b.frozen = true
 	b.invulnerable = true
 	p.invulnerable = true
-	var fwd := Vector3(sin(p.aim_yaw + PI), 0, cos(p.aim_yaw + PI))
-	b.global_position = arena.call("closest_nav_point", p.global_position + Vector3(0, 0, -14).rotated(Vector3.UP, p.aim_yaw))
+	# Same gun and settings every run (settings persist in user://, the map keeps changing).
+	Game.settings.aim_precision = 0
+	p.set_loadout("ar")
+	b.set_loadout("ar")
+	# Stand the bot 10-16 m from the player where the player has a clear view of its head and
+	# chest (cover moves with map work, so a fixed spot is not enough).
+	var placed := false
+	for dist in [14.0, 12.0, 16.0, 10.0]:
+		for ang in [0.0, 12.0, -12.0, 25.0, -25.0, 40.0, -40.0, 60.0, -60.0, 90.0, -90.0, 180.0]:
+			var dir := Vector3(0, 0, -1).rotated(Vector3.UP, p.aim_yaw + deg_to_rad(ang))
+			b.global_position = arena.call("closest_nav_point", p.global_position + dir * dist)
+			await get_tree().physics_frame
+			await get_tree().process_frame
+			if absf(p.global_position.distance_to(b.global_position) - dist) < 3.0 \
+					and p.can_see(b.chest_position()) and p.can_see(b.head_position()):
+				placed = true
+				break
+		if placed:
+			break
+	_log("AIM setup: bot at %.1f m in clear view=%s" % [p.global_position.distance_to(b.global_position), placed])
 	await _wait(0.5)
-	var fails := 0
+	var fails := 0 if placed else 1
 	# 1. pull onto the body while firing
 	_aim_at(p, b.chest_position())
 	p.aim_yaw += deg_to_rad(3.0)

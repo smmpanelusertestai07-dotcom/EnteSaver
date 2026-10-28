@@ -27,16 +27,21 @@ app (Ente Saver) and must not be touched for game work.
 
 ## Build and test
 ```bash
-godot --headless --path . --import                       # first time / after asset changes
-godot --headless --path . res://tests/check.tscn         # every script compiles
-godot --headless --path . res://tests/run_tests.tscn     # unit tests
-tools/qa/soak.sh 5                                        # 5 full headless matches, no script errors
+tools/agents/install.sh                                   # once per clone: links the agent files below
+tools/qa/run_checks.sh                                    # import, compile, unit tests, gameplay checks
 tools/qa/capture.sh /tmp/shots 1560x720 screens           # screenshot walkthrough (Xvfb + llvmpipe)
 python3 tools/qa/compare.py /tmp/shots_old /tmp/shots /tmp/cmp   # screen-by-screen diff
 tools/build_apk.sh                                        # signed release APK (see script header)
 ```
 
+## No documents in the repository
+The repository carries source and what builds and checks it, nothing else: Ente Saver's own
+tests fail on any tracked `.md` file. Player-facing text lives in the game (How to play,
+credits); developer notes live in the scripts they describe. The files Claude Code reads
+(`CLAUDE.md`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`) are git-ignored links that
+`tools/agents/install.sh` makes to the plain-text sources in `tools/agents/` - edit those.
+
 ## Reference-matching loop (agents)
-See `.claude/skills/match-reference/SKILL.md`: research -> spec (`design/`) -> build ->
+See `tools/agents/skills/match-reference/SKILL.txt`: research -> spec (`design/`) -> build ->
 capture -> compare against the spec and private references -> fix, until every checklist item
-in `design/STYLE_SPEC.md` passes.
+in `design/STYLE_SPEC.txt` passes.

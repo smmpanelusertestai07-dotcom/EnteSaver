@@ -30,7 +30,11 @@ jobs:
     env:
       GODOT_VERSION: "4.7.2"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config for the build to find.
+          persist-credentials: false
 
       - name: Free disk space
         run: |
@@ -60,20 +64,9 @@ jobs:
               "$ANDROID_HOME" "${JAVA_HOME_17_X64:-$JAVA_HOME}" "$HOME/.android/debug.keystore" > "$HOME/.config/godot/$f"
           done
 
-      - name: Import project, unit tests, headless match simulation and gameplay checks
+      - name: Import, compile, unit tests, headless match and gameplay checks
         working-directory: LoneWolfArena
-        run: |
-          # A fresh checkout's first import can exit non-zero before the class cache exists.
-          godot --headless --path . --import > import.log 2>&1 || godot --headless --path . --import > import.log 2>&1 \
-            || (tail -50 import.log; exit 1)
-          godot --headless --path . res://tests/check.tscn
-          godot --headless --path . res://tests/run_tests.tscn
-          godot --headless --path . -- --autotest=sim
-          godot --headless --path . -- --autotest=aim
-          godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
-          godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
-          LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
-          godot --headless --path . -- --autotest=script:res://tests/guard_check.gd
+        run: tools/qa/run_checks.sh
 
       - name: Export signed APK (throwaway CI key, emulator build)
         working-directory: LoneWolfArena
@@ -99,7 +92,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Install and play on Android emulator (API 34, x86_64)
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
           arch: x86_64
@@ -132,7 +125,7 @@ jobs:
           PY
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: lonewolf-arena-ci

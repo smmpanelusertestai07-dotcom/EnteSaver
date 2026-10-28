@@ -19,3 +19,6 @@ assets/props/previews/
 tools/character/work/
 tools/character/scratch/
 *.log
+# No documents in the repository (Ente Saver's tests fail on any tracked .md): the .md files
+# Claude Code reads are links made by tools/agents/install.sh to the .txt sources there.
+*.md
