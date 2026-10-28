@@ -108,19 +108,53 @@ func _test_weapon_state() -> void:
 
 
 func _test_hud_layout() -> void:
-	var lay := HudLayout.resolve({"fire_r": {"x": 2.0, "y": -1.0, "s": 9.0, "o": 0.0}, "bogus": {}})
+	var lay := HudLayout.resolve({"fire_r": {"x": 2.0, "y": -1.0, "s": 9.0, "o": 3.0}, "jump": {"o": 0.12},
+		"crouch": {"o": 0.0}, "scope": {"x": "left", "a": "up"}, "bogus": {}})
 	_check(lay.has("fire_r") and not lay.has("bogus"), "layout keeps only known widgets")
-	_check(lay.fire_r.x <= 0.98 and lay.fire_r.y >= 0.04, "layout clamps position")
-	_check(lay.fire_r.s <= 0.45 and lay.fire_r.o >= 0.15, "layout clamps size/opacity")
-	var vs := Vector2(1280, 720)
-	var slots := HudLayout.weapon_slots(lay.weapons, vs)
-	_check(slots.size() == 3 and slots[0].end.x < slots[1].position.x, "three non-overlapping weapon slots")
-	for id in HudLayout.DEFAULTS:
-		var r := HudLayout.hit_rect(id, HudLayout.resolve({})[id], vs)
-		_check(Rect2(Vector2.ZERO, vs).encloses(r) or id == "joystick", "default %s fits on a 16:9 screen" % id)
-	var tall := HudLayout.resolve({})
-	var wide := Vector2(1560, 720)
-	_check(HudLayout.center(tall.fire_r, wide).x > 1200.0, "layout scales to wide (19.5:9) screens")
+	_check(lay.fire_r.x == 0.98 and lay.fire_r.y == 0.04, "layout clamps position")
+	_check(is_equal_approx(lay.fire_r.s, minf(HudLayout.DEFAULTS.fire_r.s * HudLayout.SIZE_MAX, 0.45)), "layout clamps size")
+	_check(lay.fire_r.o == 1.0 and is_equal_approx(lay.jump.o, 0.12), "layout clamps opacity to 10..100 %")
+	_check(lay.crouch.o == HudLayout.DEFAULTS.crouch.o, "an invisible (0 %) control falls back to the default opacity")
+	_check(lay.scope.x == HudLayout.DEFAULTS.scope.x and lay.scope.a == HudLayout.DEFAULTS.scope.a, "wrongly typed values are ignored")
+	var back := HudLayout.resolve(HudLayout.to_save(lay))
+	_check(int(HudLayout.to_save(lay)._v) == HudLayout.VERSION and is_equal_approx(back.jump.o, lay.jump.o)
+		and is_equal_approx(back.fire_r.x, lay.fire_r.x), "saved layout loads back the same")
+	var saved := Game.hud_layout
+	Game.hud_layout = {"fire_r": {"x": 0.3}}
+	_check(HudLayout.current().fire_r.x == HudLayout.DEFAULTS.fire_r.x, "a layout from an older HUD version is ignored")
+	Game.hud_layout = saved
+	var def := HudLayout.resolve({})
+	var phone := Vector2(2400, 1080)
+	for vs: Vector2 in [Vector2(1280, 720), phone, Vector2(1560, 720)]:
+		var screen := Rect2(Vector2.ZERO, vs)
+		var off_screen := PackedStringArray()
+		var drift := PackedStringArray()
+		var unanchored := PackedStringArray()
+		for id: String in HudLayout.DEFAULTS:
+			var w: Dictionary = def[id]
+			var c := HudLayout.center(w, vs)
+			var moved := w.duplicate()
+			HudLayout.place(moved, c, vs)
+			if not HudLayout.center(moved, vs).is_equal_approx(c):
+				drift.append(id)
+			if id != "joystick" and not screen.encloses(HudLayout.hit_rect(id, w, vs)):
+				off_screen.append(id)
+			if w.a != "c" and id != "joystick":
+				# Anchored widgets keep their distance to their edge, in screen heights.
+				var ref := HudLayout.center(w, phone)
+				var edge := c.x if w.a == "l" else vs.x - c.x
+				var ref_edge := ref.x if w.a == "l" else phone.x - ref.x
+				if absf(edge / vs.y - ref_edge / phone.y) > 0.002:
+					unanchored.append(id)
+		_check(off_screen.is_empty(), "default widgets fit on a %s screen %s" % [vs, off_screen])
+		_check(drift.is_empty(), "place() then center() gives the same spot on %s %s" % [vs, drift])
+		_check(unanchored.is_empty(), "edge-anchored widgets keep their edge distance on %s %s" % [vs, unanchored])
+		var main := HudLayout.weapon_main(def.weapons, vs)
+		var slots := HudLayout.weapon_slots(def.weapons, vs)
+		_check(slots.size() == 3 and slots[0].end.x < slots[1].position.x and slots[1].end.x < slots[2].position.x,
+			"three non-overlapping weapon slots on %s" % vs)
+		_check(main.end.y <= slots[0].position.y and screen.encloses(main.merge(slots[2])), "weapon panel: main slot above the small ones, on screen (%s)" % vs)
+	_check(HudLayout.center(def.fire_r, Vector2(1560, 720)).x > 1200.0, "layout scales to wide (19.5:9) screens")
 
 
 func _test_guard() -> void:
