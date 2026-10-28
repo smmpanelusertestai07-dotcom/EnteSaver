@@ -123,7 +123,7 @@ func _u() -> float:
 func pick_rect() -> Rect2:
 	var u := _u()
 	var x0 := 0.025 * u
-	var w := minf(1.42 * u, size.x - x0 - 0.47 * u)
+	var w := minf(1.42 * u, size.x - x0 - 0.56 * u)
 	var rows := maxi(1, ceili(pick_options.size() / float(COLS)))
 	var h := u * (0.08 + 0.06 + rows * 0.205 + (rows - 1) * 0.018 + 0.03 + 0.1)
 	var y0 := clampf((size.y - h) * 0.5 - 0.03 * size.y, 0.105 * size.y, maxf(size.y - h - 4.0, 0.105 * size.y))

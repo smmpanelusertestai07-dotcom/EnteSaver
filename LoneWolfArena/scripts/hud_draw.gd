@@ -7,7 +7,7 @@ extends RefCounted
 const ICON_DIR := "res://assets/ui/icons/"
 
 # Palette (reference look: dark translucent disks, white glyphs, team blue vs enemy orange).
-const BTN_BG := Color(0.13, 0.135, 0.15, 0.52)
+const BTN_BG := Color(0.16, 0.16, 0.18, 0.6)
 const BTN_RIM := Color(1, 1, 1, 0.24)
 const GLYPH := Color(1, 1, 1, 0.96)
 const GOLD := Color(1.0, 0.8, 0.26)

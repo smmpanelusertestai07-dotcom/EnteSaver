@@ -119,7 +119,7 @@ func _build_environment(parent: Node3D) -> void:
 	var sky := Sky.new()
 	var sm := ProceduralSkyMaterial.new()
 	sm.sky_top_color = Color(0.78, 0.8, 0.84)
-	sm.sky_horizon_color = Color(0.8, 0.79, 0.76)
+	sm.sky_horizon_color = Color(0.9, 0.89, 0.86)
 	sm.ground_horizon_color = Color(0.62, 0.6, 0.57)
 	sm.ground_bottom_color = Color(0.5, 0.49, 0.47)
 	sm.sun_angle_max = 0.0
@@ -188,10 +188,6 @@ func _collect_quality_groups(batches: Dictionary, sets: Dictionary) -> void:
 	for key in ["signs", "roof_detail", "wall_detail"]:
 		if batches.has(key):
 			_minor.append(batches[key])
-	for key in ["fire_cabinet", "lamps_alcove"]:
-		if sets.has(key):
-			for n in sets[key]:
-				_minor.append(n)
 	for key in ["crate", "barrel", "pallet", "bollard", "fire_cabinet", "forklift", "tank", "door"]:
 		if sets.has(key):
 			for n in sets[key]:
@@ -524,7 +520,7 @@ func _shell_half() -> void:
 
 ## Pipes, conduits, electrical boxes and lamps on the walls (visual only).
 func _wall_details() -> void:
-	kit.batch_config("wall_detail", 1, false)
+	kit.batch_config("wall_detail", LAYER_WALLS, false)
 	var pipe := CylinderMesh.new()
 	pipe.top_radius = 0.07
 	pipe.bottom_radius = 0.07

@@ -40,9 +40,7 @@ func run(autotest: Node) -> int:
 	_use_player_cam(p)
 	# the barrier must hold the player in the alcove during PREP
 	p.aim_yaw = map.spawn_a_yaw
-	p.move_dir = Vector2(0, 1)
-	await at.wait(2.5)
-	p.move_dir = Vector2.ZERO
+	await _walk(p, 150)
 	var held: bool = p.global_position.x < -MapBuilder.HX + 0.1
 	at.log_line("MAPNAV %s barrier holds the player in PREP (x=%.2f)" % ["OK" if held else "FAIL", p.global_position.x])
 	if not held:
@@ -52,9 +50,7 @@ func run(autotest: Node) -> int:
 	await at.wait_for_phase(arena, 1)
 	b.frozen = true
 	p.aim_yaw = map.spawn_a_yaw
-	p.move_dir = Vector2(0, 1)
-	await at.wait(1.6)
-	p.move_dir = Vector2.ZERO
+	await _walk(p, 100)
 	var out: bool = p.global_position.x > -MapBuilder.HX + 0.5
 	at.log_line("MAPNAV %s barrier released in FIGHT (x=%.2f)" % ["OK" if out else "FAIL", p.global_position.x])
 	if not out:
@@ -124,6 +120,14 @@ func run(autotest: Node) -> int:
 	map.apply_quality(int(Game.settings.graphics))
 	at.log_line("MAPNAV RESULT fails=%d" % fails)
 	return 1 if fails > 0 else 0
+
+
+## Walks forward for a number of physics frames (independent of the render frame rate).
+func _walk(p: Player, frames: int) -> void:
+	for i in frames:
+		p.move_dir = Vector2(0, 1)
+		await at.get_tree().physics_frame
+	p.move_dir = Vector2.ZERO
 
 
 func _fwd(yaw: float, d: float) -> Vector3:

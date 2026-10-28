@@ -64,8 +64,8 @@ func _build_backdrop() -> void:
 func _build_panel() -> void:
 	_panel = UI.panel(Color(0.05, 0.06, 0.08, 0.86), 10)
 	_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_panel.custom_minimum_size = Vector2(600, 0)
-	_panel.position = Vector2(-300, 66)
+	_panel.custom_minimum_size = Vector2(560, 0)
+	_panel.position = Vector2(-280, 66)
 	add_child(_panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)

@@ -58,12 +58,14 @@ func run(at: Node) -> int:
 	var fire_c := HudLayout.center(hud.layout.fire_r, vs)
 	_touch(at, 5, fire_c, true)
 	for i in 9:
+		b.hp = maxf(b.hp, 150.0)      # keep the bot standing for the rest of the tour
 		_aim_at(p, b.chest_position() + Vector3(0, 0.05 * sin(i), 0))
 		_drag(at, 5, fire_c + Vector2(1, 0), Vector2(1, 0))
 		await at.wait(0.06)
 	await at.shot("hud_06_firing")
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
+	b.hp = maxf(b.hp, 150.0)
 	_check(int(p.stats.hits) > 0, "shots hit the bot", at)
 	# Red-dot ADS.
 	p.toggle_ads()
@@ -110,14 +112,14 @@ func run(at: Node) -> int:
 	for i in 8:
 		_drag(at, 2, jc + Vector2(0, -jr * 1.4 * minf(1.0, (i + 1) / 3.0)), Vector2(0, -jr * 0.45))
 		await at.wait(0.08)
-	await at.wait(0.5)
+	await _until(at, func() -> bool: return p.sprinting, 3.0)
 	await at.shot("hud_11_sprint_drag")
 	_check(p.sprinting, "pushing the stick past the ring sprints", at)
 	_touch(at, 2, jc + Vector2(0, -jr * 1.4), false)
 	await at.wait(0.25)
 	_check(not p.sprinting, "letting go of the stick stops the sprint", at)
 	await _tap(at, HudLayout.center(hud.layout.sprint, vs))
-	await at.wait(0.4)
+	await _until(at, func() -> bool: return p.sprinting, 3.0)
 	_check(p.sprinting and p.move_dir.y > 0.5, "sprint button runs forward", at)
 	await _tap(at, HudLayout.center(hud.layout.sprint, vs))
 	await at.wait(0.25)
@@ -199,6 +201,14 @@ func _place_bot(at: Node, arena: Node, p: Player, b: Bot) -> bool:
 			if p.can_see(b.chest_position()) and p.can_see(b.head_position()) and p.global_position.distance_to(b.global_position) > 5.0:
 				return true
 	return false
+
+
+## Waits until cond() is true (the capture box can run far below real time).
+func _until(at: Node, cond: Callable, timeout: float) -> void:
+	var t := 0.0
+	while not cond.call() and t < timeout:
+		await at.wait(0.1)
+		t += 0.1
 
 
 ## The autotest helpers take window pixels; HUD rects are in the (stretched) viewport.

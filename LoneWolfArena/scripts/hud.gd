@@ -79,9 +79,12 @@ var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
 var _vis_t := 0.0
 var _hp_lag := Fighter.MAX_HP
+var _hp_last := Fighter.MAX_HP
+var _lag_hold := 0.0
 var _fps_smooth := 60.0
 var _time := 0.0
 var _lens_tex: Texture2D
+var _ui_marked := false
 
 
 func _ready() -> void:
@@ -118,6 +121,7 @@ func bind(p: Player, a: Node) -> void:
 	player.hit_landed.connect(_on_hit_landed)
 	player.damaged.connect(_on_damaged)
 	_hp_lag = player.hp
+	_hp_last = player.hp
 
 
 # ---------------------------------------------------------------- arena -> HUD API
@@ -445,7 +449,14 @@ func _process(delta: float) -> void:
 		return
 	if player != null:
 		_update_movement(delta)
-		_hp_lag = maxf(player.hp, _hp_lag - Fighter.MAX_HP * 0.45 * real) if _hp_lag > player.hp else player.hp
+		if player.hp < _hp_last:
+			_lag_hold = 0.35
+		_hp_last = player.hp
+		_lag_hold = maxf(_lag_hold - real, 0.0)
+		if _hp_lag <= player.hp:
+			_hp_lag = player.hp
+		elif _lag_hold <= 0.0:
+			_hp_lag = maxf(player.hp, _hp_lag - Fighter.MAX_HP * 0.6 * real)
 	for k in _pressed.keys():
 		_pressed[k] -= real
 		if _pressed[k] <= 0.0:
@@ -481,6 +492,12 @@ func _process(delta: float) -> void:
 		_fps_smooth = lerpf(_fps_smooth, 1.0 / real, 0.05)
 	panels.tick(delta, real)
 	_place_minimap(size)
+	if not _ui_marked and player != null and size.x > 0.0:
+		# Where FIRE and the joystick are on screen, for the on-device CI test (logged once).
+		_ui_marked = true
+		if Game.has_method("mark_ui"):
+			Game.call("mark_ui", "fire", self, HudLayout.center(layout.fire_r, size))
+			Game.call("mark_ui", "joystick", self, HudLayout.center(layout.joystick, size))
 	queue_redraw()
 	minimap.queue_redraw()
 
@@ -666,7 +683,7 @@ func _draw_button(id: String, vs: Vector2) -> void:
 func _draw_fire_halo(c: Vector2, r: float, o: float, pressed: bool) -> void:
 	var rr := r * 1.17
 	var col := Color(1.0, 0.55, 0.3, 0.7 * o) if pressed else Color(1, 1, 1, 0.22 * o)
-	var n := 40
+	var n := 30
 	for i in n:
 		var a0 := TAU * i / n
 		draw_arc(c, rr, a0, a0 + TAU / n * 0.45, 3, col, 2.0, true)
@@ -809,7 +826,7 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 					HudDraw.ring(self, c, 9.0 * sc, Color(col, 0.35), 1.2)
 			"wide":
 				ring_r = clampf(maxf(0.055 * u, _spread_px(u) * 1.05 if dyn else 0.0), 0.05 * u, 0.2 * u) * sc
-				for k in 4:
+				for k in (0 if w.reloading and Game.settings.get("reload_on_crosshair", true) else 4):
 					var a0 := -PI * 0.5 + PI * 0.5 * k + 0.32
 					draw_arc(c, ring_r, a0, a0 + PI * 0.5 - 0.64, 16, outline, 3.6, true)
 					draw_arc(c, ring_r, a0, a0 + PI * 0.5 - 0.64, 16, col, 1.8, true)
@@ -1319,22 +1336,36 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	_draw_score_bar(vs, u)
 	_draw_hp_block(vs, u)
 	_draw_zone_strip(vs, u)
-	HudDraw.text_parts(self, [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]],
-		Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0])), int(0.03 * u), 1, 3, "bold", 0.8)
+	var fs := int(0.03 * u)
+	var feed := [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]]
+	var feed_c := Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0]))
+	var feed_w := HudDraw.text_parts(self, feed, feed_c, fs, 1, 3, "bold", 0.8)
 	_draw_controls(vs)
 	_draw_weapon_panel(vs)
+	# Labels under (or above) each widget, nudged so they never sit on top of each other.
+	var taken: Array[Rect2] = [Rect2(feed_c - Vector2(feed_w * 0.5, fs * 0.6), Vector2(feed_w, fs * 1.2))]
+	var lfs := int(0.022 * u)
 	for id: String in HudLayout.ORDER:
 		var w: Dictionary = layout[id]
 		var r := HudLayout.hit_rect(id, w, vs)
 		var sel := id == selected_id
-		var lc := Color(HudDraw.YELLOW, 1.0) if sel else Color(1, 1, 1, 0.75)
 		var label := String(SHORT_LABELS.get(id, HudLayout.LABELS.get(id, id)))
-		var ly := r.end.y + 0.018 * u
-		if HudLayout.kind(id) == "square":
-			ly += r.size.y * HudLayout.STRIP_H
-		if ly > vs.y - 0.015 * u:
-			ly = r.position.y - 0.018 * u
-		HudDraw.text(self, label, Vector2(r.get_center().x, ly), int(0.022 * u), lc, 1, 3, "bold")
+		var lw := HudDraw.text_width(label, lfs, "bold") + 8.0
+		var below := r.end.y + (r.size.y * HudLayout.STRIP_H if HudLayout.kind(id) == "square" else 0.0) + 0.018 * u
+		var above := r.position.y - 0.018 * u
+		var spots := [below, above] if below < vs.y - 0.015 * u else [above, below]
+		var lr := Rect2()
+		for y: float in spots:
+			lr = Rect2(Vector2(r.get_center().x - lw * 0.5, y - lfs * 0.6), Vector2(lw, lfs * 1.2))
+			var clash := false
+			for t in taken:
+				if t.intersects(lr):
+					clash = true
+					break
+			if not clash:
+				break
+		taken.append(lr)
+		HudDraw.text(self, label, lr.get_center(), lfs, Color(HudDraw.YELLOW, 1.0) if sel else Color(1, 1, 1, 0.8), 1, 3, "bold")
 		if sel:
 			if HudLayout.kind(id) in ["button", "joy"]:
 				HudDraw.ring(self, r.get_center(), r.size.x * 0.5 + 5.0, HudDraw.YELLOW, 2.5)

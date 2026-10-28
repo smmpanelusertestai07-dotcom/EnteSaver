@@ -96,14 +96,14 @@ func _make(key: String) -> Material:
 			m.vertex_color_is_srgb = true
 			m.uv1_scale = Vector3(0.6, 0.6, 1.0)
 		"wall_lower", "wall_upper":
-			m = _std(Color("d98a2b") if key == "wall_lower" else Color("c9ced5"), 0.68, 0.05)
+			m = _std(Color("eb9a32") if key == "wall_lower" else Color("e6eaf0"), 0.68, 0.05)
 			_set_tex(m, "wall_grime")
 			# one bay = 6 x 9 m (bay UVs in metres, centred on the bay, V = 1 - height)
 			m.uv1_scale = Vector3(1.0 / 6.0, 1.0 / 9.0, 1.0)
 			m.uv1_offset = Vector3(0.5, 8.0 / 9.0, 0.0)
 		"header":
 			# corrugated cladding on the flat lintel boxes above the spawn doors
-			m = _std(Color("c9ced5"), 0.68, 0.05)
+			m = _std(Color("e6eaf0"), 0.68, 0.05)
 			_set_tex(m, "wall_grime", "corrugated_n", 0.9)
 			m.uv1_scale = Vector3(1.0 / 6.0, 1.0 / 9.0, 1.0)
 		"steel":
