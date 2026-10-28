@@ -248,6 +248,17 @@ func mark(what: String) -> void:
 		print("[LoneWolf] ", what)
 
 
+## Logs where a control is on screen, once per name and session: "[LoneWolf] ui <name> <x> <y>"
+## in screen pixels (local_point is in the item's own coordinates). The emulator test taps there.
+func mark_ui(what: String, item: CanvasItem, local_point: Vector2) -> void:
+	var key := "ui " + what
+	if _marks.has(key) or item == null or not item.is_inside_tree():
+		return
+	_marks[key] = true
+	var p := item.get_viewport().get_screen_transform() * item.get_global_transform_with_canvas() * local_point
+	print("[LoneWolf] ui %s %d %d" % [what, roundi(p.x), roundi(p.y)])
+
+
 func goto_lobby() -> void:
 	get_tree().paused = false
 	Engine.time_scale = 1.0

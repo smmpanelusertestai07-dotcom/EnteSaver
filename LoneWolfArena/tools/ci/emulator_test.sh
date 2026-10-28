@@ -10,6 +10,13 @@ log() { echo "[emu-test] $*"; }
 alive() { adb shell pidof "$PKG" >/dev/null 2>&1 && echo yes || echo no; }
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; log "screenshot $1 alive=$(alive)"; }
 has_mark() { adb logcat -d -s godot:I 2>/dev/null | grep -q "\[LoneWolf\] $1"; }
+# The game logs "[LoneWolf] ui <name> <x> <y>" (screen pixels) for the controls this test
+# presses; ui_pos <name> <fallback x> <fallback y> prints the logged position or the fallback.
+ui_pos() {
+  local line
+  line=$(adb logcat -d -s godot:I 2>/dev/null | grep -o "\[LoneWolf\] ui $1 [0-9]* [0-9]*" | tail -1)
+  if [ -n "$line" ]; then echo "$line" | awk '{print $4, $5}'; else echo "$2 $3"; fi
+}
 wait_mark() { # wait_mark <text> <seconds>
   local i
   for ((i = 0; i < $2; i += 2)); do has_mark "$1" && { log "marker '$1' after ${i}s"; return 0; }; sleep 2; done
@@ -33,7 +40,7 @@ S=$(python3 -c "print($H/720.0)")
 VW=$(python3 -c "print($W/($H/720.0))")
 px() { python3 -c "print(int(round($1)))"; }
 # START: bottom-right anchored, 400x92 at offset (-420,-112) => centre (VW-220, 654).
-SX=$(px "($VW-220)*$S"); SY=$(px "654*$S")
+read -r SX SY < <(ui_pos start "$(px "($VW-220)*$S")" "$(px "654*$S")")
 log "tap START at $SX,$SY"
 adb shell input tap "$SX" "$SY"
 sleep 6
@@ -42,10 +49,12 @@ wait_mark "match started" 120
 sleep 2
 shot 03_fight_start
 # Hold FIRE (right fire button), then push the joystick forward, then drag to look.
-FX=$(px "0.845*$VW*$S"); FY=$(px "0.63*720*$S")
+read -r FX FY < <(ui_pos fire "$(px "0.845*$VW*$S")" "$(px "0.63*720*$S")")
+log "hold FIRE at $FX,$FY"
 adb shell input swipe "$FX" "$FY" "$FX" "$FY" 3000
 shot 04_after_fire
-JX=$(px "0.15*$VW*$S"); JY=$(px "0.71*720*$S"); JY2=$(px "0.55*720*$S")
+read -r JX JY < <(ui_pos joystick "$(px "0.15*$VW*$S")" "$(px "0.71*720*$S")")
+JY2=$(( JY - $(px "0.16*720*$S") ))
 adb shell input swipe "$JX" "$JY" "$JX" "$JY2" 3000
 shot 05_after_move
 LX=$(px "0.62*$VW*$S"); LY=$(px "0.4*720*$S"); LX2=$(px "0.74*$VW*$S")
