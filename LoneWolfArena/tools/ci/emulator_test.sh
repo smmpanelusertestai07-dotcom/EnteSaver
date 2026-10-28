@@ -23,7 +23,9 @@ wait_mark() { # wait_mark <text> <seconds>
   log "marker '$1' NOT seen after $2s"; return 1
 }
 
-adb install -r -g "$APK" || { log "INSTALL FAILED"; exit 1; }
+# A normal install: an incremental one streams the APK lazily, so the game could not read
+# its own signing block at the end of the file.
+adb install --no-incremental -r -g "$APK" || { log "INSTALL FAILED"; exit 1; }
 adb shell settings put system screen_off_timeout 1800000
 adb shell svc power stayon true
 # The emulator renders in software (SwiftShader): at the pixel_6's 2400x1080 the game runs at
@@ -46,8 +48,12 @@ px() { python3 -c "print(int(round($1)))"; }
 # START: bottom-right anchored, 400x92 at offset (-420,-112) => centre (VW-220, 654).
 read -r SX SY < <(ui_pos start "$(px "($VW-220)*$S")" "$(px "654*$S")")
 log "tap START at $SX,$SY"
-adb shell input tap "$SX" "$SY"
-sleep 6
+# Software rendering makes frames slow; tap again if the match did not begin loading.
+for try in 1 2 3; do
+  adb shell input tap "$SX" "$SY"
+  wait_mark "prep started" 60 && break
+  log "START tap $try not taken; display: $(adb shell wm size | tr '\n' ' ')"
+done
 shot 02_countdown
 # Game time runs slower than real time at a few FPS (physics catches up 6 steps per frame).
 wait_mark "match started" 420

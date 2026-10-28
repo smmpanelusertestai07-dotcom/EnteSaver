@@ -248,6 +248,16 @@ func mark(what: String) -> void:
 		print("[LoneWolf] ", what)
 
 
+## The first touch the game receives, with the window size: lets the emulator test see where its
+## taps land (once per session).
+func _input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch and event.pressed and not _marks.has("first touch"):
+		_marks["first touch"] = true
+		var p: Vector2 = (event as InputEventScreenTouch).position
+		print("[LoneWolf] first touch %d %d window %s screen %s" % [roundi(p.x), roundi(p.y),
+			str(DisplayServer.window_get_size()), str(DisplayServer.screen_get_size())])
+
+
 ## Logs where a control is on screen, once per name and session: "[LoneWolf] ui <name> <x> <y>"
 ## in screen pixels (local_point is in the item's own coordinates). The emulator test taps there.
 func mark_ui(what: String, item: CanvasItem, local_point: Vector2) -> void:
