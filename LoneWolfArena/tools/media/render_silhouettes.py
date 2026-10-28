@@ -45,12 +45,16 @@ SPRINT_POSE = [
     ("upperarm_l", (0, -1.0, -0.10)), ("lowerarm_l", (0, -0.55, 0.85)),
     ("upperarm_r", (0, 0.95, -0.30)), ("lowerarm_r", (0, 0.80, -0.60)),
 ]
+# Jump: a leap with the rifle up (front knee forward, back foot kicked up) so it never reads as
+# the kneeling crouch icon at button size.
+LEAP_POSE = [("spine_01", (0, -0.2, 1)), ("thigh_l", (0, -0.75, -0.65)), ("calf_l", (0, 0.35, -0.94)),
+             ("thigh_r", (0, 0.55, -0.83)), ("calf_r", (0, 0.95, 0.1))]
 ICONS = {
     "stance_sprint": ("pose", "idle", 0, "side_r", (256, 256), {"rifle": False, "aim": SPRINT_POSE}),
     "stance_stand": ("pose", "idle", 0, "side_l", (256, 256)),
     "stance_crouch": ("pose", "crouch_idle", 0, "side_l", (256, 256)),
     "stance_prone": ("pose", "prone_idle", 0, "side_l", (256, 256)),
-    "stance_jump": ("pose", "jump", 7, "side_l", (256, 256)),
+    "stance_jump": ("pose", "idle", 0, "side_l", (256, 256), {"aim": LEAP_POSE}),
     "weapon_ar": ("prop", "weapon_ar", None, "side_l", (512, 192)),
     "weapon_sg": ("prop", "weapon_sg", None, "side_l", (512, 192)),
     "weapon_smg": ("prop", "weapon_smg", None, "side_l", (512, 192)),

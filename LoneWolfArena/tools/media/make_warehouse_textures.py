@@ -11,9 +11,11 @@
                                              dirt toward the bottom
   diamond_plate.png / diamond_plate_n.png    steel tread plate for ramps, 1 tile = 1 m
   wall_grime.png                             multiply layer for the corrugated wall bays: 1 tile = one
-                                             6 x 9 m bay (V=0 top), streaks under the windows and the
-                                             girt, dirty base
+                                             6 x 9 m bay (V=0 top), baked rib shading, streaks under the
+                                             windows and the girt, dirty base
   crate_wood.png                             weathered brown crate boards (8 boards per tile)
+  floor_decals.png                           RGBA 2x2 atlas: contact shadow (9-slice), oil stain, grime,
+                                             tyre marks
 usage: python3 tools/media/make_warehouse_textures.py [out_dir]   (needs numpy, scipy, pillow)"""
 import os
 import sys
@@ -225,6 +227,12 @@ def wall_grime():
     col -= 0.2 * splash + 0.1 * smoothstep(0.3, 0.0, yy)
     # soot under the roof
     col -= 0.1 * smoothstep(8.2, 9.0, yy)
+    # baked rib shading (24 ribs per 6 m bay, as wall_bay.glb: valley 42 %, slope 12 %, crest
+    # 34 %, slope 12 %): the walls get no direct sun, so the corrugation is drawn in the albedo
+    ph = (np.arange(w) + 0.5) / w * 24.0 % 1.0
+    rib = np.select([ph < 0.42, ph < 0.54, ph < 0.88], [0.9, 0.78, 1.0], 0.84)
+    rib = blur(np.tile(rib, (8, 1)), 0.7)[0]
+    col = col * rib[None, :]
     out = np.repeat(np.clip(col, 0, 1)[..., None], 3, axis=2)
     out *= rgb((255, 252, 246))
     return np.clip(out, 0, 1)
@@ -263,6 +271,57 @@ def crate_wood(seed=4646):
     return np.clip(col, 0, 1)
 
 
+def floor_decals(seed=4747):
+    """RGBA 2x2 atlas (256 px cells) of floor overlays, all dark with soft alpha:
+    0 contact shadow (alpha = smooth falloff toward the cell border on both axes, flat in the
+      middle: used as a 9-slice around container / crate footprints),
+    1 oil stain, 2 grime patch, 3 tyre marks."""
+    r = R(seed)
+    n = 512
+    c = 256
+    rgba = np.zeros((n, n, 4))
+    t = (np.arange(c) + 0.5) / c
+    prof = smoothstep(0.0, 0.5, np.minimum(t, 1.0 - t) * 1.0)
+    ao = np.outer(prof, prof) ** 1.4
+    rgba[:c, :c, 3] = ao
+    rgba[:c, :c, :3] = 0.02
+    yy, xx = np.mgrid[0:c, 0:c].astype(float)
+    rr = np.hypot(xx - c / 2, yy - c / 2) / (c / 2)
+    # oil stain: noisy blob with a darker core
+    warp_n = blur(fft_noise(c, 2.0, r, fmin=2), 3.0)
+    edge_r = rr + 0.25 * warp_n
+    blob = smoothstep(0.9, 0.7, edge_r)
+    rim = smoothstep(0.62, 0.78, edge_r) * blob
+    core = smoothstep(0.55, 0.0, rr + 0.2 * blur(fft_noise(c, 2.0, r, fmin=2), 3.0))
+    a1 = 0.32 * blob + 0.18 * rim + 0.22 * core
+    a1 *= 0.9 + 0.1 * blur(fft_noise(c, 1.0, r, fmin=6), 2.0)
+    a1 *= smoothstep(1.0, 0.85, rr)
+    rgba[:c, c:, 3] = np.clip(a1, 0, 1)
+    rgba[:c, c:, :3] = rgb((22, 18, 14))
+    # grime patch: soft cloudy darkening
+    g = smoothstep(-0.6, 1.8, blur(fft_noise(c, 2.0, r, fmin=2), 2.5)) * smoothstep(1.0, 0.25, rr)
+    rgba[c:, :c, 3] = np.clip(0.42 * g, 0, 1)
+    rgba[c:, :c, :3] = rgb((40, 36, 30))
+    # tyre marks: two parallel curved streaks along the cell
+    u = xx / c
+    curve = 0.5 + 0.12 * np.sin(u * np.pi * 1.3 + 0.4)
+    marks = np.zeros((c, c))
+    for off in (-0.16, 0.16):
+        dist = np.abs(yy / c - (curve + off))
+        marks = np.maximum(marks, smoothstep(0.045, 0.012, dist))
+    marks *= smoothstep(0.0, 0.15, u) * smoothstep(1.0, 0.85, u)
+    marks *= 0.55 + 0.45 * smoothstep(-0.8, 1.2, blur(fft_noise(c, 1.2, r, fmin=4, aniso=(8.0, 1.0)), 1.5))
+    rgba[c:, c:, 3] = np.clip(0.6 * marks, 0, 1)
+    rgba[c:, c:, :3] = rgb((20, 20, 20))
+    # keep cell borders fully transparent (no bleeding between cells in the mip chain)
+    for k in range(2):
+        rgba[k * c, :, 3] = 0
+        rgba[k * c + c - 1, :, 3] = 0
+        rgba[:, k * c, 3] = 0
+        rgba[:, k * c + c - 1, 3] = 0
+    return np.clip(rgba, 0, 1)
+
+
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else OUT
     os.makedirs(out, exist_ok=True)
@@ -278,6 +337,7 @@ def main():
     save(normal_map(blur(dh, 1.2), 1.6), os.path.join(out, "diamond_plate_n.png"))
     save(wall_grime(), os.path.join(out, "wall_grime.png"))
     save(crate_wood(), os.path.join(out, "crate_wood.png"))
+    Image.fromarray((floor_decals() * 255).round().astype(np.uint8), "RGBA").save(os.path.join(out, "floor_decals.png"), optimize=True)
     print("warehouse textures written to", out)
 
 

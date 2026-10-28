@@ -180,6 +180,24 @@ func _make(key: String) -> Material:
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 			m.cull_mode = BaseMaterial3D.CULL_BACK
+		"decals":
+			# contact shadows, oil stains, grime, tyre marks (floor_decals atlas); vertex alpha =
+			# strength. Black stays black under any light: no specular.
+			m = _std(Color(1, 1, 1), 1.0)
+			_set_tex(m, "floor_decals")
+			m.metallic_specular = 0.0
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+			m.vertex_color_use_as_albedo = true
+			m.disable_receive_shadows = true
+		"pipe_red":
+			m = _std(Color("b8221c"), 0.45, 0.3)
+		"conduit":
+			m = _std(Color(0.62, 0.64, 0.66), 0.45, 0.6)
+		"elec_box":
+			m = _std(Color(0.7, 0.72, 0.7), 0.55, 0.3)
+		"lamp_warm":
+			m = _emissive(Color(1.0, 0.92, 0.75), 3.0)
 		"line_paint":
 			m = _std(Color("e8b71a"), 0.6)
 		"signs":
@@ -276,7 +294,9 @@ func _st(batch: String, mat_key: String) -> SurfaceTool:
 
 
 ## One triangle facing `n` (the winding is fixed up so the front face points along n).
-func tri(batch: String, mat_key: String, p: Array, uv: Array, n: Vector3) -> void:
+## col: optional vertex colour (used by the decal material for its strength); a surface must
+## either always or never get colours.
+func tri(batch: String, mat_key: String, p: Array, uv: Array, n: Vector3, col: Variant = null) -> void:
 	var st := _st(batch, mat_key)
 	var a: Vector3 = p[0]
 	var b: Vector3 = p[1]
@@ -293,15 +313,22 @@ func tri(batch: String, mat_key: String, p: Array, uv: Array, n: Vector3) -> voi
 		ub = uc
 		uc = tu
 	for v in [[a, ua], [b, ub], [c, uc]]:
+		if col != null:
+			st.set_color(col)
 		st.set_normal(n)
 		st.set_uv(v[1])
 		st.add_vertex(v[0])
 
 
 ## Quad p0..p3 (in order around the edge) facing n.
-func quad(batch: String, mat_key: String, p: Array, uv: Array, n: Vector3) -> void:
-	tri(batch, mat_key, [p[0], p[1], p[2]], [uv[0], uv[1], uv[2]], n)
-	tri(batch, mat_key, [p[0], p[2], p[3]], [uv[0], uv[2], uv[3]], n)
+func quad(batch: String, mat_key: String, p: Array, uv: Array, n: Vector3, col: Variant = null) -> void:
+	tri(batch, mat_key, [p[0], p[1], p[2]], [uv[0], uv[1], uv[2]], n, col)
+	tri(batch, mat_key, [p[0], p[2], p[3]], [uv[0], uv[2], uv[3]], n, col)
+
+
+## A primitive mesh (cylinder, sphere ...) baked into a batch with transform xf.
+func prim(batch: String, mat_key: String, mesh: PrimitiveMesh, xf: Transform3D) -> void:
+	_st(batch, mat_key).append_from(mesh, 0, xf)
 
 
 ## Box of `size` placed by xf (centre). UVs in metres along each face (multiplied by uv_k), so
@@ -403,8 +430,10 @@ func set_config(set_name: String, file: String, overrides: Dictionary, shadow :=
 		_set_order.append(set_name)
 
 
-## Fallback geometry for a set whose GLB is missing: [[mat_key, size, centre], ...] boxes in the
-## prop's own space (origin = the prop's origin).
+## Fallback geometry for a set whose GLB is missing, in the prop's own space (origin = the
+## prop's origin). Entries: [mat_key, size: Vector3, centre] boxes, or
+## [mat_key, "cyl", radius, length, centre, axis "x"/"y"/"z"] cylinders, or
+## [mat_key, "sph", radius, centre, scale: Vector3] (squashed) spheres.
 func set_fallback(set_name: String, boxes: Array) -> void:
 	_sets[set_name].fallback = boxes
 
@@ -441,9 +470,32 @@ func _fallback_mesh(boxes: Array) -> ArrayMesh:
 			st.begin(Mesh.PRIMITIVE_TRIANGLES)
 			by_mat[key] = st
 			order.append(key)
-		var bm := BoxMesh.new()
-		bm.size = b[1]
-		(by_mat[key] as SurfaceTool).append_from(bm, 0, Transform3D(Basis.IDENTITY, b[2]))
+		var st2: SurfaceTool = by_mat[key]
+		if b[1] is Vector3:
+			var bm := BoxMesh.new()
+			bm.size = b[1]
+			st2.append_from(bm, 0, Transform3D(Basis.IDENTITY, b[2]))
+		elif String(b[1]) == "cyl":
+			var cm := CylinderMesh.new()
+			cm.top_radius = float(b[2])
+			cm.bottom_radius = float(b[2])
+			cm.height = float(b[3])
+			cm.radial_segments = 14
+			cm.rings = 1
+			var axis := String(b[5])
+			var basis := Basis.IDENTITY
+			if axis == "x":
+				basis = Basis(Vector3.BACK, PI * 0.5)
+			elif axis == "z":
+				basis = Basis(Vector3.RIGHT, PI * 0.5)
+			st2.append_from(cm, 0, Transform3D(basis, b[4]))
+		else:
+			var sm := SphereMesh.new()
+			sm.radius = float(b[2])
+			sm.height = float(b[2]) * 2.0
+			sm.radial_segments = 14
+			sm.rings = 7
+			st2.append_from(sm, 0, Transform3D(Basis.from_scale(b[4]), b[3]))
 	for key: String in order:
 		var st: SurfaceTool = by_mat[key]
 		st.commit(mesh)

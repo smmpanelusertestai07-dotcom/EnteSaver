@@ -28,6 +28,9 @@ const C40 := Vector3(12.192, 2.591, 2.438)
 const CRATE := 1.2
 const LAYER_ROOF := 2
 const LAYER_FX := 4              # same bit as CharacterModel.LAYER_ACTORS (not in the minimap)
+## Corrugated walls, columns and lintels: excluded from the sun's cull mask (soft ambient only,
+## no harsh grazing-light stripes on the real corrugation) and from the minimap camera.
+const LAYER_WALLS := 16
 const TRUSS_X := [-15.0, -9.0, -3.0, 3.0, 9.0, 15.0]
 
 const LIGHT_BLUE := Color("67b2e6")
@@ -144,10 +147,11 @@ func _build_environment(parent: Node3D) -> void:
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
 	# High, slightly warm daylight through the roof lights: crisp container / crate shadows.
-	sun.rotation_degrees = Vector3(-58, -32, 0)
+	sun.rotation_degrees = Vector3(-66, -36, 0)
 	sun.light_energy = 1.05
 	sun.light_color = Color(1.0, 0.97, 0.92)
 	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	sun.light_cull_mask = 0xFFFFF & ~LAYER_WALLS
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 48.0
@@ -181,7 +185,7 @@ func apply_quality(g: int) -> void:
 
 
 func _collect_quality_groups(batches: Dictionary, sets: Dictionary) -> void:
-	for key in ["signs", "roof_detail"]:
+	for key in ["signs", "roof_detail", "wall_detail"]:
 		if batches.has(key):
 			_minor.append(batches[key])
 	for key in ["fire_cabinet", "lamps_alcove"]:
@@ -267,9 +271,9 @@ func _configure_sets() -> void:
 		["wood_floor", Vector3(6.0, 0.12, 2.3), Vector3(0, 0.06, 0)]])
 	kit.set_config("crate", "crate", {"wooddark": "crate_dark", "wood": "crate"}, 1)
 	kit.set_fallback("crate", [["crate", Vector3.ONE * CRATE, Vector3(0, CRATE * 0.5, 0)]])
-	kit.set_config("bay", "wall_bay", {"walllower": "wall_lower", "wallupper": "wall_upper", "steel": "steel", "frame": "frame", "glass": "window"}, 0)
+	kit.set_config("bay", "wall_bay", {"walllower": "wall_lower", "wallupper": "wall_upper", "steel": "steel", "frame": "frame", "glass": "window"}, 0, LAYER_WALLS)
 	kit.set_fallback("bay", [["wall_lower", Vector3(6.0, 2.6, 0.25), Vector3(0, 1.3, 0)], ["wall_upper", Vector3(6.0, 6.4, 0.25), Vector3(0, 5.8, 0)]])
-	kit.set_config("column", "wall_column", {"steel": "steel"}, 0)
+	kit.set_config("column", "wall_column", {"steel": "steel"}, 0, LAYER_WALLS)
 	kit.set_fallback("column", [["steel", Vector3(0.32, 9.0, 0.32), Vector3(0, 4.5, 0)]])
 	kit.set_config("door", "rollup_door", {"shutter": "shutter", "steel": "steel", "yellow": "yellow", "black": "black"}, 1)
 	kit.set_fallback("door", [["shutter", Vector3(4.4, 5.0, 0.12), Vector3(0, 2.5, -0.12)], ["steel", Vector3(5.0, 0.6, 0.45), Vector3(0, 5.3, -0.22)]])
@@ -289,17 +293,32 @@ func _configure_sets() -> void:
 	kit.set_fallback("fire_cabinet", [["red_paint", Vector3(0.75, 0.95, 0.22), Vector3(0, 1.375, -0.11)], ["red_paint", Vector3(0.17, 0.5, 0.17), Vector3(0.58, 0.25, -0.14)]])
 	kit.set_config("forklift", "forklift", {"paint": "fork_body", "body": "fork_body", "yellow": "fork_body", "metal": "metal_dark",
 		"steel": "metal_dark", "rubber": "rubber", "tire": "rubber", "black": "black", "glass": "glass_small", "seat": "black"}, 1)
-	kit.set_fallback("forklift", [["fork_body", Vector3(1.15, 1.1, 2.1), Vector3(0, 0.75, 0.2)], ["metal_dark", Vector3(1.0, 0.7, 0.5), Vector3(0, 0.85, 1.35)],
-		["metal_dark", Vector3(0.08, 2.1, 0.08), Vector3(-0.5, 1.95, 0.6)], ["metal_dark", Vector3(0.08, 2.1, 0.08), Vector3(0.5, 1.95, 0.6)],
-		["metal_dark", Vector3(0.08, 1.3, 0.08), Vector3(-0.5, 1.55, -0.6)], ["metal_dark", Vector3(0.08, 1.3, 0.08), Vector3(0.5, 1.55, -0.6)],
-		["metal_dark", Vector3(1.15, 0.06, 1.35), Vector3(0, 3.0, 0.0)], ["metal_dark", Vector3(0.9, 2.6, 0.12), Vector3(0, 1.4, -0.95)],
-		["metal_dark", Vector3(0.12, 0.06, 1.1), Vector3(-0.3, 0.1, -1.55)], ["metal_dark", Vector3(0.12, 0.06, 1.1), Vector3(0.3, 0.1, -1.55)],
-		["rubber", Vector3(0.28, 0.56, 0.56), Vector3(-0.52, 0.28, -0.55)], ["rubber", Vector3(0.28, 0.56, 0.56), Vector3(0.52, 0.28, -0.55)],
-		["rubber", Vector3(0.24, 0.46, 0.46), Vector3(-0.52, 0.23, 0.95)], ["rubber", Vector3(0.24, 0.46, 0.46), Vector3(0.52, 0.23, 0.95)]])
+	kit.set_fallback("forklift", [
+		["fork_body", Vector3(1.15, 0.55, 2.0), Vector3(0, 0.55, 0.15)], ["fork_body", Vector3(1.15, 0.75, 0.55), Vector3(0, 0.95, 0.95)],
+		["fork_body", "cyl", 0.3, 1.15, Vector3(0, 1.32, 1.0), "x"],
+		["black", Vector3(0.5, 0.14, 0.5), Vector3(0, 1.2, 0.35)], ["black", Vector3(0.5, 0.5, 0.1), Vector3(0, 1.5, 0.62)],
+		["black", Vector3(0.07, 1.3, 0.07), Vector3(-0.52, 1.5, -0.35)], ["black", Vector3(0.07, 1.3, 0.07), Vector3(0.52, 1.5, -0.35)],
+		["black", Vector3(0.07, 1.0, 0.07), Vector3(-0.52, 1.65, 0.78)], ["black", Vector3(0.07, 1.0, 0.07), Vector3(0.52, 1.65, 0.78)],
+		["black", Vector3(1.12, 0.06, 1.25), Vector3(0, 2.17, 0.22)], ["black", "cyl", 0.17, 0.04, Vector3(0, 1.48, -0.12), "y"],
+		["metal_dark", Vector3(0.1, 2.3, 0.12), Vector3(-0.36, 1.18, -1.0)], ["metal_dark", Vector3(0.1, 2.3, 0.12), Vector3(0.36, 1.18, -1.0)],
+		["metal_dark", Vector3(0.82, 0.08, 0.1), Vector3(0, 2.25, -1.0)], ["metal_dark", Vector3(0.9, 0.42, 0.08), Vector3(0, 0.45, -1.1)],
+		["metal_dark", Vector3(0.12, 0.05, 1.1), Vector3(-0.25, 0.08, -1.65)], ["metal_dark", Vector3(0.12, 0.05, 1.1), Vector3(0.25, 0.08, -1.65)],
+		["rubber", "cyl", 0.3, 0.24, Vector3(-0.5, 0.3, -0.6), "x"], ["rubber", "cyl", 0.3, 0.24, Vector3(0.5, 0.3, -0.6), "x"],
+		["rubber", "cyl", 0.25, 0.22, Vector3(-0.5, 0.25, 0.8), "x"], ["rubber", "cyl", 0.25, 0.22, Vector3(0.5, 0.25, 0.8), "x"],
+		["yellow", "cyl", 0.06, 0.1, Vector3(0, 2.25, 0.7), "y"]])
 	kit.set_config("tank", "tank", {"tank": "tank", "body": "tank", "paint": "tank", "metal": "metal_dark", "steel": "metal_dark", "frame": "metal_dark",
 		"yellow": "yellow", "black": "black", "red": "red_paint"}, 1)
-	kit.set_fallback("tank", [["tank", Vector3(3.4, 1.7, 1.7), Vector3(0, 1.25, 0)], ["metal_dark", Vector3(0.25, 0.5, 1.5), Vector3(-1.2, 0.25, 0)],
-		["metal_dark", Vector3(0.25, 0.5, 1.5), Vector3(1.2, 0.25, 0)], ["yellow", Vector3(0.1, 2.3, 0.5), Vector3(1.78, 1.15, 0)]])
+	kit.set_fallback("tank", [
+		["tank", "cyl", 0.85, 2.7, Vector3(0, 1.3, 0), "x"], ["tank", "sph", 0.85, Vector3(-1.35, 1.3, 0), Vector3(0.42, 1, 1)],
+		["tank", "sph", 0.85, Vector3(1.35, 1.3, 0), Vector3(0.42, 1, 1)], ["metal_dark", "cyl", 0.87, 0.08, Vector3(-0.7, 1.3, 0), "x"],
+		["metal_dark", "cyl", 0.87, 0.08, Vector3(0.7, 1.3, 0), "x"],
+		["metal_dark", Vector3(0.3, 0.55, 1.4), Vector3(-0.9, 0.27, 0)], ["metal_dark", Vector3(0.3, 0.55, 1.4), Vector3(0.9, 0.27, 0)],
+		["tank", "cyl", 0.24, 0.3, Vector3(0.3, 2.18, 0), "y"], ["metal_dark", "cyl", 0.27, 0.05, Vector3(0.3, 2.33, 0), "y"],
+		["yellow", "cyl", 0.06, 0.9, Vector3(-1.1, 0.45, 0.55), "y"], ["red_paint", "cyl", 0.11, 0.06, Vector3(-1.1, 0.9, 0.55), "y"],
+		["metal_dark", Vector3(0.05, 2.2, 0.05), Vector3(1.75, 1.1, -0.22)], ["metal_dark", Vector3(0.05, 2.2, 0.05), Vector3(1.75, 1.1, 0.22)],
+		["metal_dark", Vector3(0.04, 0.04, 0.44), Vector3(1.75, 0.5, 0)], ["metal_dark", Vector3(0.04, 0.04, 0.44), Vector3(1.75, 0.9, 0)],
+		["metal_dark", Vector3(0.04, 0.04, 0.44), Vector3(1.75, 1.3, 0)], ["metal_dark", Vector3(0.04, 0.04, 0.44), Vector3(1.75, 1.7, 0)],
+		["yellow", Vector3(0.6, 0.04, 0.03), Vector3(0.0, 1.3, 0.86)]])
 
 
 # ---------------------------------------------------------------- floor
@@ -369,6 +388,47 @@ func _dashed_line(a: Vector3, b: Vector3, dash := 1.0, gap := 0.7, width := 0.12
 		t = e + gap
 
 
+## Soft contact shadow around a rectangular footprint (authored coords, yaw in degrees): a
+## 9-slice of the contact-shadow cell of floor_decals.png, margin m wide, strength 0..1.
+func _ao(c: Vector3, size: Vector2, yaw_deg: float, m := 0.55, strength := 0.75) -> void:
+	var b := Basis(Vector3.UP, deg_to_rad(yaw_deg))
+	var xs := [-size.x * 0.5 - m, -size.x * 0.5, size.x * 0.5, size.x * 0.5 + m]
+	var zs := [-size.y * 0.5 - m, -size.y * 0.5, size.y * 0.5, size.y * 0.5 + m]
+	var us := [0.0, 0.25, 0.25, 0.5]
+	var col := Color(1, 1, 1, strength)
+	for i in 3:
+		for j in 3:
+			if i == 1 and j == 1:
+				continue           # under the object: never visible
+			var pts := []
+			var uvs := []
+			for k in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+				pts.append(_p(c + b * Vector3(xs[k[0]], 0, zs[k[1]]) + Vector3(0, 0.007, 0)))
+				uvs.append(Vector2(us[k[0]], us[k[1]]))
+			kit.quad("floor", "decals", pts, uvs, Vector3.UP, col)
+
+
+## Darkening strip along a wall base: a/b on the wall line, n = inward normal (authored coords).
+func _ao_strip(a: Vector3, b: Vector3, n: Vector3, width := 0.8, strength := 0.55) -> void:
+	var y := Vector3(0, 0.006, 0)
+	var pts := [_p(a + y), _p(b + y), _p(b + n * width + y), _p(a + n * width + y)]
+	kit.quad("floor", "decals", pts, [Vector2(0.25, 0.25), Vector2(0.25, 0.25), Vector2(0.0, 0.25), Vector2(0.0, 0.25)], Vector3.UP, Color(1, 1, 1, strength))
+
+
+## Floor overlay from the decal atlas: cell 1 oil stain, 2 grime, 3 tyre marks.
+func _stain(cell: int, c: Vector3, size: Vector2, yaw_deg: float, strength := 1.0) -> void:
+	var b := Basis(Vector3.UP, deg_to_rad(yaw_deg))
+	var u0 := (cell % 2) * 0.5
+	var v0 := (cell / 2) * 0.5
+	var hx := size.x * 0.5
+	var hz := size.y * 0.5
+	var pts := []
+	for q in [Vector3(-hx, 0, -hz), Vector3(hx, 0, -hz), Vector3(hx, 0, hz), Vector3(-hx, 0, hz)]:
+		pts.append(_p(c + b * q + Vector3(0, 0.008, 0)))
+	var uvs := [Vector2(u0, v0), Vector2(u0 + 0.5, v0), Vector2(u0 + 0.5, v0 + 0.5), Vector2(u0, v0 + 0.5)]
+	kit.quad("floor", "decals", pts, uvs, Vector3.UP, Color(1, 1, 1, strength))
+
+
 # ---------------------------------------------------------------- hall shell (per half)
 
 ## One wall run along a straight line: bays (MultiMesh), a collider, a white top cap for the
@@ -391,6 +451,8 @@ func _wall_run(a: Vector3, b: Vector3, n: Vector3, bays := true) -> void:
 	var mid := (wa + wb) * 0.5 + wn * (0.08 - 0.35) + Vector3(0, WALL_H * 0.5, 0)
 	var cb := Basis(Vector3.UP, yaw)
 	_collider(Vector3(length + 0.1, WALL_H, 0.7), Transform3D(cb, mid), false)
+	# soft darkening of the floor along the wall base
+	_ao_strip(a, b, n, 0.9, 0.5)
 	# white cap on top of the wall: the minimap's outline
 	kit.batch_config("caps", 1, false)
 	kit.box("caps", "white_cap", Vector3(length + 0.5, 0.06, 0.5), Transform3D(cb, (wa + wb) * 0.5 - wn * 0.06 + Vector3(0, WALL_H + 0.03, 0)), 1.0, ["-x", "+x", "-z", "+z", "-y"])
@@ -429,7 +491,7 @@ func _shell_half() -> void:
 	_column(Vector3(-HX - AL_D + off, 0, -AL_HW + off), -90.0)
 	_column(Vector3(-HX - AL_D + off, 0, AL_HW - off), -90.0)
 	# lintel above the alcove mouth + hazard-striped header beam + alcove ceiling (layer 2)
-	kit.batch_config("shell", 1, false)
+	kit.batch_config("shell", LAYER_WALLS, false)
 	var lintel := Vector3(0.25, WALL_H - AL_H, AL_HW * 2.0 + 0.5)
 	kit.box("shell", "header", lintel, _xf(Vector3(-HX - 0.08, AL_H + lintel.y * 0.5, 0)), 1.0, ["-x"])
 	kit.box("shell", "hazard", Vector3(0.36, 0.32, AL_HW * 2.0 + 0.4), _xf(Vector3(-HX + 0.06, AL_H - 0.12, 0)), 1.0)
@@ -450,6 +512,7 @@ func _shell_half() -> void:
 	_collider(Vector3(0.3, 1.0, 0.8), _xf(Vector3(-HX + 0.15, 1.38, -7.4)), false)
 	_wall_prop("fire_cabinet", Vector3(-12.9, 0, -HZ), Vector3(0, 0, 1))
 	_collider(Vector3(0.8, 1.0, 0.3), _xf(Vector3(-12.9, 1.38, -HZ + 0.15)), false)
+	_wall_details()
 	# signs: area letter over the alcove, SAFE inside, chevrons toward the exit
 	_sign(0 if _side == 0 else 1, Vector3(-HX + 0.1, 6.7, 0), Vector3(1, 0, 0), 2.0)
 	_sign(7, Vector3(-HX - AL_D + 0.08, 3.0, 0), Vector3(1, 0, 0), 1.5)
@@ -457,6 +520,48 @@ func _shell_half() -> void:
 	_sign(6, Vector3(-HX - 1.6, 1.45, AL_HW - 0.08), Vector3(0, 0, -1), 0.75, true)
 	_sign(2 if _side == 0 else 3, Vector3(-12.0, 4.1, -HZ + 0.1), Vector3(0, 0, 1), 1.5)
 	_sign(4, Vector3(-HX + 0.1, 2.0, 9.0 - 1.0), Vector3(1, 0, 0), 0.9)
+
+
+## Pipes, conduits, electrical boxes and lamps on the walls (visual only).
+func _wall_details() -> void:
+	kit.batch_config("wall_detail", 1, false)
+	var pipe := CylinderMesh.new()
+	pipe.top_radius = 0.07
+	pipe.bottom_radius = 0.07
+	pipe.height = HX * 2.0
+	pipe.radial_segments = 8
+	pipe.rings = 1
+	pipe.cap_top = false
+	pipe.cap_bottom = false
+	# red sprinkler main under the eave of the north wall (+ hangers)
+	kit.prim("wall_detail", "pipe_red", pipe, _S * Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(0, 8.3, -HZ + 0.34)))
+	for i in 15:
+		var x := -HX + 1.5 + i * 3.0
+		kit.box("wall_detail", "steel", Vector3(0.05, 0.3, 0.3), _S * Transform3D(Basis.IDENTITY, Vector3(x, 8.45, -HZ + 0.2)))
+	# grey conduit above the girt on the short wall, a box beside the alcove and its feed
+	var con := CylinderMesh.new()
+	con.top_radius = 0.035
+	con.bottom_radius = 0.035
+	con.height = HZ - AL_HW - 0.6
+	con.radial_segments = 6
+	con.rings = 1
+	for zs in [-1.0, 1.0]:
+		var zc: float = zs * (AL_HW + 0.3 + con.height * 0.5)
+		kit.prim("wall_detail", "conduit", con, _S * Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(-HX + 0.16, 3.05, zc)))
+	kit.box("wall_detail", "elec_box", Vector3(0.24, 0.85, 0.62), _xf(Vector3(-HX + 0.14, 1.55, -4.9)))
+	kit.box("wall_detail", "frame", Vector3(0.05, 0.12, 0.5), _xf(Vector3(-HX + 0.27, 1.75, -4.9)))
+	var feed := CylinderMesh.new()
+	feed.top_radius = 0.03
+	feed.bottom_radius = 0.03
+	feed.height = 1.12
+	feed.radial_segments = 6
+	feed.rings = 1
+	kit.prim("wall_detail", "conduit", feed, _S * Transform3D(Basis.IDENTITY, Vector3(-HX + 0.14, 2.5, -4.9)))
+	kit.box("wall_detail", "elec_box", Vector3(0.5, 0.7, 0.22), _xf(Vector3(-2.35, 1.6, -HZ + 0.13)))
+	# warm wall lamps on the lintel of the spawn door
+	for z in [-2.3, 2.3]:
+		kit.box("wall_detail", "frame", Vector3(0.14, 0.2, 0.44), _xf(Vector3(-HX + 0.03, 5.25, z)))
+		kit.box("wall_detail", "lamp_warm", Vector3(0.03, 0.13, 0.36), _xf(Vector3(-HX + 0.11, 5.25, z)))
 
 
 ## Wall-mounted prop (door / fire cabinet): origin on the wall line, front toward the hall.
@@ -567,6 +672,8 @@ func _container(set_name: String, pos: Vector3, yaw_deg: float, color: Color, fo
 	var xf := _xf(pos, yaw_deg)
 	kit.add(set_name, xf, color)
 	var size := C40 if set_name == "c40" else C20
+	if pos.y < 0.5:
+		_ao(pos, Vector2(size.x + 0.05, size.z + (0.3 if set_name == "copen" else 0.05)), yaw_deg, 0.75, 0.8)
 	if set_name == "copen":
 		_open_container_colliders(xf)
 		if footprint:
@@ -609,6 +716,8 @@ func _crates(cells: Array) -> void:
 		for i in lv:
 			kit.add("crate", _xf(Vector3(x, y0 + CRATE * i, z), yaw + (0.0 if i == 0 else (4.0 if i % 2 == 1 else -3.0))))
 		_collider(Vector3(CRATE, CRATE * lv, CRATE), _xf(Vector3(x, y0 + CRATE * lv * 0.5, z), yaw), y0 < 0.5)
+		if y0 < 0.5:
+			_ao(Vector3(x, 0, z), Vector2(CRATE, CRATE), yaw, 0.38 + 0.08 * lv, 0.75)
 
 
 func _barrels(spots: Array) -> void:
@@ -617,6 +726,7 @@ func _barrels(spots: Array) -> void:
 		var s: Array = spots[i]
 		var col: Color = cols[int(s[2]) % cols.size()] if s.size() > 2 else cols[i % cols.size()]
 		kit.add("barrel", _xf(Vector3(s[0], 0, s[1]), float(i) * 47.0), col)
+		_ao(Vector3(s[0], 0, s[1]), Vector2(0.45, 0.45), 0.0, 0.3, 0.6)
 		_collider(Vector3(0.6, 0.9, 0.6), _xf(Vector3(s[0], 0.45, s[1])), true)
 
 
@@ -624,6 +734,7 @@ func _pallets(x: float, z: float, n: int, yaw := 0.0) -> void:
 	for i in n:
 		kit.add("pallet", _xf(Vector3(x, 0.144 * i, z), yaw + (6.0 if i % 2 == 1 else 0.0)))
 	_collider(Vector3(1.2, 0.144 * n, 0.8), _xf(Vector3(x, 0.072 * n, z), yaw), true)
+	_ao(Vector3(x, 0, z), Vector2(1.15, 0.75), yaw, 0.22, 0.55)
 
 
 func _bollard(x: float, z: float) -> void:
@@ -697,6 +808,7 @@ func _layout_half() -> void:
 	# ---- central high ground: two 40 ft containers side by side (long axis across the hall)
 	_container("c40", Vector3(-1.219, 0, 0), 90.0, LIGHT_BLUE if west else LIGHT_BLUE2)
 	_ramp(Vector3(-7.2, 0, 2.75), Vector3(-2.44, C_H, 2.75))
+	_ao(Vector3(-4.82, 0, 2.75), Vector2(4.76, 2.4), 0.0, 0.5, 0.6)
 	_hazard_strip(Vector3(-7.45, 0, 1.55), Vector3(-7.45, 0, 3.95), 0.5)
 	_crates([[-3.04, -4.7, 2, 0.0], [-4.24, -4.7, 1, 0.0]])
 	_crates([[-1.5, -4.9, 1, 8.0, C_H]])                       # cover on the high ground
@@ -714,12 +826,14 @@ func _layout_half() -> void:
 	# ---- south-west: support container + tilted container, forklift (east: tank) by the wall
 	_container("c20", Vector3(-17.4, 0, HZ - 1.75), 0.0, LIGHT_BLUE if west else ORANGE)
 	_tilted(Vector3(-15.9, 0, 6.95), Vector3(0, 0, 1), 27.0, RUST if west else CREAM)
+	_ao(Vector3(-15.9, 0, 9.65), Vector2(2.44, 5.4), 0.0, 0.7, 0.7)
 	if west:
-		kit.add("forklift", _xf(Vector3(-12.4, 0, 13.2), 90.0))
+		kit.add("forklift", _xf(Vector3(-11.95, 0, 13.2), 90.0))
 	else:
 		kit.add("tank", _xf(Vector3(-12.4, 0, 13.2), 0.0))
 	# collider reaches the wall: no closed slot behind the vehicle
-	_collider(Vector3(3.3, 2.4, 2.4), _xf(Vector3(-12.4, 1.2, 13.7)), true)
+	_collider(Vector3(3.5, 2.4, 2.4), _xf(Vector3(-12.4, 1.2, 13.7)), true)
+	_ao(Vector3(-12.4, 0, 13.4), Vector2(3.3, 1.9), 0.0, 0.5, 0.7)
 	_hatch_pad(Vector3(-18.9, 0, 8.9), Vector2(3.4, 4.4))
 	_pallets(-19.6, 10.1, 2, 0.0)
 	_bollard(-14.0, 11.5)
@@ -736,6 +850,15 @@ func _layout_half() -> void:
 		_bollard(-HX + 0.55, z)
 	_hazard_strip(Vector3(-HX + 0.25, 0, -AL_HW), Vector3(-HX + 0.25, 0, AL_HW), 0.5)
 	_floor_sign(0 if west else 1, Vector3(-18.3, 0, 0), 2.0, -90.0)
+	# ---- floor wear
+	_stain(1, Vector3(-12.6, 0, -4.4), Vector2(1.6, 1.6), 20.0, 0.9)
+	_stain(1, Vector3(-6.2, 0, 6.4), Vector2(1.1, 1.1), 70.0, 0.8)
+	_stain(1, Vector3(-17.2, 0, 3.9), Vector2(0.9, 0.9), 140.0, 0.8)
+	_stain(2, Vector3(-19.4, 0, 12.0), Vector2(2.6, 2.6), 0.0, 1.0)
+	_stain(2, Vector3(-4.2, 0, -11.0), Vector2(2.4, 2.4), 45.0, 0.9)
+	_stain(2, Vector3(-14.0, 0, -6.2), Vector2(2.2, 2.2), 10.0, 0.8)
+	_stain(3, Vector3(-9.0, 0, 10.2), Vector2(3.8, 1.7), 12.0, 0.9)
+	_stain(3, Vector3(-3.4, 0, -7.7), Vector2(4.2, 1.8), -8.0, 0.75)
 	# ---- lane markings
 	_dashed_line(Vector3(-13.0, 0, -6.4), Vector3(-3.6, 0, -6.4))
 	_dashed_line(Vector3(-13.0, 0, 6.4), Vector3(-8.0, 0, 6.4))
