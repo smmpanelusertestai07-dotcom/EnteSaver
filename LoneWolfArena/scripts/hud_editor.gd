@@ -32,6 +32,8 @@ func _ready() -> void:
 	hud.layout = layout
 	_build_panel()
 	_select("fire_r")
+	resized.connect(_place_panel)
+	_place_panel.call_deferred()
 
 
 func _build_backdrop() -> void:
@@ -121,6 +123,19 @@ func _build_panel() -> void:
 		nudge.add_child(_arrow_button(d))
 
 
+## Keeps the settings panel in the gap between the minimap and the widgets at the top right
+## (centred when the screen is wide enough; on 16:9 it moves left so the scoreboard button and
+## its label stay visible).
+func _place_panel() -> void:
+	if _panel == null or layout.is_empty():
+		return
+	var vs := size
+	var lo := HudLayout.minimap_rect(layout.minimap, vs).end.x + 8.0
+	var hi := minf(HudLayout.hit_rect("scoreboard", layout.scoreboard, vs).position.x, HudLayout.weapon_main(layout.weapons, vs).position.x) - 8.0
+	var w := maxf(_panel.size.x, _panel.custom_minimum_size.x)
+	_panel.position = Vector2(clampf(vs.x * 0.5 - w * 0.5, lo, maxf(hi - w, lo)), 66.0)
+
+
 ## Small button with a chevron drawn on it (the UI fonts have no arrow glyphs).
 func _arrow_button(dir: Vector2) -> Button:
 	var b := UI.button("", 18, "dark", Vector2(62, 40))
@@ -187,6 +202,7 @@ func _changed() -> void:
 func _on_reset() -> void:
 	layout = HudLayout.resolve({})
 	hud.layout = layout
+	_place_panel()
 	_changed()
 	_sel_label.text = "DEFAULT LAYOUT RESTORED (TAP SAVE TO KEEP IT)"
 	_sync_sliders()

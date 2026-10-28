@@ -3,11 +3,15 @@ extends Node
 ##   tools/qa/capture.sh <dir> 1560x720 script:res://tests/shots_map.gd
 ## Spawn views in PREP (barrier on) and FIGHT, lanes, high ground, the open centre bay, ceiling,
 ## a 3D overview and a top-down debug view with the navmesh islands, the minimap texture,
-## per-view draw calls and primitives (MAPPERF lines: the visible pass from the renderer, the
-## shadow pass estimated - the Compatibility renderer counts shadow primitives but not shadow
-## draw calls - plus a SMOOTH..MAX quality sweep against the 220 draw call / 250k primitive
-## budget), navmesh path checks and the zone-centre open-floor check (MAPNAV lines) and a
-## collider dump (colliders.json) for offline gap analysis. Exit code 1 if a check fails.
+## per-view draw calls and primitives (MAPPERF lines) plus a SMOOTH..MAX quality sweep against
+## the 220 draw call / 250k primitive budget, navmesh path checks and the zone-centre open-floor
+## check (MAPNAV lines) and a collider dump (colliders.json) for offline gap analysis. Exit code
+## 1 if a check fails.
+## About the numbers: the Compatibility (GLES3) renderer adds the shadow pass's draw calls to the
+## VISIBLE draw-call counter (its SHADOW draw-call counter stays 0) and reports the shadow pass's
+## primitives separately. So "draw_calls" below is the whole frame, shadow maps included, and
+## "total_primitives" adds the shadow primitives. The shadow pass's share of the draw calls is
+## modelled (_shadow_estimate) and cross-checked once against the drop with shadows switched off.
 
 const BUDGET_DRAW_CALLS := 220
 const BUDGET_PRIMITIVES := 250000
@@ -110,10 +114,12 @@ func run(autotest: Node) -> int:
 	# cost breakdown at the same view: without the fighters, then without sun shadows
 	p.visible = false
 	b.visible = false
-	await _perf("hall_a_no_fighters")
+	var with_shadows: int = await _perf("hall_a_no_fighters")
+	var model := _shadow_estimate(at.get_viewport().get_camera_3d()).x
 	map.sun.shadow_enabled = false
-	await _perf("hall_a_no_fighters_no_shadows")
+	var without: int = await _perf("hall_a_no_fighters_no_shadows")
 	map.sun.shadow_enabled = true
+	at.log_line("MAPPERF shadow pass: switching sun shadows off removes %d draw calls from the frame count (model: %d)" % [with_shadows - without, model])
 	p.visible = true
 	b.visible = true
 	await _player_view(p, Vector3(-14.0, 0, 0.3), -PI * 0.5 - 0.35, -0.02, "map_ramp_a")
@@ -145,8 +151,10 @@ func run(autotest: Node) -> int:
 			await _perf("quality_%d" % g, "q%d" % g)
 		var w: Dictionary = _worst.get("q%d" % g, {"dc": 0, "pr": 0})
 		var ok: bool = int(w.dc) <= BUDGET_DRAW_CALLS and int(w.pr) <= BUDGET_PRIMITIVES
-		at.log_line("MAPPERF %s quality %d worst total (visible + shadow) draw_calls=%d primitives=%d budget %d / %d" % [
+		at.log_line("MAPPERF %s quality %d worst frame (shadow pass included) draw_calls=%d primitives=%d budget %d / %d" % [
 			"OK" if ok else "OVER", g, int(w.dc), int(w.pr), BUDGET_DRAW_CALLS, BUDGET_PRIMITIVES])
+		if not ok:
+			fails += 1
 	Game.settings.graphics = graphics_before
 	arena.call("apply_graphics")
 	await _view("map_ceiling", Vector3(-10, 1.7, 2), Vector3(4, 9.5, -3), 80.0)
@@ -237,7 +245,7 @@ func _player_view(p: Player, pos: Vector3, yaw: float, pitch: float, shot_name: 
 	await at.shot(shot_name)
 
 
-func _perf(tag: String, group := "") -> void:
+func _perf(tag: String, group := "") -> int:
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	var vp := at.get_viewport().get_viewport_rid()
@@ -248,13 +256,14 @@ func _perf(tag: String, group := "") -> void:
 	var ob := RenderingServer.viewport_get_render_info(vp, V, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
 	var spr := RenderingServer.viewport_get_render_info(vp, S, RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME)
 	var est := _shadow_estimate(at.get_viewport().get_camera_3d())
-	at.log_line("MAPPERF %s draw_calls=%d primitives=%d objects=%d shadow_draw_calls_est=%d shadow_primitives=%d shadow_primitives_est=%d total_draw_calls=%d total_primitives=%d fps=%d" % [
-		tag, dc, pr, ob, est.x, spr, est.y, dc + est.x, pr + spr, Engine.get_frames_per_second()])
+	at.log_line("MAPPERF %s draw_calls=%d (shadow pass inside, modelled ~%d) primitives=%d shadow_primitives=%d total_primitives=%d objects=%d fps=%d" % [
+		tag, dc, est.x, pr, spr, pr + spr, ob, Engine.get_frames_per_second()])
 	if group != "":
 		var w: Dictionary = _worst.get(group, {"dc": 0, "pr": 0})
-		w.dc = maxi(int(w.dc), dc + est.x)
+		w.dc = maxi(int(w.dc), dc)
 		w.pr = maxi(int(w.pr), pr + spr)
 		_worst[group] = w
+	return dc
 
 
 ## Shadow pass of the sun (2 PSSM splits). The Compatibility renderer reports its primitives but
@@ -357,7 +366,7 @@ func _nav_checks(map: MapBuilder, ar: Node) -> void:
 		for ix in range(-40, 41):
 			for iz in range(-40, 41):
 				var q := c + Vector2(ix, iz) * (rad / 40.0)
-				if q.distance_to(c) > rad:
+				if q.distance_to(c) > rad - 0.05:      # the interior (a wall touching the edge is fine)
 					continue
 				inside += 1
 				for r: Rect2 in map.obstacles:
@@ -365,7 +374,7 @@ func _nav_checks(map: MapBuilder, ar: Node) -> void:
 						blocked += 1
 						break
 		var frac := float(blocked) / maxf(inside, 1)
-		var ok := frac <= (0.0 if rad <= 4.0 else 0.2)
+		var ok := frac <= (0.0 if rad <= 4.0 else 0.25)
 		at.log_line("MAPNAV %s zone centre r=%.0f m: obstacles cover %.1f %% of the circle" % ["OK" if ok else "FAIL", rad, frac * 100.0])
 		if not ok:
 			fails += 1

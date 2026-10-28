@@ -32,7 +32,7 @@ const TIPS := [
 	"Pick your gun in the 10-second prep. Both of you use it.",
 	"The safe zone starts closing after 25 seconds. Stay inside.",
 	"Crouch or go prone to make yourself a smaller target.",
-	"A frag grenade does up to 150 damage. Cook it near cover.",
+	"A frag grenade does up to 150 damage after a 3-second fuse.",
 ]
 const GOLD := Color(0.94, 0.745, 0.24)
 
@@ -313,8 +313,9 @@ func _start_boot_loads() -> void:
 			weights.append(0.25)
 	paths.append("res://scenes/lobby.tscn")
 	weights.append(0.5)
+	# One worker task per file (no sub-threads: with them the engine leaks its load tokens).
 	for i in paths.size():
-		if ResourceLoader.exists(paths[i]) and ResourceLoader.load_threaded_request(paths[i], "", true) == OK:
+		if ResourceLoader.exists(paths[i]) and ResourceLoader.load_threaded_request(paths[i], "", false) == OK:
 			_paths.append(paths[i])
 			_weights.append(weights[i])
 

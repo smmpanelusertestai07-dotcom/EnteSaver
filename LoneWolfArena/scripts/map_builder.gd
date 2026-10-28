@@ -5,7 +5,7 @@ extends RefCounted
 ## of both short walls; the layout has 180-degree rotational symmetry (every piece of the west
 ## half is repeated rotated about the hall centre), so both spawns are equally fair.
 ## Gameplay pieces: the high ground is a 40 ft container on each side of an open centre bay
-## (8 m of bare floor between them, so the safe zone's final 4 m circle at the hall centre is
+## (8.5 m of bare floor between them, so the safe zone's final 4 m circle at the hall centre is
 ## open ground; each container has a steel ramp and crate steps on its outer side and blocks
 ## every spawn-to-spawn sightline), long containers along the long walls, a walk-through
 ## container per side, a 2-high stack and a tilted container per side, crates, barrels,
@@ -29,7 +29,7 @@ const C_H := 2.591
 const C20 := Vector3(6.058, 2.591, 2.438)
 const C40 := Vector3(12.192, 2.591, 2.438)
 const CRATE := 1.2
-const BAY_HW := 4.0              # half width of the open bay at the hall centre (between the containers)
+const BAY_HW := 4.25             # half width of the open bay at the hall centre (between the containers)
 const RAMP_RUN := 4.76           # horizontal run of the steel ramps up to the container roofs
 const LAYER_ROOF := 2
 const LAYER_FX := 4              # same bit as CharacterModel.LAYER_ACTORS (not in the minimap)
@@ -204,8 +204,12 @@ func set_barriers(on: bool) -> void:
 
 
 ## Graphics quality 0..3 (SMOOTH..MAX): minor decoration hidden on SMOOTH, small props cast
-## shadows on ULTRA / MAX only (containers, ramps and the high ground always do). Sun shadows
-## are filtered (soft PCF edges, the Compatibility renderer's 5-tap filter; 13 taps on MAX).
+## shadows on ULTRA / MAX only (containers, ramps and the high ground always do; props flat
+## against the walls - roll-up doors, fire cabinets - and the thin bollards never do: their
+## shadows are hardly visible but cost two draw calls per part). Sun shadows are filtered (soft
+## PCF edges, the Compatibility renderer's 5-tap filter; 13 taps on MAX). Frame cost at the
+## busiest views, shadow pass included: about 100 / 170 / 200 draw calls on SMOOTH / STANDARD /
+## ULTRA-MAX (tests/shots_map.gd checks the 220 budget).
 func apply_quality(g: int) -> void:
 	RenderingServer.directional_soft_shadow_filter_set_quality(
 		RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM if g >= 3 else RenderingServer.SHADOW_QUALITY_SOFT_LOW)
@@ -221,10 +225,14 @@ func _collect_quality_groups(batches: Dictionary, sets: Dictionary) -> void:
 	for key in ["signs", "roof_detail", "wall_detail"]:
 		if batches.has(key):
 			_minor.append(batches[key])
-	for key in ["crate", "barrel", "pallet", "bollard", "fire_cabinet", "forklift", "tank", "door"]:
+	for key in ["crate", "barrel", "pallet", "forklift", "tank"]:
 		if sets.has(key):
 			for n in sets[key]:
 				_small.append(n)
+	for key in ["bollard", "fire_cabinet", "door"]:
+		if sets.has(key):
+			for n in sets[key]:
+				(n as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for key in ["barrier", "barrier_fog"]:
 		if batches.has(key):
 			var mi: MeshInstance3D = batches[key]

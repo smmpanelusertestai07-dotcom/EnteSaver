@@ -26,6 +26,9 @@ var _levelled := false
 var _xp_to := 0.0
 var _lv_before := 1
 var _xp_t0 := 0                   # ticks (ms) when the XP bar starts filling (real time)
+var _intro_t0 := 0                # ticks (ms) of the intro (fade, medal pop, title slide)
+var _title: Control
+var _title_x := 0.0
 
 
 func setup(result: Dictionary) -> void:
@@ -468,24 +471,35 @@ static func _desaturate() -> ShaderMaterial:
 	return m
 
 
+## Intro in real time (it finishes on time even when frames are slow): fade in, the medal pops,
+## the title slides in from the left.
 func _animate_in() -> void:
-	modulate.a = 0.0
-	var tw := create_tween()
-	tw.tween_property(self, "modulate:a", 1.0, 0.3)
-	_medal.scale = Vector2(0.4, 0.4)
-	var tm := create_tween()
-	tm.tween_property(_medal, "scale", Vector2.ONE, 0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	var title := get_node_or_null("Title") as Control
-	if title:
-		title.modulate.a = 0.0
-		title.position.x -= 60
-		var tt := create_tween().set_parallel()
-		tt.tween_property(title, "modulate:a", 1.0, 0.35).set_delay(0.15)
-		tt.tween_property(title, "position:x", title.position.x + 60, 0.45).set_delay(0.15).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_title = get_node_or_null("Title") as Control
+	if _title:
+		_title_x = _title.position.x
+	_intro_t0 = Time.get_ticks_msec()
+	_step_intro()
+
+
+func _step_intro() -> void:
+	if _intro_t0 == 0:
+		return
+	var e := (Time.get_ticks_msec() - _intro_t0) / 1000.0
+	modulate.a = clampf(e / 0.25, 0.0, 1.0)
+	var k := clampf(e / 0.5, 0.0, 1.0) - 1.0
+	var pop := 1.0 + 2.70158 * k * k * k + 1.70158 * k * k          # back ease-out
+	_medal.scale = Vector2.ONE * lerpf(0.4, 1.0, pop)
+	if _title:
+		var kt := clampf((e - 0.1) / 0.4, 0.0, 1.0)
+		_title.modulate.a = kt
+		_title.position.x = _title_x - 60.0 * pow(1.0 - kt, 3.0)
+	if e >= 0.6:
+		_intro_t0 = 0
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	_step_intro()
 	_step_xp()
 	if _medal and (_kind == "victory" or _kind == "draw"):
 		_medal.queue_redraw()

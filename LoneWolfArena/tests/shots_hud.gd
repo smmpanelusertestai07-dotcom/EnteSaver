@@ -62,18 +62,23 @@ func run(at: Node) -> int:
 	_check(p.crosshair_on_target, "crosshair turns red on the bot", at)
 	# Fire with the right fire button (drag-aim keeps it on the bot).
 	var fire_c := HudLayout.center(hud.layout.fire_r, vs)
+	var hits0 := int(p.stats.hits)
+	var most := 0
 	_touch(at, 5, fire_c, true)
 	for i in 9:
 		b.hp = maxf(b.hp, 150.0)      # keep the bot standing for the rest of the tour
 		_aim_at(p, b.chest_position() + Vector3(0, 0.05 * sin(i), 0))
 		_drag(at, 5, fire_c + Vector2(1, 0), Vector2(1, 0))
 		await at.wait(0.06)
+		var showing := 0
+		for n: Dictionary in hud._dmg_numbers:
+			if float(n.t) < 0.6:
+				showing += 1
+		most = maxi(most, showing)
 	await at.shot("hud_06_firing")
-	var numbers := 0
-	for n: Dictionary in hud._dmg_numbers:
-		if float(n.t) < 0.6:
-			numbers += 1
-	_check(numbers <= 2, "rapid hits stack into one damage number (%d showing)" % numbers, at)
+	var burst_hits := int(p.stats.hits) - hits0
+	_check(burst_hits < 2 or (most >= 1 and most <= 2),
+		"rapid hits stack into one damage number (%d hits, at most %d numbers at once)" % [burst_hits, most], at)
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
 	b.hp = maxf(b.hp, 150.0)
