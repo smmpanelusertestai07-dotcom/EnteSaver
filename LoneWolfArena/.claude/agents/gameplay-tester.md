@@ -1,0 +1,14 @@
+---
+name: gameplay-tester
+description: Runs Lone Wolf Arena's automated gameplay checks (compile, unit tests, aim-assist scenarios, full match simulations, perf/leak run, APK checks) and reports pass/fail with numbers against the targets in design/STYLE_SPEC.md. Never edits files.
+tools: Bash, Read, Glob, Grep
+model: inherit
+---
+Run from LoneWolfArena/ and report every number:
+- `godot --headless --path . --import` then `res://tests/check.tscn` and `res://tests/run_tests.tscn`
+- `godot --headless --path . -- --autotest=aim` (AIM lines: pull time, head stop error, tracking %, red crosshair)
+- `tools/qa/soak.sh 5` (every match must finish, zero SCRIPT ERROR lines, both sides must be able to win)
+- `tools/qa/capture.sh <dir> 1560x720 perf` (draw calls, primitives, nodes, orphans; leak = nodes growing between rounds)
+- if an APK is given: `aapt dump badging` (no INTERNET permission), `apksigner verify --print-certs`
+Compare against the targets in design/STYLE_SPEC.md ("Game feel" and "Performance" sections) and
+list failures first with the exact numbers. Do not edit anything.

@@ -26,6 +26,8 @@ func _ready() -> void:
 			_run_victory.call_deferred()
 		"perf":
 			_run_perf.call_deferred()
+		"aim":
+			_run_aim.call_deferred()
 
 
 func _log(t: String) -> void:
@@ -366,3 +368,93 @@ func _run_perf() -> void:
 	await _wait(1.0)
 	_log("PERF lobby nodes=%d orphans=%d" % [Performance.get_monitor(Performance.OBJECT_NODE_COUNT), Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)])
 	get_tree().quit(0)
+
+
+## Aim-assist checks (headless): a frozen bot stands 14 m in front of the player.
+##  1. start 3 deg off the chest, hold FIRE: the pull must bring the crosshair onto the body;
+##  2. on the body, a fast upward drag while firing must stop on the head (no overshoot);
+##  3. the bot strafes: with assist the crosshair stays on target more often than without;
+##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away.
+## Prints AIM lines and exits 1 if a check fails.
+func _run_aim() -> void:
+	Game.settings.aim_assist = true
+	Game.settings.aim_assist_strength = 60
+	Game.goto_arena()
+	var arena: Node = null
+	for i in 300:
+		await _wait(0.1)
+		arena = _scene()
+		if arena and arena.get("phase") == 1:
+			break
+	var p: Player = arena.get("player")
+	var b: Bot = arena.get("bot")
+	b.frozen = true
+	b.invulnerable = true
+	p.invulnerable = true
+	var fwd := Vector3(sin(p.aim_yaw + PI), 0, cos(p.aim_yaw + PI))
+	b.global_position = arena.call("closest_nav_point", p.global_position + Vector3(0, 0, -14).rotated(Vector3.UP, p.aim_yaw))
+	await _wait(0.5)
+	var fails := 0
+	# 1. pull onto the body while firing
+	_aim_at(p, b.chest_position())
+	p.aim_yaw += deg_to_rad(3.0)
+	p.set_firing(true)
+	var acquired := -1.0
+	for i in 60:
+		await get_tree().physics_frame
+		if p.crosshair_on_target and acquired < 0.0:
+			acquired = i / 60.0
+	p.set_firing(false)
+	_log("AIM pull: on target after %.2fs (want < 0.6s)" % acquired)
+	if acquired < 0.0 or acquired > 0.6:
+		fails += 1
+	# 2. drag up while firing -> head stop
+	await _wait(0.3)
+	_aim_at(p, b.chest_position())
+	p.set_firing(true)
+	await get_tree().physics_frame
+	for i in 12:
+		p.add_look(Vector2(0, -25), true)
+		await get_tree().physics_frame
+	var cam_dir := -p.camera.global_basis.z
+	var head := b.head_position()
+	var to_head := (head - p.camera.global_position).normalized()
+	var pitch_err := rad_to_deg(asin(clampf(cam_dir.y, -1, 1)) - asin(clampf(to_head.y, -1, 1)))
+	p.set_firing(false)
+	_log("AIM head stop: crosshair %.2f deg vs head centre after a 300 px upward drag (want -1.5..+0.8)" % pitch_err)
+	if pitch_err > 0.8 or pitch_err < -1.5:
+		fails += 1
+	# 3. strafing target, with and without assist
+	var on := {}
+	for assist in [false, true]:
+		Game.settings.aim_assist = assist
+		await _wait(0.3)
+		_aim_at(p, b.chest_position())
+		var base: Vector3 = b.global_position
+		var hits := 0
+		for i in 90:
+			b.global_position = base + p.camera.global_basis.x * sin(i / 60.0 * 5.0) * 1.2
+			await get_tree().physics_frame
+			if p.crosshair_on_target:
+				hits += 1
+		b.global_position = base
+		on[assist] = hits / 90.0
+	_log("AIM tracking: on-target %.0f%% with assist vs %.0f%% without (want more with)" % [on[true] * 100.0, on[false] * 100.0])
+	if on[true] <= on[false]:
+		fails += 1
+	# 4. red crosshair flag
+	Game.settings.aim_assist = true
+	for k in 3:   # the camera sits on the shoulder, so re-aim once it has moved
+		_aim_at(p, b.chest_position())
+		await get_tree().process_frame
+		await get_tree().physics_frame
+	var red_on := p.crosshair_on_target
+	p.aim_yaw += deg_to_rad(8.0)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var red_off := p.crosshair_on_target
+	_log("AIM red crosshair: on body=%s, 8 deg away=%s" % [red_on, red_off])
+	if not red_on or red_off:
+		fails += 1
+	_log("AIM RESULT fails=%d" % fails)
+	get_tree().quit(1 if fails > 0 else 0)

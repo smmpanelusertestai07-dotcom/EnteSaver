@@ -20,7 +20,7 @@ var recoil_pitch := 0.0
 var recoil_yaw := 0.0
 var shake := 0.0
 var assist_target: Fighter
-var head_lock := 0.0
+var head_lock := 0.0    # s left of the armed head stop
 var input_enabled := true
 var victory_cam := false
 var _victory_yaw := INF
@@ -65,6 +65,26 @@ func _build_camera() -> void:
 
 # ---------------------------------------------------------------- input API (called by HUD)
 
+## Aim assist tuning. The feel being matched: the crosshair slows down and "sticks" to an enemy
+## it is over, follows them when they strafe, gets pulled onto the body while firing, and a
+## quick upward drag while firing stops on the head instead of flying past it.
+const ASSIST := {
+	"range": 65.0,             # metres
+	"cone_deg": 6.0,           # acquisition cone half-angle at 10 m (wider up close)
+	"bubble_deg": 0.9,         # angular margin around the body that still counts as "on target"
+	"friction": 0.5,           # look sensitivity multiplier while on target (lower = stickier)
+	"track": 0.8,              # share of the target's angular motion the aim follows on target
+	"pull_rate": 9.0,          # 1/s exponential pull toward the aim point while firing
+	"pull_max_deg": 55.0,      # deg/s cap of that pull
+	"head_window": 0.5,        # s the head stop stays armed after an upward drag while firing
+	"head_drag_px": 1.2,       # minimum upward drag per event (px) that arms the head stop
+}
+
+var crosshair_on_target := false      # HUD: crosshair turns red
+var _track_dir := Vector3.ZERO        # last camera->target chest direction (for tracking)
+var _track_target: Fighter
+
+
 func add_look(rel: Vector2, from_fire_button := false) -> void:
 	if not alive or not input_enabled:
 		return
@@ -74,15 +94,18 @@ func add_look(rel: Vector2, from_fire_button := false) -> void:
 	var vh := get_viewport().get_visible_rect().size.y
 	var deg_per_px := 120.0 / maxf(vh, 1.0) * (s / 50.0)
 	var friction := 1.0
-	if assist_target and _assist_angle(assist_target.chest_position()) < deg_to_rad(4.0):
-		friction = lerpf(1.0, 0.55, float(Game.settings.aim_assist_strength) / 100.0)
+	if crosshair_on_target and Game.settings.aim_assist:
+		friction = lerpf(1.0, float(ASSIST.friction), _assist_strength())
 	aim_yaw -= deg_to_rad(rel.x * deg_per_px * friction)
 	aim_pitch = clampf(aim_pitch - deg_to_rad(rel.y * deg_per_px * friction), deg_to_rad(PITCH_MIN), deg_to_rad(PITCH_MAX))
-	# FF-style "drag headshot": dragging up while firing near the head snaps briefly to it.
-	if firing and rel.y < -1.5 and assist_target and Game.settings.aim_assist:
-		var strength := float(Game.settings.aim_assist_strength) / 100.0
-		if _assist_angle(assist_target.head_position()) < deg_to_rad(2.0 + 3.0 * strength):
-			head_lock = 0.2
+	# Upward drag while firing near a target arms the head stop ("drag headshot").
+	if firing and rel.y < -float(ASSIST.head_drag_px) and assist_target and Game.settings.aim_assist:
+		head_lock = float(ASSIST.head_window) * float(weapon().def.get("head_lock", 0.6)) / 0.6
+	_apply_head_stop()
+
+
+func _assist_strength() -> float:
+	return clampf(float(Game.settings.aim_assist_strength) / 100.0, 0.0, 1.0)
 
 
 func set_firing(on: bool) -> void:
@@ -208,41 +231,103 @@ func _assist_angle(point: Vector3) -> float:
 	return (-xf.basis.z).angle_to((point - xf.origin).normalized())
 
 
+## Yaw/pitch (radians) the aim needs so the camera's crosshair (including recoil) points at p.
+func _aim_angles_for(p: Vector3) -> Vector2:
+	var d := (p - camera.global_position).normalized()
+	return Vector2(atan2(-d.x, -d.z) - deg_to_rad(recoil_yaw), asin(clampf(d.y, -1.0, 1.0)) - deg_to_rad(recoil_pitch))
+
+
+## Angular distance (radians) between the crosshair ray and the target's body, a capsule from
+## the feet to the top of the head with the body's half width. 0 = the crosshair is on them.
+func _body_miss_angle(f: Fighter) -> float:
+	var xf := camera.global_transform
+	var o := xf.origin
+	var dir := -xf.basis.z
+	var top := f.head_position() + Vector3.UP * 0.12
+	var bottom := f.global_position + Vector3.UP * 0.15
+	# closest point on the body segment to the ray
+	var seg := top - bottom
+	var w := bottom - o
+	var a := seg.dot(seg)
+	var b := seg.dot(dir)
+	var c := dir.dot(dir)
+	var d := seg.dot(w)
+	var e := dir.dot(w)
+	var den := a * c - b * b
+	var t := clampf((b * e - c * d) / den, 0.0, 1.0) if absf(den) > 1e-6 else 0.0
+	var p := bottom + seg * t
+	var dist := o.distance_to(p)
+	var ang := dir.angle_to((p - o) / maxf(dist, 0.01))
+	var radius := atan(0.32 / maxf(dist, 0.5))
+	return maxf(ang - radius, 0.0)
+
+
 func _update_aim_assist(delta: float) -> void:
 	head_lock = maxf(head_lock - delta, 0.0)
 	assist_target = null
-	if not Game.settings.aim_assist or arena == null or camera == null:
+	crosshair_on_target = false
+	if arena == null or camera == null:
 		return
-	var strength := float(Game.settings.aim_assist_strength) / 100.0
 	var xf := camera.global_transform
 	var best_score := INF
+	var best_miss := PI
 	for f: Fighter in arena.fighters:
 		if f == self or not f.alive:
 			continue
 		var chest := f.chest_position()
-		var dist := eye_position().distance_to(chest)
-		if dist > 70.0:
+		var dist := xf.origin.distance_to(chest)
+		if dist > float(ASSIST.range):
 			continue
-		var limit := deg_to_rad(7.0 if ads else 9.0) * (1.0 + clampf(5.0 / maxf(dist, 1.0), 0.0, 1.5))
-		var ang := _assist_angle(chest)
-		if ang > limit or not can_see(chest):
+		var miss := _body_miss_angle(f)
+		var cone := deg_to_rad(float(ASSIST.cone_deg)) * clampf(10.0 / maxf(dist, 1.0), 0.6, 3.0)
+		if ads:
+			cone *= 0.75
+		if miss > cone or not (can_see(chest) or can_see(f.head_position())):
 			continue
-		if ang < best_score:
-			best_score = ang
+		if miss < best_score:
+			best_score = miss
+			best_miss = miss
 			assist_target = f
-	if assist_target == null or strength <= 0.0:
+	if assist_target == null:
+		_track_target = null
+		head_lock = 0.0
 		return
-	if not firing and head_lock <= 0.0:
+	crosshair_on_target = best_miss <= deg_to_rad(float(ASSIST.bubble_deg))
+	if not Game.settings.aim_assist:
+		_track_target = null
 		return
-	var point := assist_target.head_position() if head_lock > 0.0 else assist_target.chest_position()
-	var desired := (point - xf.origin).normalized()
-	var want_yaw := atan2(-desired.x, -desired.z) - deg_to_rad(recoil_yaw)
-	var want_pitch := asin(clampf(desired.y, -1.0, 1.0)) - deg_to_rad(recoil_pitch)
-	var rate := deg_to_rad(lerpf(4.0, 16.0, strength)) * delta
-	if head_lock > 0.0:
-		rate *= 4.0
-	aim_yaw += clampf(wrapf(want_yaw - aim_yaw, -PI, PI), -rate, rate)
-	aim_pitch += clampf(want_pitch - aim_pitch, -rate, rate)
+	var strength := _assist_strength()
+	# Tracking: follow the target's angular motion while on (or right next to) them.
+	var chest_dir := (assist_target.chest_position() - xf.origin).normalized()
+	if _track_target == assist_target and crosshair_on_target:
+		var prev := Vector2(atan2(-_track_dir.x, -_track_dir.z), asin(clampf(_track_dir.y, -1.0, 1.0)))
+		var now := Vector2(atan2(-chest_dir.x, -chest_dir.z), asin(clampf(chest_dir.y, -1.0, 1.0)))
+		var k := float(ASSIST.track) * strength
+		aim_yaw += wrapf(now.x - prev.x, -PI, PI) * k
+		aim_pitch += (now.y - prev.y) * k
+	_track_target = assist_target
+	_track_dir = chest_dir
+	# Pull while firing (or while the head stop is armed): onto the chest, or the head.
+	if (firing or head_lock > 0.0) and strength > 0.0:
+		var point := assist_target.head_position() if head_lock > 0.0 else assist_target.chest_position()
+		var want := _aim_angles_for(point)
+		var err := Vector2(wrapf(want.x - aim_yaw, -PI, PI), want.y - aim_pitch)
+		var step := err * (1.0 - exp(-float(ASSIST.pull_rate) * strength * delta))
+		var cap := deg_to_rad(float(ASSIST.pull_max_deg)) * strength * delta
+		if head_lock > 0.0:
+			cap *= 2.5
+		aim_yaw += clampf(step.x, -cap, cap)
+		aim_pitch += clampf(step.y, -cap, cap)
+	_apply_head_stop()
+
+
+## While the head stop is armed, the crosshair can't be dragged above the target's head.
+func _apply_head_stop() -> void:
+	if head_lock <= 0.0 or assist_target == null or camera == null:
+		return
+	var want := _aim_angles_for(assist_target.head_position() + Vector3.UP * 0.03)
+	if aim_pitch > want.y:
+		aim_pitch = want.y
 
 
 func _process(delta: float) -> void:
