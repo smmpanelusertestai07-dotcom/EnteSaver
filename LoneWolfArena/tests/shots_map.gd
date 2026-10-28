@@ -31,14 +31,36 @@ func run(autotest: Node) -> int:
 	# ---- PREP: barrier on
 	await at.shot("map_prep_a_hud")
 	hud.visible = false
+	# the HUD writes the joystick into player.move_dir every frame: park it for the scripted moves
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
 	await _perf("prep_a")
 	await at.shot("map_prep_a")
 	await _view("map_prep_b", map.spawn_b + _back(map.spawn_b_yaw, 3.3) + Vector3(0, 2.0, 0), map.spawn_b + _fwd(map.spawn_b_yaw, 10.0) + Vector3(0, 1.2, 0))
 	await _view("map_prep_inside_a", map.spawn_a + Vector3(1.0, 1.7, 0), map.spawn_a + Vector3(-6.0, 1.2, 0), 75.0)
 	_use_player_cam(p)
+	# the barrier must hold the player in the alcove during PREP
+	p.aim_yaw = map.spawn_a_yaw
+	p.move_dir = Vector2(0, 1)
+	await at.wait(2.5)
+	p.move_dir = Vector2.ZERO
+	var held: bool = p.global_position.x < -MapBuilder.HX + 0.1
+	at.log_line("MAPNAV %s barrier holds the player in PREP (x=%.2f)" % ["OK" if held else "FAIL", p.global_position.x])
+	if not held:
+		fails += 1
+	p.global_position = map.spawn_a
 	# ---- FIGHT
 	await at.wait_for_phase(arena, 1)
 	b.frozen = true
+	p.aim_yaw = map.spawn_a_yaw
+	p.move_dir = Vector2(0, 1)
+	await at.wait(1.6)
+	p.move_dir = Vector2.ZERO
+	var out: bool = p.global_position.x > -MapBuilder.HX + 0.5
+	at.log_line("MAPNAV %s barrier released in FIGHT (x=%.2f)" % ["OK" if out else "FAIL", p.global_position.x])
+	if not out:
+		fails += 1
+	p.global_position = map.spawn_a
+	p.aim_yaw = map.spawn_a_yaw
 	await at.wait(1.2)
 	await _perf("fight_a")
 	await at.shot("map_fight_a")
