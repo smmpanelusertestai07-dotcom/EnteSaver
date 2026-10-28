@@ -67,6 +67,7 @@ jobs:
           godot --headless --path . -- --autotest=aim
           godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
           godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
+          LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
 
       - name: Export signed APK (throwaway CI key, emulator build)
         working-directory: LoneWolfArena
