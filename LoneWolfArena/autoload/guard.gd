@@ -7,10 +7,10 @@ extends Node
 ## - edited save files: the profile is signed with an HMAC tied to this device and to a secret
 ##   that exists only in release builds (res://build_secret.txt, written by tools/build_apk.sh from
 ##   a key kept with the signing key, never in the repository);
-## - repackaged APKs: on Android the installed APK's v2/v3 signing block must carry the
-##   certificate the official build was signed with (res://build_signer.txt, written by
-##   tools/build_apk.sh). The game reads its own APK file, so no Java call can misreport it:
-##   anything it cannot read counts as "unknown" (allowed), only a different certificate counts.
+## - repackaged APKs: on Android 9+ the system's package manager must confirm that the app is
+##   signed with the certificate of the official build (res://build_signer.txt, written by
+##   tools/build_apk.sh). A question it cannot answer counts as "unknown" (allowed), only a
+##   different certificate counts.
 ## A detection ends the running match without XP ("INTEGRITY CHECK FAILED").
 
 signal tampered(reason: String)
@@ -18,8 +18,7 @@ signal tampered(reason: String)
 const SIGNER_FILE := "res://build_signer.txt"
 const SECRET_FILE := "res://build_secret.txt"
 const SPEED_WINDOW_USEC := 3000000
-## APK Signing Block entry IDs of the v2, v3 and v3.1 signature schemes.
-const APK_SIG_IDS := [0x7109871a, 0xf05368c0, 0x1b93ad61]
+const CERT_INPUT_SHA256 := 1        # android.content.pm.PackageManager.CERT_INPUT_SHA256
 
 var flags: PackedStringArray = []
 var signature_state := "unchecked"
@@ -167,114 +166,30 @@ func _signature_state() -> String:
 		return "not android"
 	if not FileAccess.file_exists(SIGNER_FILE):
 		return "unknown (no signer file)"
-	var expected := FileAccess.get_file_as_string(SIGNER_FILE).strip_edges().to_lower().replace(":", "")
-	if expected.length() != 64:
+	var expected := signer_digest(FileAccess.get_file_as_string(SIGNER_FILE))
+	if expected.is_empty():
 		return "unknown (bad signer file)"
-	var apk := _apk_path()
-	if apk == "":
-		return "unknown (no apk path)"
-	var certs := apk_signer_hashes(apk)
-	if certs.is_empty():
-		return "unknown (no signing block)"
-	return "ok" if expected in certs else "mismatch"
-
-
-## Path of the installed APK (Context.getPackageCodePath()), or "" when unavailable.
-func _apk_path() -> String:
+	# The installed APK can't be read directly: Godot only opens files in the app's own storage.
 	if not Engine.has_singleton("AndroidRuntime"):
-		return ""
+		return "unknown (no android runtime)"
 	var ctx: Variant = Engine.get_singleton("AndroidRuntime").call("getApplicationContext")
-	if not ctx is Object or ctx == null:
-		return ""
-	var path: Variant = (ctx as Object).call("getPackageCodePath")
-	return String(path) if typeof(path) == TYPE_STRING else ""
+	if not ctx is JavaObject:
+		return "unknown (no context)"
+	var pm: Variant = (ctx as JavaObject).call("getPackageManager")
+	if not pm is JavaObject or not (pm as JavaObject).has_java_method("hasSigningCertificate"):
+		return "unknown (android < 9)"
+	# Also true for an older key of a rotated signing lineage.
+	var signed: Variant = (pm as JavaObject).call("hasSigningCertificate",
+			(ctx as JavaObject).call("getPackageName"), expected, CERT_INPUT_SHA256)
+	if typeof(signed) != TYPE_BOOL:
+		return "unknown (no answer)"
+	return "ok" if signed else "mismatch"
 
 
-## SHA-256 (lower-case hex) of every signer certificate in an APK's v2 / v3 / v3.1 signing
-## block. Empty when the file can't be read or has no such block (e.g. v1-only signing).
-static func apk_signer_hashes(path: String) -> PackedStringArray:
-	var out := PackedStringArray()
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return out
-	var size := f.get_length()
-	# End-of-central-directory record: within the last 22 bytes + up to 64 KB of comment.
-	var tail_len := mini(size, 65535 + 22)
-	f.seek(size - tail_len)
-	var tail := f.get_buffer(tail_len)
-	var eocd := -1
-	for i in range(tail_len - 22, -1, -1):
-		if tail.decode_u32(i) == 0x06054b50:
-			eocd = i
-			break
-	if eocd < 0:
-		return out
-	# The signing block sits right before the central directory and ends with its own size
-	# and the magic "APK Sig Block 42".
-	var cd_offset := tail.decode_u32(eocd + 16)
-	if cd_offset < 32 or cd_offset > size:
-		return out
-	f.seek(cd_offset - 24)
-	var footer := f.get_buffer(24)
-	if footer.slice(8, 24).get_string_from_ascii() != "APK Sig Block 42":
-		return out
-	var block_size := footer.decode_u64(0)
-	var start := cd_offset - block_size - 8
-	if block_size < 32 or block_size > 32 * 1024 * 1024 or start < 0:
-		return out
-	f.seek(start)
-	var block := f.get_buffer(block_size + 8)
-	if block.decode_u64(0) != block_size:
-		return out
-	# ID-value pairs: uint64 length (of id + value), uint32 id, value.
-	var pos := 8
-	var end := block.size() - 24
-	while pos + 12 <= end:
-		var plen := block.decode_u64(pos)
-		var vend := pos + 8 + plen
-		if plen < 4 or vend > end:
-			break
-		if block.decode_u32(pos + 8) in APK_SIG_IDS:
-			_collect_certs(block, pos + 12, vend, out)
-		pos = vend
-	return out
-
-
-## v2/v3 value: [signers: [signer: [signed data: [digests] [certificates: [cert]...] ...] ...]...]
-## where every [...] is a uint32 length-prefixed field.
-static func _collect_certs(b: PackedByteArray, start: int, end: int, out: PackedStringArray) -> void:
-	var signers := _lp(b, start, end)
-	if signers.is_empty():
-		return
-	var p: int = signers[0]
-	while p < signers[1]:
-		var signer := _lp(b, p, signers[1])
-		if signer.is_empty():
-			return
-		var signed := _lp(b, signer[0], signer[1])
-		var digests := _lp(b, signed[0], signed[1]) if not signed.is_empty() else []
-		var certs := _lp(b, digests[1], signed[1]) if not digests.is_empty() else []
-		if not certs.is_empty():
-			var c: int = certs[0]
-			while c < certs[1]:
-				var cert := _lp(b, c, certs[1])
-				if cert.is_empty():
-					break
-				var h := HashingContext.new()
-				h.start(HashingContext.HASH_SHA256)
-				h.update(b.slice(cert[0], cert[1]))
-				var hex := h.finish().hex_encode()
-				if not hex in out:
-					out.append(hex)
-				c = cert[1]
-		p = signer[1]
-
-
-## The uint32 length-prefixed field at p: [content start, content end], or [] if it overruns.
-static func _lp(b: PackedByteArray, p: int, limit: int) -> Array:
-	if p < 0 or p + 4 > limit:
-		return []
-	var n := b.decode_u32(p)
-	if p + 4 + n > limit:
-		return []
-	return [p + 4, p + 4 + n]
+## The certificate SHA-256 in build_signer.txt (hex, with or without colons) as 32 bytes, or
+## empty when the text is not one.
+static func signer_digest(text: String) -> PackedByteArray:
+	var hex := text.strip_edges().to_lower().replace(":", "")
+	if hex.length() != 64 or not hex.is_valid_hex_number():
+		return PackedByteArray()
+	return hex.hex_decode()

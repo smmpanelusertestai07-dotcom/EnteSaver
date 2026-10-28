@@ -24,7 +24,7 @@ func _ready() -> void:
 	_test_weapon_state()
 	_test_hud_layout()
 	_test_guard()
-	_test_apk_signature()
+	_test_signer_digest()
 	_test_settings_sanitize()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
@@ -143,62 +143,15 @@ func _test_guard() -> void:
 	_check(Guard.verify_dict({"name": "OLD"}).unsigned, "old unsigned profile is accepted once")
 
 
-func _u32(v: int) -> PackedByteArray:
-	var b := PackedByteArray()
-	b.resize(4)
-	b.encode_u32(0, v)
-	return b
-
-
-func _u64(v: int) -> PackedByteArray:
-	var b := PackedByteArray()
-	b.resize(8)
-	b.encode_u64(0, v)
-	return b
-
-
-func _lp(content: PackedByteArray) -> PackedByteArray:
-	return _u32(content.size()) + content
-
-
-## A minimal file with the APK layout: data, signing block (one v2 signer with `cert`),
-## central directory, end-of-central-directory record.
-func _fake_apk(cert: PackedByteArray, magic := "APK Sig Block 42") -> PackedByteArray:
-	var signed := _lp(PackedByteArray()) + _lp(_lp(cert)) + _lp(PackedByteArray())
-	var signer := _lp(signed) + _lp(PackedByteArray()) + _lp(PackedByteArray())
-	var value := _lp(_lp(signer))
-	var pair := _u64(4 + value.size()) + _u32(0x7109871a) + value
-	var size := pair.size() + 8 + 16
-	var block := _u64(size) + pair + _u64(size) + magic.to_ascii_buffer()
-	var data := "local file data".to_ascii_buffer()
-	var cd := "CDIR".to_ascii_buffer()
-	var eocd := _u32(0x06054b50) + PackedByteArray([0, 0, 0, 0, 1, 0, 1, 0]) + _u32(cd.size()) \
-		+ _u32(data.size() + block.size()) + PackedByteArray([0, 0])
-	return data + block + cd + eocd
-
-
-func _test_apk_signature() -> void:
-	var cert := "fake X.509 certificate bytes".to_ascii_buffer()
-	var path := OS.get_user_data_dir().path_join("test_fake.apk")
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_buffer(_fake_apk(cert))
-	f.close()
-	var h := HashingContext.new()
-	h.start(HashingContext.HASH_SHA256)
-	h.update(cert)
-	var want := h.finish().hex_encode()
-	var got := Guard.apk_signer_hashes(path)
-	_check(got.size() == 1 and got[0] == want, "APK signing block: signer certificate hash is read")
-	f = FileAccess.open(path, FileAccess.WRITE)
-	f.store_buffer(_fake_apk(cert, "APK Sig Block 41"))
-	f.close()
-	_check(Guard.apk_signer_hashes(path).is_empty(), "APK without a valid signing block gives no hash (unknown, allowed)")
-	_check(Guard.apk_signer_hashes(path + ".missing").is_empty(), "unreadable APK gives no hash (unknown, allowed)")
-	DirAccess.remove_absolute(path)
-	var real := ProjectSettings.globalize_path("res://apk/LoneWolfArena.apk")
-	if FileAccess.file_exists(real):
-		var hashes := Guard.apk_signer_hashes(real)
-		_check(hashes.size() >= 1 and hashes[0].length() == 64, "shipped APK's signer certificate is read")
+func _test_signer_digest() -> void:
+	var hex := "0123456789abcdef".repeat(4)
+	var colons := ":".join(PackedStringArray(Array(range(0, 64, 2)).map(func(i: int) -> String: return hex.substr(i, 2).to_upper())))
+	var d := Guard.signer_digest(hex)
+	_check(d.size() == 32 and d[0] == 0x01 and d[31] == 0xef, "signer file: plain hex digest becomes 32 bytes")
+	_check(Guard.signer_digest(colons + "\n") == d, "signer file: keytool's AB:CD:.. form gives the same bytes")
+	_check(Guard.signer_digest("").is_empty() and Guard.signer_digest(hex.left(62)).is_empty(), "signer file: short text is rejected")
+	_check(Guard.signer_digest(hex.left(63) + "z").is_empty(), "signer file: non-hex text is rejected")
+	_check(Guard._signature_state() == "not android", "signature check only runs on Android")
 
 
 func _test_settings_sanitize() -> void:
