@@ -226,6 +226,10 @@ func _build_ui() -> void:
 	var b3 := UI.button("HOW TO PLAY", 22, "dark", Vector2(210, 60))
 	b3.pressed.connect(_how_to_play)
 	menu.add_child(b3)
+	var b4 := UI.button("CREDITS", 22, "dark", Vector2(210, 60))
+	b4.name = "CreditsButton"
+	b4.pressed.connect(func() -> void: add_child(CreditsPanel.new()))
+	menu.add_child(b4)
 	# Equipped bundle (bottom-left).
 	var info := CharacterModel.bundle_info(String(Game.profile.bundle))
 	_bundle_label = UI.outlined(UI.label("", 20, UI.RARITY_COLORS[info.rarity], "bold"), 4)

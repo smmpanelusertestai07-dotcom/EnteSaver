@@ -4,7 +4,9 @@ extends Node
 ## - memory scanners that search for and freeze values (HP, ammo, items): those values live
 ##   XOR-masked with a checksum in SecureNum, so they can't be found and edits are detected;
 ## - speed hacks: the game clock is compared with the wall clock;
-## - edited save files: the profile is signed with an HMAC tied to this device;
+## - edited save files: the profile is signed with an HMAC tied to this device and to a secret
+##   that exists only in release builds (res://build_secret.txt, written by tools/build_apk.sh from
+##   a key kept with the signing key, never in the repository);
 ## - repackaged APKs: on Android the installed APK's v2/v3 signing block must carry the
 ##   certificate the official build was signed with (res://build_signer.txt, written by
 ##   tools/build_apk.sh). The game reads its own APK file, so no Java call can misreport it:
@@ -14,6 +16,7 @@ extends Node
 signal tampered(reason: String)
 
 const SIGNER_FILE := "res://build_signer.txt"
+const SECRET_FILE := "res://build_secret.txt"
 const SPEED_WINDOW_USEC := 3000000
 ## APK Signing Block entry IDs of the v2, v3 and v3.1 signature schemes.
 const APK_SIG_IDS := [0x7109871a, 0xf05368c0, 0x1b93ad61]
@@ -35,8 +38,12 @@ func _ready() -> void:
 	rng.randomize()
 	_salt = rng.randi() | (rng.randi() << 31)
 	_mask_state = rng.randi() | 1
-	var seed_text := "lw-arena|%s|%s" % [OS.get_unique_id(), "7f3c91e2a85d4b06"]
-	_hmac_key = seed_text.sha256_buffer()
+	var secret := "dev"      # editor, tests and CI builds; release builds ship their own
+	if FileAccess.file_exists(SECRET_FILE):
+		var s := FileAccess.get_file_as_string(SECRET_FILE).strip_edges()
+		if s.length() >= 32:
+			secret = s
+	_hmac_key = ("lw-arena|%s|%s" % [OS.get_unique_id(), secret]).sha256_buffer()
 	_reset_clock()
 	_check_signature.call_deferred()
 

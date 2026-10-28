@@ -8,6 +8,8 @@
 # to it, both outside the repository). Never commit keystores or passwords.
 # The certificate's SHA-256 is written to build_signer.txt (git-ignored) and packed into the
 # game, which refuses to count matches when it runs from an APK re-signed with another key.
+# The save-signing secret (~/.lonewolf/save_secret, created once and kept with the key so saves
+# stay valid across updates) is copied to build_secret.txt (git-ignored) and packed too.
 # Needs: godot 4.7.2 + Android export templates, Android SDK build-tools (apksigner, aapt),
 # and Godot editor settings pointing at the SDK and JDK.
 set -euo pipefail
@@ -35,6 +37,16 @@ fi
 keytool -list -v -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -storepass "$LW_KEY_PASS" 2>/dev/null \
   | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f' > build_signer.txt
 test "$(wc -c < build_signer.txt)" -ge 64 || { echo "could not read the certificate fingerprint"; exit 1; }
+
+# Save-signing secret: one per signing key, kept beside it (LW_SAVE_SECRET overrides).
+SECRET_SRC="${LW_SAVE_SECRET:-$(dirname "$LW_KEYSTORE")/save_secret}"
+if [ ! -f "$SECRET_SRC" ]; then
+  head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$SECRET_SRC"
+  chmod 600 "$SECRET_SRC"
+  echo "created save-signing secret: $SECRET_SRC"
+fi
+cp "$SECRET_SRC" build_secret.txt
+test "$(wc -c < build_secret.txt)" -ge 32 || { echo "save-signing secret too short"; exit 1; }
 
 # A fresh checkout's first import can exit non-zero before the class cache exists; retry once.
 godot --headless --path . --import > build_import.log 2>&1 || godot --headless --path . --import > build_import.log 2>&1 \
