@@ -1,9 +1,12 @@
 """Renders the HUD's silhouette icons from the game's OWN 3D assets (so every icon is original):
-stance icons from the character in its animation poses (stand, crouch, prone, jump) and item /
-weapon icons from the prop models. Output: white-on-transparent PNGs in assets/ui/icons/.
+stance icons from the character in its animation poses (stand, crouch, prone, jump, sprint) and item /
+weapon icons from the prop models. Output: white-on-transparent PNGs in assets/ui/icons/
+(then run tools/media/make_ui_icons.py, which also writes their .import files with mipmaps).
 
 usage: blender -b --python tools/media/render_silhouettes.py -- [--only name,name] [--out DIR]
-Each icon is framed to fill a square canvas with a margin (stances) or a wide canvas (weapons)."""
+Each icon is rendered at 3x, cropped to the silhouette and fitted into its canvas with a margin
+(square for stances, wide for weapons); stance figures are thickened a little ("bold") so they
+still read as solid shapes at button size (~50 px)."""
 import math
 import os
 import sys
@@ -27,14 +30,27 @@ CHAR = os.path.join(ROOT, "assets", "character", "character.glb")
 EXTRA = os.path.join(ROOT, "assets", "character", "anims_extra.glb")
 PROPS = os.path.join(ROOT, "assets", "props")
 
-# name -> (kind, source, action/frame or None, view, canvas (w, h))
-# view: "side_r" = camera on the character's right looking at it (character faces screen-left),
-#       "side_l" = camera on the character's left (faces screen-right).
+# name -> (kind, source, action/frame or None, view, canvas (w, h)[, options])
+# view: "side_r" = camera on the character's right: the character (it faces -Y) faces screen-right,
+#       "side_l" = camera on its left: the character faces screen-left, props point screen-right
+#       (their muzzle is +Y). Stance buttons sit on the right of the HUD and face left (inward);
+#       the sprint button sits on the left and runs right.
+# options: "rifle" (pose icons hold the AR, default True), "bold" (thickening, fraction of the
+#          canvas height; default 0.022 for poses, 0 for props), "margin" (default 0.06 / 0.04),
+#          "aim" (pose tweaks after the frame is set: [(bone, world direction of the bone)]).
+SPRINT_POSE = [
+    ("spine_01", (0, -0.45, 1)),
+    ("thigh_l", (0, -0.95, -0.30)), ("calf_l", (0, 0.25, -1)),
+    ("thigh_r", (0, 0.55, -0.83)), ("calf_r", (0, 1.0, -0.20)),
+    ("upperarm_l", (0, -1.0, -0.10)), ("lowerarm_l", (0, -0.55, 0.85)),
+    ("upperarm_r", (0, 0.95, -0.30)), ("lowerarm_r", (0, 0.80, -0.60)),
+]
 ICONS = {
-    "stance_stand": ("pose", "idle", 0, "side_r", (256, 256)),
-    "stance_crouch": ("pose", "crouch_idle", 0, "side_r", (256, 256)),
-    "stance_prone": ("pose", "prone_idle", 0, "side_r", (256, 256)),
-    "stance_jump": ("pose", "jump", 7, "side_r", (256, 256)),
+    "stance_sprint": ("pose", "idle", 0, "side_r", (256, 256), {"rifle": False, "aim": SPRINT_POSE}),
+    "stance_stand": ("pose", "idle", 0, "side_l", (256, 256)),
+    "stance_crouch": ("pose", "crouch_idle", 0, "side_l", (256, 256)),
+    "stance_prone": ("pose", "prone_idle", 0, "side_l", (256, 256)),
+    "stance_jump": ("pose", "jump", 7, "side_l", (256, 256)),
     "weapon_ar": ("prop", "weapon_ar", None, "side_l", (512, 192)),
     "weapon_sg": ("prop", "weapon_sg", None, "side_l", (512, 192)),
     "weapon_smg": ("prop", "weapon_smg", None, "side_l", (512, 192)),
@@ -137,14 +153,58 @@ def ortho_camera(sc, view, lo, hi, canvas, margin=0.08):
     return cam
 
 
-def render(sc, name):
+def render(sc, name, canvas, margin, bold):
     os.makedirs(OUT, exist_ok=True)
     sc.render.filepath = os.path.join(OUT, name + ".png")
+    sc.render.resolution_percentage = 300
     bpy.ops.render.render(write_still=True)
+    finish(sc.render.filepath, canvas, margin, bold)
     print("ICON", name, sc.render.filepath)
 
 
-def pose_icon(name, action, frame, view, canvas):
+def finish(path, canvas, margin, bold):
+    """Crops the 3x render to the silhouette, thickens it by `bold` (fraction of the canvas
+    height), centres it in the canvas with `margin` and writes it back as white RGBA."""
+    import numpy as np
+    img = bpy.data.images.load(path, check_existing=False)
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    a = px.reshape(h, w, 4)[:, :, 3]
+    ys, xs = np.nonzero(a > 0.01)
+    if xs.size == 0:
+        return
+    a = a[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    cw, ch = canvas
+    k = min(cw * (1 - 2 * margin) / a.shape[1], ch * (1 - 2 * margin) / a.shape[0])
+    r = int(round(bold * ch / k))
+    if r > 0:
+        a = np.pad(a, r)
+        src = a.copy()
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                if dx * dx + dy * dy <= r * r:
+                    a = np.maximum(a, np.roll(np.roll(src, dy, 0), dx, 1))
+        k = min(cw * (1 - 2 * margin) / a.shape[1], ch * (1 - 2 * margin) / a.shape[0])
+    sw, sh = max(int(round(cw / k)), a.shape[1]), max(int(round(ch / k)), a.shape[0])
+    full = np.zeros((sh, sw), dtype=np.float32)
+    oy, ox = (sh - a.shape[0]) // 2, (sw - a.shape[1]) // 2
+    full[oy:oy + a.shape[0], ox:ox + a.shape[1]] = a
+    rgba = np.ones((sh, sw, 4), dtype=np.float32)
+    rgba[:, :, 3] = full
+    out = bpy.data.images.new("icon_out", sw, sh, alpha=True)
+    out.alpha_mode = "STRAIGHT"
+    out.pixels.foreach_set(rgba.ravel())
+    out.scale(cw, ch)
+    out.filepath_raw = path
+    out.file_format = "PNG"
+    out.save()
+    bpy.data.images.remove(out)
+
+
+def pose_icon(name, action, frame, view, canvas, opts=None):
+    opts = opts or {}
     sc = reset()
     bpy.ops.import_scene.gltf(filepath=CHAR)
     arm = bpy.data.objects["Armature"]
@@ -168,12 +228,34 @@ def pose_icon(name, action, frame, view, canvas):
     if hasattr(arm.animation_data, "action_slot") and act.slots:
         arm.animation_data.action_slot = act.slots[0]
     sc.frame_set(frame)
-    attach_rifle(arm)
+    if opts.get("aim"):
+        # Freeze this frame's pose, drop the action, then point the listed bones.
+        mats = {pb.name: pb.matrix_basis.copy() for pb in arm.pose.bones}
+        arm.animation_data.action = None
+        for pb in arm.pose.bones:
+            pb.matrix_basis = mats[pb.name]
+        bpy.context.view_layer.update()
+        for bone, direction in opts["aim"]:
+            aim_bone(arm, bone, direction)
+    if opts.get("rifle", True):
+        attach_rifle(arm)
     meshes = [o for o in bpy.data.objects if o.type == "MESH" and not o.hide_render]
     apply_white(meshes)
     lo, hi = world_bounds(meshes)
     ortho_camera(sc, view, lo, hi, canvas)
-    render(sc, name)
+    render(sc, name, canvas, opts.get("margin", 0.06), opts.get("bold", 0.022))
+
+
+def aim_bone(arm, name, direction):
+    """Turns a pose bone about its head (world space) so its head->tail points along direction."""
+    pb = arm.pose.bones[name]
+    mw = arm.matrix_world
+    head = mw @ pb.head
+    cur = ((mw @ pb.tail) - head).normalized()
+    q = cur.rotation_difference(Vector(direction).normalized())
+    R = Matrix.Translation(head) @ q.to_matrix().to_4x4() @ Matrix.Translation(-head)
+    pb.matrix = mw.inverted() @ (R @ (mw @ pb.matrix))
+    bpy.context.view_layer.update()
 
 
 def attach_rifle(arm):
@@ -191,20 +273,27 @@ def attach_rifle(arm):
         o.matrix_world = M @ o.matrix_world
 
 
-def prop_icon(name, prop, view, canvas):
+def prop_icon(name, prop, view, canvas, opts=None):
+    opts = opts or {}
+    src = os.path.join(PROPS, prop + ".glb")
+    if not os.path.exists(src):
+        print("SKIP", name, "missing", src)
+        return
     sc = reset()
-    bpy.ops.import_scene.gltf(filepath=os.path.join(PROPS, prop + ".glb"))
+    bpy.ops.import_scene.gltf(filepath=src)
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
     apply_white(meshes)
     lo, hi = world_bounds(meshes)
     ortho_camera(sc, view, lo, hi, canvas, margin=0.05)
-    render(sc, name)
+    render(sc, name, canvas, opts.get("margin", 0.04), opts.get("bold", 0.0))
 
 
-for name, (kind, src, frame, view, canvas) in ICONS.items():
+for name, entry in ICONS.items():
     if ONLY and name not in ONLY:
         continue
+    kind, src, frame, view, canvas = entry[:5]
+    options = entry[5] if len(entry) > 5 else {}
     if kind == "pose":
-        pose_icon(name, src, frame, view, canvas)
+        pose_icon(name, src, frame, view, canvas, options)
     else:
-        prop_icon(name, src, view, canvas)
+        prop_icon(name, src, view, canvas, options)
