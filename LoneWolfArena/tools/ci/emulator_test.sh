@@ -23,8 +23,12 @@ wait_mark() { # wait_mark <text> <seconds>
   log "marker '$1' NOT seen after $2s"; return 1
 }
 
-# A normal install: an incremental one streams the APK lazily, so the game could not read
-# its own signing block at the end of the file.
+# The slow software emulator makes system apps (launcher, Play services) stall; their "isn't
+# responding" dialogs would cover the game and swallow the taps. Hide such dialogs.
+adb shell settings put global hide_error_dialogs 1
+close_dialogs() { adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1; }
+close_dialogs
+# A normal install (not an incremental one, which streams the APK lazily).
 adb install --no-incremental -r -g "$APK" || { log "INSTALL FAILED"; exit 1; }
 adb shell settings put system screen_off_timeout 1800000
 adb shell svc power stayon true
@@ -49,10 +53,14 @@ px() { python3 -c "print(int(round($1)))"; }
 read -r SX SY < <(ui_pos start "$(px "($VW-177)*$S")" "$(px "669*$S")")
 log "tap START at $SX,$SY"
 # Software rendering makes frames slow; tap again if the match did not begin loading.
+focus() { adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus | tr -s ' '; }
 for try in 1 2 3; do
+  # Bring the game back to the front if something else holds the focus.
+  focus | grep -q "$PKG" || { log "focus elsewhere:$(focus)"; close_dialogs
+    adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 5; }
   adb shell input tap "$SX" "$SY"
   wait_mark "prep started" 60 && break
-  log "START tap $try not taken; display: $(adb shell wm size | tr '\n' ' ')"
+  log "START tap $try not taken; focus:$(focus); display: $(adb shell wm size | tr '\n' ' ')"
 done
 shot 02_countdown
 # Game time runs slower than real time at a few FPS (physics catches up 6 steps per frame).
