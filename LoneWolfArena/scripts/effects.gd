@@ -8,6 +8,7 @@ const MAX_HOLES := 40
 static var _mats := {}
 static var _meshes := {}
 static var _holes: Array = []
+static var _hole_mat: StandardMaterial3D
 static var muzzle_tex: Texture2D
 static var glow_tex: Texture2D
 static var lights_enabled := true
@@ -147,8 +148,8 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 	_burst(parent, pos + normal * 0.02, normal, Color(1.0, 0.75, 0.35, 1), 7, 5.0, 0.025, 0.22)
 	_burst(parent, pos + normal * 0.05, normal, Color(0.55, 0.52, 0.48, 0.55), 4, 1.2, 0.09, 0.45, 0.5)
 	var hole := MeshInstance3D.new()
-	hole.mesh = _quad(Vector2(0.09, 0.09))
-	hole.material_override = _mat(Color(0.05, 0.05, 0.05, 0.85), false)
+	hole.mesh = _quad(Vector2(0.07, 0.07))
+	hole.material_override = _hole_material()
 	hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(hole)
 	var up := Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT
@@ -159,6 +160,28 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 		if is_instance_valid(old):
 			(old as Node).queue_free()
 	_free_after(hole, 12.0)
+
+
+## Bullet hole: a dark round core with a soft edge and a faint chipped rim, lit like the surface
+## it sits on (texture drawn once).
+static func _hole_material() -> StandardMaterial3D:
+	if _hole_mat != null:
+		return _hole_mat
+	var n := 64
+	var img := Image.create_empty(n, n, false, Image.FORMAT_RGBA8)
+	for y in n:
+		for x in n:
+			var r := Vector2(x + 0.5 - n * 0.5, y + 0.5 - n * 0.5).length() / (n * 0.5)
+			var c := Color(0.03, 0.028, 0.025).lerp(Color(0.34, 0.31, 0.27), clampf((r - 0.3) / 0.25, 0.0, 1.0))
+			c.a = maxf((1.0 - smoothstep(0.26, 0.4, r)) * 0.95, (1.0 - smoothstep(0.4, 0.95, r)) * 0.35)
+			img.set_pixel(x, y, c)
+	img.generate_mipmaps()
+	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_texture = ImageTexture.create_from_image(img)
+	m.roughness = 1.0
+	_hole_mat = m
+	return m
 
 
 static func hit_spark(ctx: Node, pos: Vector3, normal: Vector3, headshot: bool) -> void:

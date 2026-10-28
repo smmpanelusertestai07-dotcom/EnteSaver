@@ -43,7 +43,7 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
 | Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
 | Weapon panel | top-right 0.891, 0.208 | slot 0.105 h | main slot (gun silhouette, ammo "mag / reserve") over three small slots (gun, empty, fists) |
-| HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", green fill (label above the bar when space is short) |
+| HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
 | Joystick | 0.177, 0.79 | 0.25 | translucent ring + knob, floating in the left part; push past the ring to sprint |
 | Sprint | 0.174, 0.475 | 0.13 | running-figure glyph |
 | Fire (right) | 0.82, 0.69 | 0.22 | big circle, bullet glyph, dotted outer ring, warm while firing |
@@ -59,8 +59,9 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Settings / pause | top-right corner 0.977, 0.055 | 0.072 | gear |
 | Scoreboard | next to settings 0.94, 0.055 | 0.072 | list glyph |
 - Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
-- Crosshair: WHITE by default (4 short lines + centre dot, spreads with movement/firing), turns
-  RED when the crosshair is on an enemy; red-dot reticle when aiming (ADS).
+- Crosshair: WHITE by default, a ring + centre dot (a 4-arc ring for shotguns, a dot for the
+  sniper and fists) that spreads with movement/firing; turns RED when on an enemy; red-dot reticle when
+  aiming (ADS), full scope for the sniper.
 - Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger.
 - Hit marker: white X; headshot: orange X + head icon; kill: big red X on the enemy and the
   elimination badge (our emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
