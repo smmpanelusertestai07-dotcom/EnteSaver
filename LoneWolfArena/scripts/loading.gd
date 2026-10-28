@@ -212,8 +212,6 @@ func _show_tip() -> void:
 
 func _build_match() -> void:
 	_backdrop(1.12)
-	if _art:
-		_art.pivot_offset = Vector2(1560, 360)
 	var shade := ColorRect.new()
 	shade.color = Color(0.02, 0.02, 0.05, 0.35)
 	UI.full_rect(shade)
@@ -377,7 +375,9 @@ func _process(delta: float) -> void:
 		_tip_i += 1
 		_show_tip()
 	if _art:
+		# slow push-in on the hero (boot) / drift toward the rival (match)
 		var z := (1.0 + 0.035 * clampf(_t / 12.0, 0.0, 1.0)) if mode == "boot" else (1.12 - 0.06 * clampf(_t / 2.0, 0.0, 1.0))
+		_art.pivot_offset = _art.size * (Vector2(0.36, 0.42) if mode == "boot" else Vector2(0.72, 0.42))
 		_art.scale = Vector2(z, z)
 	if mode == "boot":
 		_process_boot(delta)
@@ -414,17 +414,17 @@ func _process_boot(delta: float) -> void:
 
 func _process_match(delta: float) -> void:
 	var path := "res://scenes/arena.tscn"
-	var ready := true
+	var loaded := true
 	if _arena_scene == null and ResourceLoader.exists(path):
 		var st := ResourceLoader.load_threaded_get_status(path)
 		if st == ResourceLoader.THREAD_LOAD_LOADED:
 			_arena_scene = ResourceLoader.load_threaded_get(path)
 		elif st == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
-			ready = false
-	var goal := clampf(_t / MATCH_MIN_S, 0.0, 1.0) * (1.0 if ready else 0.85)
+			loaded = false
+	var goal := clampf(_t / MATCH_MIN_S, 0.0, 1.0) * (1.0 if loaded else 0.85)
 	progress = maxf(progress, lerpf(progress, goal, minf(1.0, delta * 8.0)))
 	_status.text = "PREPARING WEAPONS" if progress < 0.5 else "ENTERING THE ARENA"
-	if not _leaving and ((ready and _t >= MATCH_MIN_S) or _t >= MATCH_MAX_S):
+	if not _leaving and ((loaded and _t >= MATCH_MIN_S) or _t >= MATCH_MAX_S):
 		_leaving = true
 		progress = 1.0
 		_pct.text = "100%"
