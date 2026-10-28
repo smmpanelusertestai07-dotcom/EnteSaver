@@ -16,7 +16,7 @@ const DEFS := {
 		"move": 0.92, "fire_move": 0.85, "equip": 0.35, "assist": 1.0, "head_lock": 0.6, "crosshair": "ring",
 	},
 	"smg": {
-		"name": "WASP SMG", "class": "SMG", "icon": "weapon_smg", "model": "weapon_smg", "sound": "ar_shot",
+		"name": "WASP SMG", "class": "SMG", "icon": "weapon_smg", "model": "weapon_smg", "sound": "smg_shot",
 		"damage": 26.0, "min_damage": 12.0, "falloff_start": 8.0, "range": 30.0,
 		"head_mult": 3.5, "head_far_mult": 0.8, "interval": 0.075, "auto": true, "mag": 20, "reserve": 100,
 		"reload": 2.3, "pellets": 1, "spread_hip": 2.0, "spread_ads": 0.8, "spread_move": 0.8, "spread_air": 3.0,
@@ -53,7 +53,7 @@ const DEFS := {
 		"move": 0.96, "fire_move": 0.9, "equip": 0.25, "assist": 1.0, "head_lock": 1.0, "crosshair": "ring",
 	},
 	"sniper": {
-		"name": "FALCON SR", "class": "SNIPER", "icon": "weapon_sniper", "model": "weapon_sniper", "sound": "shot_far",
+		"name": "FALCON SR", "class": "SNIPER", "icon": "weapon_sniper", "model": "weapon_sniper", "sound": "sniper_shot",
 		"damage": 150.0, "min_damage": 120.0, "falloff_start": 60.0, "range": 150.0,
 		"head_mult": 5.5, "head_far_mult": 1.0, "interval": 1.4, "auto": false, "mag": 5, "reserve": 20,
 		"reload": 2.8, "pellets": 1, "spread_hip": 6.0, "spread_ads": 0.0, "spread_move": 3.0, "spread_air": 8.0,

@@ -173,6 +173,31 @@ def pistol_shot():
                    mech=(0.032, 3400, 0.13), ir=(0.3, 0.24), presence=(3800, 3.5), hpf=85)
 
 
+@sfx("smg_shot", "SMG shot: tight high crack, light snappy body, very short tail for a fast rate of fire.")
+def smg_shot():
+    return gunshot(505, 0.24, thump=(240, 95, 0.028, 0.022, 0.4),
+                   body=(0.018, 320, 9000, 2100, 7, 1.0), crack=(0.62, 0.0022, 3100),
+                   boom=(800, 0.028, 0.35), roar=(3200, 0.045, 0.35), drive=2.6,
+                   mech=(0.03, 3600, 0.08), ir=(0.28, 0.22), presence=(3600, 3.5), hpf=95)
+
+
+@sfx("sniper_shot", "Sniper shot: huge supersonic crack, deep boom, long rolling tail, bolt cycled at the end.")
+def sniper_shot():
+    rng = np.random.default_rng(606)
+    shot = gunshot(606, 0.95, thump=(150, 48, 0.09, 0.08, 0.85),
+                   body=(0.05, 180, 8000, 1300, 6, 1.0), crack=(0.8, 0.004, 2200),
+                   boom=(420, 0.12, 0.8), roar=(2000, 0.2, 0.75), drive=3.4,
+                   ir=(0.9, 0.36), presence=(2800, 3.0), hpf=45)
+    out = np.zeros(ns(1.25))
+    out[: shot.size] += shot
+    # bolt: lift + pull back, then push forward + lock
+    place(out, 0.22 * metal_click(rng, ns(0.08), 2300, 0.012), 0.72, 1.0)
+    place(out, 0.18 * normalize(scrape(rng, 0.09, 1800, 3200, grit=0.5)), 0.76, 1.0)
+    place(out, 0.18 * normalize(scrape(rng, 0.08, 3000, 1900, grit=0.5)), 0.93, 1.0)
+    place(out, 0.26 * metal_click(rng, ns(0.08), 2600, 0.01), 1.02, 1.0)
+    return finalize(out, max_len=1.2, fout=0.08)
+
+
 @sfx("shot_far", "Distant gunshot (enemy fire): low-passed muffled boom with outdoor echo slaps.")
 def shot_far():
     rng = np.random.default_rng(404)
