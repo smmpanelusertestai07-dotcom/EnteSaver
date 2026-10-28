@@ -1,9 +1,20 @@
-"""Renders the key art used by the loading screen and the lobby banner: the game's own character
-(chosen bundle) holding the AR, low 3/4 hero angle, warm key light + cool rim light, stacked
-containers out of focus behind. Text/logo are added afterwards by tools/media/make_keyart.py.
+"""Renders the game's key art and the wardrobe portraits from its OWN 3D assets (character GLB,
+rifle and container props), with Cycles. Text, logo and grading are added afterwards by
+tools/media/make_keyart.py, which also calls this script (see its header).
 
-usage: blender -b --python tools/media/render_keyart.py -- --bundle shadow --out art.png
-       [--res 1920x1080] [--samples 64] [--action idle --frame 0] [--side right]"""
+Scenes:
+  hero      the key art: our character on the left third of the frame, low hero angle, facing
+            into the frame with the rifle at the ready; a container yard at sunset behind
+            (warm sky, sun glow behind the stacks, cyan + orange rim lights, shallow depth of
+            field) and the opponent standing on a container stack in the distance (a duel).
+  portrait  one outfit (bundle) full body, 3/4 front, on a transparent background, studio key
+            + rim lights: the item art of the wardrobe cards.
+
+usage: blender -b --python tools/media/render_keyart.py -- --scene hero --out art.png
+           [--bundle shadow] [--opponent desert|none] [--res 1920x1080] [--samples 64]
+       blender -b --python tools/media/render_keyart.py -- --scene portrait --bundle neon --out p.png
+           [--res 360x480] [--samples 48]"""
+import json
 import math
 import os
 import sys
@@ -20,17 +31,14 @@ def arg(name, default=None):
     return ARGS[ARGS.index(name) + 1] if name in ARGS else default
 
 
-BUNDLE = arg("--bundle", "shadow")
-OUT = arg("--out", "/tmp/keyart.png")
-RES = [int(v) for v in arg("--res", "1920x1080").split("x")]
-SAMPLES = int(arg("--samples", "64"))
-ACTION = arg("--action", "idle")
-FRAME = int(arg("--frame", "0"))
-SIDE = arg("--side", "right")      # where the character stands in the frame
+SCENE = arg("--scene", "hero")
+BUNDLE = arg("--bundle", "neon" if SCENE == "hero" else "default")
+OPPONENT = arg("--opponent", "shadow")
+OUT = arg("--out", os.path.join(os.getcwd(), "keyart.png"))
+RES = [int(v) for v in arg("--res", "1920x1080" if SCENE == "hero" else "360x480").split("x")]
+SAMPLES = int(arg("--samples", "64" if SCENE == "hero" else "48"))
 CHAR = os.path.join(ROOT, "assets", "character", "character.glb")
 PROPS = os.path.join(ROOT, "assets", "props")
-
-import json
 MANIFEST = json.load(open(os.path.join(ROOT, "assets", "character", "manifest.json")))
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -39,119 +47,115 @@ sc.render.engine = "CYCLES"
 sc.cycles.device = "CPU"
 sc.cycles.samples = SAMPLES
 sc.cycles.use_denoising = True
+sc.cycles.max_bounces = 6
 sc.render.resolution_x, sc.render.resolution_y = RES
+sc.render.resolution_percentage = 100
 sc.render.fps = 30
 sc.view_settings.view_transform = "AgX"
 try:
-    sc.view_settings.look = "AgX - Punchy"
+    sc.view_settings.look = "AgX - Punchy" if SCENE == "hero" else "AgX - Medium High Contrast"
 except Exception:
     pass
 
-bpy.ops.import_scene.gltf(filepath=CHAR)
-arm = bpy.data.objects["Armature"]
-bundle = next((b for b in MANIFEST["bundles"] if b["id"] == BUNDLE), MANIFEST["bundles"][0])
-for ob in bpy.data.objects:
-    if ob.type != "MESH":
-        continue
-    if ob.name.startswith("Outfit_"):
-        ob.hide_render = ob.name not in bundle["meshes"]
-    elif ob.name in bundle.get("hide", []):
-        ob.hide_render = True
-act = bpy.data.actions.get(ACTION)
-arm.animation_data_create()
-arm.animation_data.action = act
-if hasattr(arm.animation_data, "action_slot") and act is not None and act.slots:
-    arm.animation_data.action_slot = act.slots[0]
-sc.frame_set(FRAME)
-TURN = float(arg("--turn", "-60"))      # rotate the character (deg about Z) to face into the frame
-arm.rotation_euler = (0, 0, math.radians(TURN))
-bpy.context.view_layer.update()
-sc.frame_set(FRAME)
 
-# Rifle in the right hand, barrel where the character faces (-Y); GLB barrel is +Y in Blender.
-before = set(bpy.data.objects)
-bpy.ops.import_scene.gltf(filepath=os.path.join(PROPS, "weapon_ar.glb"))
-gun_roots = [o for o in bpy.data.objects if o not in before and o.parent is None]
-hand = arm.matrix_world @ arm.pose.bones["hand_r"].head
-fore = arm.matrix_world @ arm.pose.bones["lowerarm_r"].head
-grip = hand + (hand - fore).normalized() * 0.055
-lh = arm.matrix_world @ arm.pose.bones["hand_l"].head
-aim = (lh - grip)
-aim.z = 0.0
-aim = aim.normalized() if aim.length > 0.01 else Vector((0, -1, 0))
-y_axis = aim
-x_axis = y_axis.cross(Vector((0, 0, 1))).normalized()
-z_axis = x_axis.cross(y_axis).normalized()
-G = Matrix((x_axis, y_axis, z_axis)).transposed().to_4x4()
-G.translation = grip
-for o in gun_roots:
-    o.matrix_world = G @ o.matrix_world
+def base_name(name):
+    """Object name without Blender's .001 duplicate suffix."""
+    return name.rsplit(".", 1)[0] if len(name) > 4 and name[-4] == "." and name[-3:].isdigit() else name
+
+
+def add_character(bundle_id, loc, turn_deg, action="idle", frame=0, rifle=True):
+    """Imports the character GLB (again), shows one bundle's outfit, poses it and puts the AR in
+    its hands. Returns the armature."""
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=CHAR)
+    new = [o for o in bpy.data.objects if o not in before]
+    arm = next(o for o in new if o.type == "ARMATURE")
+    bundle = next((b for b in MANIFEST["bundles"] if b["id"] == bundle_id), MANIFEST["bundles"][0])
+    for ob in new:
+        if ob.type != "MESH":
+            continue
+        n = base_name(ob.name)
+        if n.startswith("Outfit_"):
+            ob.hide_render = n not in bundle["meshes"]
+        elif n in bundle.get("hide", []):
+            ob.hide_render = True
+    # The first import owns the clean action names; later imports add suffixed copies.
+    act = bpy.data.actions.get(action)
+    arm.animation_data_create()
+    arm.animation_data.action = act
+    if hasattr(arm.animation_data, "action_slot") and act is not None and act.slots:
+        arm.animation_data.action_slot = act.slots[0]
+    arm.location = Vector(loc)
+    arm.rotation_mode = "XYZ"           # imported as quaternion: euler edits would be ignored
+    arm.rotation_euler = (0, 0, math.radians(turn_deg))
+    sc.frame_set(frame)
+    bpy.context.view_layer.update()
+    if rifle:
+        attach_rifle(arm)
+    return arm
+
+
+def attach_rifle(arm):
+    """The AR in the right hand, barrel toward the left hand (like the game's held weapon)."""
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=os.path.join(PROPS, "weapon_ar.glb"))
+    gun_roots = [o for o in bpy.data.objects if o not in before and o.parent is None]
+    hand = arm.matrix_world @ arm.pose.bones["hand_r"].head
+    fore = arm.matrix_world @ arm.pose.bones["lowerarm_r"].head
+    grip = hand + (hand - fore).normalized() * 0.055
+    lh = arm.matrix_world @ arm.pose.bones["hand_l"].head
+    aim = lh - grip
+    aim.z *= 0.35
+    aim = aim.normalized() if aim.length > 0.01 else Vector((0, -1, 0))
+    y_axis = aim
+    x_axis = y_axis.cross(Vector((0, 0, 1))).normalized()
+    z_axis = x_axis.cross(y_axis).normalized()
+    g = Matrix((x_axis, y_axis, z_axis)).transposed().to_4x4()
+    g.translation = grip
+    for o in gun_roots:
+        o.matrix_world = g @ o.matrix_world
 
 
 def add_prop(name, loc, rot_deg, scale=1.0, color=None):
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=os.path.join(PROPS, name + ".glb"))
     roots = [o for o in bpy.data.objects if o not in before and o.parent is None]
-    M = Matrix.Translation(Vector(loc)) @ Matrix.Rotation(math.radians(rot_deg), 4, "Z") @ Matrix.Scale(scale, 4)
+    m = Matrix.Translation(Vector(loc)) @ Matrix.Rotation(math.radians(rot_deg), 4, "Z") @ Matrix.Scale(scale, 4)
     for o in roots:
-        o.matrix_world = M @ o.matrix_world
+        o.matrix_world = m @ o.matrix_world
     if color:
         for o in bpy.data.objects:
             if o in before or o.type != "MESH":
                 continue
             for slot in o.material_slots:
-                m = slot.material
-                if m and "paint" in m.name.lower():
-                    m = m.copy()
-                    slot.material = m
-                    bsdf = m.node_tree.nodes.get("Principled BSDF") if m.use_nodes else None
+                mat = slot.material
+                if mat and "paint" in mat.name.lower():
+                    mat = mat.copy()
+                    slot.material = mat
+                    bsdf = mat.node_tree.nodes.get("Principled BSDF") if mat.use_nodes else None
                     if bsdf:
                         bsdf.inputs["Base Color"].default_value = color
 
 
-# Background: stacked shipping containers (out of focus) and the ground.
-add_prop("container", (3.5, 9.0, 0), 8, 1.0, (0.42, 0.06, 0.04, 1))
-add_prop("container", (3.5, 9.0, 2.59), 8, 1.0, (0.04, 0.14, 0.36, 1))
-add_prop("container", (-5.5, 11.5, 0), -12, 1.0, (0.55, 0.26, 0.03, 1))
-add_prop("container", (-5.5, 11.5, 2.59), -12, 1.0, (0.05, 0.25, 0.10, 1))
-add_prop("container", (-9.5, 6.0, 0), 80, 1.0, (0.06, 0.26, 0.11, 1))
-add_prop("crate", (2.4, 3.4, 0), 20)
-add_prop("sandbags", (-3.2, 4.2, 0), -10)
-me = bpy.data.meshes.new("Ground")
-s = 60.0
-me.from_pydata([(-s, -s, 0), (s, -s, 0), (s, s, 0), (-s, s, 0)], [], [(0, 1, 2, 3)])
-ground = bpy.data.objects.new("Ground", me)
-sc.collection.objects.link(ground)
-gm = bpy.data.materials.new("GroundMat")
-gm.use_nodes = True
-bsdf = gm.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (0.16, 0.13, 0.11, 1)
-bsdf.inputs["Roughness"].default_value = 0.55
-me.materials.append(gm)
+def flat_material(name, color, rough=0.6, emit=None, strength=0.0):
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    b = m.node_tree.nodes["Principled BSDF"]
+    b.inputs["Base Color"].default_value = color
+    b.inputs["Roughness"].default_value = rough
+    if emit is not None:
+        b.inputs["Emission Color"].default_value = emit
+        b.inputs["Emission Strength"].default_value = strength
+    return m
 
-# Sky: warm sunset gradient (horizon orange -> zenith violet).
-world = bpy.data.worlds.new("Sky")
-world.use_nodes = True
-nt = world.node_tree
-for n in list(nt.nodes):
-    nt.nodes.remove(n)
-tex = nt.nodes.new("ShaderNodeTexCoord")
-sep = nt.nodes.new("ShaderNodeSeparateXYZ")
-ramp = nt.nodes.new("ShaderNodeValToRGB")
-ramp.color_ramp.elements[0].position = 0.0
-ramp.color_ramp.elements[0].color = (1.0, 0.42, 0.10, 1)
-ramp.color_ramp.elements[1].position = 0.55
-ramp.color_ramp.elements[1].color = (0.20, 0.06, 0.32, 1)
-mid = ramp.color_ramp.elements.new(0.18)
-mid.color = (0.95, 0.20, 0.25, 1)
-bg = nt.nodes.new("ShaderNodeBackground")
-bg.inputs[1].default_value = 1.6
-out = nt.nodes.new("ShaderNodeOutputWorld")
-nt.links.new(tex.outputs["Generated"], sep.inputs[0])
-nt.links.new(sep.outputs["Z"], ramp.inputs[0])
-nt.links.new(ramp.outputs["Color"], bg.inputs[0])
-nt.links.new(bg.outputs[0], out.inputs[0])
-sc.world = world
+
+def add_box(name, center, size, mat):
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=center)
+    ob = bpy.context.active_object
+    ob.name = name
+    ob.scale = size
+    ob.data.materials.append(mat)
+    return ob
 
 
 def light(name, kind, loc, target, energy, color, size=1.0, spot=None):
@@ -160,6 +164,8 @@ def light(name, kind, loc, target, energy, color, size=1.0, spot=None):
     ld.color = color
     if kind == "AREA":
         ld.size = size
+    if kind == "SUN":
+        ld.angle = math.radians(size)
     if kind == "SPOT" and spot:
         ld.spot_size = math.radians(spot)
         ld.spot_blend = 0.4
@@ -171,26 +177,172 @@ def light(name, kind, loc, target, energy, color, size=1.0, spot=None):
     return ob
 
 
-light("Sun", "SUN", (6, -4, 8), (0, 0, 0), 3.0, (1.0, 0.72, 0.45))
-light("Key", "AREA", (-2.0, -2.6, 2.4), (0, 0, 1.3), 700, (1.0, 0.86, 0.70), 2.0)
-light("RimL", "AREA", (1.9, 1.2, 2.2), (0, 0, 1.3), 2600, (0.30, 0.65, 1.0), 0.8)
-light("RimR", "AREA", (-1.6, 1.6, 1.9), (0, 0, 1.2), 2000, (1.0, 0.38, 0.55), 0.8)
+def camera(loc, look, lens, fstop=None, focus=None):
+    cd = bpy.data.cameras.new("Cam")
+    cd.lens = lens
+    cam = bpy.data.objects.new("Cam", cd)
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    cam.location = Vector(loc)
+    cam.rotation_euler = (Vector(look) - cam.location).to_track_quat("-Z", "Y").to_euler()
+    if fstop:
+        cd.dof.use_dof = True
+        cd.dof.aperture_fstop = fstop
+        cd.dof.focus_distance = (Vector(focus) - cam.location).length
+    return cam
 
-# Camera: low hero angle, 3/4 front; character on one third of the frame.
-cd = bpy.data.cameras.new("Cam")
-cd.lens = 45
-cd.dof.use_dof = True
-cd.dof.aperture_fstop = 1.6
-cam = bpy.data.objects.new("Cam", cd)
-sc.collection.objects.link(cam)
-sc.camera = cam
-side = -1.0 if SIDE == "right" else 1.0
-cam.location = Vector((side * 0.95 - 0.35, -3.6, 0.78))
-look = Vector((side * 0.95 + 0.05, 0.0, 1.18))
-cam.rotation_euler = (look - cam.location).to_track_quat("-Z", "Y").to_euler()
-cd.dof.focus_distance = (Vector((0, 0, 1.3)) - cam.location).length
 
+def sunset_world(sun_dir):
+    """Sky by view direction: warm horizon -> rose -> violet zenith, a glow around the sun and
+    faint streaky clouds above the horizon."""
+    world = bpy.data.worlds.new("Sky")
+    world.use_nodes = True
+    nt = world.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    tex = nt.nodes.new("ShaderNodeTexCoord")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(tex.outputs["Generated"], sep.inputs[0])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    els = ramp.color_ramp.elements
+    els[0].position = 0.0
+    els[0].color = (1.0, 0.50, 0.16, 1)
+    els[1].position = 0.62
+    els[1].color = (0.10, 0.07, 0.30, 1)
+    for pos, col in ((0.07, (1.0, 0.34, 0.12, 1)), (0.2, (0.85, 0.20, 0.30, 1)), (0.38, (0.36, 0.12, 0.42, 1))):
+        e = els.new(pos)
+        e.color = col
+    nt.links.new(sep.outputs["Z"], ramp.inputs[0])
+    # sun glow: (dot(view, sun) ^ k) in warm yellow
+    dot = nt.nodes.new("ShaderNodeVectorMath")
+    dot.operation = "DOT_PRODUCT"
+    dot.inputs[1].default_value = Vector(sun_dir).normalized()
+    nt.links.new(tex.outputs["Generated"], dot.inputs[0])
+    clamp = nt.nodes.new("ShaderNodeMath")
+    clamp.operation = "MAXIMUM"
+    clamp.inputs[1].default_value = 0.0
+    nt.links.new(dot.outputs["Value"], clamp.inputs[0])
+    pw = nt.nodes.new("ShaderNodeMath")
+    pw.operation = "POWER"
+    pw.inputs[1].default_value = 18.0
+    nt.links.new(clamp.outputs[0], pw.inputs[0])
+    glow = nt.nodes.new("ShaderNodeMixRGB")
+    glow.blend_type = "ADD"
+    glow.inputs["Color2"].default_value = (1.0, 0.62, 0.22, 1)
+    nt.links.new(pw.outputs[0], glow.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], glow.inputs["Color1"])
+    # clouds: stretched noise, only in a band above the horizon
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (1.2, 1.2, 9.0)
+    nt.links.new(tex.outputs["Generated"], mapping.inputs["Vector"])
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 2.2
+    noise.inputs["Detail"].default_value = 6.0
+    nt.links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+    band = nt.nodes.new("ShaderNodeMapRange")
+    band.inputs["From Min"].default_value = 0.52
+    band.inputs["From Max"].default_value = 0.75
+    nt.links.new(noise.outputs["Fac"], band.inputs["Value"])
+    zmask = nt.nodes.new("ShaderNodeMapRange")
+    zmask.inputs["From Min"].default_value = 0.05
+    zmask.inputs["From Max"].default_value = 0.3
+    zmask.inputs["To Min"].default_value = 0.0
+    zmask.inputs["To Max"].default_value = 1.0
+    nt.links.new(sep.outputs["Z"], zmask.inputs["Value"])
+    zfall = nt.nodes.new("ShaderNodeMath")
+    zfall.operation = "PINGPONG"
+    zfall.inputs[1].default_value = 0.5
+    nt.links.new(zmask.outputs["Result"], zfall.inputs[0])
+    cm = nt.nodes.new("ShaderNodeMath")
+    cm.operation = "MULTIPLY"
+    nt.links.new(band.outputs["Result"], cm.inputs[0])
+    nt.links.new(zfall.outputs[0], cm.inputs[1])
+    cm2 = nt.nodes.new("ShaderNodeMath")
+    cm2.operation = "MULTIPLY"
+    cm2.inputs[1].default_value = 0.55
+    nt.links.new(cm.outputs[0], cm2.inputs[0])
+    clouds = nt.nodes.new("ShaderNodeMixRGB")
+    clouds.blend_type = "MIX"
+    clouds.inputs["Color2"].default_value = (1.0, 0.70, 0.55, 1)
+    nt.links.new(cm2.outputs[0], clouds.inputs["Fac"])
+    nt.links.new(glow.outputs["Color"], clouds.inputs["Color1"])
+    bg = nt.nodes.new("ShaderNodeBackground")
+    bg.inputs[1].default_value = 1.5
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    nt.links.new(clouds.outputs["Color"], bg.inputs[0])
+    nt.links.new(bg.outputs[0], out.inputs[0])
+    sc.world = world
+
+
+def hero():
+    # Character at the origin facing screen-right and a little toward the camera.
+    add_character(BUNDLE, (0, 0, 0), 62, "idle", 0)
+    if OPPONENT != "none":
+        # The rival on a container across the yard, facing the hero (a duel).
+        add_character(OPPONENT, (3.6, 14.6, 2.59), -14, "idle", 20)
+    # Container yard: a two-high stack to the right, a single one across the yard (the rival's
+    # perch), a stack far left behind the hero and a gantry crane on the skyline.
+    add_prop("container", (6.6, 10.6, 0), 4, 1.0, (0.50, 0.08, 0.04, 1))
+    add_prop("container", (6.6, 10.6, 2.59), 4, 1.0, (0.05, 0.16, 0.40, 1))
+    add_prop("container", (3.6, 14.6, 0), 90, 1.0, (0.78, 0.62, 0.42, 1))
+    add_prop("container", (11.5, 16.0, 0), -8, 1.0, (0.70, 0.36, 0.04, 1))
+    add_prop("container", (-7.0, 15.0, 0), -14, 1.0, (0.60, 0.30, 0.05, 1))
+    add_prop("container", (-7.0, 15.0, 2.59), -14, 1.0, (0.06, 0.30, 0.36, 1))
+    add_prop("barrel", (3.1, 4.4, 0), 0)
+    add_prop("barrel", (3.75, 4.9, 0), 30)
+    steel = flat_material("Gantry", (0.05, 0.04, 0.05, 1), 0.5, (0.30, 0.12, 0.26, 1), 0.35)
+    for x in (-20.0, 10.0):
+        add_box("GantryLeg", (x, 80.0, 11.0), (1.4, 1.4, 22.0), steel)
+    add_box("GantryBeam", (-5.0, 80.0, 22.6), (40.0, 2.2, 2.6), steel)
+    add_box("GantryBoom", (-16.0, 72.0, 23.4), (2.0, 18.0, 1.2), steel)
+    add_box("GantryCab", (0.0, 79.0, 19.8), (3.6, 3.0, 2.6), steel)
+    lamp = flat_material("Lamp", (1, 0.8, 0.5, 1), 0.5, (1.0, 0.75, 0.4, 1), 40.0)
+    for x in (-16.0, -6.0, 4.0):
+        add_box("GantryLamp", (x, 78.6, 21.0), (1.0, 0.4, 0.4), lamp)
+    # Ground: concrete with a yellow lane line.
+    me = bpy.data.meshes.new("Ground")
+    s = 120.0
+    me.from_pydata([(-s, -s, 0), (s, -s, 0), (s, s, 0), (-s, s, 0)], [], [(0, 1, 2, 3)])
+    ground = bpy.data.objects.new("Ground", me)
+    sc.collection.objects.link(ground)
+    gm = flat_material("Concrete", (0.20, 0.17, 0.16, 1), 0.38)
+    me.materials.append(gm)
+    stripe = flat_material("Stripe", (0.85, 0.55, 0.04, 1), 0.5)
+    add_box("Lane", (1.7, 8.0, 0.004), (0.2, 26.0, 0.01), stripe).rotation_euler = (0, 0, math.radians(-10))
+
+    sun_dir = (0.13, 1.0, 0.055)
+    sunset_world(sun_dir)
+    light("Sun", "SUN", (20, 40, 6), (0, 0, 1), 2.4, (1.0, 0.62, 0.36), 2.0)
+    light("Key", "AREA", (2.4, -2.9, 2.6), (0, 0, 1.3), 520, (1.0, 0.86, 0.72), 2.4)
+    light("Fill", "AREA", (-2.4, -3.2, 1.2), (0, 0, 1.1), 110, (0.55, 0.62, 1.0), 3.0)
+    light("RimWarm", "AREA", (1.2, 2.4, 2.3), (0, 0, 1.35), 2600, (1.0, 0.50, 0.20), 1.0)
+    light("RimCool", "AREA", (-2.2, 0.9, 2.1), (0, 0, 1.25), 2200, (0.25, 0.70, 1.0), 0.9)
+    light("OppRim", "AREA", (5.0, 17.0, 6.0), (3.6, 14.6, 3.6), 700, (1.0, 0.45, 0.2), 1.5)
+    # Low hero angle; the character on the left third, the yard opening to the right.
+    camera((0.68, -4.4, 0.55), (0.72, 0.0, 1.16), 40, 2.2, (0.0, 0.0, 1.3))
+
+
+def portrait():
+    sc.render.film_transparent = True
+    add_character(BUNDLE, (0, 0, 0), 22, "idle", 0)
+    world = bpy.data.worlds.new("Studio")
+    world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs[0].default_value = (0.32, 0.33, 0.38, 1)
+    world.node_tree.nodes["Background"].inputs[1].default_value = 0.6
+    sc.world = world
+    light("Key", "AREA", (1.8, -2.6, 2.6), (0, 0, 1.2), 520, (1.0, 0.92, 0.84), 2.2)
+    light("Fill", "AREA", (-2.4, -2.0, 1.4), (0, 0, 1.0), 160, (0.7, 0.8, 1.0), 2.5)
+    light("Rim", "AREA", (-1.2, 2.2, 2.4), (0, 0, 1.3), 900, (0.9, 0.95, 1.0), 1.2)
+    light("Rim2", "AREA", (1.6, 2.0, 1.8), (0, 0, 1.1), 600, (1.0, 0.8, 0.6), 1.0)
+    camera((0.25, -5.6, 1.0), (0.12, 0.0, 0.93), 50)
+
+
+if SCENE == "portrait":
+    portrait()
+else:
+    hero()
 sc.render.filepath = OUT
 sc.render.image_settings.file_format = "PNG"
+sc.render.image_settings.color_mode = "RGBA" if SCENE == "portrait" else "RGB"
 bpy.ops.render.render(write_still=True)
 print("KEYART", OUT)
