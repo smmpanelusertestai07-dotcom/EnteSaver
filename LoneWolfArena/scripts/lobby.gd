@@ -20,9 +20,12 @@ func _ready() -> void:
 	_build_ui()
 	Audio.play_music("lobby_music", -4.0)
 	Game.mark("lobby ready")
-	# Where START is on screen, for the emulator test (after the layout has settled).
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# Where START is on screen, for the emulator test, once the layout has settled (a method
+	# connection is dropped automatically if the lobby is left first).
+	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
+
+
+func _mark_start() -> void:
 	Game.mark_ui("start", start_btn, start_btn.size / 2.0)
 
 

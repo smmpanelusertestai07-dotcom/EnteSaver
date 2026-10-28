@@ -39,11 +39,28 @@ func _expect(ok: bool, what: String) -> void:
 
 
 func _check_grenade_arc(arena: Node, b: Bot) -> void:
-	# Aim at a floor point ~12 m in front of the bot (the closest walkable spot to it).
-	var fwd := -b.global_basis.z
-	fwd.y = 0.0
-	var goal: Vector3 = arena.closest_nav_point(b.global_position + fwd.normalized() * 12.0)
+	# A floor spot 7-13 m from the bot with an open lane for the arc (the map has plenty of
+	# cover, which would make the bounce, not the aim, decide where it lands).
+	var goal := Vector3.INF
+	for dist in [10.0, 12.0, 8.0]:
+		for ang in [0.0, 30.0, -30.0, 60.0, -60.0, 90.0, -90.0, 135.0, -135.0, 180.0]:
+			var dir := (-b.global_basis.z).rotated(Vector3.UP, deg_to_rad(ang))
+			dir.y = 0.0
+			var p: Vector3 = arena.closest_nav_point(b.global_position + dir.normalized() * dist)
+			var d := Vector2(p.x - b.global_position.x, p.z - b.global_position.z).length()
+			if d < 7.0 or d > 13.0 or absf(p.y - b.global_position.y) > 0.8:     # nav points sit ~0.5 m up
+				continue
+			if _lane_clear(b, b.eye_position(), p + Vector3.UP * 0.3) and _lane_clear(b, b.eye_position(), (b.eye_position() + p) * 0.5 + Vector3.UP * 2.5) \
+					and _lane_clear(b, (b.eye_position() + p) * 0.5 + Vector3.UP * 2.5, p + Vector3.UP * 0.3):
+				goal = p
+				break
+		if goal != Vector3.INF:
+			break
+	_expect(goal != Vector3.INF, "found an open throwing lane")
+	if goal == Vector3.INF:
+		return
 	var before := _grenades()
+	var throw_dist := Vector2(goal.x - b.global_position.x, goal.z - b.global_position.z).length()
 	_expect(b.throw_grenade(goal), "bot throw accepted")
 	await at.wait(Fighter.THROW_RELEASE + 0.1)
 	var g: Grenade = null
@@ -65,7 +82,7 @@ func _check_grenade_arc(arena: Node, b: Bot) -> void:
 		_expect(false, "grenade landed within 2.5 s")
 		return
 	var miss := Vector2(landed.x - goal.x, landed.z - goal.z).length()
-	_expect(miss < 2.0, "grenade lands near the aimed point (miss %.2f m over %.1f m)" % [miss, b.global_position.distance_to(goal)])
+	_expect(miss < 2.0, "grenade lands near the aimed point (miss %.2f m on a %.1f m throw)" % [miss, throw_dist])
 	await at.wait(3.0)      # let it go off before the zone test
 
 
@@ -92,6 +109,11 @@ func _check_zone(arena: Node, p: Fighter, b: Bot) -> void:
 	_expect(b.alive, "bot survived to the end of the round (zone + shots), hp %d" % roundi(b.hp))
 	_expect(outside_late < 4.0, "bot spent %.1f s outside the closing zone" % outside_late)
 	_expect(worst_r < 2.5, "bot was never more than %.1f m outside the edge" % worst_r)
+
+
+func _lane_clear(f: Fighter, a: Vector3, z: Vector3) -> bool:
+	var d := z - a
+	return f.trace(a, d.normalized(), d.length(), Fighter.LAYER_WORLD | Fighter.LAYER_SHIELD).is_empty()
 
 
 func _grenades() -> Array:
