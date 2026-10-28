@@ -7,6 +7,8 @@ locally on the phone as JSON.
 
 Built with **Godot 4.7.2** (MIT-licensed, open source, no license key or account needed).
 
+**Ready-to-install APK:** [`apk/LoneWolfArena.apk`](apk/LoneWolfArena.apk) (Android 7.0+, arm64 + armv7, 85 MB).
+
 ## Features
 
 - **Match:** 1 round, 1 vs 1 bot (Easy / Normal / Hard), 3:00 timer, shrinking safe zone after
