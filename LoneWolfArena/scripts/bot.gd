@@ -6,10 +6,14 @@ extends Fighter
 enum S { SEARCH, ENGAGE, CHASE, COVER, HEAL }
 
 const DIFF := [
-	{"reaction": 0.85, "error": 6.5, "head": 0.06, "burst_min": 3, "burst_max": 5, "pause": 0.75, "turn": 150.0, "strafe": 0.55, "shield": 0.2, "crouch": 0.0, "hear": 30.0, "sg_range": 5.0, "jump": 0.0},
-	{"reaction": 0.5, "error": 4.0, "head": 0.16, "burst_min": 4, "burst_max": 8, "pause": 0.45, "turn": 240.0, "strafe": 0.8, "shield": 0.45, "crouch": 0.15, "hear": 45.0, "sg_range": 7.0, "jump": 0.12},
-	{"reaction": 0.24, "error": 2.0, "head": 0.3, "burst_min": 6, "burst_max": 12, "pause": 0.28, "turn": 380.0, "strafe": 1.0, "shield": 0.75, "crouch": 0.35, "hear": 60.0, "sg_range": 9.0, "jump": 0.25},
+	{"reaction": 0.85, "error": 6.5, "head": 0.06, "burst_min": 3, "burst_max": 5, "pause": 0.75, "turn": 150.0, "strafe": 0.55, "shield": 0.2, "crouch": 0.0, "hear": 30.0, "sg_range": 5.0, "jump": 0.0, "grenade": 0.0},
+	{"reaction": 0.5, "error": 4.0, "head": 0.16, "burst_min": 4, "burst_max": 8, "pause": 0.45, "turn": 240.0, "strafe": 0.8, "shield": 0.45, "crouch": 0.15, "hear": 45.0, "sg_range": 7.0, "jump": 0.12, "grenade": 0.35},
+	{"reaction": 0.24, "error": 2.0, "head": 0.3, "burst_min": 6, "burst_max": 12, "pause": 0.28, "turn": 380.0, "strafe": 1.0, "shield": 0.75, "crouch": 0.35, "hear": 60.0, "sg_range": 9.0, "jump": 0.25, "grenade": 0.6},
 ]
+## The zone keeps closing: stay this far inside its edge (m), and start moving in this many
+## seconds before the shrink begins.
+const ZONE_MARGIN := 2.5
+const ZONE_EARLY := 6.0
 
 var target: Fighter
 var state := S.SEARCH
@@ -36,6 +40,9 @@ var _stuck_timer := 0.0
 var _last_pos := Vector3.ZERO
 var _shield_cooldown := 0.0
 var _decision_timer := 0.0
+var _grenade_timer := 0.0
+var _zone_goal := Vector3.INF
+var _zone_goal_timer := 0.0
 var nav_ready := false
 
 
@@ -72,7 +79,7 @@ func _perceive() -> void:
 		return
 	var facing := -global_basis.z
 	var in_fov := facing.angle_to(to / maxf(dist, 0.01)) < deg_to_rad(70.0)
-	var alerted := _now() - last_seen_time < 4.0 or _now() - last_damage_time < 3.0
+	var alerted := _now() - last_seen_time < 4.0 or _now() - last_attacked_time < 3.0
 	if not in_fov and not alerted and dist > 6.0:
 		return
 	if can_see(chest) or can_see(head):
@@ -105,10 +112,27 @@ func _think(delta: float) -> void:
 		perceive_timer = 0.1
 		_perceive()
 	_shield_cooldown -= delta
+	_grenade_timer -= delta
 	reaction -= delta
 	if see_target:
 		track_time += delta
 	_decide(delta)
+	if _zone_pressure(delta):
+		# Get inside the safe zone first; keep shooting on the way if the enemy is in sight.
+		if healing:
+			cancel_heal()
+		if state == S.HEAL or state == S.COVER:
+			state = S.ENGAGE if see_target else S.CHASE
+		_move_to(_zone_goal, delta)
+		if see_target:
+			_aim_and_shoot(delta)
+		else:
+			_face_point(_zone_goal + Vector3.UP * 1.5, delta, 0.6)
+		if weapon().ammo <= 0 and not weapon().reloading:
+			start_reload()
+		_check_stuck(delta)
+		return
+	_maybe_grenade()
 	match state:
 		S.ENGAGE:
 			_engage(delta)
@@ -130,6 +154,7 @@ func _think(delta: float) -> void:
 			_search(delta)
 	if weapon().ammo <= 0 and not weapon().reloading:
 		start_reload()
+	_zone_clamp_move()
 	_check_stuck(delta)
 
 
@@ -137,7 +162,7 @@ func _decide(delta: float) -> void:
 	_decision_timer -= delta
 	var low := hp < MAX_HP * 0.42
 	if state == S.HEAL:
-		if see_target and _now() - last_damage_time < 0.5:
+		if see_target and _now() - last_attacked_time < 0.5:
 			cancel_heal()
 			state = S.ENGAGE
 		return
@@ -155,6 +180,11 @@ func _decide(delta: float) -> void:
 			return
 	if state == S.COVER:
 		return
+	if see_target and shields > 0 and _shield_cooldown <= 0.0 and _now() - last_attacked_time < 0.25 \
+			and global_position.distance_to(target.global_position) > 5.0 and rng.randf() < float(p.shield) * 0.3:
+		# Under fire in the open: drop a wall toward the shooter and keep fighting around it.
+		_shield_cooldown = 10.0
+		deploy_shield(target.global_position - global_position)
 	if see_target:
 		state = S.ENGAGE
 	elif has_info and _now() - last_seen_time < 12.0:
@@ -164,6 +194,71 @@ func _decide(delta: float) -> void:
 			state = S.SEARCH
 	else:
 		state = S.SEARCH
+
+
+## True while the bot should head into the safe zone; keeps _zone_goal (a nav point well inside).
+func _zone_pressure(delta: float) -> bool:
+	if arena == null or arena.get("phase") != 1:
+		return false
+	var c: Vector3 = arena.zone_center
+	var flat := Vector2(global_position.x - c.x, global_position.z - c.z).length()
+	var r: float = arena.zone_radius
+	var st := String(arena.zone_state)
+	if st == "stationary":
+		if float(arena.zone_next()) > ZONE_EARLY:
+			if flat <= r - 0.5:
+				return false
+		r = minf(r, float(arena.zone_start_radius) * 0.7)
+	elif st == "shrinking":
+		r = maxf(r - 4.0, 3.0)     # where the edge will be in a few seconds
+	var need := flat > r - minf(ZONE_MARGIN, r * 0.3)
+	if not need:
+		_zone_goal = Vector3.INF
+		return false
+	_zone_goal_timer -= delta
+	if _zone_goal == Vector3.INF or _zone_goal_timer <= 0.0 or global_position.distance_to(_zone_goal) < 1.2:
+		_zone_goal_timer = 2.0
+		# A spot inside on the bot's own side of the centre (no detours around central cover).
+		var out := Vector3(global_position.x - c.x, 0.0, global_position.z - c.z)
+		var keep := clampf(r * 0.45, 0.5, 8.0)
+		var spot := c + (out.normalized() * keep if out.length() > 0.1 else Vector3.ZERO)
+		spot += Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)) * minf(keep * 0.3, 2.0)
+		_zone_goal = arena.closest_nav_point(spot)
+	return true
+
+
+## While the zone is closing, never step outward across the edge (strafing / backing off).
+func _zone_clamp_move() -> void:
+	if arena == null or arena.get("phase") != 1 or String(arena.zone_state) == "stationary" or move_dir.length() < 0.05:
+		return
+	var c: Vector3 = arena.zone_center
+	var out := Vector3(global_position.x - c.x, 0.0, global_position.z - c.z)
+	var flat := out.length()
+	var r: float = arena.zone_radius
+	if flat < 0.1 or flat < r - 2.0:
+		return
+	out /= flat
+	var world := Basis(Vector3.UP, aim_yaw) * Vector3(move_dir.x, 0.0, -move_dir.y)
+	var radial := world.dot(out)
+	if radial > 0.0:
+		world -= out * (radial + 0.35)      # drop the outward part and lean back in
+		var local := Basis(Vector3.UP, aim_yaw).inverse() * world
+		move_dir = Vector2(local.x, -local.z).limit_length(1.0)
+
+
+## Frag the enemy out of cover: it was seen a moment ago, is hiding now, and is in throwing range.
+func _maybe_grenade() -> void:
+	if grenades <= 0 or _grenade_timer > 0.0 or see_target or not has_info or healing or target == null:
+		return
+	var since := _now() - last_seen_time
+	if since < 0.8 or since > 5.0:
+		return
+	_grenade_timer = 2.5
+	var d := global_position.distance_to(last_seen_pos)
+	if d < 7.0 or d > 22.0 or rng.randf() >= float(p.get("grenade", 0.0)):
+		return
+	_face_point(last_seen_pos + Vector3.UP * 1.0, 1.0, 100.0)
+	throw_grenade(last_seen_pos)
 
 
 func _engage(delta: float) -> void:

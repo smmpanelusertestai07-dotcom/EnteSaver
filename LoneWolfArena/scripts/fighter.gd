@@ -96,6 +96,7 @@ var hitboxes: Array[Area3D] = []
 var rng := RandomNumberGenerator.new()
 var bundle_id := "default"
 var last_damage_time := -99.0
+var last_attacked_time := -99.0   # last damage from the enemy (not the zone or a fall)
 var last_shot_time := -99.0
 var invulnerable := false
 var stance_lock := 0.0           # s until the stance change finishes (can't fire meanwhile)
@@ -109,6 +110,7 @@ var _grenades := SecureNum.new(1)
 var _heal_t := 0.0
 var _heal_used := false
 var _throwing := false
+var _throw_target := Vector3.INF
 var _exclude: Array[RID] = []
 var _collider: CollisionShape3D
 var _capsule: CapsuleShape3D
@@ -269,6 +271,8 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	hp -= dmg
 	stats.taken += dmg
 	last_damage_time = _now()
+	if attacker != null:
+		last_attacked_time = last_damage_time
 	if healing and zone != "zone":
 		cancel_heal()
 	damaged.emit(dmg, from_pos, zone == "head", attacker)
@@ -548,12 +552,14 @@ func deploy_shield(toward := Vector3.ZERO) -> bool:
 	return true
 
 
-func throw_grenade() -> bool:
+## Throws along the aim; with a target point (bots) the arc is solved to land there.
+func throw_grenade(target := Vector3.INF) -> bool:
 	if grenades <= 0 or not alive or healing or hold_fire or _throwing:
 		return false
 	grenades -= 1
 	sprinting = false
 	_throwing = true
+	_throw_target = target
 	model.play_throw()
 	# The grenade leaves the hand at the release frame of the throw clip, aimed where the
 	# thrower aims at that moment; a thrower killed during the wind-up drops nothing.
@@ -571,6 +577,12 @@ func _release_grenade() -> void:
 	var dir := aim_forward()
 	g.global_position = eye_position() + dir * 0.6 + global_basis.x * 0.25
 	g.linear_velocity = dir * 17.0 + Vector3.UP * 4.0 + Vector3(velocity.x, 0, velocity.z) * 0.5
+	if _throw_target != Vector3.INF:
+		var to := _throw_target - g.global_position
+		var flat := Vector2(to.x, to.z).length()
+		var t := clampf(flat / 13.0, 0.5, 1.6)
+		var grav := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)) * g.gravity_scale
+		g.linear_velocity = (to / t + Vector3.UP * 0.5 * grav * t).limit_length(22.0)
 	Audio.play_at("grenade_throw", global_position, -4.0)
 
 
