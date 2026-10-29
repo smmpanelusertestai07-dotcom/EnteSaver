@@ -43,12 +43,28 @@ func run(at: Node) -> int:
 		await at.wait(0.2)
 		t += 0.2
 	_check(ld != null and ld.done, "boot loading finishes")
-	_check(get_tree().root.get_node_or_null("LoadingCache") != null, "boot preloads kept by LoadingCache")
+	var cache := get_tree().root.get_node_or_null("LoadingCache")
+	_check(cache != null, "boot preloads kept by LoadingCache")
+	# The timeout path hands requests still in flight to the cache, which must collect them.
+	if cache is Loading.Cache:
+		var path := "res://assets/ui/keyart.jpg"
+		if ResourceLoader.load_threaded_request(path) == OK:
+			(cache as Loading.Cache).collect([path])
+			t = 0.0
+			while not (cache as Loading.Cache).pending.is_empty() and t < 10.0:
+				await at.wait(0.1)
+				t += 0.1
+			var kept: Array = cache.get_meta("resources", [])
+			_check((cache as Loading.Cache).pending.is_empty() and kept.any(func(r: Resource) -> bool: return r.resource_path == path),
+				"LoadingCache collects a load that was still running at the timeout")
 	Loading.hold_for_test = false
 	Game.goto_lobby()
 	var lobby := await _wait_scene("Lobby", 30.0)
 	await _settle(2.0)
 	await at.shot("m02_lobby")
+	if OS.get_environment("LW_MENUS_STOP") == "lobby":       # quick look while tuning the stage
+		Game.settings = saved_settings
+		return _fails
 	var marks: Dictionary = Game.get("_marks")
 	_check(marks.has("ui start"), "lobby reports the START position")
 	var howto := lobby.find_child("HowToPlayButton", true, false) as Control
@@ -255,7 +271,11 @@ func run(at: Node) -> int:
 	await _settle(0.6)
 	await _tap(rs2.find_child("PlayAgain", true, false) as Control)
 	await _settle(0.2)
-	_check(get_tree().root.find_child("Loading", true, false) != null or get_tree().current_scene.name == "Arena", "PLAY AGAIN shows the match loading")
+	var overlay := false
+	for n in get_tree().root.find_children("*", "Control", true, false):
+		if n is Loading:
+			overlay = true
+	_check(overlay or get_tree().current_scene.name == "Arena", "PLAY AGAIN shows the match loading")
 	_back()
 	_check(await _wait_scene("Arena", 30.0) != null, "PLAY AGAIN starts a new match (back ignored while it loads)")
 	_check(ResultsScreen.honour({"headshots": 2, "hp_left": 50, "taken": 150}) == "SHARPSHOOTER", "honour SHARPSHOOTER")
@@ -292,12 +312,16 @@ func _results_scene(r: Dictionary) -> ResultsScreen:
 	root.set_script(stub)
 	root.name = "ResultsTest"
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var won := bool(r.get("won", false))
+	# the opponent's numbers match the outcome: beaten, winner, or level on HP at the time-out
+	var e: Dictionary = {"victory": {"hp": 0, "kills": 0, "damage": 88, "headshots": 0},
+		"defeat": {"hp": 64, "kills": 1, "damage": 200, "headshots": 2},
+		"draw": {"hp": 84, "kills": 0, "damage": 116, "headshots": 1},
+		"invalid": {"hp": 140, "kills": 0, "damage": 60, "headshots": 0}}[String(r.kind)]
 	root.set("rows", [
-		{"name": "ROOKIE", "me": true, "alive": true, "hp": int(r.hp_left), "kills": int(r.kills), "damage": int(r.damage),
+		{"name": "ROOKIE", "me": true, "alive": int(r.hp_left) > 0, "hp": int(r.hp_left), "kills": int(r.kills), "damage": int(r.damage),
 			"headshots": int(r.headshots), "accuracy": 47, "rounds": int(r.score_player), "weapon": "AR-7 RIFLE"},
-		{"name": "VIPER", "me": false, "alive": not won, "hp": 0 if won else 64, "kills": 0 if won else 1,
-			"damage": 88 if won else 200, "headshots": 0 if won else 2, "accuracy": 31, "rounds": int(r.score_bot), "weapon": "AR-7 RIFLE"},
+		{"name": "VIPER", "me": false, "alive": int(e.hp) > 0, "hp": int(e.hp), "kills": int(e.kills), "damage": int(e.damage),
+			"headshots": int(e.headshots), "accuracy": 31, "rounds": int(r.score_bot), "weapon": "AR-7 RIFLE"},
 	])
 	var tex := UI.texture("keyart_clean.jpg")
 	if tex:

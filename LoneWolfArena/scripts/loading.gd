@@ -310,6 +310,7 @@ func _build_match() -> void:
 	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	big.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	big.material = gradient_text_material(Color(1, 1, 1), Color(1.0, 0.72, 0.2), 170.0)
+	UI.center_italic(big, 132)
 	add_child(big)
 	_build_bar("ENTERING THE ARENA")
 

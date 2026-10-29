@@ -186,6 +186,7 @@ func _build_stage() -> void:
 	add_child(floor_mi)
 	_build_podium()
 	_build_backdrop()
+	_build_motes()
 	# Character.
 	model = CharacterModel.new()
 	add_child(model)
@@ -286,15 +287,16 @@ func _build_podium() -> void:
 	var edge := CylinderMesh.new()
 	edge.top_radius = 1.035
 	edge.bottom_radius = 1.035
-	edge.height = 0.03
+	edge.height = 0.04
 	edge.cap_top = false
 	edge.cap_bottom = false
 	edge.radial_segments = 6
 	edge.rings = 1
 	var em := MeshInstance3D.new()
 	em.mesh = edge
-	# amber like the UI accent: red well above green, so tone mapping does not push it to lime
-	em.material_override = _unshaded(Color(1.0, 0.50, 0.04) * 1.7)
+	# amber like the UI accent. Kept within 0..1: the Compatibility renderer clamps brighter
+	# colours per channel, which turned an "HDR" amber into yellow-lime (R = G = 1)
+	em.material_override = _unshaded(Color(1.0, 0.68, 0.05))
 	em.position = Vector3(0, PODIUM_TOP - 0.03, 0)
 	em.rotation.y = PI / 6.0
 	add_child(em)
@@ -410,6 +412,38 @@ func _build_backdrop() -> void:
 			add_child(head)
 
 
+## Warm dust motes drifting up through the light around the podium: one CPUParticles3D of 30
+## additive quads (one draw call, a few microseconds of CPU a frame) so the yard is never still.
+func _build_motes() -> void:
+	var p := CPUParticles3D.new()
+	p.name = "Motes"
+	p.amount = 30
+	p.lifetime = 9.0
+	p.preprocess = 9.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	p.emission_box_extents = Vector3(4.5, 1.3, 2.5)
+	p.position = Vector3(0.4, 1.3, -1.6)
+	p.direction = Vector3(0.3, 1.0, 0.0)
+	p.spread = 35.0
+	p.gravity = Vector3(0.03, 0.02, 0.0)
+	p.initial_velocity_min = 0.05
+	p.initial_velocity_max = 0.18
+	p.scale_amount_min = 0.5
+	p.scale_amount_max = 1.3
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.25, 0.75, 1.0])
+	g.colors = PackedColorArray([Color(1.0, 0.72, 0.42, 0.0), Color(1.0, 0.74, 0.45, 0.85), Color(1.0, 0.66, 0.38, 0.6), Color(1.0, 0.66, 0.38, 0.0)])
+	p.color_ramp = g
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.045, 0.045)
+	var m := _unshaded(Color.WHITE, true, UI.texture("res://assets/textures/glow.png"))
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.vertex_color_use_as_albedo = true
+	qm.material = m
+	p.mesh = qm
+	add_child(p)
+
+
 ## The skyline card: one big unshaded quad far behind the yard (one draw call), its texture
 ## painted by tools/media/make_keyart.py with transparency above the silhouettes, so the
 ## procedural sunset sky shows through. Its lower edge sits under the floor.
@@ -429,6 +463,7 @@ func _build_skyline() -> bool:
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	m.disable_receive_shadows = true
+	m.disable_fog = true                   # the card's haze is painted in (far layers paler)
 	q.material_override = m
 	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	q.position = Vector3(14.0, h * 0.5 - h * 0.08, -96.0)
@@ -763,7 +798,8 @@ func _build_right_column(root: Control) -> void:
 		var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
 		card.draw_polygon(pts, PackedColorArray([Color(0.16, 0.12, 0.07, 0.92), Color(0.16, 0.12, 0.07, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.12, 0.09, 0.06, 0.92)]))
 		if thumb:
-			card.draw_texture_rect_region(thumb, Rect2(s.x - 128, 6, 120, s.y - 12), Rect2(150, 40, 420, 250))
+			# the two fighters of the mode art, at the slot's aspect (120 x 60)
+			card.draw_texture_rect_region(thumb, Rect2(s.x - 128, 6, 120, s.y - 12), Rect2(110, 96, 420, 210))
 			card.draw_rect(Rect2(s.x - 128, 6, 120, s.y - 12), Color(1, 1, 1, 0.35), false, 1.5)
 		card.draw_rect(Rect2(0, s.y - 2, s.x, 2), Color(UI.AMBER, 0.8)))
 	root.add_child(card)

@@ -62,22 +62,6 @@ func run(autotest: Node) -> int:
 	cam.fov = 70.0
 	cam.far = 300.0
 	arena.add_child(cam)
-	if OS.get_environment("LW_MAP_PROBE") != "":
-		# TEMPORARY probe: the top-down minimap render with one change at a time
-		var mr: Rect2 = arena.get("map_rect")
-		var c2 := mr.get_center()
-		await _probe("base", Vector3(c2.x, 30.0, c2.y))
-		await _probe("offset", Vector3(c2.x + 6.0, 30.0, c2.y + 4.0))
-		map.sun.visible = false
-		await _probe("nosun", Vector3(c2.x, 30.0, c2.y))
-		map.sun.visible = true
-		map.fill.visible = false
-		await _probe("nofill", Vector3(c2.x, 30.0, c2.y))
-		map.fill.visible = true
-		map.env.environment.glow_enabled = false
-		await _probe("noglow", Vector3(c2.x, 30.0, c2.y))
-		map.env.environment.glow_enabled = true
-		return 0
 	var only := OS.get_environment("LW_MAP_ONLY")
 	if only != "":
 		hud.visible = false
@@ -223,6 +207,7 @@ func run(autotest: Node) -> int:
 		var img := mm.get_image()
 		img.save_png(String(at.get("shots_dir")).path_join("map_minimap.png"))
 		at.log_line("minimap %dx%d" % [img.get_width(), img.get_height()])
+		_minimap_hotspot(img)
 	else:
 		at.log_line("MAPNAV FAIL minimap texture missing")
 		fails += 1
@@ -270,29 +255,33 @@ func _use_player_cam(p: Player) -> void:
 	p.camera.current = true
 
 
-## TEMPORARY probe: renders the floor plan from straight above like arena._render_minimap().
-func _probe(tag: String, pos: Vector3) -> void:
+## The minimap render must show bare floor at the zone centre (the final circle). A bright patch
+## there means something on visual layer 1 sat in the top-down view while it was rendered (seen
+## on 2026-10-29: the effect warm-up of effects.gd, spawned at (0, -50, 0) just before
+## arena._render_minimap()). A warning, not a failure: the cause is outside the map.
+func _minimap_hotspot(img: Image) -> void:
 	var mr: Rect2 = arena.get("map_rect")
-	var vp := SubViewport.new()
-	vp.size = Vector2i(roundi(512 * mr.size.x / mr.size.y), 512)
-	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
-	vp.transparent_bg = false
-	arena.add_child(vp)
-	var c3 := Camera3D.new()
-	c3.projection = Camera3D.PROJECTION_ORTHOGONAL
-	c3.size = mr.size.y
-	c3.cull_mask = 1
-	c3.near = 0.5
-	c3.far = 60.0
-	vp.add_child(c3)
-	c3.global_transform = Transform3D(Basis(Vector3.RIGHT, -PI * 0.5), pos)
-	c3.current = true
-	await RenderingServer.frame_post_draw
-	await RenderingServer.frame_post_draw
-	var img := vp.get_texture().get_image()
-	img.save_png(String(at.get("shots_dir")).path_join("probe_%s.png" % tag))
-	at.log_line("probe %s saved" % tag)
-	vp.queue_free()
+	var zc := Vector2(map.zone_center.x, map.zone_center.z)
+	var centre := _floor_luminance(img, mr, zc, 0.8)
+	var ref := (_floor_luminance(img, mr, zc + Vector2(0, 4.5), 0.8) + _floor_luminance(img, mr, zc - Vector2(0, 4.5), 0.8)) * 0.5
+	var clean := centre <= ref + 0.07
+	at.log_line("MAPNAV %s minimap render at the zone centre: luminance %.2f vs the bay floor %.2f%s" % ["OK" if clean else "WARN",
+		centre, ref, "" if clean else " (a layer-1 object shows in the top-down render there)"])
+
+
+## Mean luminance (0..1) of the minimap image over a square of `half` metres around world X/Z `c`.
+func _floor_luminance(img: Image, mr: Rect2, c: Vector2, half: float) -> float:
+	var x0 := int((c.x - half - mr.position.x) / mr.size.x * img.get_width())
+	var x1 := int((c.x + half - mr.position.x) / mr.size.x * img.get_width())
+	var y0 := int((c.y - half - mr.position.y) / mr.size.y * img.get_height())
+	var y1 := int((c.y + half - mr.position.y) / mr.size.y * img.get_height())
+	var sum := 0.0
+	var n := 0
+	for y in range(maxi(y0, 0), mini(y1, img.get_height())):
+		for x in range(maxi(x0, 0), mini(x1, img.get_width())):
+			sum += img.get_pixel(x, y).get_luminance()
+			n += 1
+	return sum / maxf(n, 1)
 
 
 func _named_view(p: Player, view_name: String) -> void:

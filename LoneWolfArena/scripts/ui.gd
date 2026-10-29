@@ -740,6 +740,16 @@ static func draw_dialog_band(ci: CanvasItem, s: Vector2, line := ACCENT) -> void
 	ci.draw_rect(Rect2(0, s.y - 3, s.x, 3), Color(line, 0.8))
 
 
+## The synthetic italic ("italic" font) leans the glyph tops right while a label centres the
+## upright advances: a centred italic title looks about 0.11 x its size right of centre. This
+## shifts such a label back (call after its anchors/offsets are set).
+static func center_italic(l: Label, size: int) -> Label:
+	var dx := roundf(size * 0.11)
+	l.offset_left -= dx
+	l.offset_right -= dx
+	return l
+
+
 ## Long names end in "..." inside the label's width (instead of growing or cutting a glyph).
 static func ellipsis(l: Label) -> Label:
 	l.clip_text = true

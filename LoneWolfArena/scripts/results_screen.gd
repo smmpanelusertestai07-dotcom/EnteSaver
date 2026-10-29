@@ -157,6 +157,7 @@ func _build() -> void:
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title.material = Loading.gradient_text_material(pal[0], pal[1], 118.0)
 	title.pivot_offset = Vector2(0, 59)
+	UI.center_italic(title, 94)
 	add_child(title)
 	# Round score: [YOU n] : [n BOT]
 	var score := HBoxContainer.new()

@@ -425,8 +425,8 @@ def skyline(w=2048, h=384, seed=5) -> Image.Image:
         else:
             d.rectangle([X(x0 + 2.0), Y(hh + 1.4), X(x0 + 5.0), Y(hh)], fill=wc)
             d.rectangle([X(x1 - 9.0), Y(hh + 2.2), X(x1 - 6.0), Y(hh)], fill=wc)
-        windows(x0 + 1.0, x1 - 1.5, hh * 0.55, hh - 1.2, 0.12, 0.5, (1.6, 0.7), (2.4, 2.0))
-        windows(x0 + 1.0, x1 - 1.5, 1.4, 2.4, 0.12, 0.25, (2.2, 0.9), (4.0, 2.0))
+        windows(x0 + 1.0, x1 - 1.5, hh * 0.5, hh - 1.2, 0.12, 0.62, (1.6, 0.7), (2.4, 1.8))
+        windows(x0 + 1.0, x1 - 1.5, 1.4, 2.4, 0.12, 0.3, (2.2, 0.9), (4.0, 2.0))
     tx = -62.0
     for lx in (tx - 2.2, tx + 2.2):
         d.line([(X(lx), Y(0)), (X(lx * 0.0 + tx + (lx - tx) * 0.6), Y(13.0))], fill=wc, width=lw)
@@ -442,17 +442,17 @@ def skyline(w=2048, h=384, seed=5) -> Image.Image:
 
     # container stacks near the ground, dark paint colours
     d = layer()
-    paints = [(52, 22, 22), (22, 32, 56), (20, 44, 48), (58, 34, 14), (40, 38, 44)]
+    paints = [(46, 24, 26), (26, 30, 48), (24, 38, 44), (50, 32, 20), (38, 34, 42)]
     x = -126.0
     while x < 154.0:
         ln = 12.2 if rng.random() < 0.45 else 6.1
         n = int(rng.choice([0, 1, 1, 2, 2, 3, 4]))
         for k in range(n):
             pc = paints[int(rng.integers(len(paints)))]
-            c = col(pc, 0.1)
+            c = col(pc, 0.24)
             off = rng.uniform(-0.4, 0.4)
             d.rectangle([X(x + off), Y((k + 1) * 2.59), X(x + off + ln), Y(k * 2.59)], fill=c)
-            d.line([(X(x + off), Y((k + 1) * 2.59)), (X(x + off + ln), Y((k + 1) * 2.59))], fill=col((90, 70, 80), 0.1), width=2)
+            d.line([(X(x + off), Y((k + 1) * 2.59)), (X(x + off + ln), Y((k + 1) * 2.59))], fill=col((80, 60, 72), 0.24), width=2)
             if rng.random() < 0.3:
                 windows(x + off + 0.5, x + off + ln - 0.5, k * 2.59 + 1.0, k * 2.59 + 1.6, 0.1, 0.06, (0.6, 0.35), (2.0, 1.0))
         x += ln + rng.uniform(0.4, 6.0)
