@@ -59,7 +59,7 @@ sc.render.resolution_percentage = 100
 sc.render.fps = 30
 sc.view_settings.view_transform = "AgX"
 try:
-    sc.view_settings.look = "AgX - Punchy" if SCENE == "hero" else "AgX - Medium High Contrast"
+    sc.view_settings.look = "AgX - Punchy" if SCENE in ("hero", "faceoff") else "AgX - Medium High Contrast"
 except Exception:
     pass
 
@@ -350,6 +350,97 @@ def hero():
     camera((0.68, -4.4, 0.55), (0.72, 0.0, 1.16), 40, 1.6, (0.0, 0.0, 1.3))
 
 
+def set_emission(name_part, color, strength, exclude="@"):
+    """Makes every imported material whose name contains `name_part` (and not `exclude`)
+    glow: the hall's windows and tubes."""
+    for mat in bpy.data.materials:
+        n = mat.name.lower()
+        if name_part.lower() in n and exclude.lower() not in n and mat.use_nodes:
+            b = mat.node_tree.nodes.get("Principled BSDF")
+            if b:
+                b.inputs["Emission Color"].default_value = color
+                b.inputs["Emission Strength"].default_value = strength
+
+
+def hazard_strip(name, center, length, width):
+    """A yellow / black diagonal hazard strip on the floor (procedural bands), along +Y."""
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    b = nt.nodes["Principled BSDF"]
+    b.inputs["Roughness"].default_value = 0.45
+    geo = nt.nodes.new("ShaderNodeNewGeometry")          # world position: stripes keep their size
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Rotation"].default_value = (0, 0, math.radians(45))
+    nt.links.new(geo.outputs["Position"], mapping.inputs["Vector"])
+    wave = nt.nodes.new("ShaderNodeTexWave")
+    wave.wave_type = "BANDS"
+    wave.bands_direction = "X"
+    wave.wave_profile = "SAW"
+    wave.inputs["Scale"].default_value = 1.6
+    wave.inputs["Distortion"].default_value = 0.0
+    nt.links.new(mapping.outputs["Vector"], wave.inputs["Vector"])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.interpolation = "CONSTANT"
+    ramp.color_ramp.elements[0].color = srgb((240, 186, 20))
+    ramp.color_ramp.elements[1].position = 0.5
+    ramp.color_ramp.elements[1].color = srgb((18, 18, 18))
+    nt.links.new(wave.outputs["Fac"], ramp.inputs[0])
+    nt.links.new(ramp.outputs["Color"], b.inputs["Base Color"])
+    return add_box(name, (center[0], center[1], 0.004), (width, length, 0.008), m)
+
+
+def faceoff():
+    # The duel: our hero on the left facing right, the rival on the right facing left, both a
+    # little toward the camera, rifles at the ready, a hazard line on the floor between them.
+    add_character(BUNDLE, (-1.3, 0.0, 0), 74, "idle", 0)
+    add_character(OPPONENT, (1.3, 0.3, 0), -74, "idle", 24)
+    hazard_strip("Line", (0.0, 4.0), 16.0, 0.32)
+    # The hall behind them: containers and crates on the floor, the back wall (bays with high
+    # windows between steel columns), roof trusses with hanging fluorescent tubes.
+    add_prop("container_40", (-7.2, 9.6, 0), 0, 1.0, (0.20, 0.55, 0.78, 1))
+    add_prop("container", (6.4, 8.8, 0), 0, 1.0, (0.85, 0.36, 0.05, 1))
+    add_prop("container", (6.4, 8.8, 2.59), 0, 1.0, (0.62, 0.10, 0.06, 1))
+    add_prop("container", (12.0, 10.5, 0), 90, 1.0, (0.10, 0.25, 0.62, 1))
+    add_prop("crate", (-2.9, 6.2, 0), 8)
+    add_prop("crate", (-1.75, 6.4, 0), -6)
+    add_prop("crate", (-2.3, 6.3, 1.2), 3)
+    add_prop("barrel", (3.0, 5.6, 0), 0)
+    add_prop("barrel", (3.6, 6.1, 0), 40)
+    for i in range(-5, 6):
+        add_prop("wall_bay", (i * 6.0, 17.0, 0), 180)      # window side toward the camera
+        add_prop("wall_column", (i * 6.0 + 3.0, 16.7, 0), 0)
+    for y in (4.0, 10.5):
+        add_prop("roof_truss", (0.0, y, 8.6), 0)
+        for x in (-7.5, 0.0, 7.5):
+            add_prop("lamp_tube", (x, y, 8.6), 90)
+    set_emission("glass", (0.80, 0.90, 1.0, 1), 9.0)
+    set_emission("lamp", (1.0, 0.97, 0.9, 1), 14.0, exclude="housing")
+    me = bpy.data.meshes.new("Floor")
+    s = 60.0
+    me.from_pydata([(-s, -s, 0), (s, -s, 0), (s, s, 0), (-s, s, 0)], [], [(0, 1, 2, 3)])
+    fl = bpy.data.objects.new("Floor", me)
+    sc.collection.objects.link(fl)
+    me.materials.append(flat_material("Concrete", srgb((92, 94, 100)), 0.3))
+    world = bpy.data.worlds.new("Hall")
+    world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs[0].default_value = (0.03, 0.034, 0.05, 1)
+    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0
+    sc.world = world
+    # key from the front, a blue rim behind the hero and an orange one behind the rival, and
+    # the back wall washed blue on the left and orange on the right (the two sides of the duel)
+    light("Key", "SPOT", (0.0, -3.4, 4.6), (0, 0.1, 1.15), 1000, (1.0, 0.93, 0.85), spot=46)
+    light("Fill", "AREA", (0.0, -5.5, 1.6), (0, 0, 1.2), 90, (0.75, 0.8, 1.0), 4.0)
+    light("RimBlue", "AREA", (-3.4, 3.4, 2.6), (-1.3, 0.0, 1.35), 4200, (0.2, 0.6, 1.0), 1.0)
+    light("RimOrange", "AREA", (3.4, 3.8, 2.6), (1.3, 0.3, 1.35), 4200, (1.0, 0.42, 0.12), 1.0)
+    light("KickBlue", "AREA", (-2.6, -1.2, 0.6), (-1.3, 0.0, 1.0), 260, (0.3, 0.6, 1.0), 1.0)
+    light("KickOrange", "AREA", (2.6, -0.9, 0.6), (1.3, 0.3, 1.0), 260, (1.0, 0.5, 0.2), 1.0)
+    light("WashBlue", "SPOT", (-9.0, 9.0, 6.5), (-9.0, 17.0, 2.5), 12000, (0.25, 0.55, 1.0), spot=70)
+    light("WashOrange", "SPOT", (9.0, 9.0, 6.5), (9.0, 17.0, 2.5), 12000, (1.0, 0.5, 0.2), spot=70)
+    # low camera; the fighters at about 0.27 and 0.73 of the width, 60 % of the height
+    camera((0.0, -4.8, 0.95), (0.0, 0.0, 1.22), 32, 2.4, (0.0, 0.15, 1.3))
+
+
 def portrait():
     sc.render.film_transparent = True
     add_character(BUNDLE, (0, 0, 0), 22, "idle", 0)
@@ -367,6 +458,8 @@ def portrait():
 
 if SCENE == "portrait":
     portrait()
+elif SCENE == "faceoff":
+    faceoff()
 else:
     hero()
 sc.render.filepath = OUT

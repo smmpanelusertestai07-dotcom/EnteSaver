@@ -62,6 +62,22 @@ func run(autotest: Node) -> int:
 	cam.fov = 70.0
 	cam.far = 300.0
 	arena.add_child(cam)
+	if OS.get_environment("LW_MAP_PROBE") != "":
+		# TEMPORARY probe: the top-down minimap render with one change at a time
+		var mr: Rect2 = arena.get("map_rect")
+		var c2 := mr.get_center()
+		await _probe("base", Vector3(c2.x, 30.0, c2.y))
+		await _probe("offset", Vector3(c2.x + 6.0, 30.0, c2.y + 4.0))
+		map.sun.visible = false
+		await _probe("nosun", Vector3(c2.x, 30.0, c2.y))
+		map.sun.visible = true
+		map.fill.visible = false
+		await _probe("nofill", Vector3(c2.x, 30.0, c2.y))
+		map.fill.visible = true
+		map.env.environment.glow_enabled = false
+		await _probe("noglow", Vector3(c2.x, 30.0, c2.y))
+		map.env.environment.glow_enabled = true
+		return 0
 	var only := OS.get_environment("LW_MAP_ONLY")
 	if only != "":
 		hud.visible = false
@@ -252,6 +268,31 @@ func _view(shot_name: String, from: Vector3, to: Vector3, fov := 70.0) -> void:
 
 func _use_player_cam(p: Player) -> void:
 	p.camera.current = true
+
+
+## TEMPORARY probe: renders the floor plan from straight above like arena._render_minimap().
+func _probe(tag: String, pos: Vector3) -> void:
+	var mr: Rect2 = arena.get("map_rect")
+	var vp := SubViewport.new()
+	vp.size = Vector2i(roundi(512 * mr.size.x / mr.size.y), 512)
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	vp.transparent_bg = false
+	arena.add_child(vp)
+	var c3 := Camera3D.new()
+	c3.projection = Camera3D.PROJECTION_ORTHOGONAL
+	c3.size = mr.size.y
+	c3.cull_mask = 1
+	c3.near = 0.5
+	c3.far = 60.0
+	vp.add_child(c3)
+	c3.global_transform = Transform3D(Basis(Vector3.RIGHT, -PI * 0.5), pos)
+	c3.current = true
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var img := vp.get_texture().get_image()
+	img.save_png(String(at.get("shots_dir")).path_join("probe_%s.png" % tag))
+	at.log_line("probe %s saved" % tag)
+	vp.queue_free()
 
 
 func _named_view(p: Player, view_name: String) -> void:

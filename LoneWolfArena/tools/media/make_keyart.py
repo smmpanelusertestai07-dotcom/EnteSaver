@@ -10,14 +10,20 @@
      keyart_clean.jpg    the same without the logo: the loading screen's full-bleed background
      logo.png            the logo lockup on transparency (loading screen, lobby)
      emblem.png          the wolf emblem alone, 256 px (results medal, player avatar)
-     mode_lonewolf.jpg   the duel crop of the key art (lobby mode card, match loading card)
+     mode_lonewolf.jpg   the mode art: the face-off render (two fighters squaring up inside the
+                         Cargo Cage hall), graded with a blue / orange duel split (lobby mode
+                         card, featured card, match loading card)
      bundle_<id>.png     the outfit portraits (wardrobe item cards)
+     lobby_skyline.png   the lobby's painted horizon card (cranes, warehouses, city lights) on
+                         transparency, 2048x384
    plus their Godot .import settings (lossy WebP for the photos, mipmaps for downscaled art).
 
 usage: python3 tools/media/make_keyart.py [--work DIR] [--skip-render] [--quick] [--out DIR]
+                                          [--only keyart,logo,emblem,mode,portraits,skyline]
   --work DIR     where the raw renders go (default: a fresh temporary folder)
   --skip-render  reuse the renders already in --work
   --quick        low resolution / samples (layout checks only)
+  --only LIST    write only these outputs (and render only what they need)
 Needs Blender on PATH (blender), Pillow, numpy and scipy."""
 from __future__ import annotations
 
@@ -45,6 +51,7 @@ def arg(name, default=None):
 
 
 QUICK = "--quick" in ARGS
+ONLY = set((arg("--only") or "keyart,logo,emblem,mode,portraits,skyline").split(","))
 WORK = arg("--work") or tempfile.mkdtemp(prefix="lw_keyart_")
 OUT = arg("--out", os.path.join(ROOT, "assets", "ui"))
 FONTS = os.path.join(ROOT, "assets", "fonts")
@@ -68,10 +75,15 @@ def render(scene, out, *extra):
 
 def render_all():
     os.makedirs(WORK, exist_ok=True)
-    render("hero", os.path.join(WORK, "hero.png"), "--res", "%dx%d" % (W, H), "--samples", "12" if QUICK else "64")
-    for b in BUNDLES:
-        render("portrait", os.path.join(WORK, "portrait_%s.png" % b), "--bundle", b,
+    if "keyart" in ONLY:
+        render("hero", os.path.join(WORK, "hero.png"), "--res", "%dx%d" % (W, H), "--samples", "12" if QUICK else "64")
+    if "mode" in ONLY:
+        render("faceoff", os.path.join(WORK, "faceoff.png"), "--res", "640x360" if QUICK else "1280x720",
                "--samples", "12" if QUICK else "48")
+    if "portraits" in ONLY:
+        for b in BUNDLES:
+            render("portrait", os.path.join(WORK, "portrait_%s.png" % b), "--bundle", b,
+                   "--samples", "12" if QUICK else "48")
 
 
 # ---------------------------------------------------------------- grading and effects
@@ -272,6 +284,204 @@ def logo(height=420) -> Image.Image:
     return out.crop(out.getbbox())
 
 
+# ---------------------------------------------------------------- mode art (face-off)
+def mode_art(img: Image.Image) -> Image.Image:
+    """The face-off render as mode art: contrast and saturation, the duel's colour split (blue
+    on the left fighter's side, orange on the right one's), bloom on the windows and tubes and a
+    vignette. 640x360."""
+    img = img.convert("RGB").resize((1280, 720), Image.LANCZOS)
+    a = np.asarray(img).astype(np.float32) / 255.0
+    h, w = a.shape[:2]
+    a = np.clip(a, 0, 1)
+    a = a + 0.26 * (a - 0.5) * (1 - np.abs(2 * a - 1)) * 1.6
+    lum = (a @ np.array([0.2126, 0.7152, 0.0722], np.float32))[..., None]
+    a = lum + (a - lum) * 1.22
+    xx = np.linspace(0, 1, w, dtype=np.float32)[None, :, None]
+    blue = np.array([0.10, 0.45, 1.0], np.float32)
+    orange = np.array([1.0, 0.42, 0.10], np.float32)
+    k_l = np.clip(1.0 - xx / 0.5, 0, 1) ** 1.4
+    k_r = np.clip((xx - 0.5) / 0.5, 0, 1) ** 1.4
+    # soft-light style tint: stronger in the mid tones
+    mid = 4.0 * lum * (1 - lum)
+    a = a + (blue - a) * k_l * 0.22 * (0.4 + mid) + (orange - a) * k_r * 0.22 * (0.4 + mid)
+    # bloom from the luminance only (windows, tubes), added as a warm white
+    lum2 = (np.clip(a, 0, 1) @ np.array([0.2126, 0.7152, 0.0722], np.float32))
+    yy, xg = np.mgrid[0:h, 0:w].astype(np.float32)
+    hot = np.clip((lum2 - 0.82) / 0.18, 0, 1) * (yy < h * 0.45)
+    glow = np.asarray(Image.fromarray((hot * 255).astype(np.uint8), "L").filter(ImageFilter.GaussianBlur(16))).astype(np.float32) / 255.0
+    a = a + glow[..., None] * np.array([0.55, 0.5, 0.42], np.float32)
+    # vignette, heavier along the bottom (the bright floor)
+    r = np.sqrt(((xg / w - 0.5) * 2) ** 2 * 0.6 + ((yy / h - 0.45) * 2) ** 2)
+    v = np.clip(1.0 - 0.36 * np.clip(r - 0.45, 0, None) ** 1.3, 0.45, 1.0)
+    v *= 1.0 - 0.3 * np.clip((yy / h - 0.72) / 0.28, 0, 1) ** 1.5
+    a *= v[..., None]
+    out = Image.fromarray((np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8), "RGB")
+    return out.resize((640, 360), Image.LANCZOS)
+
+
+# ---------------------------------------------------------------- lobby skyline card
+def skyline(w=2048, h=384, seed=5) -> Image.Image:
+    """The lobby's horizon card, RGBA with a transparent sky (the lobby's procedural sunset
+    shows through): a low hazy far city, port gantry cranes on the sun side, warehouses with lit
+    windows, a water tower, light poles and container stacks, all backlit (dark violet
+    silhouettes, a warm rim on the right, warm and cool windows, red aviation lights).
+    Mapping used by scripts/lobby.gd: 280 m wide, ground line at 92 % of the height, the lobby's
+    x = 0 m at 126 m from the left edge. Painted at 2x and downsampled (smooth edges)."""
+    S = 2
+    W, H = w * S, h * S
+    pxm = W / 280.0
+    gy = H * 0.92
+    rng = np.random.default_rng(seed)
+
+    def X(m):
+        return (m + 126.0) * pxm
+
+    def Y(m):
+        return gy - m * pxm
+
+    haze = np.array([214, 132, 120], np.float32)
+
+    def col(base, k, a=255):
+        b = np.array(base, np.float32)
+        c = b + (haze - b) * k
+        return (int(c[0]), int(c[1]), int(c[2]), a)
+
+    layers = []                 # [silhouettes, their lights], far to near
+    reds = []
+    dl = None
+
+    def layer():
+        nonlocal dl
+        im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        lim = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        layers.append((im, lim))
+        dl = ImageDraw.Draw(lim)
+        return ImageDraw.Draw(im)
+
+    def windows(x0, x1, y0, y1, k, density, size=(0.7, 0.5), step=(1.6, 1.5)):
+        for wy in np.arange(y0, y1, step[1]):
+            for wx in np.arange(x0, x1, step[0]):
+                if rng.random() < density:
+                    warm = rng.random() < 0.82
+                    c = col((255, 196, 118) if warm else (168, 208, 255), k, int(rng.uniform(150, 245)))
+                    dl.rectangle([X(wx), Y(wy + size[1]), X(wx + size[0]), Y(wy)], fill=c)
+
+    # far city: low and hazy, taller clusters only toward the edges (never behind the hero)
+    d = layer()
+    x = -126.0
+    while x < 154.0:
+        bw = rng.uniform(3.0, 8.0)
+        edge = x < -55.0 or x > 92.0
+        bh = rng.uniform(12.0, 24.0) if edge and rng.random() < 0.5 else rng.uniform(3.5, 9.5)
+        d.rectangle([X(x), Y(bh), X(x + bw), Y(-6)], fill=col((44, 28, 58), 0.58))
+        windows(x + 0.6, x + bw - 0.7, 1.5, bh - 1.0, 0.5, 0.13, (0.5, 0.45), (1.3, 1.4))
+        if bh > 19.0:
+            d.rectangle([X(x + bw / 2 - 0.12), Y(bh + 3.5), X(x + bw / 2 + 0.12), Y(bh)], fill=col((44, 28, 58), 0.58))
+            reds.append((x + bw / 2, bh + 3.5, 0.5, len(layers) - 1))
+        x += bw + rng.uniform(0.0, 2.2)
+
+    # port gantry cranes on the sun side (right), booms reaching left
+    d = layer()
+    cc = col((28, 18, 38), 0.32)
+    lw = max(2, int(0.28 * pxm))
+    for cx, s in ((46.0, 0.64), (82.0, 0.58), (112.0, 0.5)):
+        top = 30.0 * s
+        for lx in (cx - 9.0 * s, cx + 9.0 * s):
+            d.polygon([(X(lx - 0.9 * s), Y(0)), (X(lx + 0.9 * s), Y(0)), (X(lx + 0.55 * s), Y(top)), (X(lx - 0.55 * s), Y(top))], fill=cc)
+        for by in (7.0 * s, 19.0 * s):
+            d.rectangle([X(cx - 9.0 * s), Y(by + 1.1 * s), X(cx + 9.0 * s), Y(by)], fill=cc)
+        d.line([(X(cx - 9.0 * s), Y(7.0 * s)), (X(cx + 9.0 * s), Y(19.0 * s))], fill=cc, width=lw)
+        b0, b1 = cx - 40.0 * s, cx + 17.0 * s
+        bt = top + 2.6 * s
+        d.rectangle([X(b0), Y(bt), X(b1), Y(top)], fill=cc)
+        k = b0
+        while k < b1 - 2.0:
+            d.line([(X(k), Y(top)), (X(k + 1.6 * s), Y(bt))], fill=cc, width=lw)
+            k += 3.2 * s
+        ax = cx + 1.5 * s
+        apex = top + 15.0 * s
+        d.polygon([(X(cx - 7.5 * s), Y(bt)), (X(cx - 6.3 * s), Y(bt)), (X(ax + 0.35 * s), Y(apex)), (X(ax - 0.35 * s), Y(apex))], fill=cc)
+        d.polygon([(X(cx + 6.3 * s), Y(bt)), (X(cx + 7.5 * s), Y(bt)), (X(ax + 0.35 * s), Y(apex)), (X(ax - 0.35 * s), Y(apex))], fill=cc)
+        for end in (b0 + 3.0 * s, b0 + 16.0 * s, b1 - 1.0 * s):
+            d.line([(X(ax), Y(apex)), (X(end), Y(bt))], fill=cc, width=max(1, lw // 2))
+        d.rectangle([X(cx - 3.5 * s), Y(bt + 4.5 * s), X(cx + 5.5 * s), Y(bt)], fill=cc)
+        d.rectangle([X(b0 + 8.0 * s), Y(top), X(b0 + 11.0 * s), Y(top - 2.5 * s)], fill=cc)       # spreader
+        reds.append((ax, apex + 0.6, 0.25, len(layers) - 1))
+        reds.append((b0 + 0.6, bt + 0.5, 0.25, len(layers) - 1))
+        for fx in np.arange(b0 + 4.0 * s, b1, 9.0 * s):
+            dl.ellipse([X(fx) - 3, Y(top - 0.2) - 2, X(fx) + 3, Y(top - 0.2) + 2], fill=(255, 226, 170, 235))
+
+    # warehouses (sawtooth and flat roofs) with rows of lit windows, rooftop units, a water tower
+    d = layer()
+    wc = col((24, 16, 32), 0.2)
+    for x0, x1, hh, saw in ((-126, -86, 9.0, True), (-80, -50, 12.0, False), (-44, -14, 7.0, True),
+                            (-10, 26, 6.0, False), (30, 60, 10.0, False), (64, 100, 8.0, True), (104, 154, 9.0, False)):
+        d.rectangle([X(x0), Y(hh), X(x1), Y(-6)], fill=wc)
+        if saw:
+            t = float(x0)
+            while t < x1 - 1.0:
+                d.polygon([(X(t), Y(hh)), (X(t + 4.0), Y(hh + 2.6)), (X(t + 4.0), Y(hh))], fill=wc)
+                t += 4.0
+        else:
+            d.rectangle([X(x0 + 2.0), Y(hh + 1.4), X(x0 + 5.0), Y(hh)], fill=wc)
+            d.rectangle([X(x1 - 9.0), Y(hh + 2.2), X(x1 - 6.0), Y(hh)], fill=wc)
+        windows(x0 + 1.0, x1 - 1.5, hh * 0.55, hh - 1.2, 0.12, 0.5, (1.6, 0.7), (2.4, 2.0))
+        windows(x0 + 1.0, x1 - 1.5, 1.4, 2.4, 0.12, 0.25, (2.2, 0.9), (4.0, 2.0))
+    tx = -62.0
+    for lx in (tx - 2.2, tx + 2.2):
+        d.line([(X(lx), Y(0)), (X(lx * 0.0 + tx + (lx - tx) * 0.6), Y(13.0))], fill=wc, width=lw)
+    d.rectangle([X(tx - 3.2), Y(18.0), X(tx + 3.2), Y(13.0)], fill=wc)
+    d.polygon([(X(tx - 3.2), Y(18.0)), (X(tx), Y(19.6)), (X(tx + 3.2), Y(18.0))], fill=wc)
+    reds.append((tx, 19.9, 0.12, len(layers) - 1))
+    # light poles with warm heads (the yard's own lights)
+    for px in (-34.0, -4.0, 38.0, 70.0):
+        d.rectangle([X(px - 0.14), Y(15.0), X(px + 0.14), Y(0)], fill=wc)
+        d.rectangle([X(px - 1.1), Y(15.4), X(px + 1.1), Y(14.8)], fill=wc)
+        for hx in (px - 0.7, px + 0.7):
+            dl.ellipse([X(hx) - 4, Y(14.75) - 3, X(hx) + 4, Y(14.75) + 3], fill=(255, 232, 180, 245))
+
+    # container stacks near the ground, dark paint colours
+    d = layer()
+    paints = [(52, 22, 22), (22, 32, 56), (20, 44, 48), (58, 34, 14), (40, 38, 44)]
+    x = -126.0
+    while x < 154.0:
+        ln = 12.2 if rng.random() < 0.45 else 6.1
+        n = int(rng.choice([0, 1, 1, 2, 2, 3, 4]))
+        for k in range(n):
+            pc = paints[int(rng.integers(len(paints)))]
+            c = col(pc, 0.1)
+            off = rng.uniform(-0.4, 0.4)
+            d.rectangle([X(x + off), Y((k + 1) * 2.59), X(x + off + ln), Y(k * 2.59)], fill=c)
+            d.line([(X(x + off), Y((k + 1) * 2.59)), (X(x + off + ln), Y((k + 1) * 2.59))], fill=col((90, 70, 80), 0.1), width=2)
+            if rng.random() < 0.3:
+                windows(x + off + 0.5, x + off + ln - 0.5, k * 2.59 + 1.0, k * 2.59 + 1.6, 0.1, 0.06, (0.6, 0.35), (2.0, 1.0))
+        x += ln + rng.uniform(0.4, 6.0)
+
+    for x_m, y_m, r, li in reds:
+        rr = max(2.0, r * pxm)
+        ImageDraw.Draw(layers[li][1]).ellipse([X(x_m) - rr, Y(y_m) - rr, X(x_m) + rr, Y(y_m) + rr], fill=(255, 64, 44, 255))
+    out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    rim_col = np.array([255, 150, 96], np.float32)
+    for im, lim in layers:
+        arr = np.asarray(im).astype(np.float32)
+        a = arr[..., 3] / 255.0
+        # warm rim on the sun side (right edges) and a faint one along the tops
+        right = np.clip(a - np.roll(a, -int(1.2 * S), axis=1), 0, 1)
+        topr = np.clip(a - np.roll(a, int(1.0 * S), axis=0), 0, 1)
+        rim = np.clip(right * 0.75 + topr * 0.35, 0, 1)[..., None]
+        arr[..., :3] = arr[..., :3] + (rim_col - arr[..., :3]) * rim * 0.7
+        out.alpha_composite(Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA"))
+        # this layer's lights with a soft glow, before the nearer layers cover them
+        glow = lim.filter(ImageFilter.GaussianBlur(5 * S))
+        ga = np.asarray(glow).astype(np.float32)
+        ga[..., 3] *= 0.55
+        out.alpha_composite(Image.fromarray(np.clip(ga, 0, 255).astype(np.uint8), "RGBA"))
+        out.alpha_composite(lim)
+    # solid below the ground line (hidden under the lobby floor anyway)
+    ImageDraw.Draw(out).rectangle([0, int(gy) + 2, W, H], fill=col((26, 18, 30), 0.15))
+    return out.resize((w, h), Image.LANCZOS)
+
+
 # ---------------------------------------------------------------- outputs
 def write_import(path, lossy=False, mipmaps=False):
     """Godot import settings next to an output (Godot fills in the rest on import). Kept when
@@ -321,35 +531,42 @@ def main():
     if "--skip-render" not in ARGS:
         render_all()
     os.makedirs(OUT, exist_ok=True)
-    hero = Image.open(os.path.join(WORK, "hero.png")).convert("RGB")
-    if hero.size != (W, H):
-        hero = hero.resize((W, H), Image.LANCZOS)
-    art = grade(hero)
-    art = sun_flare(art, int(W * 0.66), int(H * 0.47))
-    art = streaks(art)
-    full = art.copy()
-    lg = logo()
-    lw = int(W * 0.30)
-    lg_small = lg.resize((lw, int(lg.size[1] * lw / lg.size[0])), Image.LANCZOS)
-    full.paste(lg_small, (int(W * 0.035), int(H * 0.05)), lg_small)
-    q = 88
-    full.save(os.path.join(OUT, "keyart.jpg"), quality=q, optimize=True, progressive=True)
-    art.save(os.path.join(OUT, "keyart_clean.jpg"), quality=86, optimize=True, progressive=True)
-    write_import(os.path.join(OUT, "keyart.jpg"), lossy=True)
-    write_import(os.path.join(OUT, "keyart_clean.jpg"), lossy=True)
-    # The duel crop: the rival on the container and the hero's rifle.
-    crop = art.crop((int(W * 0.30), int(H * 0.12), int(W * 0.30) + int(W * 0.52), int(H * 0.12) + int(W * 0.52 * 9 / 16)))
-    crop = crop.resize((640, 360), Image.LANCZOS)
-    crop.save(os.path.join(OUT, "mode_lonewolf.jpg"), quality=86, optimize=True, progressive=True)
-    write_import(os.path.join(OUT, "mode_lonewolf.jpg"), lossy=True, mipmaps=True)
-    lg_out = lg.resize((900, int(lg.size[1] * 900 / lg.size[0])), Image.LANCZOS)
-    lg_out.save(os.path.join(OUT, "logo.png"), optimize=True)
-    write_import(os.path.join(OUT, "logo.png"), lossy=False, mipmaps=True)
-    em = draw_emblem(256)
-    em.save(os.path.join(OUT, "emblem.png"), optimize=True)
-    write_import(os.path.join(OUT, "emblem.png"), lossy=False, mipmaps=True)
-    portraits()
-    print("key art done; renders in", WORK)
+    lg = logo() if ONLY & {"keyart", "logo"} else None
+    if "keyart" in ONLY:
+        hero = Image.open(os.path.join(WORK, "hero.png")).convert("RGB")
+        if hero.size != (W, H):
+            hero = hero.resize((W, H), Image.LANCZOS)
+        art = grade(hero)
+        art = sun_flare(art, int(W * 0.66), int(H * 0.47))
+        art = streaks(art)
+        full = art.copy()
+        lw = int(W * 0.30)
+        lg_small = lg.resize((lw, int(lg.size[1] * lw / lg.size[0])), Image.LANCZOS)
+        full.paste(lg_small, (int(W * 0.035), int(H * 0.05)), lg_small)
+        full.save(os.path.join(OUT, "keyart.jpg"), quality=88, optimize=True, progressive=True)
+        art.save(os.path.join(OUT, "keyart_clean.jpg"), quality=86, optimize=True, progressive=True)
+        write_import(os.path.join(OUT, "keyart.jpg"), lossy=True)
+        write_import(os.path.join(OUT, "keyart_clean.jpg"), lossy=True)
+    if "mode" in ONLY:
+        # Its own art (not a crop of the key art, which is the loading screens' backdrop).
+        duel = mode_art(Image.open(os.path.join(WORK, "faceoff.png")))
+        duel.save(os.path.join(OUT, "mode_lonewolf.jpg"), quality=88, optimize=True, progressive=True)
+        write_import(os.path.join(OUT, "mode_lonewolf.jpg"), lossy=True, mipmaps=True)
+    if "logo" in ONLY:
+        lg_out = lg.resize((900, int(lg.size[1] * 900 / lg.size[0])), Image.LANCZOS)
+        lg_out.save(os.path.join(OUT, "logo.png"), optimize=True)
+        write_import(os.path.join(OUT, "logo.png"), lossy=False, mipmaps=True)
+    if "emblem" in ONLY:
+        em = draw_emblem(256)
+        em.save(os.path.join(OUT, "emblem.png"), optimize=True)
+        write_import(os.path.join(OUT, "emblem.png"), lossy=False, mipmaps=True)
+    if "portraits" in ONLY:
+        portraits()
+    if "skyline" in ONLY:
+        sky = skyline()
+        sky.save(os.path.join(OUT, "lobby_skyline.png"), optimize=True)
+        write_import(os.path.join(OUT, "lobby_skyline.png"), lossy=False, mipmaps=True)
+    print("key art done (%s); renders in %s" % (",".join(sorted(ONLY)), WORK))
 
 
 if __name__ == "__main__":
