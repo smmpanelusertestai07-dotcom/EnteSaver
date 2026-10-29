@@ -23,6 +23,7 @@ tools/props/_render_tmp/
 tools/props/previews/
 tools/character/previews/
 tools/media/_work/
+tools/props/manifest.json
 assets/props/previews/
 assets/character/previews/
 # Character pipeline intermediates and scratch renders (tools/character/*.py)

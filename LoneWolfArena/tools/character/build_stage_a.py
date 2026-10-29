@@ -89,6 +89,7 @@ names = {"Eyes": "Eyes", "Eyebrows": "Eyebrows", "Eyelashes": "Eyelashes", "Hair
 for atype, path in CFG.BODYPARTS.items():
     ob = S.HumanService.add_mhclo_asset(path, basemesh, asset_type=atype, subdiv_levels=0, material_type="MAKESKIN")
     ob.name = names[atype]
+    ob.data.name = ob.name      # the mesh keeps our name, not the upstream asset's (it ships in the GLB)
     ob["mhclo"] = path
     print("added", ob.name, len(ob.data.polygons))
 
@@ -97,6 +98,7 @@ for bid, disp, parts in CFG.BUNDLES:
     for part, path in parts:
         ob = S.HumanService.add_mhclo_asset(path, basemesh, asset_type="Clothes", subdiv_levels=0, material_type="MAKESKIN")
         ob.name = "Outfit_%s_%s" % (bid, part)
+        ob.data.name = ob.name
         ob["mhclo"] = path
         ob["bundle"] = bid
         ob["part"] = part
