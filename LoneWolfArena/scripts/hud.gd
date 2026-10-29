@@ -757,9 +757,12 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	if id == "settings":
 		HudDraw.glyph_button(self, c, r, _glyph(id), o, pressed)
 		return
+	var glyph := _glyph(id)
+	if (id == "fire_r" or id == "fire_l") and player != null and not editor_mode and Weapons.is_melee(player.weapon().def):
+		glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
 	if id == "fire_r":
 		_draw_fire_halo(c, r, o, pressed)
-	HudDraw.button(self, c, r, _glyph(id), o, pressed, act, en, float(GLYPH_SCALE.get(id, 0.6)))
+	HudDraw.button(self, c, r, glyph, o, pressed, act, en, float(GLYPH_SCALE.get(id, 0.6)))
 	if count >= 0:
 		HudDraw.count_badge(self, c, r, count, o)
 	if id == "medkit" and act and player != null:
@@ -1203,7 +1206,13 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 			[String(k.victim), Color(1, 1, 1)]]
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
-		HudDraw.text_parts(self, parts, Vector2(vs.x * 0.5, vs.y * float(FEED_Y[i])), fs, 1, 3, "bold", a)
+		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
+		var tw := 0.0
+		for part in parts:
+			tw += HudDraw.text_width(String(part[0]), fs, "bold")
+		var y := vs.y * float(FEED_Y[i])
+		draw_rect(Rect2(vs.x * 0.5 - tw * 0.5 - fs * 0.6, y - fs * 0.72, tw + fs * 1.2, fs * 1.44), Color(0.03, 0.03, 0.04, 0.5 * a))
+		HudDraw.text_parts(self, parts, Vector2(vs.x * 0.5, y), fs, 1, 3, "bold", a)
 
 
 # ---------------------------------------------------------------- top: score bar, zone, prep
