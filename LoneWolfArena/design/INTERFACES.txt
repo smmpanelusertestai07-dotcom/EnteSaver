@@ -47,8 +47,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout` and
   `boot timeout: <n> files still loading`), `lobby ready`,
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
-  `player moved`, `match over: <why>`, `results shown`, `signature <state>` (Guard, "ok" when the
-  package manager confirms a signer listed in the build's res://build_keys.gd).
+  `player moved`, `pause opened`, `pause closed`, `match over: <why>`, `results shown`,
+  `signature <state>` (Guard, "ok" when the package manager confirms a signer listed in the
+  build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
   (start, fire, joystick) so the test taps controls where the current layout puts them.
 
@@ -79,8 +80,11 @@ listed here. If a part needs something new from the core, add it in its own file
   `zone_center`; `zone_start_radius`
 - `set_barriers(on: bool)` red spawn barriers (colliders + glow) during PREP
 - `apply_quality(g: int)` 0 SMOOTH .. 3 MAX
-- Roof, ceiling, trusses and hanging lamps must use visual layer 2 (`layers = 2`) so the
-  top-down minimap render (camera cull_mask 1) sees the floor plan; everything else layer 1.
+- Visual layers: the top-down minimap camera sees only layer 1 (floor, containers, crates, the
+  white wall caps that outline the walls). Roof, ceiling, trusses and hanging lamps are on 2
+  (`LAYER_ROOF`); characters, weapons, effects, the zone wall and the spawn barriers on 4
+  (`LAYER_FX` = `CharacterModel.LAYER_ACTORS`); corrugated walls, columns and lintels on 16
+  (`LAYER_WALLS`, not lit by the sun or the fill light).
 
 ## Menus
 - Main scene: `scenes/loading.tscn` (`Loading`, scripts/loading.gd). The boot screen preloads

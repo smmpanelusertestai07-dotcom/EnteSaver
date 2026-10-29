@@ -3,6 +3,7 @@
 #   tools/qa/run_checks.sh            all checks (a few minutes)
 #   tools/qa/run_checks.sh quick      import, compile check and unit tests only
 # Checks (each fails the run on its own):
+#   textures               the 3D textures keep their phone import settings (texture_import.py)
 #   tests/check.tscn       every script compiles with the autoloads present
 #   warnings               the same load with the debugger on (-d) reports no GDScript warning
 #   tests/run_tests.tscn   unit tests: damage/TTK, spread, weapon state, HUD layout, guard,
@@ -11,7 +12,7 @@
 #   --autotest=aim         aim assist: pull, head stop, tracking with vs without, red crosshair
 #   tests/anim_check.gd    every clip merged, toe fix, swap timing, flinch limit, grenade release
 #   tests/bot_check.gd     grenade arc accuracy, the bot survives the closing zone
-#   tests/flow_soak.gd     several matches in one process with no leaks
+#   tests/flow_soak.gd     several matches in one process: no leaks, corpses stay on the floor
 #   tests/guard_check.gd   a detection made before a match voids it
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
@@ -28,6 +29,7 @@ step() { # step <name> <command...>
     fail=1
   fi
 }
+step textures python3 tools/qa/texture_import.py --check
 # A fresh checkout's first import can exit non-zero before the class cache exists; retry once.
 step import bash -c 'godot --headless --path . --import || godot --headless --path . --import'
 step compile godot --headless --path . res://tests/check.tscn

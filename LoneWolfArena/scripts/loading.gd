@@ -22,8 +22,10 @@ const TIMEOUT_S := 12.0
 const BOOT_MIN_S := 2.4
 const MATCH_MIN_S := 1.2
 const MATCH_MAX_S := 6.0
+## Prop GLBs loaded at boot. forklift and tank have no GLB yet (the map builds them from boxes
+## and the loader skips missing files).
 const PROPS := ["container", "container_40", "container_open", "crate", "wall_bay", "wall_column", "rollup_door",
-	"roof_truss", "lamp_tube", "barrel", "pallet", "bollard", "fire_cabinet", "forklift", "tank", "barrier",
+	"roof_truss", "lamp_tube", "barrel", "pallet", "bollard", "fire_cabinet", "forklift", "tank",
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_pistol", "weapon_sniper", "medkit", "grenade", "shield_wall"]
 const TIPS := [
 	"Hold FIRE and drag to keep aiming while you shoot.",

@@ -33,7 +33,7 @@ if [ -z "${LW_KEYSTORE:-}" ]; then
     chmod 600 "$HOME/.lonewolf/release.pass"
     keytool -genkeypair -noprompt -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -keyalg RSA -keysize 4096 \
       -validity 10000 -storepass:file "$HOME/.lonewolf/release.pass" \
-      -keypass:file "$HOME/.lonewolf/release.pass" -dname "CN=Lone Wolf Arena, O=LoneWolf, C=IN" 2>/dev/null
+      -keypass:file "$HOME/.lonewolf/release.pass" -dname "CN=Lone Wolf Arena" 2>/dev/null
     echo "created new release key: $LW_KEYSTORE"
     NEW_KEY=1
   fi

@@ -21,9 +21,11 @@ app (Ente Saver) and must not be touched for game work.
 
 ## Originality (legal)
 - The game should FEEL like popular mobile battle-royale "Lone Wolf" modes (layout, flow,
-  controls, pacing), but every asset, icon, name and logo must be original. Do not use any
-  Garena/Free Fire names, logos, characters, bundles, icons, sounds or ripped assets, and do
-  not use trademarked phrases such as "Booyah" or "Gloo Wall".
+  controls, pacing), but every asset, icon, name and logo must be original. Never use another
+  game's names, logos, characters, bundles, icons, sounds or ripped assets, or its trademarked
+  phrases (its victory call, its item and ability names): use our own words (VICTORY!, SHIELD
+  WALL, FRAG). The concrete list, where present, is in the git-ignored
+  `reference_private/originality.txt`.
 
 ## Build and test
 ```bash

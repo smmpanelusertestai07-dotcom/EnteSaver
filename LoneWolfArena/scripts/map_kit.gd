@@ -220,10 +220,6 @@ func _make(key: String) -> Material:
 			m = _std(Color(0.8, 0.83, 0.86), 0.3, 0.75)
 		"fork_body":
 			m = _std(Color("f0a818"), 0.5, 0.2)
-		"concrete":
-			m = _std(Color(0.78, 0.77, 0.74), 0.85)
-			_set_tex(m, "concrete")
-			m.uv1_scale = Vector3(0.5, 0.5, 1.0)
 		"barrier":
 			return _barrier_shader(false)
 		"barrier_floor":

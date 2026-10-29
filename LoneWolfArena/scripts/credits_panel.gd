@@ -2,7 +2,8 @@ class_name CreditsPanel
 extends CanvasLayer
 ## Credits and licences: what the game is made with and the notices their licences ask for
 ## (Godot's MIT licence and its third-party components, read from the engine itself; the
-## CC0 character assets; the fonts' SIL Open Font Licence, shipped in assets/fonts/LICENSE.txt).
+## AndroidX and Kotlin libraries the Android template adds; the CC0 character assets; the fonts'
+## SIL Open Font Licence, shipped in assets/fonts/LICENSE.txt).
 
 signal closed
 
@@ -75,6 +76,8 @@ static func credits_text() -> String:
 			for c in part.get("copyright", []):
 				who.append(String(c))
 			out.append("%s - %s (%s)" % [comp.get("name", ""), ", ".join(who), part.get("license", "")])
+	out.append("")
+	out.append("ANDROID LIBRARIES - the AndroidX (Jetpack) libraries and the Kotlin standard library, included by Godot's Android export template: Apache License 2.0 (text below).")
 	out.append("")
 	out.append("LICENCE TEXTS")
 	var lic: Dictionary = Engine.get_license_info()

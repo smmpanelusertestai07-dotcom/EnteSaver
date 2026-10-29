@@ -73,7 +73,7 @@ jobs:
         run: |
           mkdir -p build
           keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 1000 \
-            -storepass cipass123 -keypass cipass123 -dname "CN=CI,O=CI,C=IN"
+            -storepass cipass123 -keypass cipass123 -dname "CN=CI"
           # The game checks its own signing certificate against the list in res://build_keys.gd
           # (autoload/guard.gd); the emulator test expects "[LoneWolf] signature ok".
           SIGNER="$(keytool -list -v -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -storepass cipass123 \

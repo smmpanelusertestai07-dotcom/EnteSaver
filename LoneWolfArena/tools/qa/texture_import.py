@@ -12,7 +12,7 @@ import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 # UI sprites drawn in 2D keep their lossless import.
-SKIP = {"glow.png", "spark.png", "muzzle_flash.png"}
+SKIP = {"glow.png", "muzzle_flash.png"}
 
 
 def want(name):

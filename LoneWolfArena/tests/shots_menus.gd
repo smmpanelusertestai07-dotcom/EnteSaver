@@ -280,7 +280,8 @@ func run(at: Node) -> int:
 	_check(await _wait_scene("Arena", 30.0) != null, "PLAY AGAIN starts a new match (back ignored while it loads)")
 	_check(ResultsScreen.honour({"headshots": 2, "hp_left": 50, "taken": 150}) == "SHARPSHOOTER", "honour SHARPSHOOTER")
 	_check(ResultsScreen.honour({"headshots": 0, "hp_left": 180, "taken": 20}) == "UNTOUCHABLE", "honour UNTOUCHABLE")
-	_check(ResultsScreen.honour({"headshots": 1, "hp_left": 12, "taken": 188}) == "CLUTCH", "honour CLUTCH")
+	_check(ResultsScreen.honour({"won": true, "headshots": 1, "hp_left": 12, "taken": 188}) == "CLUTCH", "honour CLUTCH")
+	_check(ResultsScreen.honour({"won": false, "headshots": 1, "hp_left": 12, "taken": 188}) == "FIGHTER", "no CLUTCH without a win")
 	_check(ResultsScreen.honour({"headshots": 0, "hp_left": 0, "taken": 200}) == "FIGHTER", "honour FIGHTER")
 	Game.settings = saved_settings
 	Game.save_settings()

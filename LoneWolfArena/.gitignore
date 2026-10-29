@@ -18,8 +18,13 @@ build_secret.txt
 __pycache__/
 # Scratch renders of the props pipeline
 tools/props/_render_tmp/
-# Prop preview renders (tools/props/preview.py), not game assets
+# Preview renders and work files of the asset tools (under tools/, never shipped); older
+# versions of the tools wrote their previews into assets/
+tools/props/previews/
+tools/character/previews/
+tools/media/_work/
 assets/props/previews/
+assets/character/previews/
 # Character pipeline intermediates and scratch renders (tools/character/*.py)
 tools/character/work/
 tools/character/scratch/
