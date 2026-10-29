@@ -153,6 +153,7 @@ func _aim_at(p: Player, target: Vector3) -> void:
 	var dir := (target - p.camera.global_position).normalized()
 	p.aim_yaw = atan2(-dir.x, -dir.z) - deg_to_rad(p.recoil_yaw)
 	p.aim_pitch = asin(clampf(dir.y, -1.0, 1.0)) - deg_to_rad(p.recoil_pitch)
+	p.forget_aim_hold()
 
 
 # ---------------------------------------------------------------- screenshots walkthrough
@@ -456,8 +457,9 @@ func _run_perf() -> void:
 
 ## Aim-assist checks (headless): a frozen bot stands 14 m in front of the player.
 ##  1. start 3 deg off the chest, hold FIRE: the pull must bring the crosshair onto the body;
-##  2. a drag from the chest: too short stays on the body, the right length stops on the head
-##     (a forgiving band), too long goes over it; the first bullet follows the drag;
+##  2. a drag from the chest: tiny stays on the body, a normal (also slanted) one stops on the
+##     head, a huge one goes over it; a resting thumb's jitter keeps the body; the first bullet
+##     follows the drag;
 ##  3. the bot strafes: with assist the crosshair stays on target more often than without;
 ##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away.
 ## Prints AIM lines and exits 1 if a check fails.
@@ -477,8 +479,8 @@ func _run_aim() -> void:
 	# Same gun every run (the map keeps changing).
 	p.set_loadout("ar")
 	b.set_loadout("ar")
-	# Stand the bot 10-16 m from the player where the player sees its head and chest and the
-	# crosshair ray (from the shoulder camera) reaches both (cover moves with map work).
+	# Stand the bot 10-16 m from the player where the player's eye and gun see its head and chest
+	# and the crosshair ray (from the shoulder camera) reaches both (cover moves with map work).
 	var placed := false
 	for dist in [14.0, 12.0, 16.0, 10.0]:
 		for ang in [0.0, 12.0, -12.0, 25.0, -25.0, 40.0, -40.0, 60.0, -60.0, 90.0, -90.0, 180.0]:
@@ -488,6 +490,7 @@ func _run_aim() -> void:
 			await _wait(0.25)          # let it settle on the floor before judging the view
 			if absf(p.global_position.distance_to(b.global_position) - dist) < 3.0 \
 					and p.can_see(b.chest_position()) and p.can_see(b.head_position()) \
+					and p.can_see(b.chest_position(), p.model.muzzle_position()) and p.can_see(b.head_position(), p.model.muzzle_position()) \
 					and await _crosshair_hits(p, b, b.chest_position()) and await _crosshair_hits(p, b, b.head_position()):
 				placed = true
 				break
@@ -509,15 +512,18 @@ func _run_aim() -> void:
 	_log("AIM pull: on target after %.2fs (want < 0.6s)" % acquired)
 	if acquired < 0.0 or acquired > 0.6:
 		fails += 1
-	# 2. drag sweep from the chest in 2 px steps: body, then the head band, then over the head
+	# 2. drag sweep from the chest in small steps: body, then the head band (the stop takes a
+	#    good share of the screen), then over the head
+	var vh := get_viewport().get_visible_rect().size.y
+	var step_px := maxf(2.0, vh / 320.0)
 	await _wait(0.3)
 	for k in 3:
 		_aim_at(p, b.chest_position())
 		await get_tree().process_frame
 		await get_tree().physics_frame
 	var zones := PackedStringArray()
-	for i in 200:
-		p.add_look(Vector2(0, -2), true)
+	for i in 400:
+		p.add_look(Vector2(0, -step_px), true)
 		await get_tree().physics_frame
 		zones.append(p.aim_zone if p.aim_zone != "" else "-")
 		if zones.size() > 8 and "head" in zones and zones.slice(zones.size() - 8).count("-") == 8:
@@ -528,13 +534,44 @@ func _run_aim() -> void:
 	var over := first_head >= 0 and zones[zones.size() - 1] == "-"
 	var clean := first_head > 0 and zones.slice(0, first_head).count("body") == first_head \
 		and zones.slice(first_head, last_head + 1).count("head") == head_run
-	_log("AIM drag sweep: body for %d steps, head for %d, then over the head=%s (want >0, >=5, true)" % [maxi(first_head, 0), head_run, over])
-	if not clean or head_run < 5 or not over:
+	var head_share := head_run * step_px / vh
+	_log("AIM drag sweep: body for %.0f%% of the screen, head for %.0f%%, then over the head=%s (want >0, >=15, true)" % [
+		maxi(first_head, 0) * step_px / vh * 100.0, head_share * 100.0, over])
+	if not clean or head_share < 0.15 or not over:
 		fails += 1
-	# 2b. the first bullet goes where the drag that began with the press stopped
 	b.invulnerable = false
 	b.endless_hp = true             # hits count, HP stays
-	var mid := (first_head + last_head) / 2 + 1
+	# 2b. real thumbs while firing: a resting thumb's jitter keeps the body; flicks of a normal
+	#     length (also slanted) end on the head; a tiny one stays on the body; a huge one goes over.
+	var cases := [["jitter", 0.0, 0.0, "body"], ["tiny", 0.02, 0.0, "body"], ["normal", 0.15, 0.0, "head"],
+		["long", 0.3, 0.0, "head"], ["slanted", 0.22, 0.12, "head"], ["huge", 0.5, 0.0, ""]]
+	var got := PackedStringArray()
+	for c: Array in cases:
+		await _wait(0.5)
+		for k in 3:
+			_aim_at(p, b.chest_position())
+			await get_tree().process_frame
+			await get_tree().physics_frame
+		p.weapon().cancel_reload()
+		p.weapon().ammo = 30
+		p.weapon().cooldown = 0.0
+		p.set_firing(true)
+		if String(c[0]) == "jitter":
+			for i in 60:
+				p.add_look(Vector2(1.5 if i % 2 == 0 else -1.5, -2.0 if i % 2 == 0 else 2.0), true)
+				await get_tree().physics_frame
+		else:
+			for i in 6:
+				p.add_look(Vector2(float(c[2]) * vh / 6.0, -float(c[1]) * vh / 6.0), true)
+				await get_tree().physics_frame
+			await _wait(0.5)
+		var zone := p.aim_zone
+		p.set_firing(false)
+		got.append("%s=%s" % [c[0], zone if zone != "" else "over"])
+		if zone != String(c[3]):
+			fails += 1
+	_log("AIM thumbs: %s (want jitter, tiny = body; normal, long, slanted = head; huge = over)" % ", ".join(got))
+	# 2c. the first bullet goes where the drag that began with the press stopped
 	var first := {}
 	for trial in ["drag", "still"]:
 		await _wait(0.5)
@@ -548,28 +585,27 @@ func _run_aim() -> void:
 		var shots0 := int(p.stats.shots)
 		var heads0 := int(p.stats.headshots)
 		var hits0 := int(p.stats.hits)
+		var landed := []
+		var on_hit := func(_t: Fighter, _amount: float, head_hit: bool, pos: Vector3, _killed: bool) -> void:
+			if landed.is_empty():
+				landed.append("%s %+.2f m from the head centre" % ["head" if head_hit else "body", pos.y - b.head_position().y])
+		p.hit_landed.connect(on_hit)
 		p.set_firing(true)
-		var at_shot := ""
 		if trial == "drag":
-			for i in mid:
-				p.add_look(Vector2(0, -2), true)
-				if i % 4 == 3:
-					await get_tree().physics_frame
-					if int(p.stats.shots) > shots0 and at_shot == "":
-						at_shot = "fired mid-drag at step %d of %d" % [i + 1, mid]
+			for i in 4:                 # a quick 12 % flick with the press
+				p.add_look(Vector2(0, -0.03 * vh), true)
+				await get_tree().physics_frame
 		for i in 30:
 			await get_tree().physics_frame
 			if int(p.stats.shots) > shots0:
 				break
-		if trial == "drag":
-			var cam := p.camera.global_transform
-			var to_head := (b.head_position() - cam.origin).normalized()
-			_log("AIM first drag shot: %s, crosshair %.2f deg above the head centre, zone %s" % [
-				at_shot if at_shot != "" else "fired after the drag", rad_to_deg(asin(-cam.basis.z.y) - asin(to_head.y)), p.aim_zone])
 		first[trial] = "head" if int(p.stats.headshots) > heads0 else ("body" if int(p.stats.hits) > hits0 else \
-			("miss" if int(p.stats.shots) > shots0 else "no shot (ammo %d, reloading %s)" % [p.weapon().ammo, p.weapon().reloading]))
+			("miss" if int(p.stats.shots) > shots0 else "no shot"))
 		p.set_firing(false)
-	_log("AIM first bullet: right drag=%s, no drag=%s (want head, body)" % [first.drag, first.still])
+		p.hit_landed.disconnect(on_hit)
+		if not landed.is_empty():
+			_log("AIM first bullet (%s) landed: %s" % [trial, landed[0]])
+	_log("AIM first bullet: with a drag=%s, no drag=%s (want head, body)" % [first.drag, first.still])
 	if first.drag != "head" or first.still != "body":
 		fails += 1
 	b.endless_hp = false

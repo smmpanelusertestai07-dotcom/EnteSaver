@@ -12,9 +12,11 @@ const PITCH_MAX := 62.0
 
 ## Aim assist tuning. The feel being matched: the crosshair slows down and "sticks" to an enemy
 ## it is over and follows them when they strafe; firing pulls it sideways onto the body and holds
-## it on the part it is on (body or head) against the recoil. A drag moves it on its own terms:
-## too short stays on the body, the right length stops on the head (stickier there), too long
-## goes over the head. The first shot waits a moment for a drag that starts with the press.
+## it on the part it is on (body or head) against the recoil. An upward drag from the body meets
+## the head as a "stop" that takes a fixed share of the screen in thumb travel at any distance:
+## a tiny drag stays on the body, a normal one ends on the head, only a very long one goes over
+## it (a short overshoot is pulled back onto the head). The first shot waits a moment for a drag
+## that starts with the press.
 const ASSIST := {
 	"strength": 0.9,            # overall assist; each gun scales it by its "assist" factor
 	"range_hip": 30.0,          # metres, hip fire / red dot
@@ -24,16 +26,23 @@ const ASSIST := {
 	"bubble_deg": 1.2,          # angular margin around the body that still counts as "on target"
 	"track_deg": 3.0,           # tracking keeps following while the crosshair is this close to the body
 	"friction": 0.4,            # look sensitivity multiplier on the body (lower = stickier)
-	"head_friction": 0.25,      # the same over the head band: the right drag stops there
 	"head_band": 0.2,           # m around the head centre that counts as the head for the aim
+	"lip": 0.25,                # m over the head band that still slows a drag and pulls back to the head
+	"neck_drag": 0.04,          # screen heights of drag from the chest up to the head band
+	"head_drag": 0.26,          # screen heights of drag the head band takes up: the head "stop"
+	"lip_drag": 0.08,           # and the lip over it; a longer drag goes over the head
+	"drag_net": 0.004,          # screen heights of net vertical drag over the last 3 ticks that count
+	                            # as dragging (a resting thumb's jitter cancels out)
+	"drag_side": 0.35,          # sideways share an upward drag on the target keeps (the body lock)
 	"track": 1.0,               # share of the target's angular motion the aim follows on target
 	"pull_rate": 20.0,          # 1/s exponential pull toward the aim point while firing (body lock)
 	"pull_max_deg": 160.0,      # deg/s cap of that pull (a fast drag still breaks away)
-	"drag_free": 0.15,          # s after a vertical drag during which firing holds no height
+	"drag_free": 0.0,           # s after a drag before firing holds the height again
 	"on_target_spread": 0.35,   # spread multiplier while the crosshair is on the target (full strength)
 }
 const DRAG_SHOT_WINDOW := 0.15   # s the first shot may wait for a drag that starts with the press
 const DRAG_SHOT_START := 0.04    # no drag by then (or the drag paused): it fires
+const DRAG_SHOT_SETTLE := 0.15   # more s it waits while a drag that ran just over the head is pulled back
 
 var rig: Node3D
 var yaw_node: Node3D
@@ -48,10 +57,16 @@ var assist_target: Fighter
 var assist_on := true                 # tests compare the aim with and without the assist
 var aim_zone := ""                    # crosshair on the assist target: "head", "body" or ""
 var _shot_wait := -1.0                # s since the press while the first shot waits (-1: not waiting)
-var _since_v_drag := 99.0             # s since the last vertical look drag
-var _on_column := false               # crosshair level with the target (the drag friction applies)
-var _head_lo := 0.0                   # aim pitch of the head band's bottom and top
+var _v_drag := 0.0                    # vertical look drag since the last physics tick (screen heights)
+var _v_recent: Array[float] = [0.0, 0.0, 0.0]   # that drag over the last ticks (jitter cancels out)
+var _since_v_drag := 99.0             # s since the last steady vertical drag (firing holds the height)
+var _since_v_move := 99.0             # s since the last vertical movement at all (the first shot)
+var _on_column := false               # crosshair level with the target (the drag regions apply)
+var _chest_p := 0.0                   # aim pitch of the chest, the head band's bottom and top and
+var _head_lo := 0.0                   # the lip's top (the drag regions' edges)
 var _head_hi := 0.0
+var _lip_hi := 0.0
+var _anchor := ""                     # what firing holds since the last drag: "head", "body", "over"
 var free_look := false                # eye button held: the camera turns around you, the aim stays
 var _free := Vector2.ZERO             # the free look's camera yaw / pitch offset (radians)
 var victory_cam := false
@@ -121,6 +136,9 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	super(pos, yaw)
 	firing = false
 	_shot_wait = -1.0
+	_v_drag = 0.0
+	_v_recent = [0.0, 0.0, 0.0]
+	_anchor = ""
 	_scope_hold = false
 	recoil_pitch = 0.0
 	recoil_yaw = 0.0
@@ -130,6 +148,11 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_track_target = null
 	free_look = false
 	_free = Vector2.ZERO
+
+
+## The aim was set directly (not dragged): firing decides afresh what to hold.
+func forget_aim_hold() -> void:
+	_anchor = ""
 
 
 func _assist_active() -> bool:
@@ -168,41 +191,54 @@ func add_look(rel: Vector2, from_fire_button := false) -> void:
 	if ads:
 		deg_per_px *= _fov / FOV_HIP
 	var fx := 1.0
-	if crosshair_on_target and _assist_active():
+	if aim_zone != "" and _assist_active():
 		fx = lerpf(1.0, float(ASSIST.friction), _assist_strength())
+	# A mostly upward drag on the target (a drag shot is never quite straight) keeps to its column.
+	if _on_column and assist_target != null and _assist_active() and rel.y < 0.0 and absf(rel.x) < absf(rel.y) * 1.5:
+		fx *= float(ASSIST.drag_side)
 	aim_yaw -= deg_to_rad(rel.x * deg_per_px * fx)
 	var dy := -deg_to_rad(rel.y * deg_per_px)
 	if _on_column and assist_target != null and _assist_active():
-		aim_pitch = _slowed_pitch(aim_pitch, dy)
+		aim_pitch = _slowed_pitch(aim_pitch, dy, deg_to_rad(deg_per_px * vh))
 	else:
 		aim_pitch += dy
 	aim_pitch = clampf(aim_pitch, deg_to_rad(PITCH_MIN), deg_to_rad(PITCH_MAX))
-	if absf(rel.y) > 0.5:
-		_since_v_drag = 0.0
+	_v_drag += rel.y / maxf(vh, 1.0)
 
 
-## Moves the pitch by `dy` (radians, + = up) through the target's regions, each with its own
-## friction: the body, then the head band (stickier), then free air over the head. Exact for any
-## drag size, so one big touch event can't skip the head.
-func _slowed_pitch(p: float, dy: float) -> float:
-	var k := _assist_strength()
+## Moves the pitch by dy (radians, + = up) through the target's regions. per_screen is the raw
+## pitch one screen height of drag gives; each region takes its share of the screen in drag
+## whatever the distance (scaled by the assist): the neck from the chest to the head band, the
+## head band (the stop), the lip over it. The body below the chest has the plain friction and
+## free air is above the lip. Exact for any event size: one big touch event can't skip the head.
+func _slowed_pitch(p: float, dy: float, per_screen: float) -> float:
+	var k := clampf(_assist_strength(), 0.0, 1.0)
+	if k <= 0.0:
+		return p + dy
 	var f_body := lerpf(1.0, float(ASSIST.friction), k)
-	var f_head := lerpf(1.0, float(ASSIST.head_friction), k)
+	var edges := [minf(_chest_p, _head_lo - 1e-4), _head_lo, _head_hi, _lip_hi]
+	var shares := [float(ASSIST.neck_drag), float(ASSIST.head_drag), float(ASSIST.lip_drag)]
+	var f := [f_body, 1.0, 1.0, 1.0, 1.0]       # below the chest, neck, head band, lip, above
+	for i in 3:
+		var budget := float(shares[i]) * k * per_screen
+		f[i + 1] = clampf((float(edges[i + 1]) - float(edges[i])) / maxf(budget, 1e-6), 0.02, f_body if i < 2 else 1.0)
 	var left := dy
-	for i in 4:
+	for step in 6:
 		if absf(left) < 1e-7:
 			break
 		var probe := p + signf(left) * 1e-6
-		var f := f_body if probe < _head_lo else (f_head if probe <= _head_hi else 1.0)
+		var region := 0
+		while region < 4 and probe > float(edges[region]):
+			region += 1
+		var fr: float = f[region]
 		var edge := INF if left > 0.0 else -INF
-		for e: float in [_head_lo, _head_hi]:
-			if left > 0.0 and e > probe:
-				edge = minf(edge, e)
-			elif left < 0.0 and e < probe:
-				edge = maxf(edge, e)
-		if is_inf(edge) or absf(left * f) <= absf(edge - p):
-			return p + left * f
-		left -= (edge - p) / f
+		if left > 0.0 and region < 4:
+			edge = float(edges[region])
+		elif left < 0.0 and region > 0:
+			edge = float(edges[region - 1])
+		if is_inf(edge) or absf(left * fr) <= absf(edge - p):
+			return p + left * fr
+		left -= (edge - p) / fr
 		p = edge
 	return p
 
@@ -215,9 +251,11 @@ func _assist_strength() -> float:
 ## spread shrinks with the aim assist strength while the crosshair is on the body or head.
 func current_spread() -> float:
 	var s := super()
-	if crosshair_on_target and _assist_active():
-		s *= lerpf(1.0, float(ASSIST.on_target_spread), _assist_strength())
 	var w := weapon()
+	# On target (or held on it while the kick throws the camera about) the spray's growth counts
+	# a quarter, so a held trigger keeps to the body.
+	if (crosshair_on_target or (_on_column and (_anchor == "body" or _anchor == "head"))) and _assist_active():
+		s = (s - w.bloom * 0.75) * lerpf(1.0, float(ASSIST.on_target_spread), _assist_strength())
 	if int(w.def.pellets) == 1 and w.since_shot > 0.35:
 		s *= 0.5                 # the first bullet after a pause goes where the crosshair is
 	return s
@@ -320,12 +358,24 @@ func _think(delta: float) -> void:
 	_keyboard_fallback()
 	if move_dir.length() > 0.5:
 		Game.mark("player moved")
-	_since_v_drag += delta
+	# Vertical drag: its net amount over the last ticks decides whether firing holds the height (a
+	# resting thumb's jitter cancels out, the end of a drag shows at once); any movement at all
+	# delays the first shot.
+	_v_recent.pop_front()
+	_v_recent.append(_v_drag)
+	var net := 0.0
+	for v in _v_recent:
+		net += v
+	_since_v_move = 0.0 if absf(_v_drag) > 0.004 else _since_v_move + delta
+	_since_v_drag = 0.0 if absf(net) > float(ASSIST.drag_net) else _since_v_drag + delta
+	_v_drag = 0.0
 	_update_aim_assist(delta)
 	if firing and _shot_wait >= 0.0:
 		# The first shot leaves when the drag that began with the press stops (or never came).
 		_shot_wait += delta
-		if _shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_drag >= 0.03):
+		var settling := _on_column and assist_target != null and aim_pitch > _head_hi and aim_pitch <= _lip_hi \
+			and _shot_wait < DRAG_SHOT_WINDOW + DRAG_SHOT_SETTLE
+		if (_shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_move >= 0.03)) and not settling:
 			_shot_wait = -1.0
 			_try_fire()
 	elif firing:
@@ -463,21 +513,25 @@ func _update_aim_assist(delta: float) -> void:
 			best_score = miss
 			best_miss = miss
 			assist_target = f
-			aim_zone = zone if crosshair_on_target else ""
+			aim_zone = zone      # the aim works the same at any range; the red crosshair only in range
 	if assist_target == null:
 		_track_target = null
+		_anchor = ""
 		return
 	if not _assist_active():
 		_track_target = null
+		_anchor = ""
 		return
 	var strength := _assist_strength()
 	var head := assist_target.head_position()
 	var band := float(ASSIST.head_band)
+	var chest_aim := _aim_angles_for(assist_target.chest_position())
+	_chest_p = chest_aim.y
 	_head_lo = _aim_angles_for(head - Vector3.UP * band).y
 	_head_hi = _aim_angles_for(head + Vector3.UP * band).y
-	var chest_aim := _aim_angles_for(assist_target.chest_position())
+	_lip_hi = _aim_angles_for(head + Vector3.UP * (band + float(ASSIST.lip))).y
 	var d := xf.origin.distance_to(head)
-	_on_column = absf(wrapf(chest_aim.x - aim_yaw, -PI, PI)) <= atan(0.35 / maxf(d, 0.5)) + deg_to_rad(float(ASSIST.bubble_deg))
+	_on_column = absf(wrapf(chest_aim.x - aim_yaw, -PI, PI)) <= atan(0.35 / maxf(d, 0.5)) + deg_to_rad(float(ASSIST.bubble_deg) + 1.5)
 	var on_body := best_miss <= deg_to_rad(float(ASSIST.track_deg))
 	# Tracking: follow the target's angular motion while on (or right next to) them.
 	var chest_dir := (assist_target.chest_position() - xf.origin).normalized()
@@ -487,14 +541,27 @@ func _update_aim_assist(delta: float) -> void:
 		var k := clampf(float(ASSIST.track) * strength, 0.0, 1.0)
 		aim_yaw += wrapf(now.x - prev.x, -PI, PI) * k
 		aim_pitch += (now.y - prev.y) * k
+	if _track_target != assist_target:
+		_anchor = ""
 	_track_target = assist_target
 	_track_dir = chest_dir
+	# The drag decides what firing holds: where the aim is when it stops (head, also from the lip
+	# just over it; the body; or over the head). The choice stays until the next drag, so a gun's
+	# kick throwing the camera over the head band for a moment can't switch it.
+	if _since_v_drag <= float(ASSIST.drag_free):          # dragging (or just stopped): undecided
+		_anchor = ""
+	elif _anchor == "":
+		if not _on_column or aim_pitch < _head_lo:
+			_anchor = "body"
+		else:
+			_anchor = "head" if aim_pitch <= _lip_hi else "over"
 	# Pull while firing: sideways onto the body always; the height only once the drag has
-	# stopped (it holds the head or the body against the recoil), and never down from over the head.
+	# stopped, onto what it chose (the head or the body) against the recoil; never down from over
+	# the head.
 	if firing and strength > 0.0:
-		var want := _aim_angles_for(head) if aim_zone == "head" else chest_aim
+		var want := _aim_angles_for(head) if _anchor == "head" else chest_aim
 		var err := Vector2(wrapf(want.x - aim_yaw, -PI, PI), want.y - aim_pitch)
-		if _since_v_drag < float(ASSIST.drag_free) or (aim_zone == "" and aim_pitch > _head_hi):
+		if _anchor == "" or _anchor == "over":
 			err.y = 0.0
 		var rate := float(ASSIST.pull_rate) * strength
 		var cap := deg_to_rad(float(ASSIST.pull_max_deg)) * strength * delta
