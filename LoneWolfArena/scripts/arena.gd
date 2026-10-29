@@ -54,6 +54,7 @@ var _winner: Fighter
 var _draw := false
 var _invalid := false
 var _rng := RandomNumberGenerator.new()
+var practice := false      # Game.practice: a training dummy with endless HP, no zone, no clock, no record
 
 
 func _ready() -> void:
@@ -69,6 +70,7 @@ func _ready() -> void:
 	map_name = map.map_name
 	zone_center = map.zone_center
 	zone_start_radius = map.zone_start_radius
+	practice = Game.practice
 	_build_zone()
 	_spawn_fighters()
 	ui_layer = CanvasLayer.new()
@@ -164,6 +166,10 @@ func _spawn_fighters() -> void:
 	bot.configure(int(Game.settings.difficulty), player)
 	bot.hold_fire = true
 	bot.frozen = true
+	if practice:
+		bot.display_name = "TRAINING DUMMY"
+		bot.endless_hp = true
+		player.endless_hp = true
 	fighters.append(bot)
 	for f in fighters:
 		f.died.connect(_on_fighter_died)
@@ -271,7 +277,8 @@ func _on_weapon_picked(id: String) -> void:
 
 func _start_fight() -> void:
 	phase = Phase.FIGHT
-	Game.count_match()
+	if not practice:
+		Game.count_match()
 	if picked_weapon == "":
 		hud.close_weapon_pick()
 		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
@@ -283,10 +290,15 @@ func _start_fight() -> void:
 	elapsed = 0.0
 	zone_radius = zone_start_radius
 	zone_state = "stationary"
-	_zone_mesh.visible = true
+	_zone_mesh.visible = not practice
 	_update_zone_mesh()
 	Game.mark("match started")
-	hud.show_round_banner(round_index, map_name)
+	if practice:
+		_place_dummy()
+		zone_radius = 999.0
+		hud.show_center("PRACTICE", 2.0, Color(1.0, 0.82, 0.22), 80, "THE DUMMY NEVER GOES DOWN")
+	else:
+		hud.show_round_banner(round_index, map_name)
 	Audio.play("countdown_go", 0.0)
 
 
@@ -301,17 +313,38 @@ func _physics_process(delta: float) -> void:
 			if prep_left <= 0.0:
 				_start_fight()
 		Phase.FIGHT:
-			time_left -= delta
 			elapsed += delta
-			_update_zone(delta)
-			if time_left <= 0.0:
-				_timeout()
+			if practice:
+				time_left = elapsed          # the clock counts the practice time up
+				_refill_practice_ammo()
+			else:
+				time_left -= delta
+				_update_zone(delta)
+				if time_left <= 0.0:
+					_timeout()
 		Phase.END:
 			_end_t += delta / maxf(Engine.time_scale, 0.01)
 			if _end_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
 			if _end_t > 2.6 and not _result_shown:
 				_show_results()
+
+
+## Practice: the bot stands still in the open centre bay, facing the player's spawn, and takes
+## every hit without going down.
+func _place_dummy() -> void:
+	bot.frozen = true
+	bot.hold_fire = true
+	bot.global_position = closest_nav_point(zone_center)
+	var d := player.global_position - bot.global_position
+	bot.aim_yaw = atan2(-d.x, -d.z)
+
+
+## Practice: the gun never runs dry (the magazine still needs reloading).
+func _refill_practice_ammo() -> void:
+	var w := player.weapon()
+	if not w.infinite() and w.reserve < int(w.def.mag):
+		w.reserve = int(w.def.get("reserve", 0))
 
 
 ## Seconds until the zone changes state (for the HUD's "SAFE ZONE SHRINKS IN" text).

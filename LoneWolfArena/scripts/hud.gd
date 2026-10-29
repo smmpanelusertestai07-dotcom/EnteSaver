@@ -1236,7 +1236,7 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		goal = int(arena.get("rounds_to_win"))
 		var phase := int(arena.get("phase"))
 		t = float(arena.get("prep_left")) if phase == 0 else float(arena.get("time_left"))
-		red = phase == 0 or t <= 10.0
+		red = phase == 0 or (t <= 10.0 and not bool(arena.get("practice")))
 		if player != null:
 			hp_me = clampf(player.hp / Fighter.MAX_HP, 0.0, 1.0)
 		var b: Variant = arena.get("bot")
@@ -1288,6 +1288,9 @@ func _draw_zone_strip(vs: Vector2) -> void:
 			closed = true
 	HudDraw.icon(self, HudDraw.tex("v_zone"), Vector2(r.position.x + h * 0.55, r.get_center().y), Vector2(h, h) * 0.62, Color(1, 1, 1, 0.9 * o))
 	var parts := [["SAFE ZONE  ", Color(0.72, 0.76, 0.82)], [state, Color(1, 0.4, 0.35) if closed else Color.WHITE]]
+	if arena != null and not editor_mode and bool(arena.get("practice")):
+		parts = [["PRACTICE", HudDraw.YELLOW], ["  NO ZONE", Color.WHITE]]
+		closed = true
 	if not closed:
 		var s := ceili(maxf(left, 0.0))
 		parts.append(["  %d:%02d" % [s / 60, s % 60], HudDraw.YELLOW])

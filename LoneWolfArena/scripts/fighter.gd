@@ -88,6 +88,7 @@ var move_dir := Vector2.ZERO
 var want_jump := false
 var frozen := false
 var round_over := false        # the result is decided: no more shots or damage (a grenade in the air)
+var endless_hp := false        # practice: hits land and show their damage, HP never drops
 var stats := {"shots": 0, "hits": 0, "headshots": 0, "damage": 0.0, "kills": 0, "taken": 0.0, "healed": 0.0}
 var model: CharacterModel
 var arena: Node
@@ -248,7 +249,14 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	if not alive or round_over or (invulnerable and not OS.has_feature("template")):     # invulnerable: a test switch only
 		return 0.0
 	# Armour is read from the constants (a per-fighter value could be frozen in memory).
-	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, hp)
+	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, INF if endless_hp else hp)
+	if endless_hp:
+		stats.taken += dmg
+		last_damage_time = _now()
+		damaged.emit(dmg, from_pos, zone == "head", attacker)
+		if attacker != null and dmg > 0.0:
+			model.play_hit()
+		return dmg
 	hp -= dmg
 	stats.taken += dmg
 	last_damage_time = _now()

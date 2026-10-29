@@ -34,10 +34,10 @@ const DEFS := {
 		"move": 0.92, "fire_move": 0.85, "equip": 0.45, "assist": 1.2, "head_lock": 1.0, "crosshair": "wide",
 	},
 	"lever": {
-		"name": "BULLDOG LV", "class": "SG", "icon": "weapon_sg_lever", "model": "weapon_sg", "sound": "sg_shot",
-		"damage": 26.0, "min_damage": 6.0, "falloff_start": 3.0, "range": 14.0,
+		"name": "M1887", "class": "SG", "icon": "weapon_sg_lever", "model": "weapon_sg", "sound": "sg_shot",
+		"damage": 26.0, "min_damage": 6.0, "falloff_start": 4.0, "range": 15.0,
 		"head_mult": 3.0, "head_far_mult": 0.8, "interval": 0.35, "auto": false, "mag": 2, "reserve": 24,
-		"reload": 2.2, "pellets": 8, "spread_hip": 4.6, "spread_ads": 3.4, "spread_move": 1.0, "spread_air": 2.5,
+		"reload": 2.2, "pellets": 8, "spread_hip": 4.0, "spread_ads": 3.0, "spread_move": 1.0, "spread_air": 2.5,
 		"spread_per_shot": 0.0, "spread_max": 0.0, "spread_recover": 8.0,
 		"recoil_v": 3.0, "recoil_h": 0.9, "recoil_ramp": 0.0, "scope": "none", "ads_fov": 58.0,
 		"move": 0.93, "fire_move": 0.85, "equip": 0.45, "assist": 1.2, "head_lock": 1.0, "crosshair": "wide",

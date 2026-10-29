@@ -16,13 +16,14 @@ const PITCH_MAX := 62.0
 const ASSIST := {
 	"range_hip": 30.0,          # metres, hip fire / red dot
 	"range_scope": 80.0,        # metres, sniper scope
-	"cone_deg": 6.0,            # acquisition cone half-angle at 10 m (wider up close)
+	"cone_deg": 9.0,            # acquisition cone half-angle at 10 m (wider up close)
 	"cone_scope_deg": 2.5,
-	"bubble_deg": 0.9,          # angular margin around the body that still counts as "on target"
-	"friction": 0.55,           # look sensitivity multiplier while on target (lower = stickier)
-	"track": 0.7,               # share of the target's angular motion the aim follows on target
-	"pull_rate": 9.0,           # 1/s exponential pull toward the aim point while firing
-	"pull_max_deg": 55.0,       # deg/s cap of that pull
+	"bubble_deg": 1.2,          # angular margin around the body that still counts as "on target"
+	"track_deg": 3.0,           # tracking keeps following while the crosshair is this close to the body
+	"friction": 0.4,            # look sensitivity multiplier while on target (lower = stickier)
+	"track": 1.0,               # share of the target's angular motion the aim follows on target
+	"pull_rate": 20.0,          # 1/s exponential pull toward the aim point while firing (body lock)
+	"pull_max_deg": 160.0,      # deg/s cap of that pull (a fast drag still breaks away)
 	"head_window": 0.5,         # s the head stop stays armed after an upward drag while firing
 	"head_drag_px": 1.2,        # minimum upward drag per event (px) that arms the head stop
 }
@@ -357,7 +358,7 @@ func _update_aim_assist(delta: float) -> void:
 		_track_target = null
 		return
 	var strength := _assist_strength()
-	var on_body := best_miss <= deg_to_rad(float(ASSIST.bubble_deg))
+	var on_body := best_miss <= deg_to_rad(float(ASSIST.track_deg))
 	# Tracking: follow the target's angular motion while on (or right next to) them.
 	var chest_dir := (assist_target.chest_position() - xf.origin).normalized()
 	if _track_target == assist_target and on_body:

@@ -8,7 +8,7 @@ const SETTINGS_PATH := "user://settings.json"
 const PROFILE_PATH := "user://profile.json"
 const HUD_PATH := "user://hud_layout.json"
 
-const SETTINGS_VERSION := 2
+const SETTINGS_VERSION := 3
 const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"graphics": 1,
@@ -21,7 +21,7 @@ const DEFAULT_SETTINGS := {
 	"sens_sniper": 71,
 	"sens_fire": 100,
 	"aim_assist": true,
-	"aim_assist_strength": 70,
+	"aim_assist_strength": 90,
 	"aim_precision": 0,
 	"hold_fire_scope": true,
 	"left_fire": 0,
@@ -67,6 +67,9 @@ var last_result: Dictionary = {}
 ## Ignored in exported builds, so an installed game can't be started in a test mode.
 var autotest := ""
 var shots_dir := ""
+## The next arena run is practice (lobby PRACTICE): a training dummy with endless HP, no zone, no
+## clock, nothing recorded. START clears it.
+var practice := false
 
 signal settings_changed
 
@@ -84,10 +87,12 @@ func _ready() -> void:
 	var version: Variant = (saved as Dictionary).get("settings_version", 1) if saved is Dictionary else 1
 	if not (version is int or version is float):
 		version = 1
-	if saved is Dictionary and int(version) < SETTINGS_VERSION:
+	if saved is Dictionary and int(version) < 2:
 		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
 		for k in ["sens_general", "sens_reddot", "sens_fire", "crosshair_color", "left_fire", "aim_assist_strength", "settings_version"]:
 			(saved as Dictionary).erase(k)
+	if saved is Dictionary and int(version) < 3:
+		(saved as Dictionary).erase("aim_assist_strength")      # v3: the stronger default body lock
 	_merge_into(settings, saved)
 	settings.settings_version = SETTINGS_VERSION
 	_sanitize_settings()

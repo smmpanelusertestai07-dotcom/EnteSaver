@@ -727,6 +727,7 @@ func _build_left_menu(root: Control) -> void:
 	menu.add_theme_constant_override("separation", 6)
 	root.add_child(menu)
 	var items := [
+		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
 		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
@@ -946,8 +947,18 @@ func _update_bundle_label(id: String) -> void:
 func _start() -> void:
 	if start_btn.disabled:
 		return
+	Game.practice = false
 	start_btn.disabled = true
 	UI.set_caption(start_btn, "MATCHING")
+	Loading.start_match(self)
+
+
+## Practice against a training dummy that never goes down (no zone, no clock, nothing recorded).
+func _start_practice() -> void:
+	if start_btn.disabled:
+		return
+	Game.practice = true
+	start_btn.disabled = true
 	Loading.start_match(self)
 
 
