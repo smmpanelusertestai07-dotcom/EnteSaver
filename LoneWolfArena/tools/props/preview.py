@@ -1,16 +1,18 @@
 """Re-import exported GLBs and render preview strips.
 
 usage: blender -b --python preview.py -- [--res 512] name [name ...]
-Writes assets/props/previews/<name>.png
+Reads assets/props/<name>.glb (or $PROPS_OUT/<name>.glb) and writes tools/props/previews/<name>.png
+(outside res://, so previews are never imported or shipped).
 """
 import bpy, sys, os, math, json
 from mathutils import Vector
 from PIL import Image, ImageDraw
 
-PROPS = os.environ.get('PROPS_OUT', os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'props')))
-PREV = os.path.join(PROPS, 'previews')
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROPS = os.environ.get('PROPS_OUT', os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'props')))
+PREV = os.path.join(HERE, 'previews')
 os.makedirs(PREV, exist_ok=True)
-TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_render_tmp')
+TMP = os.path.join(HERE, '_render_tmp')
 os.makedirs(TMP, exist_ok=True)
 
 args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
@@ -21,13 +23,11 @@ if '--res' in args:
     RES = int(args[args.index('--res') + 1])
 names = [a for i, a in enumerate(args) if not a.startswith('--') and (i == 0 or args[i - 1] != '--res')]
 
-WEAPONS = {'weapon_ar', 'weapon_sg', 'weapon_pistol'}
+WEAPONS = {'weapon_ar', 'weapon_smg', 'weapon_sg', 'weapon_pistol', 'weapon_sniper'}
 # (azimuth deg: 0 = camera in front (+Y), 90 = right side (+X)), elevation deg
 VIEWS = {
     'weapon': [(90, 4), (50, 22), (235, 25)],
     'prop': [(40, 24), (220, 28)],
-    'mountains': [('top',), ('inside',)],
-    'house': [(40, 30), (220, 34), ('topcut',)],
 }
 
 
@@ -124,7 +124,6 @@ def marker(loc, col, r):
 def render_views(name, kind, mn, mx):
     sc = bpy.context.scene
     c = (mn + mx) / 2
-    rad = (mx - mn).length / 2
     cam_d = bpy.data.cameras.new('Cam')
     cam_d.lens = 50
     cam_d.clip_start = 0.01
@@ -134,44 +133,26 @@ def render_views(name, kind, mn, mx):
     sc.camera = cam
     files = []
     for i, v in enumerate(VIEWS[kind]):
-        if v[0] == 'top':
-            cam.location = c + Vector((0, -rad * 1.2, rad * 1.5))
-            look_at(cam, c)
-        elif v[0] == 'inside':
-            cam_d.lens = 18
-            cam.location = Vector((0, 0, 6))
-            look_at(cam, Vector((0, 400, 60)))
-        elif v[0] == 'topcut':
-            cam_d.type = 'ORTHO'
-            cam_d.ortho_scale = max(mx.x - mn.x, mx.y - mn.y) * 1.25
-            cam.location = Vector((c.x, c.y, mx.z - 0.25))
-            cam.rotation_euler = (0, 0, 0)
-            cam_d.clip_start = 0.01
-            cam_d.clip_end = 100
-        else:
-            az, el = math.radians(v[0]), math.radians(v[1])
-            dvec = Vector((math.sin(az) * math.cos(el), math.cos(az) * math.cos(el), math.sin(el)))
-            # fit projected bbox corners
-            fwd = -dvec
-            right = fwd.cross(Vector((0, 0, 1))).normalized()
-            up = right.cross(fwd).normalized()
-            corners = [Vector((x, y, z)) for x in (mn.x, mx.x) for y in (mn.y, mx.y) for z in (mn.z, mx.z)]
-            ex = max(abs((p - c).dot(right)) for p in corners)
-            ey = max(abs((p - c).dot(up)) for p in corners)
-            ez = max(abs((p - c).dot(fwd)) for p in corners)
-            aspect = sc.render.resolution_x / sc.render.resolution_y
-            tan_h = 18 / cam_d.lens
-            tan_v = tan_h / aspect
-            dist = max(ex / tan_h, ey / tan_v) * 1.12 + ez
-            cam.location = c + dvec * dist
-            look_at(cam, c)
+        az, el = math.radians(v[0]), math.radians(v[1])
+        dvec = Vector((math.sin(az) * math.cos(el), math.cos(az) * math.cos(el), math.sin(el)))
+        # fit projected bbox corners
+        fwd = -dvec
+        right = fwd.cross(Vector((0, 0, 1))).normalized()
+        up = right.cross(fwd).normalized()
+        corners = [Vector((x, y, z)) for x in (mn.x, mx.x) for y in (mn.y, mx.y) for z in (mn.z, mx.z)]
+        ex = max(abs((p - c).dot(right)) for p in corners)
+        ey = max(abs((p - c).dot(up)) for p in corners)
+        ez = max(abs((p - c).dot(fwd)) for p in corners)
+        aspect = sc.render.resolution_x / sc.render.resolution_y
+        tan_h = 18 / cam_d.lens
+        tan_v = tan_h / aspect
+        dist = max(ex / tan_h, ey / tan_v) * 1.12 + ez
+        cam.location = c + dvec * dist
+        look_at(cam, c)
         f = os.path.join(TMP, f'prev_{name}_{i}.png')
         sc.render.filepath = f
         bpy.ops.render.render(write_still=True)
         files.append(f)
-        cam_d.type = 'PERSP'
-        cam_d.lens = 50
-        cam_d.clip_end = 5000
     return files
 
 
@@ -194,15 +175,16 @@ def main():
         for e in empties:
             p = e.matrix_world.translation
             print(f'   empty {e.name}: blender={tuple(round(x, 4) for x in p)} godot={(round(p.x, 4), round(p.z, 4), round(-p.y, 4))}')
-        kind = 'weapon' if name in WEAPONS else ('mountains' if name == 'mountains' else ('house' if name == 'house' else 'prop'))
+        kind = 'weapon' if name in WEAPONS else 'prop'
         if kind == 'weapon':
             r = (mx - mn).length * 0.012
             for e in empties:
                 col = (1, 0.1, 0.1) if e.name.startswith('Muzzle') else (0.1, 0.4, 1)
                 marker(e.matrix_world.translation, col, r)
             marker(Vector((0, 0, 0)), (0.1, 1, 0.2), r)
-        elif kind in ('prop', 'house'):
-            bpy.ops.mesh.primitive_plane_add(size=max(40, (mx - mn).length * 6), location=(0, 0, 0))
+        else:
+            # ground at z=0, or under the prop when it hangs below its origin (lamp_tube)
+            bpy.ops.mesh.primitive_plane_add(size=max(40, (mx - mn).length * 6), location=(0, 0, min(0.0, mn.z)))
             pl = bpy.context.object
             pm = bpy.data.materials.new('ground')
             pm.diffuse_color = (0.33, 0.33, 0.33, 1)

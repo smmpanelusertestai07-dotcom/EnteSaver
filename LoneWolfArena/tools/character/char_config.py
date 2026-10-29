@@ -6,7 +6,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 MH_ROOT = os.environ.get("MH_ROOT", os.path.expanduser("~/mh"))
 D = os.path.join(MH_ROOT, "mpfb_user_data")   # merged MPFB user data (symlinks into MH_ROOT/ext/packs/*)
 OUT_DIR = os.path.join(ROOT, "assets", "character")
-PREVIEW_DIR = os.path.join(OUT_DIR, "previews")
+PREVIEW_DIR = os.path.join(ROOT, "tools", "character", "previews")   # outside res:// (git-ignored)
 WORK = os.path.join(ROOT, "tools", "character", "work")   # intermediate .blend + processed textures (git-ignored)
 TEX_DIR = os.path.join(WORK, "tex")
 

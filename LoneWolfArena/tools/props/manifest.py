@@ -1,14 +1,18 @@
-"""Parse every GLB directly (no Blender) and write assets/props/manifest.json.
+"""Parse every shipped prop GLB in assets/props directly (no Blender) and write the developer report
+tools/props/manifest.json (outside res://: the game does not read it and it must not ship).
 glTF axes == Godot axes (Y up, -Z forward), so values are reported as-is."""
 import json, struct, os, sys
 import numpy as np
 
-PROPS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'props'))
-META = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'meta')
-BUDGET = {'weapon_ar': 3000, 'weapon_sg': 3000, 'weapon_pistol': 1200, 'medkit': 600, 'grenade': 500,
-          'shield_wall': 2000, 'container': 2000, 'crate': 400, 'barrier': 300, 'sandbags': 1500,
-          'tree_pine': 800, 'tree_round': 800, 'rock': 300, 'mountains': 6000, 'watchtower': 2000,
-          'lamp_post': 400, 'house': 1500}
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROPS = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'props'))
+OUT = os.path.join(HERE, 'manifest.json')
+# Triangle budgets, the same as each build_*.py passes to report().
+BUDGET = {'weapon_ar': 3000, 'weapon_smg': 2000, 'weapon_sg': 3000, 'weapon_pistol': 1200, 'weapon_sniper': 3000,
+          'medkit': 600, 'grenade': 500, 'shield_wall': 2000,
+          'container': 2000, 'container_40': 3600, 'container_open': 3200, 'crate': 400, 'wall_bay': 1600,
+          'wall_column': 120, 'rollup_door': 900, 'roof_truss': 1600, 'lamp_tube': 260, 'barrel': 360,
+          'pallet': 320, 'bollard': 280, 'fire_cabinet': 700}
 ORDER = list(BUDGET.keys())
 COMP = {5120: ('b', 1), 5121: ('B', 1), 5122: ('h', 2), 5123: ('H', 2), 5125: ('I', 4), 5126: ('f', 4)}
 NCOMP = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}
@@ -129,23 +133,27 @@ def main():
         conventions=dict(
             weapons='Origin = right-hand pistol-grip point (centre of the grip). Barrel points -Z (Godot forward), top +Y. '
                     'Marker nodes: "Muzzle" = barrel tip; "LeftHand" = support-hand point (AR: centre of handguard just '
-                    'behind the hand-stop; SG: centre of the pump; pistol: on the grip, offset 1.2 cm to the left/1 cm down).',
-            props='Origin at bottom centre (Y=0 is the ground). Front faces -Z (Blender +Y) where it matters: lamp arm, '
-                  'watchtower ladder, shield convex side, sandbag convex side, house front door. Container doors are at +X.',
-            uv='UV0 = world-space box projection, 1 UV unit = 1 m (mountains: 1 UV unit = 10 m), for tileable textures by material name.',
+                    'behind the hand-stop; SMG: front grip; SG: centre of the pump; pistol: on the grip, offset 1.2 cm to '
+                    'the left/1 cm down; sniper: forend).',
+            props='Origin at bottom centre (Y=0 is the floor) unless noted: lamp_tube hangs from its ceiling hook (origin; '
+                  'the fixture reaches down to Y=-1.2), roof_truss = centre of the bottom chord underside, rollup_door and '
+                  'fire_cabinet = bottom centre on the wall (mounting) plane. Front faces -Z (Blender +Y) where it matters: '
+                  'shield convex side, wall_bay inner face, rollup_door, fire_cabinet. Container doors are at +X '
+                  '(container_open: open at both ends, door leaves folded back against the side walls).',
+            uv='UV0 = world-space box projection, 1 UV unit = 1 m, for tileable textures by material name.',
             shading='Smooth shading with sharp edges > ~60 deg and weighted (face-area) custom normals; bevels applied.'),
         assets={})
     for name in ORDER:
         info = analyse(name)
-        meta = os.path.join(META, name + '.json')
-        if os.path.exists(meta):
-            info.update(json.load(open(meta)))
         manifest['assets'][name + '.glb'] = info
         flag = 'ok' if info['within_budget'] else 'OVER'
         print(f"{name:14s} tris={info['triangles']:5d}/{info['triangle_budget']:<5d} {flag}  size={info['bbox']['size']} "
               f"center={info['bbox']['center']} mats={info['materials']} markers={info.get('marker_nodes', {})}")
-    json.dump(manifest, open(os.path.join(PROPS, 'manifest.json'), 'w'), indent=2)
-    print('wrote', os.path.join(PROPS, 'manifest.json'))
+    unlisted = sorted(f[:-4] for f in os.listdir(PROPS) if f.endswith('.glb') and f[:-4] not in BUDGET)
+    if unlisted:
+        print('WARNING: GLBs in assets/props not listed in BUDGET (stale, or a new prop to add here):', ', '.join(unlisted))
+    json.dump(manifest, open(OUT, 'w'), indent=2)
+    print('wrote', OUT)
 
 
 main()

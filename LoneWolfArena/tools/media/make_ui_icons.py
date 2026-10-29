@@ -111,22 +111,12 @@ for k in range(8):
     a = math.radians(k * 45)
     teeth.append('<rect x="56" y="10" width="16" height="22" rx="3" fill="%s" transform="rotate(%g 64 64)"/>' % (W, k * 45))
 ICONS["settings"] = svg("".join(teeth) + dot(64, 64, 38) + '<circle cx="64" cy="64" r="15" fill="#000"/>')
-# Map: folded map.
-ICONS["map"] = svg(poly([(10, 30), (44, 18), (84, 30), (118, 18), (118, 98), (84, 110), (44, 98), (10, 110)])
-                   + line(44, 22, 44, 96, 4) + '<line x1="84" y1="32" x2="84" y2="106" stroke="#000" stroke-width="4"/>'
-                   + '<line x1="44" y1="22" x2="44" y2="96" stroke="#000" stroke-width="4"/>')
-# Backpack.
-ICONS["backpack"] = svg(path("M46 30 V22 A8 8 0 0 1 54 14 H74 A8 8 0 0 1 82 22 V30", False, 7)
-                        + '<rect x="24" y="28" width="80" height="88" rx="22" fill="%s"/>' % W
-                        + '<rect x="40" y="70" width="48" height="28" rx="6" fill="#000"/>')
 # Scoreboard: podium / list.
 ICONS["scoreboard"] = svg('<rect x="14" y="20" width="100" height="18" rx="5" fill="%s"/>' % W
                           + '<rect x="14" y="55" width="100" height="18" rx="5" fill="%s"/>' % W
                           + '<rect x="14" y="90" width="100" height="18" rx="5" fill="%s"/>' % W
                           + '<rect x="24" y="24" width="10" height="10" fill="#000"/><rect x="24" y="59" width="10" height="10" fill="#000"/>'
                           + '<rect x="24" y="94" width="10" height="10" fill="#000"/>')
-# Pause.
-ICONS["pause"] = svg('<rect x="30" y="22" width="24" height="84" rx="5" fill="%s"/><rect x="74" y="22" width="24" height="84" rx="5" fill="%s"/>' % (W, W))
 # Skull (kills, kill feed).
 ICONS["skull"] = svg(path("M64 12 C34 12 16 32 16 58 C16 76 26 86 36 90 V108 A6 6 0 0 0 42 114 H86 A6 6 0 0 0 92 108 V90 C102 86 112 76 112 58 C112 32 94 12 64 12 Z")
                      + '<ellipse cx="45" cy="60" rx="13" ry="15" fill="#000"/><ellipse cx="83" cy="60" rx="13" ry="15" fill="#000"/>'
@@ -153,20 +143,12 @@ ICONS["vest"] = svg(path("M36 10 H52 L64 32 L76 10 H92 Q94 42 114 48 V108 Q114 1
 ICONS["helmet"] = svg(path("M14 86 C14 46 36 22 66 22 C96 22 114 44 114 74 V86 H96 V96 H34 V86 Z"))
 # Eye (free look).
 ICONS["eye"] = svg(path("M6 64 C26 30 102 30 122 64 C102 98 26 98 6 64 Z") + '<circle cx="64" cy="64" r="22" fill="#000"/>' + dot(64, 64, 11))
-# Back arrow / close.
-ICONS["back"] = svg(path("M72 22 L30 64 L72 106", False, 14))
-ICONS["close"] = svg(line(28, 28, 100, 100, 14) + line(100, 28, 28, 100, 14))
 # Trophy (victory / wins).
 ICONS["trophy"] = svg(path("M34 14 H94 V44 C94 66 80 80 64 80 C48 80 34 66 34 44 Z")
                       + path("M34 22 H16 V36 C16 50 26 58 38 58", False, 7) + path("M94 22 H112 V36 C112 50 102 58 90 58", False, 7)
                       + '<rect x="56" y="78" width="16" height="18" fill="%s"/><rect x="38" y="96" width="52" height="16" rx="4" fill="%s"/>' % (W, W))
 # Crosshair glyph (settings preview).
 ICONS["crosshair"] = svg(dot(64, 64, 7) + line(64, 14, 64, 44, 8) + line(64, 84, 64, 114, 8) + line(14, 64, 44, 64, 8) + line(84, 64, 114, 64, 8))
-# Swap weapon arrows.
-ICONS["swap"] = svg(path("M20 44 H96", False, 9) + poly([(92, 28), (114, 44), (92, 60)]) + path("M108 84 H32", False, 9)
-                    + poly([(36, 68), (14, 84), (36, 100)]))
-# Lock (locked bundle).
-ICONS["lock"] = svg(path("M40 56 V40 A24 24 0 0 1 88 40 V56", False, 10) + '<rect x="26" y="54" width="76" height="62" rx="10" fill="%s"/>' % W)
 # Coin (offline reward currency).
 ICONS["coin"] = svg(dot(64, 64, 52) + ring(64, 64, 38, 6).replace(W, "#000") + path("M64 40 L76 64 L64 88 L52 64 Z").replace(W, "#000"))
 # Star (XP / level).
@@ -178,17 +160,6 @@ ICONS["wardrobe"] = svg(path("M64 40 V30 A10 10 0 1 1 74 20", False, 7) + path("
                         + '<rect x="14" y="78" width="100" height="10" rx="5" fill="%s"/>' % W)
 # Info / how to play.
 ICONS["info"] = svg(ring(64, 64, 52, 8) + dot(64, 38, 8) + '<rect x="57" y="54" width="14" height="44" rx="5" fill="%s"/>' % W)
-# Sound on.
-ICONS["sound"] = svg(path("M14 48 H40 L70 22 V106 L40 80 H14 Z") + path("M86 44 C96 54 96 74 86 84", False, 8)
-                     + path("M98 30 C116 48 116 80 98 98", False, 8))
-# Graphics (picture).
-ICONS["graphics"] = svg('<rect x="10" y="22" width="108" height="84" rx="10" fill="%s"/>' % W
-                        + '<path d="M22 94 L52 56 L72 80 L86 64 L106 94 Z" fill="#000"/><circle cx="90" cy="44" r="9" fill="#000"/>')
-# Controls (gamepad-ish joystick).
-ICONS["controls"] = svg(ring(64, 64, 50, 7) + dot(64, 64, 22))
-# Sensitivity (sliders).
-ICONS["sensitivity"] = svg(line(18, 34, 110, 34, 7) + line(18, 64, 110, 64, 7) + line(18, 94, 110, 94, 7)
-                           + dot(44, 34, 12) + dot(86, 64, 12) + dot(58, 94, 12))
 # Custom HUD (layout grid with a move cross).
 ICONS["hud"] = svg('<rect x="10" y="22" width="108" height="84" rx="10" fill="none" stroke="%s" stroke-width="7"/>' % W
                    + dot(36, 78, 14) + dot(94, 70, 18) + dot(92, 40, 9))

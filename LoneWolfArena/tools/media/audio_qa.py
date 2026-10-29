@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from scipy import signal
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-FONT = os.path.join(ROOT, "assets", "fonts", "Rajdhani-SemiBold.ttf")
+FONT = os.path.join(ROOT, "assets", "fonts", "ui_semibold.ttf")
 
 
 def seam_report(x, sr):

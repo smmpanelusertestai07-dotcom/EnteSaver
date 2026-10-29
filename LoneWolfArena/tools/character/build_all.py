@@ -1,6 +1,7 @@
 """Rebuild the whole character asset: python3 tools/character/build_all.py
 Order: MPFB human+clothes -> mesh/texture processing -> animations -> GLB export -> validation ->
-manifest -> previews. Intermediates go to tools/character/work/, outputs to assets/character/.
+manifest -> previews. Intermediates go to tools/character/work/, previews to tools/character/previews/,
+outputs to assets/character/.
 Needs the MakeHuman/MPFB CC0 packs and extension under MH_ROOT (default ~/mh, see mpfb_boot.py)."""
 import os
 import subprocess

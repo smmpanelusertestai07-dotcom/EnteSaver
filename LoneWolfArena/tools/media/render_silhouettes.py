@@ -1,6 +1,7 @@
 """Renders the HUD's silhouette icons from the game's OWN 3D assets (so every icon is original):
-stance icons from the character in its animation poses (stand, crouch, prone, jump, sprint) and item /
-weapon icons from the prop models. Output: white-on-transparent PNGs in assets/ui/icons/
+stance icons from the character in its animation poses (crouch, prone, jump, sprint) and the grenade /
+weapon icons from the prop models (the medkit button uses make_ui_icons.py's v_medkit).
+Output: white-on-transparent PNGs in assets/ui/icons/
 (then run tools/media/make_ui_icons.py, which also writes their .import files with mipmaps).
 
 usage: blender -b --python tools/media/render_silhouettes.py -- [--only name,name] [--out DIR]
@@ -52,7 +53,6 @@ LEAP_POSE = [("spine_01", (0, -0.2, 1)), ("thigh_l", (0, -0.75, -0.65)), ("calf_
              ("thigh_r", (0, 0.55, -0.83)), ("calf_r", (0, 0.95, 0.1))]
 ICONS = {
     "stance_sprint": ("pose", "idle", 0, "side_r", (256, 256), {"rifle": False, "aim": SPRINT_POSE}),
-    "stance_stand": ("pose", "idle", 0, "side_l", (256, 256)),
     # jump / crouch: extra thickening so the right-column buttons stay crisp down to ~45 px
     "stance_crouch": ("pose", "crouch_idle", 0, "side_l", (256, 256), {"bold": 0.034}),
     "stance_prone": ("pose", "prone_idle", 0, "side_l", (256, 256)),
@@ -66,7 +66,6 @@ ICONS = {
     "weapon_sniper": ("prop", "weapon_sniper", None, "side_l", (512, 192)),
     "weapon_pistol": ("prop", "weapon_pistol", None, "side_l", (320, 192)),
     "item_grenade": ("prop", "grenade", None, "front3q", (256, 256)),
-    "item_medkit": ("prop", "medkit", None, "front3q", (256, 256)),
 }
 
 

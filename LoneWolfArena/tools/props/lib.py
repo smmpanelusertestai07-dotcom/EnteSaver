@@ -9,9 +9,7 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.environ.get('PROPS_OUT', os.path.normpath(os.path.join(_HERE, '..', '..', 'assets', 'props')))
-META_DIR = os.path.join(_HERE, 'meta')
 os.makedirs(OUT_DIR, exist_ok=True)
-os.makedirs(META_DIR, exist_ok=True)
 
 PARTS = []
 
@@ -228,11 +226,6 @@ def report(ob, name, budget):
     print(f'[{name}] tris={t} / {budget} {flag}  mats={mats}')
     print(f'[{name}] bbox min={tuple(round(x, 4) for x in mn)} max={tuple(round(x, 4) for x in mx)} size={tuple(round(x, 4) for x in (mx - mn))}')
     return t
-
-
-def save_meta(name, data):
-    with open(os.path.join(META_DIR, name + '.json'), 'w') as f:
-        json.dump(data, f, indent=1)
 
 
 # ----------------------------------------------------------------- bmesh primitives

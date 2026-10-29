@@ -40,7 +40,8 @@ def arg(name, default=None):
 SCENE = arg("--scene", "hero")
 BUNDLE = arg("--bundle", "neon" if SCENE in ("hero", "faceoff") else "default")
 OPPONENT = arg("--opponent", "desert" if SCENE == "faceoff" else "shadow")
-OUT = arg("--out", os.path.join(os.getcwd(), "keyart.png"))
+OUT = arg("--out", os.path.join(HERE, "_work", "keyart.png"))   # default: outside res://
+os.makedirs(os.path.dirname(os.path.abspath(OUT)), exist_ok=True)
 RES = [int(v) for v in arg("--res", {"hero": "1920x1080", "faceoff": "1280x720"}.get(SCENE, "360x480")).split("x")]
 SAMPLES = int(arg("--samples", "64" if SCENE == "hero" else "48"))
 CHAR = os.path.join(ROOT, "assets", "character", "character.glb")
