@@ -20,21 +20,37 @@ func _ready() -> void:
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(shade)
-	var panel := UI.panel()
-	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	panel.offset_left = 60
-	panel.offset_right = -60
-	panel.offset_top = 40
-	panel.offset_bottom = -40
-	root.add_child(panel)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 10)
-	panel.add_child(v)
-	var head := UI.popup_header("CREDITS & LICENCES")
-	v.add_child(head)
+	# Built like the lobby's popups: the header flush on top of a near-black body.
+	var frame := VBoxContainer.new()
+	frame.add_theme_constant_override("separation", 0)
+	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frame.offset_left = 60
+	frame.offset_right = -60
+	frame.offset_top = 40
+	frame.offset_bottom = -40
+	root.add_child(frame)
+	var head := UI.popup_header("CREDITS & LICENCES", 26, 54.0)
+	frame.add_child(head)
 	(head.get_node("Close") as Button).pressed.connect(func() -> void:
 		closed.emit()
 		queue_free())
+	var panel := PanelContainer.new()
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var st := UI.box(Color(0.075, 0.072, 0.068, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
+	st.border_width_left = 1
+	st.border_width_right = 1
+	st.border_width_bottom = 1
+	st.border_color = Color(1, 1, 1, 0.1)
+	st.content_margin_top = 18
+	st.content_margin_bottom = 22
+	panel.add_theme_stylebox_override("panel", st)
+	panel.draw.connect(func() -> void:
+		var s := panel.size
+		panel.draw_colored_polygon(PackedVector2Array([Vector2(s.x, s.y - 18), Vector2(s.x, s.y), Vector2(s.x - 18, s.y)]), UI.ACCENT))
+	frame.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	panel.add_child(v)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

@@ -47,6 +47,10 @@ var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_from_look := Vector3(0, CAM_LOOK_Y, 0)
 var _cam_to_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_to_look := Vector3(0, CAM_LOOK_Y, 0)
+## [3D scale, MSAA] for SMOOTH, STANDARD, ULTRA, MAX.
+const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X],
+	[1.0, Viewport.MSAA_4X]]
+
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
 var _modal: Control
@@ -69,6 +73,16 @@ func _ready() -> void:
 	# connection is dropped automatically if the lobby is left first).
 	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
 	get_viewport().size_changed.connect(_on_viewport_resized)
+	Game.settings_changed.connect(_apply_quality)
+
+
+## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
+## is a little lighter than the arena, so each level gets a bit more than in a match.
+func _apply_quality() -> void:
+	var q: Array = STAGE_QUALITY[clampi(int(Game.settings.graphics), 0, STAGE_QUALITY.size() - 1)]
+	var vp := get_viewport()
+	vp.scaling_3d_scale = float(q[0])
+	vp.msaa_3d = int(q[1])
 
 
 func _mark_start() -> void:
@@ -116,13 +130,10 @@ func _on_viewport_resized() -> void:
 
 func _build_stage() -> void:
 	var hi := int(Game.settings.graphics) >= 1
-	# The lobby is light (about 70 draw calls), so it always renders at full resolution with
-	# MSAA: clean edges on the character, the podium and the container ribs.
 	var vp := get_viewport()
 	_vp_msaa = vp.msaa_3d
 	_vp_scale = vp.scaling_3d_scale
-	vp.msaa_3d = Viewport.MSAA_4X if hi else Viewport.MSAA_2X
-	vp.scaling_3d_scale = 1.0
+	_apply_quality()
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
@@ -177,6 +188,7 @@ func _build_stage() -> void:
 		if fn:
 			floor_m.normal_enabled = true
 			floor_m.normal_texture = fn
+			floor_m.normal_scale = 0.35        # polished concrete, not rippled sand
 	var floor_mi := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(240, 240)            # reaches under the skyline card on the horizon
@@ -344,13 +356,16 @@ func _build_backdrop() -> void:
 					if mat and mat.resource_name.to_lower().contains("paint"):
 						var pmat := StandardMaterial3D.new()
 						pmat.albedo_color = col
-						pmat.roughness = 0.62
-						pmat.metallic = 0.25
+						# Rougher, softer ribs than in the match: far away, sharp rib highlights
+						# turn into sparkling lines.
+						pmat.roughness = 0.78
+						pmat.metallic = 0.2
 						if paint_tex:
 							pmat.albedo_texture = paint_tex
 						if corr_n:
 							pmat.normal_enabled = true
 							pmat.normal_texture = corr_n
+							pmat.normal_scale = 0.55
 						m.set_surface_override_material(i, pmat)
 		else:
 			var box := MeshInstance3D.new()
@@ -397,10 +412,10 @@ func _build_backdrop() -> void:
 	for side: float in [-1.0, 1.0]:
 		var mast := MeshInstance3D.new()
 		var mm := BoxMesh.new()
-		mm.size = Vector3(0.3, 12.0, 0.3)
+		mm.size = Vector3(0.3, 8.6, 0.3)       # lamp heads just inside the top of the view
 		mast.mesh = mm
 		mast.material_override = dark
-		mast.position = Vector3(side * 13.5, 6.0, -21.0)
+		mast.position = Vector3(side * 13.5, 4.3, -21.0)
 		add_child(mast)
 		for k in 2:
 			var head := MeshInstance3D.new()
@@ -408,7 +423,7 @@ func _build_backdrop() -> void:
 			hm.size = Vector3(0.9, 0.55, 0.25)
 			head.mesh = hm
 			head.material_override = _unshaded(Color(1.0, 0.93, 0.78) * 3.2)
-			head.position = Vector3(side * 13.5 + (k - 0.5) * 1.05, 12.1, -20.8)
+			head.position = Vector3(side * 13.5 + (k - 0.5) * 1.05, 8.7, -20.8)
 			add_child(head)
 
 
@@ -559,8 +574,10 @@ func _build_top_bar(root: Control) -> void:
 	lv_txt.position = Vector2(72, 34)
 	card.add_child(lv_txt)
 	var xp := Control.new()
-	xp.position = Vector2(110, 42)
-	xp.size = Vector2(124, 4)
+	# The XP line starts after the measured "LV n" label (LV 100 is wider than LV 1).
+	var xp_x := maxf(110.0, 72.0 + lv_txt.get_combined_minimum_size().x + 8.0)
+	xp.position = Vector2(xp_x, 42)
+	xp.size = Vector2(234.0 - xp_x, 4)
 	xp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	xp.draw.connect(func() -> void:
 		xp.draw_rect(Rect2(Vector2.ZERO, xp.size), Color(1, 1, 1, 0.15))
@@ -599,6 +616,8 @@ func _build_top_bar(root: Control) -> void:
 	off.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	off.add_child(UI.label("OFFLINE", 13, UI.ACCENT, "bold"))
 	sh.add_child(off)
+	# A long-time player's numbers widen the row: the slanted strip grows with it.
+	strip.size.x = maxf(330.0, sh.position.x + sh.get_combined_minimum_size().x + 34.0)
 	# Logo wordmark centred at about 0.75 W (the reference's place), glyph buttons top-right.
 	var lg := UI.texture("logo.png")
 	if lg:
@@ -1296,6 +1315,11 @@ func _fill_wardrobe() -> void:
 		for b in CharacterModel.BUNDLE_INFO:
 			if b.rarity == r and (_ward_filter == "all" or _ward_filter == r):
 				list.append(b)
+	# The info box and the podium follow the first card when the previewed one is filtered out.
+	if not list.is_empty() and not list.any(func(b: Dictionary) -> bool: return String(b.id) == _preview_bundle):
+		_preview_bundle = String(list[0].id)
+		model.apply_bundle(_preview_bundle)
+		_update_bundle_label(_preview_bundle)
 	for b in list:
 		_ward_grid.add_child(_bundle_card(b, group))
 	_update_ward_info()
@@ -1498,8 +1522,8 @@ func _confirm_quit() -> void:
 	_modal.add_child(shade)
 	var band := Control.new()
 	band.anchor_right = 1.0
-	band.anchor_top = 0.32
-	band.anchor_bottom = 0.68
+	band.anchor_top = 0.30
+	band.anchor_bottom = 0.70
 	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	band.draw.connect(func() -> void: UI.draw_dialog_band(band, band.size))
 	_modal.add_child(band)

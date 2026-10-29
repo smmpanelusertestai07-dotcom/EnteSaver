@@ -60,7 +60,7 @@ func _ready() -> void:
 	info.add_theme_constant_override("separation", 4)
 	info.alignment = BoxContainer.ALIGNMENT_CENTER
 	h.add_child(info)
-	var title := UI.shadowed(UI.label("PAUSED", 54, UI.TEXT, "italic"))
+	var title := UI.shadowed(UI.label("PAUSED", 50, UI.TEXT, "bold"))     # dialog titles are upright
 	info.add_child(title)
 	var bar := ColorRect.new()
 	bar.color = UI.ACCENT
