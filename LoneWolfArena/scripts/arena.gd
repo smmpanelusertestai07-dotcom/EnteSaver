@@ -454,6 +454,8 @@ func scoreboard_rows() -> Array:
 # ---------------------------------------------------------------- results / pause
 
 func _show_results() -> void:
+	# Read the masked values first: a tamper flag raised by that read still voids the match.
+	var hp_left := roundi(player.hp)
 	_result_shown = true
 	Engine.time_scale = 1.0
 	var won := _winner == player and not _draw and not _invalid
@@ -467,7 +469,7 @@ func _show_results() -> void:
 		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": int(st.damage),
 		"headshots": int(st.headshots), "accuracy": acc, "time": elapsed, "xp": xp, "enemy": bot.display_name,
 		"mode": MODE_NAME, "map": map_name, "weapon": String(player.gun().def.name),
-		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": roundi(player.hp),
+		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
 		"difficulty": Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
 	}
 	if not _invalid:

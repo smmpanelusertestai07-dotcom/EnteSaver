@@ -263,7 +263,7 @@ func gun() -> WeaponState:
 # ---------------------------------------------------------------- damage
 
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3) -> float:
-	if not alive or invulnerable:
+	if not alive or (invulnerable and not OS.has_feature("template")):     # a test switch only
 		return 0.0
 	# Armour is read from the constants (a per-fighter value could be frozen in memory).
 	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, hp)

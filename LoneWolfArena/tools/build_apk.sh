@@ -41,9 +41,12 @@ if [ -z "${LW_KEYSTORE:-}" ]; then
 fi
 
 # Certificate fingerprint(s) and the save secret -> build_keys.gd (read by autoload/guard.gd).
-# Passwords go through the environment, not the command line (where other processes see them).
-export LW_KEY_PASS
-SIGNER="$(keytool -list -v -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -storepass:env LW_KEY_PASS 2>/dev/null \
+# keytool gets the password through its environment only (not its command line). Godot's
+# export hands it to apksigner on the command line for the few seconds of signing; on the
+# default path it is stored next to the keystore anyway.
+: "${LW_KEY_ALIAS:?set LW_KEY_ALIAS (the key alias in LW_KEYSTORE)}" "${LW_KEY_PASS:?set LW_KEY_PASS (the keystore password)}"
+export -n LW_KEY_PASS 2>/dev/null || true
+SIGNER="$(LW_KEY_PASS="$LW_KEY_PASS" keytool -list -v -keystore "$LW_KEYSTORE" -alias "$LW_KEY_ALIAS" -storepass:env LW_KEY_PASS 2>/dev/null \
   | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
 [[ "$SIGNER" =~ ^[0-9a-f]{64}$ ]] || { echo "could not read the certificate fingerprint"; exit 1; }
 SIGNERS="\"$SIGNER\""
@@ -90,7 +93,8 @@ BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
 # The game must accept its own signature, or every match would be voided.
 SIGNED="$("$BT/apksigner" verify --print-certs "$OUT" 2>/dev/null | grep -m1 "Signer #1 certificate SHA-256" | sed 's/.*: *//')"
 [ "$SIGNED" = "$SIGNER" ] || { echo "ERROR: APK signer $SIGNED is not the key the game expects ($SIGNER)"; exit 1; }
-# No plain key files in the package.
+# The keys ship compiled, and no plain key file does.
+unzip -l "$OUT" | grep -q "assets/build_keys.gdc" || { echo "ERROR: the build keys are missing from the APK"; exit 1; }
 if unzip -l "$OUT" | grep -qE "build_(signer|secret)\.txt|build_keys\.gd$"; then
   echo "ERROR: the APK carries a plain build key file"; exit 1
 fi

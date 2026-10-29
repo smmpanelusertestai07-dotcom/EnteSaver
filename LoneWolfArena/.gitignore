@@ -12,6 +12,9 @@ reference_private/
 # hashes and the save-signing secret. Never commit.
 build_keys.gd
 build_keys.gd.uid
+# Older builds wrote these plain files; keep them out of commits too.
+build_signer.txt
+build_secret.txt
 __pycache__/
 # Scratch renders of the props pipeline
 tools/props/_render_tmp/

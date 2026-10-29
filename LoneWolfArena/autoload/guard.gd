@@ -11,7 +11,8 @@ extends Node
 ##   "unknown" (allowed); a different certificate, or a release build without the list, counts.
 ## The secret and the certificate list are constants in res://build_keys.gd, which
 ## tools/build_apk.sh (and the CI export) writes for one build and deletes afterwards; it is
-## git-ignored and ships compiled inside the APK, never as a plain file.
+## git-ignored and ships compiled inside the APK, never as a plain file. Offline, someone who
+## digs through the APK can still recover them: this raises the bar, it is not a lock.
 ## A detection ends the running match without XP ("INTEGRITY CHECK FAILED").
 
 signal tampered(reason: String)
@@ -112,10 +113,10 @@ static func speed_window(ticks_s: float, wall_s: float) -> int:
 
 
 func _notification(what: int) -> void:
-	# The monotonic clock stops while the phone sleeps; the app is paused then.
+	# The monotonic clock stops while the phone sleeps; the app is paused then. A pending strike
+	# is kept, so switching apps does not clear it.
 	if what in [NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_APPLICATION_PAUSED]:
 		_reset_clock()
-		_speed_strikes = 0
 
 
 # ---------------------------------------------------------------- signed saves
