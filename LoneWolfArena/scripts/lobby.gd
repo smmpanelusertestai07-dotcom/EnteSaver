@@ -974,8 +974,8 @@ func _start() -> void:
 
 # ---------------------------------------------------------------- play with friends (Lan / Cloud)
 
-## Two ways to find a friend: ONLINE (internet, through the game's own realtime project, see
-## Cloud) and SAME WI-FI (the same network or one phone's hotspot, no server, see Lan). Players
+## Two ways to find a friend: ONLINE (internet, no account: a free public relay carries
+## end-to-end encrypted messages, see Cloud) and SAME WI-FI (no server at all, see Lan). Players
 ## show up by name; CHALLENGE sends a request, the other phone accepts or declines. The ONLINE
 ## list connects only once this tab is opened.
 func _open_friends(kind := "online") -> void:
@@ -994,7 +994,7 @@ func _open_friends(kind := "online") -> void:
 				_open_friends(tk))
 		tabs.add_child(b)
 	v.add_child(tabs)
-	var note := "Play from anywhere over the internet. Messages go encrypted through the game's own realtime project and are not stored." \
+	var note := "Play from anywhere, no account. A free public relay passes the messages; everything in a match is end-to-end encrypted on the two phones." \
 		if kind == "online" else "Same Wi-Fi or one phone's hotspot. No internet, no server: nearby players show up by name."
 	var info := UI.label(note, 17, UI.TEXT_DIM, "semi")
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1021,10 +1021,14 @@ func _refresh_friends() -> void:
 	var svc: Node = _net_service()
 	var waiting := String(svc.waiting_for())
 	var peers: Dictionary = svc.peers
-	if _net_kind == "online" and not bool(svc.configured()):
-		_net_status.text = "ONLINE PLAY IS NOT SET UP IN THIS BUILD"
-	elif _net_kind == "online" and String(svc.status) != "online":
-		_net_status.text = "CONNECTING..." if String(svc.status) == "connecting" else "NO INTERNET: RETRYING..."
+	if _net_kind == "online" and String(svc.status) != "online":
+		match String(svc.status):
+			"preparing":
+				_net_status.text = "PREPARING ENCRYPTION KEYS..."
+			"connecting":
+				_net_status.text = "CONNECTING TO THE RELAY (%s)..." % String(svc.server_name)
+			_:
+				_net_status.text = "NO INTERNET: RETRYING..."
 	elif _net_kind == "wifi" and String(svc.local_address()) == "":
 		_net_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
 	elif waiting != "":
@@ -1032,7 +1036,7 @@ func _refresh_friends() -> void:
 	elif _net_note != "":
 		_net_status.text = _net_note
 	elif peers.is_empty():
-		_net_status.text = "LOOKING FOR PLAYERS ONLINE..." if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
+		_net_status.text = ("LOOKING FOR PLAYERS ONLINE (RELAY %s)..." % String(svc.server_name)) if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
 	else:
 		_net_status.text = "PLAYERS ONLINE" if _net_kind == "online" else "PLAYERS NEARBY"
 	var sig := waiting

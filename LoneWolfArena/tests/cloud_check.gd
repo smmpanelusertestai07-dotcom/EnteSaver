@@ -1,6 +1,7 @@
 extends Node
-## Internet 1 vs 1 end to end (Cloud) against tests/realtime_mock.gd (tools/qa/run_checks.sh
-## starts both): LW_LAN_ROLE=host sees the guest in the lobby presence, challenges it; the guest
+## Internet 1 vs 1 end to end (Cloud, end-to-end encrypted) through tests/mqtt_mock.gd
+## (tools/qa/run_checks.sh starts both, LW_MQTT_URL points Cloud at it): LW_LAN_ROLE=host sees
+## the guest's announcement in the lobby, challenges it; the guest
 ## accepts; both load the arena, exchange their players' state, the host lands a lethal hit on
 ## its copy of the guest, the guest's phone applies it and reports its death, and both show the
 ## result (host VICTORY, guest DEFEAT). Prints "CLOUD CHECK DONE bad=N".
@@ -13,7 +14,6 @@ func run(autotest: Node) -> int:
 	at = autotest
 	var host := OS.get_environment("LW_LAN_ROLE") == "host"
 	var lan := Game.cloud_service()
-	lan.set_project(OS.get_environment("LW_ONLINE_URL"), "test-key")
 	lan.start_lobby()
 	var started := [false]
 	lan.session_started.connect(func(_h: bool) -> void: started[0] = true)

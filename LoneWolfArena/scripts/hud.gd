@@ -39,6 +39,7 @@ const KILL_X_TIME := 0.9
 const SPRINT_PUSH := 1.12          # joystick deflection (in ring radii) that counts as past the ring
 const SPRINT_HOLD := 0.3           # seconds past the ring before the sprint locks
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
+const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
 
 var player: Player
@@ -439,13 +440,14 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 			player.add_look(rel, true)
 
 
-## A held FIRE button follows the finger like the floating joystick (by the drag since the
-## press, kept on screen) and snaps back when it is let go.
+## A held FIRE button moves with the finger like a joystick knob, as in the reference mode:
+## in the drag's direction, at most FIRE_TRAVEL x its radius from home (the camera keeps
+## following the whole drag), and it springs back when it is let go.
 func _fire_center(id: String, home: Vector2, r: float, vs: Vector2) -> Vector2:
 	for k in _touches:
 		var t: Dictionary = _touches[k]
 		if String(t.kind) == "fire" and String(t.id) == id and t.has("pos"):
-			var c: Vector2 = home + (t.pos as Vector2) - (t.start as Vector2)
+			var c: Vector2 = home + ((t.pos as Vector2) - (t.start as Vector2)).limit_length(r * FIRE_TRAVEL)
 			return Vector2(clampf(c.x, r, vs.x - r), clampf(c.y, r, vs.y - r))
 	return home
 

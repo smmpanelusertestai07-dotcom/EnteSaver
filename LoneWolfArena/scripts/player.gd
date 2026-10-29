@@ -26,6 +26,7 @@ const ASSIST := {
 	"pull_max_deg": 160.0,      # deg/s cap of that pull (a fast drag still breaks away)
 	"head_window": 0.5,         # s the head stop stays armed after an upward drag while firing
 	"head_drag_px": 1.2,        # minimum upward drag per event (px) that arms the head stop
+	"on_target_spread": 0.35,   # spread multiplier while the crosshair is on the target (full strength)
 }
 
 var rig: Node3D
@@ -40,6 +41,7 @@ var shake := 0.0
 var assist_target: Fighter
 var head_lock := 0.0    # s left of the armed head stop (held while FIRE stays down)
 var _shot_hold := 0.0   # s the first semi-auto shot waits after the press for a drag up
+var _head_snap := 0.0   # s of fast pull right after a drag up moved the lock to the head
 const DRAG_SHOT_WINDOW := 0.12
 var victory_cam := false
 var crosshair_on_target := false      # HUD: crosshair turns red
@@ -133,12 +135,23 @@ func add_look(rel: Vector2, from_fire_button := false) -> void:
 	aim_pitch = clampf(aim_pitch - deg_to_rad(rel.y * deg_per_px * friction), deg_to_rad(PITCH_MIN), deg_to_rad(PITCH_MAX))
 	# Upward drag while firing near a target arms the head stop ("drag headshot").
 	if firing and rel.y < -float(ASSIST.head_drag_px) and assist_target and _assist_active():
+		if head_lock <= 0.0:
+			_head_snap = 0.15
 		head_lock = float(ASSIST.head_window) * float(weapon().def.get("head_lock", 0.6)) / 0.6
 	_apply_head_stop()
 
 
 func _assist_strength() -> float:
 	return clampf(float(Game.settings.aim_assist_strength) / 100.0, 0.0, 1.0) * float(weapon().def.get("assist", 1.0))
+
+
+## Bullets stay on a target the crosshair is locked on (the reference's bullet magnetism): the
+## spread shrinks with the aim assist strength while the crosshair is on the body or head.
+func current_spread() -> float:
+	var s := super()
+	if crosshair_on_target and _assist_active():
+		s *= lerpf(1.0, float(ASSIST.on_target_spread), _assist_strength())
+	return s
 
 
 ## Lets go of FIRE without the release shooting (pause, end of the round): a held sniper scope
@@ -334,6 +347,7 @@ func _body_miss_angle(f: Fighter) -> float:
 func _update_aim_assist(delta: float) -> void:
 	if not firing:
 		head_lock = maxf(head_lock - delta, 0.0)
+	_head_snap = maxf(_head_snap - delta, 0.0)
 	assist_target = null
 	crosshair_on_target = false
 	if arena == null or camera == null:
@@ -392,7 +406,7 @@ func _update_aim_assist(delta: float) -> void:
 		var cap := deg_to_rad(float(ASSIST.pull_max_deg)) * strength * delta
 		if head_lock > 0.0:
 			cap *= 2.5
-			if _shot_hold > 0.0:      # press + flick up: the drag shot snaps onto the head
+			if _shot_hold > 0.0 or _head_snap > 0.0:      # just dragged up: snap onto the head
 				rate *= 3.0
 				cap *= 3.0
 		var step := err * (1.0 - exp(-rate * delta))

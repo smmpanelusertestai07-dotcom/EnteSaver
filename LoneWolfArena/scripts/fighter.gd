@@ -164,7 +164,7 @@ func set_loadout(weapon_id: String) -> void:
 func _build_hitboxes() -> void:
 	# zone, anchor roles (midpoint), radius
 	var defs := [
-		["head", "head", ["head"], 0.14],
+		["head", "head", ["head"], 0.16],
 		["chest", "body", ["spine2", "spine3"], 0.21],
 		["belly", "body", ["spine1", "pelvis"], 0.2],
 		["thigh_l", "limb", ["thigh_l", "calf_l"], 0.11],

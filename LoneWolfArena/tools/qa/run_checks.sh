@@ -16,7 +16,7 @@
 #   tests/guard_check.gd   a detection made before a match voids it
 #   tests/lan_check.gd     Wi-Fi 1 vs 1 with two copies of the game: find, challenge, accept,
 #                          play, a lethal hit and the result on both
-#   tests/cloud_check.gd   the same over the internet transport, against tests/realtime_mock.gd
+#   tests/cloud_check.gd   the same online (end-to-end encrypted), through tests/mqtt_mock.gd
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -53,8 +53,8 @@ if [ "${1:-}" != "quick" ]; then
   step lan bash -c 'LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd > "$0" 2>&1 &
     h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd; g=$?
     wait $h; r=$?; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/lan_host.txt"
-  step cloud bash -c 'timeout 200 godot --headless -s res://tests/realtime_mock.gd -- 47810 > /dev/null 2>&1 & m=$!
-    sleep 2; export LW_ONLINE_URL=ws://127.0.0.1:47810/realtime/v1/websocket
+  step cloud bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47810 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810
     LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &
     h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/cloud_host.txt"
