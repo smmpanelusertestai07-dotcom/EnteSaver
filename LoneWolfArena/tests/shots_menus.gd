@@ -1,10 +1,16 @@
 extends Node
-## Menus screenshot tour (everything outside the match), with input checks:
+## Menus screenshot tour (everything outside the match), with real-input checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_menus.gd
-## Boot/loading screen, lobby, name edit, how to play, wardrobe (card tap, rarity tab), every
-## settings tab (taps change settings, presets, close saves), credits, START -> match loading
-## overlay -> arena, pause menu (+ settings from it), results screens (win, defeat, draw,
-## invalid) in an empty scene with sample data. Returns the number of failed checks.
+## Boot/loading screen, lobby (menu captions bright, drag to turn the character, START position
+## report), name edit (pencil tap, long name ends in "..."), the player card, how to play, the
+## wardrobe (card tap, rarity tab), every settings tab (tab taps, ULTRA, HIGH / DEFAULT
+## presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
+## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
+## shortcut), results screens (win, defeat, draw, invalid) with the opponent's row in an empty
+## scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
+## Android back is sent the way the engine delivers it (_back(): the node, then its children
+## by index, children added during the walk included), so a menu opened by a back request also
+## receives that same request. Returns the number of failed checks.
 
 var _fails := 0
 var _at: Node
@@ -16,6 +22,7 @@ func run(at: Node) -> int:
 	_at = at
 	var saved_settings: Dictionary = Game.settings.duplicate(true)
 	var saved_bundle := String(Game.profile.bundle)
+	var saved_name := String(Game.profile.name)
 	Game.settings.difficulty = 1
 	# The autotest boot goes straight to the lobby; wait for it, then look at the boot screen.
 	await _wait_scene("Lobby", 30.0)
@@ -36,11 +43,17 @@ func run(at: Node) -> int:
 		await at.wait(0.2)
 		t += 0.2
 	_check(ld != null and ld.done, "boot loading finishes")
+	_check(get_tree().root.get_node_or_null("LoadingCache") != null, "boot preloads kept by LoadingCache")
 	Loading.hold_for_test = false
 	Game.goto_lobby()
 	var lobby := await _wait_scene("Lobby", 30.0)
 	await _settle(2.0)
 	await at.shot("m02_lobby")
+	var marks: Dictionary = Game.get("_marks")
+	_check(marks.has("ui start"), "lobby reports the START position")
+	var howto := lobby.find_child("HowToPlayButton", true, false) as Control
+	var lum := await _caption_lum(howto)
+	_check(lum >= 230.0, "menu captions are drawn bright, not under their plate (HOW TO PLAY max lum %.0f)" % lum)
 	# Drag on the character turns it.
 	var model := lobby.get("model") as Node3D
 	var yaw0 := model.rotation.y
@@ -54,17 +67,40 @@ func run(at: Node) -> int:
 	at.touch(1, p0 + Vector2(180, 0) * fx.get_scale(), false)
 	await at.wait(0.1)
 	_check(absf(model.rotation.y - yaw0) > 0.3, "dragging on the character turns it (%.2f rad)" % (model.rotation.y - yaw0))
-	# Name edit + how to play.
-	lobby.call("_edit_name")
-	await _settle(0.6)
-	await at.shot("m03_name_edit")
-	lobby.call("_close_modal")
-	lobby.call("_how_to_play")
+	# Name edit from the pencil; a long name ends in "..." inside the player card.
+	await _tap(lobby.find_child("EditName", true, false) as Control)
+	await _settle(0.5)
+	var le := lobby.find_child("NameEdit", true, false) as LineEdit
+	_check(le != null, "the pencil opens the name editor")
+	if le:
+		await at.shot("m03_name_edit")
+		le.text = "SHADOWHUNTER99"
+		await _tap(lobby.find_child("NameOk", true, false) as Control)
+		await _settle(0.4)
+		var nl := lobby.find_child("PlayerName", true, false) as Label
+		_check(String(Game.profile.name) == "SHADOWHUNTER99" and nl and nl.size.x <= 170.0,
+			"a 14-character name is saved and fits the card (%.0f px)" % (nl.size.x if nl else -1.0))
+		await at.shot("m03b_long_name")
+	# The whole player card opens the editor too; back closes it.
+	var card := lobby.find_child("PlayerCard", true, false) as Control
+	if card:
+		await _tap_at(card.get_global_rect().position + Vector2(34, 31))
+		await _settle(0.3)
+	_check(lobby.find_child("NameEdit", true, false) != null, "tapping the player card opens the name editor")
+	_back()
+	await _settle(0.3)
+	_check(lobby.get("_modal") == null, "back closes the name editor")
+	# How to play from its menu row; the header X closes it.
+	await _tap(howto)
 	await _settle(0.6)
 	await at.shot("m04_how_to_play")
-	lobby.call("_close_modal")
-	await at.wait(0.3)
-	# Wardrobe: open with a tap, pick a card by tapping it, filter by rarity.
+	var modal := lobby.get("_modal") as Node
+	_check(modal != null, "HOW TO PLAY opens")
+	if modal:
+		await _tap(modal.find_child("Close", true, false) as Control)
+		await _settle(0.3)
+	_check(lobby.get("_modal") == null, "the popup X closes HOW TO PLAY")
+	# Wardrobe: open with a tap, pick a card by tapping it, filter by rarity, back closes it.
 	await _tap(lobby.find_child("BundlesButton", true, false) as Control)
 	await at.wait(1.2)
 	var royal := lobby.find_child("Bundle_royal", true, false) as Control
@@ -73,17 +109,18 @@ func run(at: Node) -> int:
 		await _tap(royal)
 		await at.wait(0.6)
 	_check(String(lobby.get("_preview_bundle")) == "royal", "tapping a bundle card previews it")
+	await _settle(0.5)
 	await at.shot("m05_wardrobe")
 	await _tap(lobby.find_child("Tab_epic", true, false) as Control)
 	await _settle(0.5)
 	await at.shot("m06_wardrobe_epic")
 	_check(lobby.find_child("Bundle_royal", true, false) == null and lobby.find_child("Bundle_neon", true, false) != null, "EPIC tab filters the cards")
-	await _tap(lobby.find_child("BackButton", true, false) as Control)
-	await at.wait(0.8)
-	_check(lobby.get("wardrobe") == null, "BACK closes the wardrobe")
-	# Settings: open from the gear, walk the tabs, tap a few options.
+	_back()
+	await _settle(0.8)
+	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
+	# Settings: open from the gear, walk the tabs with taps, tap a few options.
 	await _tap(lobby.find_child("SettingsButton", true, false) as Control)
-	await at.wait(0.6)
+	await _settle(0.6)
 	var sp := _settings(lobby)
 	_check(sp != null, "settings opens from the gear")
 	if sp:
@@ -94,14 +131,15 @@ func run(at: Node) -> int:
 			await _tap(ultra)
 		_check(int(Game.settings.graphics) == 2, "tapping ULTRA sets graphics 2")
 		Game.settings.graphics = g_before
-		sp.call("_show_tab", 2)
+		await _tap(_find_text(sp, "CONTROLS"))
 		await _settle(0.4)
 		await at.shot("m08_settings_controls")
+		_check(sp.find_child("EditHud", true, false) != null, "lobby settings offer EDIT CUSTOM HUD")
 		(sp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
 		await _settle(0.4)
 		await at.shot("m09_settings_controls_more")
-		sp.call("_show_tab", 1)
-		await at.wait(0.3)
+		await _tap(_find_text(sp, "SENSITIVITY"))
+		await _settle(0.3)
 		var high := _find_text(sp, "HIGH")
 		if high:
 			await _tap(high)
@@ -112,71 +150,123 @@ func run(at: Node) -> int:
 		if deflt:
 			await _tap(deflt)
 		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "DEFAULT preset sets 100 / 71")
-		sp.call("_show_tab", 3)
+		await _tap(_find_text(sp, "SOUND"))
 		await _settle(0.3)
 		await at.shot("m11_settings_sound")
 		var closed := [false]
 		sp.closed.connect(func() -> void: closed[0] = true)
-		await _tap(sp.find_child("Close", true, false) as Control)
-		await at.wait(0.4)
-		_check(closed[0] and _settings(lobby) == null, "Close saves and closes the settings")
-	# Credits.
+		_back()
+		await _settle(0.4)
+		_check(closed[0] and _settings(lobby) == null and lobby.get("_modal") == null, "back saves and closes the settings (and nothing else)")
+	# Credits; back closes them.
 	await _tap(lobby.find_child("CreditsButton", true, false) as Control)
 	await _settle(0.8)
 	await at.shot("m12_credits")
+	_back()
+	await _settle(0.4)
+	var credits_open := false
 	for c in lobby.get_children():
-		if c is CreditsPanel:
-			c.queue_free()
-	await at.wait(0.3)
-	# START -> match loading overlay -> arena.
+		if c is CreditsPanel and not c.is_queued_for_deletion():
+			credits_open = true
+	_check(not credits_open, "back closes the credits")
+	# Back with nothing open asks before quitting; CANCEL and back both close the dialog.
+	_back()
+	await _settle(0.4)
+	_check(lobby.find_child("QuitDialog", true, false) != null, "back in the lobby asks before quitting")
+	await at.shot("m12b_quit_dialog")
+	await _tap(lobby.find_child("QuitCancel", true, false) as Control)
+	await _settle(0.3)
+	_check(lobby.get("_modal") == null, "CANCEL closes the quit dialog")
+	_back()
+	await _settle(0.2)
+	_back()
+	await _settle(0.3)
+	_check(lobby.get("_modal") == null, "a second back closes the quit dialog")
+	# START -> match loading overlay (back is ignored there) -> arena.
 	await _tap(lobby.get("start_btn") as Control, 0.05)
 	await _settle(0.25)
 	await at.shot("m13_match_loading")
+	_back()
+	await _settle(0.1)
+	_check(lobby.find_child("QuitDialog", true, false) == null, "back during the match loading does nothing")
 	var arena := await _wait_scene("Arena", 30.0)
 	_check(arena != null, "START enters the arena")
 	if arena:
 		await at.wait(1.0)
-		arena.call("open_pause")
+		# Android back opens the pause menu (and the same request must not close it again).
+		_back()
 		await _settle(0.5)
-		await at.shot("m14_pause")
 		var pm := arena.find_child("PauseMenu", true, false)
-		_check(pm != null and get_tree().paused, "pause menu pauses the match")
+		_check(pm != null and get_tree().paused, "back in a match opens the pause menu and keeps it open")
+		var hud := arena.get("hud") as CanvasItem
+		_check(hud != null and not hud.visible, "the match HUD is hidden under the pause menu")
+		await at.shot("m14_pause")
 		if pm:
 			await _tap(pm.find_child("Settings", true, false) as Control)
 			await _settle(0.5)
-			await at.shot("m15_pause_settings")
 			var psp: Node = null
 			for c in pm.get_children():
 				if c is SettingsPanel:
 					psp = c
-			if psp is SettingsPanel:
-				(psp as SettingsPanel).call("_close")
-			await at.wait(0.3)
-			await _tap(pm.find_child("Resume", true, false) as Control)
-			await at.wait(0.4)
-			_check(not get_tree().paused, "RESUME unpauses")
-	# Results in an empty scene (the key art stands in for the arena behind).
+			_check(psp != null, "SETTINGS opens over the pause menu")
+			if psp:
+				await _tap(_find_text(psp, "CONTROLS"))
+				await _settle(0.4)
+				(psp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
+				await _settle(0.4)
+				await at.shot("m15_pause_settings")
+				_check(psp.find_child("EditHud", true, false) == null and psp.find_child("EditHudNote", true, false) != null,
+					"in a match the HUD editor shortcut is replaced by a note")
+				_back()
+				await _settle(0.4)
+			_check(arena.find_child("PauseMenu", true, false) != null and _no_settings(pm), "back closes the settings, the pause menu stays")
+			_back()
+			await _settle(0.4)
+			_check(arena.find_child("PauseMenu", true, false) == null and not get_tree().paused and hud.visible,
+				"a second back resumes the match and shows the HUD again")
+		# The HUD gear opens it too; RESUME closes it.
+		var gear_c := HudLayout.center(HudLayout.current().settings, get_viewport().get_visible_rect().size)
+		await _tap_at(gear_c)
+		await _settle(0.4)
+		var pm2 := arena.find_child("PauseMenu", true, false)
+		_check(pm2 != null and get_tree().paused, "the HUD gear opens the pause menu")
+		if pm2:
+			await _tap(pm2.find_child("Resume", true, false) as Control)
+			await _settle(0.4)
+		_check(not get_tree().paused, "RESUME unpauses")
+	# Results in an empty scene (the key art stands in for the arena behind; a stub scoreboard
+	# gives the opponent's row).
 	for r in [_sample("victory"), _sample("defeat"), _sample("draw"), _sample("invalid")]:
-		var root := Control.new()
-		root.name = "ResultsTest"
-		root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		var tex := UI.texture("keyart_clean.jpg")
-		if tex:
-			root.add_child(UI.cover(tex))
-		get_tree().change_scene_to_node(root)
-		await at.wait(0.3)
-		var rs := ResultsScreen.new()
-		root.add_child(rs)
-		rs.setup(r)
+		var rs := await _results_scene(r)
 		await _settle(2.8)
 		await at.shot("m16_results_%s" % String(r.kind))
 		_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
+		_check(rs.find_child("EnemyRow", true, false) != null, "the opponent's row comes from the scoreboard (%s)" % r.kind)
+	# LOBBY tap, back on results, PLAY AGAIN tap.
+	var rs2 := await _results_scene(_sample("defeat"))
+	await _settle(0.6)
+	await _tap(rs2.find_child("Lobby", true, false) as Control)
+	_check(await _wait_scene("Lobby", 30.0) != null, "LOBBY returns to the lobby")
+	rs2 = await _results_scene(_sample("draw"))
+	await _settle(0.6)
+	_back()
+	_check(await _wait_scene("Lobby", 30.0) != null, "back on the results returns to the lobby")
+	rs2 = await _results_scene(_sample("victory"))
+	await _settle(0.6)
+	await _tap(rs2.find_child("PlayAgain", true, false) as Control)
+	await _settle(0.2)
+	_check(get_tree().root.find_child("Loading", true, false) != null or get_tree().current_scene.name == "Arena", "PLAY AGAIN shows the match loading")
+	_back()
+	_check(await _wait_scene("Arena", 30.0) != null, "PLAY AGAIN starts a new match (back ignored while it loads)")
 	_check(ResultsScreen.honour({"headshots": 2, "hp_left": 50, "taken": 150}) == "SHARPSHOOTER", "honour SHARPSHOOTER")
 	_check(ResultsScreen.honour({"headshots": 0, "hp_left": 180, "taken": 20}) == "UNTOUCHABLE", "honour UNTOUCHABLE")
 	_check(ResultsScreen.honour({"headshots": 1, "hp_left": 12, "taken": 188}) == "CLUTCH", "honour CLUTCH")
 	_check(ResultsScreen.honour({"headshots": 0, "hp_left": 0, "taken": 200}) == "FIGHTER", "honour FIGHTER")
 	Game.settings = saved_settings
+	Game.save_settings()
 	Game.profile.bundle = saved_bundle
+	Game.profile.name = saved_name
+	Game.save_profile()
 	at.log_line("MENUS TOUR DONE fails=%d" % _fails)
 	return _fails
 
@@ -192,11 +282,48 @@ func _sample(kind: String) -> Dictionary:
 	return r
 
 
+## An empty scene with the key art and a stub `scoreboard_rows()` (what the arena offers), the
+## results screen on top.
+func _results_scene(r: Dictionary) -> ResultsScreen:
+	var stub := GDScript.new()
+	stub.source_code = "extends Control\nvar rows: Array = []\nfunc scoreboard_rows() -> Array:\n\treturn rows\n"
+	stub.reload()
+	var root := Control.new()
+	root.set_script(stub)
+	root.name = "ResultsTest"
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var won := bool(r.get("won", false))
+	root.set("rows", [
+		{"name": "ROOKIE", "me": true, "alive": true, "hp": int(r.hp_left), "kills": int(r.kills), "damage": int(r.damage),
+			"headshots": int(r.headshots), "accuracy": 47, "rounds": int(r.score_player), "weapon": "AR-7 RIFLE"},
+		{"name": "VIPER", "me": false, "alive": not won, "hp": 0 if won else 64, "kills": 0 if won else 1,
+			"damage": 88 if won else 200, "headshots": 0 if won else 2, "accuracy": 31, "rounds": int(r.score_bot), "weapon": "AR-7 RIFLE"},
+	])
+	var tex := UI.texture("keyart_clean.jpg")
+	if tex:
+		root.add_child(UI.cover(tex))
+	get_tree().change_scene_to_node(root)
+	await _at.wait(0.3)
+	var rs := ResultsScreen.new()
+	root.add_child(rs)
+	rs.setup(r)
+	return rs
+
+
 func _settings(lobby: Node) -> SettingsPanel:
 	for c in (lobby.get("ui") as Node).get_children():
-		if c is SettingsPanel:
+		if c is SettingsPanel and not c.is_queued_for_deletion():
 			return c
 	return null
+
+
+func _no_settings(n: Node) -> bool:
+	if n == null:
+		return true
+	for c in n.get_children():
+		if c is SettingsPanel and not c.is_queued_for_deletion():
+			return false
+	return true
 
 
 func _find_text(root: Node, text: String) -> Button:
@@ -204,6 +331,42 @@ func _find_text(root: Node, text: String) -> Button:
 		if (b as Button).text == text and (b as Button).is_visible_in_tree():
 			return b
 	return null
+
+
+## Android back as the engine delivers it (Window::_propagate_window_notification): the node
+## first, then its children by index, re-reading the count, so children added on the way get
+## the same notification.
+func _back() -> void:
+	_prop(get_tree().root)
+
+
+func _prop(n: Node) -> void:
+	n.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	var i := 0
+	while i < n.get_child_count():
+		var c := n.get_child(i)
+		if not (c is Window):
+			_prop(c)
+		i += 1
+
+
+## Brightest pixel (luminance 0..255) of a menu row's caption start (where a plate drawn over
+## the text used to grey it out most).
+func _caption_lum(c: Control) -> float:
+	if c == null:
+		return 0.0
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var fx: Transform2D = get_tree().root.get_final_transform()
+	var r := c.get_global_rect()
+	var a: Vector2 = fx * (r.position + Vector2(60, 8))
+	var b: Vector2 = fx * (r.position + Vector2(130, r.size.y - 8))
+	var best := 0.0
+	for y in range(int(a.y), int(b.y)):
+		for x in range(int(a.x), int(b.x)):
+			var col := img.get_pixel(clampi(x, 0, img.get_width() - 1), clampi(y, 0, img.get_height() - 1))
+			best = maxf(best, col.r * 0.2126 + col.g * 0.7152 + col.b * 0.0722)
+	return best * 255.0
 
 
 ## Waits `sec` of process time (what tweens and _process see) and at least 3 drawn frames.
@@ -233,7 +396,11 @@ func _tap(c: Control, hold := 0.08) -> void:
 	if c == null:
 		_check(false, "tap target exists")
 		return
-	var p := c.get_global_rect().get_center()
+	await _tap_at(c.get_global_rect().get_center(), hold)
+
+
+## A real tap at a canvas position.
+func _tap_at(p: Vector2, hold := 0.08) -> void:
 	var w: Vector2 = get_tree().root.get_final_transform() * p
 	_at.touch(0, w, true)
 	await _at.wait(hold)
