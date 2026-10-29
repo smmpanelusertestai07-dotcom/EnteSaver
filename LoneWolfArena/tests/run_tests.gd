@@ -2,6 +2,8 @@ extends Node
 ## Unit tests for the pure gameplay logic. Run through the scene, so the autoloads exist:
 ##   godot --headless --path . res://tests/run_tests.tscn
 
+const GuardCode := preload("res://autoload/guard.gd")     # its static helpers, without the autoload
+
 var _fails := 0
 var _passes := 0
 
@@ -180,9 +182,9 @@ func _test_guard() -> void:
 	_check(not Guard.verify_dict({"name": "OLD", "xp": 99999}).ok, "an unsigned profile is rejected")
 	_check(not Guard.verify_dict({"name": "OLD", "_sig": 12345}).ok and not Guard.verify_dict({"_sig": []}).ok,
 		"a profile with a malformed signature is rejected")
-	_check(Guard.speed_window(3.0, 3.0) == 0 and Guard.speed_window(3.0, 3.3) == 0, "speed check: a normal clock passes")
-	_check(Guard.speed_window(3.0, 1.5) == 1 and Guard.speed_window(3.0, 6.0) == 1, "speed check: a 2x faster or slower game clock strikes")
-	_check(Guard.speed_window(3.0, -2.0) == -1 and Guard.speed_window(3.0, 0.0) == -1, "speed check: a wall clock set backwards gives no verdict")
+	_check(GuardCode.speed_window(3.0, 3.0) == 0 and GuardCode.speed_window(3.0, 3.3) == 0, "speed check: a normal clock passes")
+	_check(GuardCode.speed_window(3.0, 1.5) == 1 and GuardCode.speed_window(3.0, 6.0) == 1, "speed check: a 2x faster or slower game clock strikes")
+	_check(GuardCode.speed_window(3.0, -2.0) == -1 and GuardCode.speed_window(3.0, 0.0) == -1, "speed check: a wall clock set backwards gives no verdict")
 	_check(Game.clean_name("  [color=red]hacker[/color]\u0007\u202e") == "COLORREDHACKER", "player names keep only A-Z 0-9 space _ - . (14 max)")
 	var saved_profile := Game.profile.duplicate(true)
 	Game.profile.merge({"name": "", "bundle": "nope", "matches": -5, "wins": 9, "kills": -1, "xp": -40}, true)
@@ -196,13 +198,13 @@ func _test_guard() -> void:
 func _test_signer_digests() -> void:
 	var hex := "0123456789abcdef".repeat(4)
 	var colons := ":".join(PackedStringArray(Array(range(0, 64, 2)).map(func(i: int) -> String: return hex.substr(i, 2).to_upper())))
-	var d := Guard.signer_digests(hex)
+	var d := GuardCode.signer_digests(hex)
 	_check(d.size() == 1 and d[0].size() == 32 and d[0][0] == 0x01 and d[0][31] == 0xef, "signer file: a hex digest becomes 32 bytes")
-	_check(Guard.signer_digests(colons + "\n") == d, "signer file: keytool's AB:CD:.. form gives the same bytes")
-	var two := Guard.signer_digests(hex + "\n\n" + "ab".repeat(32) + "\n")
+	_check(GuardCode.signer_digests(colons + "\n") == d, "signer file: keytool's AB:CD:.. form gives the same bytes")
+	var two := GuardCode.signer_digests(hex + "\n\n" + "ab".repeat(32) + "\n")
 	_check(two.size() == 2 and two[1][0] == 0xab, "signer file: one accepted certificate per line")
-	_check(Guard.signer_digests("").is_empty() and Guard.signer_digests(hex.left(62)).is_empty(), "signer file: empty or short text is rejected")
-	_check(Guard.signer_digests(hex + "\n" + hex.left(63) + "z").is_empty(), "signer file: a non-hex line rejects the file")
+	_check(GuardCode.signer_digests("").is_empty() and GuardCode.signer_digests(hex.left(62)).is_empty(), "signer file: empty or short text is rejected")
+	_check(GuardCode.signer_digests(hex + "\n" + hex.left(63) + "z").is_empty(), "signer file: a non-hex line rejects the file")
 	_check(Guard._signature_state() == "not android", "signature check only runs on Android")
 
 

@@ -414,20 +414,20 @@ func _surface_tris(g: GeometryInstance3D) -> Array:
 	return out
 
 
-func _nav_checks(map: MapBuilder, ar: Node) -> void:
+func _nav_checks(mb: MapBuilder, ar: Node) -> void:
 	# The safe zone ends as a 4 m circle around zone_center: that must be open floor (no
 	# obstacle footprint), and so should most of the 6 m ring around it.
 	for rad: float in [4.0, 6.0]:
 		var inside := 0
 		var blocked := 0
-		var c := Vector2(map.zone_center.x, map.zone_center.z)
+		var c := Vector2(mb.zone_center.x, mb.zone_center.z)
 		for ix in range(-40, 41):
 			for iz in range(-40, 41):
 				var q := c + Vector2(ix, iz) * (rad / 40.0)
 				if q.distance_to(c) > rad - 0.05:      # the interior (a wall touching the edge is fine)
 					continue
 				inside += 1
-				for r: Rect2 in map.obstacles:
+				for r: Rect2 in mb.obstacles:
 					if r.has_point(q):
 						blocked += 1
 						break
@@ -447,15 +447,15 @@ func _nav_checks(map: MapBuilder, ar: Node) -> void:
 		return
 	await at.wait(0.3)
 	var targets := {
-		"spawn_b": map.spawn_b, "high_ground": Vector3(-5.2, MapBuilder.C_H, 1.0), "high_ground_far": Vector3(5.2, MapBuilder.C_H, -1.0),
-		"bay_centre": map.zone_center, "bay_north": Vector3(0.0, 0, -4.5), "bay_south": Vector3(0.0, 0, 4.5),
+		"spawn_b": mb.spawn_b, "high_ground": Vector3(-5.2, MapBuilder.C_H, 1.0), "high_ground_far": Vector3(5.2, MapBuilder.C_H, -1.0),
+		"bay_centre": mb.zone_center, "bay_north": Vector3(0.0, 0, -4.5), "bay_south": Vector3(0.0, 0, 4.5),
 		"open_container_a": Vector3(-9.2, 0.12, -8.7), "open_container_b": Vector3(9.2, 0.12, 8.7),
 		"sw_pocket": Vector3(-19.0, 0, 8.5), "ne_pocket": Vector3(19.0, 0, -8.5), "nw_pad": Vector3(-17.0, 0, -8.0),
 		"north_lane": Vector3(0.0, 0, -9.0), "south_lane": Vector3(0.0, 0, 9.0), "behind_crates_a": Vector3(-13.8, 0, 0.0),
 	}
 	for key: String in targets:
 		var to: Vector3 = targets[key]
-		var path := NavigationServer3D.map_get_path(nav_map, map.spawn_a, to, true)
+		var path := NavigationServer3D.map_get_path(nav_map, mb.spawn_a, to, true)
 		var end := path[path.size() - 1] if path.size() > 0 else Vector3.INF
 		var ok := path.size() > 1 and end.distance_to(to) < 1.2
 		var length := 0.0
@@ -468,7 +468,7 @@ func _nav_checks(map: MapBuilder, ar: Node) -> void:
 	var bad := 0
 	for i in 60:
 		var rp := NavigationServer3D.map_get_random_point(nav_map, 1, false)
-		var path := NavigationServer3D.map_get_path(nav_map, map.spawn_a, rp, true)
+		var path := NavigationServer3D.map_get_path(nav_map, mb.spawn_a, rp, true)
 		if path.size() == 0 or path[path.size() - 1].distance_to(rp) > 0.8:
 			bad += 1
 			at.log_line("MAPNAV unreachable random point %s" % str(rp))
@@ -478,8 +478,8 @@ func _nav_checks(map: MapBuilder, ar: Node) -> void:
 
 
 ## Translucent overlay of the baked navmesh, one colour per connected island.
-func _nav_overlay(map: MapBuilder) -> MeshInstance3D:
-	var nm := map.nav.navigation_mesh
+func _nav_overlay(mb: MapBuilder) -> MeshInstance3D:
+	var nm := mb.nav.navigation_mesh
 	if nm == null:
 		return null
 	var verts := nm.get_vertices()
@@ -550,9 +550,9 @@ func _union(parent: Array, a: int, b: int) -> void:
 
 
 ## Writes every box collider of the map (world-layer bodies) + obstacles to colliders.json.
-func _dump_colliders(map: MapBuilder) -> void:
+func _dump_colliders(mb: MapBuilder) -> void:
 	var boxes := []
-	for root: Node in [map.nav, map.deco]:
+	for root: Node in [mb.nav, mb.deco]:
 		for cs in root.find_children("*", "CollisionShape3D", true, false):
 			var shape := (cs as CollisionShape3D).shape
 			if shape is BoxShape3D:
@@ -561,11 +561,11 @@ func _dump_colliders(map: MapBuilder) -> void:
 					"basis": [xf.basis.x.x, xf.basis.x.y, xf.basis.x.z, xf.basis.y.x, xf.basis.y.y, xf.basis.y.z, xf.basis.z.x, xf.basis.z.y, xf.basis.z.z],
 					"disabled": (cs as CollisionShape3D).disabled})
 	var obs := []
-	for r in map.obstacles:
+	for r in mb.obstacles:
 		obs.append([r.position.x, r.position.y, r.size.x, r.size.y])
-	var data := {"boxes": boxes, "obstacles": obs, "map_rect": [map.map_rect.position.x, map.map_rect.position.y, map.map_rect.size.x, map.map_rect.size.y],
-		"spawn_a": [map.spawn_a.x, map.spawn_a.z], "spawn_b": [map.spawn_b.x, map.spawn_b.z], "cover_points": map.cover_points.size()}
+	var data := {"boxes": boxes, "obstacles": obs, "map_rect": [mb.map_rect.position.x, mb.map_rect.position.y, mb.map_rect.size.x, mb.map_rect.size.y],
+		"spawn_a": [mb.spawn_a.x, mb.spawn_a.z], "spawn_b": [mb.spawn_b.x, mb.spawn_b.z], "cover_points": mb.cover_points.size()}
 	var f := FileAccess.open(String(at.get("shots_dir")).path_join("colliders.json"), FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
 	f.close()
-	at.log_line("colliders=%d obstacles=%d cover_points=%d" % [boxes.size(), obs.size(), map.cover_points.size()])
+	at.log_line("colliders=%d obstacles=%d cover_points=%d" % [boxes.size(), obs.size(), mb.cover_points.size()])

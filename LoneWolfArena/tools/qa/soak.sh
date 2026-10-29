@@ -5,6 +5,9 @@ set -u
 N="${1:-5}"; LOG="${2:-/tmp/lonewolf-soak}"
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 mkdir -p "$LOG"
+# Godot's user data (logs, anything a run writes to user://) goes to a scratch folder: the
+# checks never touch the player's own data and parallel runs share nothing (Linux).
+export XDG_DATA_HOME="$(mktemp -d)"
 fail=0
 for i in $(seq 1 "$N"); do
   godot --headless --path "$HERE" -- --autotest=sim > "$LOG/sim_$i.log" 2>&1

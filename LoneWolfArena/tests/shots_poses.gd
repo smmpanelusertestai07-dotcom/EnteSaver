@@ -40,7 +40,6 @@ func run(at: Node) -> int:
 	floor_mi.mesh = pm
 	world.add_child(floor_mi)
 	var models: Array[CharacterModel] = []
-	var cams: Array[Camera3D] = []
 	for i in 2:
 		var m := CharacterModel.new()
 		world.add_child(m)

@@ -18,6 +18,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 LOGS="$(mktemp -d)"
+# Godot's user data (logs, anything a run writes to user://) goes to a scratch folder: the
+# checks never touch the player's own data and parallel runs share nothing (Linux).
+export XDG_DATA_HOME="$LOGS/userdata"
 fail=0
 step() { # step <name> <command...>
   local name="$1"; shift

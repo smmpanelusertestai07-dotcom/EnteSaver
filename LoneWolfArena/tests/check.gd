@@ -1,8 +1,9 @@
 extends Node
-## Loads every script so compile errors surface with autoloads available.
+## Loads every script (the game's and the tests') so compile errors surface with autoloads
+## available; run with -d, GDScript also reports its warnings (tools/qa/run_checks.sh).
 func _ready() -> void:
 	var bad := 0
-	for dir in ["res://autoload", "res://scripts"]:
+	for dir in ["res://autoload", "res://scripts", "res://tests"]:
 		for f in DirAccess.get_files_at(dir):
 			if f.ends_with(".gd"):
 				var s: Script = load(dir.path_join(f))

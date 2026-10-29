@@ -7,6 +7,9 @@ set -u
 OUT="${1:?out dir}"; RES="${2:-1560x720}"; MODE="${3:-screens}"
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 mkdir -p "$OUT"
+# Godot's user data (logs, anything a run writes to user://) goes to a scratch folder: the
+# checks never touch the player's own data and parallel runs share nothing (Linux).
+export XDG_DATA_HOME="$(mktemp -d)"
 W="${RES%x*}"; H="${RES#*x}"
 xvfb-run -a -s "-screen 0 $((W + 40))x$((H + 40))x24" \
   godot --path "$HERE" --rendering-driver opengl3 --resolution "$RES" -- --autotest="$MODE" --shots="$OUT" \

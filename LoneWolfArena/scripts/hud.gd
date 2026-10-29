@@ -307,7 +307,7 @@ func _input(event: InputEvent) -> void:
 		if t.pressed:
 			_on_down(t.index, t.position)
 		else:
-			_on_up(t.index)
+			_on_up(t.index, t.canceled)
 	elif event is InputEventScreenDrag:
 		var d := event as InputEventScreenDrag
 		_on_drag(d.index, d.position, d.relative)
@@ -435,7 +435,9 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 			player.add_look(rel, true)
 
 
-func _on_up(index: int) -> void:
+## canceled: the system took the touch away (app switch, notification shade), so a held FIRE
+## lets go without the release shooting (a held sniper scope closes).
+func _on_up(index: int, canceled := false) -> void:
 	if not _touches.has(index):
 		return
 	var t: Dictionary = _touches[index]
@@ -453,7 +455,10 @@ func _on_up(index: int) -> void:
 				if String(_touches[k].kind) == "fire":
 					still = true
 			if not still:
-				player.set_firing(false)
+				if canceled:
+					player.cancel_input()
+				else:
+					player.set_firing(false)
 
 
 func _in_joy_zone(pos: Vector2, vs: Vector2) -> bool:
