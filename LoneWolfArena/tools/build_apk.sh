@@ -103,7 +103,11 @@ if grep -qE "build_(signer|secret)\.txt|build_keys\.gd$" <<< "$FILES"; then
 fi
 BADGING="$("$BT/aapt" dump badging "$OUT")"
 grep -E "^package:|uses-permission|sdkVersion|native-code" <<< "$BADGING"
-if grep -q "android.permission.INTERNET" <<< "$BADGING"; then
-  echo "ERROR: the APK requests INTERNET permission"; exit 1
+# Permissions: vibration and local Wi-Fi play (Android needs INTERNET for any socket; the game
+# only talks to phones on the same network, see scripts/lan.gd). Anything else fails the build.
+PERMS="$(grep -oE "uses-permission: name='[^']+'" <<< "$BADGING" | sed "s/.*name='//; s/'\$//" | sort -u)"
+EXTRA="$(grep -vxE "android\.permission\.(VIBRATE|INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE|CHANGE_WIFI_MULTICAST_STATE)|.*\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" <<< "$PERMS" || true)"
+if [ -n "$EXTRA" ]; then
+  echo "ERROR: the APK requests unexpected permissions: $EXTRA"; exit 1
 fi
 ls -la "$OUT"

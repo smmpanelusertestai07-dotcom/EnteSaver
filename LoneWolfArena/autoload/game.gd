@@ -70,6 +70,17 @@ var shots_dir := ""
 ## The next arena run is practice (lobby PRACTICE): a training dummy with endless HP, no zone, no
 ## clock, nothing recorded. START clears it.
 var practice := false
+## The next arena run is a Wi-Fi match against the phone in `lan.opponent` (see Lan).
+var online := false
+var lan: Lan
+
+
+## The local-network service (made on first use; it outlives scene changes).
+func lan_service() -> Lan:
+	if lan == null:
+		lan = Lan.new()
+		add_child(lan)
+	return lan
 
 signal settings_changed
 

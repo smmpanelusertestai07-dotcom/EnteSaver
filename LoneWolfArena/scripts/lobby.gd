@@ -32,6 +32,11 @@ var model: CharacterModel
 var camera: Camera3D
 var ui: CanvasLayer
 var start_btn: Button
+var _wifi_list: VBoxContainer
+var _wifi_status: Label
+var _wifi_sig := ""
+var _wifi_note := ""
+var _wifi_refresh_t := 0.0
 var wardrobe: Control
 var _main_ui: Control
 var _preview_bundle := ""
@@ -73,6 +78,13 @@ func _ready() -> void:
 	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	Game.settings_changed.connect(_apply_quality)
+	var lan := Game.lan_service()
+	lan.invited.connect(_on_wifi_invited)
+	lan.invite_cancelled.connect(_on_wifi_invite_cancelled)
+	lan.invite_answered.connect(_on_wifi_answered)
+	lan.session_started.connect(_on_wifi_session)
+	lan.session_ended.connect(_on_wifi_ended)
+	lan.start_discovery()
 
 
 ## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
@@ -89,6 +101,14 @@ func _mark_start() -> void:
 
 
 func _exit_tree() -> void:
+	if Game.lan:
+		Game.lan.invited.disconnect(_on_wifi_invited)
+		Game.lan.invite_cancelled.disconnect(_on_wifi_invite_cancelled)
+		Game.lan.invite_answered.disconnect(_on_wifi_answered)
+		Game.lan.session_started.disconnect(_on_wifi_session)
+		Game.lan.session_ended.disconnect(_on_wifi_ended)
+		Game.lan.cancel_invite()
+		Game.lan.stop_discovery()
 	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
 	var vp := get_viewport()
 	if vp:
@@ -728,6 +748,7 @@ func _build_left_menu(root: Control) -> void:
 	root.add_child(menu)
 	var items := [
 		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
+		["PLAY ON WI-FI", "v_player", "WifiButton", _open_wifi],
 		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
@@ -948,9 +969,124 @@ func _start() -> void:
 	if start_btn.disabled:
 		return
 	Game.practice = false
+	Game.online = false
 	start_btn.disabled = true
 	UI.set_caption(start_btn, "MATCHING")
 	Loading.start_match(self)
+
+
+# ---------------------------------------------------------------- Wi-Fi 1 vs 1 (see Lan)
+
+## Phones on the same Wi-Fi (or one phone's hotspot) list each other by player name; CHALLENGE
+## sends a request, the other phone accepts or declines. No internet and no server.
+func _open_wifi() -> void:
+	var v := _open_modal("PLAY ON WI-FI", 920.0)
+	var info := UI.label("Same Wi-Fi or one phone's hotspot. No internet, no server: nearby players show up by name.", 17, UI.TEXT_DIM, "semi")
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(info)
+	_wifi_status = UI.label("", 20, UI.ACCENT, "bold")
+	v.add_child(_wifi_status)
+	_wifi_list = VBoxContainer.new()
+	_wifi_list.add_theme_constant_override("separation", 8)
+	_wifi_list.custom_minimum_size = Vector2(0, 180)
+	v.add_child(_wifi_list)
+	_wifi_sig = "-"
+	_refresh_wifi()
+
+
+func _refresh_wifi() -> void:
+	if _wifi_list == null or not is_instance_valid(_wifi_list):
+		return
+	var lan := Game.lan_service()
+	var waiting := lan.waiting_for()
+	if lan.local_address() == "":
+		_wifi_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
+	elif waiting != "":
+		_wifi_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
+	elif lan.peers.is_empty():
+		_wifi_status.text = "LOOKING FOR PLAYERS ON THIS WI-FI..."
+	elif _wifi_note == "":
+		_wifi_status.text = "PLAYERS NEARBY"
+	if _wifi_note != "" and waiting == "":
+		_wifi_status.text = _wifi_note
+	var sig := waiting
+	for id in lan.peers:
+		sig += "|%s:%s" % [id, lan.peers[id].name]
+	if sig == _wifi_sig:
+		return
+	_wifi_sig = sig
+	for c in _wifi_list.get_children():
+		c.queue_free()
+	for id: String in lan.peers:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 16)
+		var who := UI.label(String(lan.peers[id].name), 26, UI.TEXT, "heavy")
+		who.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		who.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(who)
+		var b := UI.button("CANCEL" if waiting != "" else "CHALLENGE", 20, "light" if waiting != "" else "primary", Vector2(230, 52))
+		b.pressed.connect(func() -> void:
+			_wifi_note = ""
+			if Game.lan.waiting_for() != "":
+				Game.lan.cancel_invite()
+			elif not Game.lan.invite(id):
+				_wifi_note = "COULD NOT OPEN THE GAME PORT"
+			_wifi_sig = "-"
+			_refresh_wifi())
+		row.add_child(b)
+		_wifi_list.add_child(row)
+
+
+func _on_wifi_invited(who: String) -> void:
+	_wifi_list = null
+	var v := _open_modal("CHALLENGE", 640.0)
+	var t := UI.label("%s wants a 1 vs 1 on Wi-Fi" % who, 26, UI.TEXT, "heavy")
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(t)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 12)
+	var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
+	no.pressed.connect(func() -> void:
+		Game.lan.answer(false)
+		_close_modal())
+	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
+	yes.name = "AcceptButton"
+	yes.pressed.connect(func() -> void:
+		yes.disabled = true
+		UI.set_caption(yes, "CONNECTING")
+		Game.lan.answer(true))
+	row.add_child(no)
+	row.add_child(yes)
+	v.add_child(row)
+
+
+func _on_wifi_invite_cancelled() -> void:
+	if _modal and is_instance_valid(_modal) and _modal.find_child("AcceptButton", true, false):
+		_close_modal()
+
+
+func _on_wifi_answered(accepted: bool, who: String) -> void:
+	if not accepted:
+		_wifi_note = "%s DECLINED (OR DID NOT ANSWER)" % who
+		_wifi_sig = "-"
+
+
+func _on_wifi_session(_host: bool) -> void:
+	if start_btn.disabled:
+		return
+	Game.practice = false
+	Game.online = true
+	_close_modal()
+	start_btn.disabled = true
+	UI.set_caption(start_btn, "MATCHING")
+	Loading.start_match(self)
+
+
+func _on_wifi_ended(reason: String) -> void:
+	Game.online = false
+	_wifi_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
+	_wifi_sig = "-"
 
 
 ## Practice against a training dummy that never goes down (no zone, no clock, nothing recorded).
@@ -1448,6 +1584,11 @@ func _in_drag_zone(p: Vector2) -> bool:
 func _process(delta: float) -> void:
 	_time += delta
 	_idle_t += delta
+	if _wifi_list and is_instance_valid(_wifi_list):
+		_wifi_refresh_t -= delta
+		if _wifi_refresh_t <= 0.0:
+			_wifi_refresh_t = 0.4
+			_refresh_wifi()
 	if _cam_t < 1.0:
 		_cam_t = minf(1.0, _cam_t + delta / 0.45)
 		var k := 1.0 - pow(1.0 - _cam_t, 3.0)

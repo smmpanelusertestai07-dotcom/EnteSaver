@@ -38,7 +38,9 @@ var recoil_pitch := 0.0
 var recoil_yaw := 0.0
 var shake := 0.0
 var assist_target: Fighter
-var head_lock := 0.0    # s left of the armed head stop
+var head_lock := 0.0    # s left of the armed head stop (held while FIRE stays down)
+var _shot_hold := 0.0   # s the first semi-auto shot waits after the press for a drag up
+const DRAG_SHOT_WINDOW := 0.12
 var victory_cam := false
 var crosshair_on_target := false      # HUD: crosshair turns red
 var _track_dir := Vector3.ZERO        # last camera->target chest direction (for tracking)
@@ -151,6 +153,11 @@ func cancel_input() -> void:
 func set_firing(on: bool) -> void:
 	var was := firing
 	firing = on and alive
+	if firing and not was and not bool(weapon().def.auto) and scope_type() != "sniper":
+		_shot_hold = DRAG_SHOT_WINDOW
+	elif not firing and was and _shot_hold > 0.0:
+		_shot_hold = 0.0
+		_fire_once()          # a quick tap still fires
 	if firing and healing:
 		cancel_heal()
 	if firing:
@@ -229,7 +236,11 @@ func _think(delta: float) -> void:
 	if move_dir.length() > 0.5:
 		Game.mark("player moved")
 	_update_aim_assist(delta)
-	if firing:
+	if firing and _shot_hold > 0.0:
+		_shot_hold -= delta
+		if _shot_hold <= 0.0:
+			_try_fire()
+	elif firing:
 		_try_fire()
 	elif not weapon().infinite() and weapon().ammo <= 0 and not weapon().reloading:
 		start_reload()
@@ -265,6 +276,8 @@ func _try_fire() -> void:
 	var start := xf.origin + fwd * maxf((head - xf.origin).dot(fwd), 0.0)
 	if perform_shot(start, fwd):
 		Game.mark("player fired")
+		if arena and arena.has_method("net_shot"):
+			arena.net_shot(start, fwd)
 		_apply_recoil(w)
 		if scope_type() == "sniper" and ads and not _scope_hold:
 			ads = false        # bolt action: the scope drops after each shot
@@ -319,7 +332,8 @@ func _body_miss_angle(f: Fighter) -> float:
 
 
 func _update_aim_assist(delta: float) -> void:
-	head_lock = maxf(head_lock - delta, 0.0)
+	if not firing:
+		head_lock = maxf(head_lock - delta, 0.0)
 	assist_target = null
 	crosshair_on_target = false
 	if arena == null or camera == null:
@@ -374,10 +388,14 @@ func _update_aim_assist(delta: float) -> void:
 		var point := assist_target.head_position() if head_lock > 0.0 else assist_target.chest_position()
 		var want := _aim_angles_for(point)
 		var err := Vector2(wrapf(want.x - aim_yaw, -PI, PI), want.y - aim_pitch)
-		var step := err * (1.0 - exp(-float(ASSIST.pull_rate) * strength * delta))
+		var rate := float(ASSIST.pull_rate) * strength
 		var cap := deg_to_rad(float(ASSIST.pull_max_deg)) * strength * delta
 		if head_lock > 0.0:
 			cap *= 2.5
+			if _shot_hold > 0.0:      # press + flick up: the drag shot snaps onto the head
+				rate *= 3.0
+				cap *= 3.0
+		var step := err * (1.0 - exp(-rate * delta))
 		aim_yaw += clampf(step.x, -cap, cap)
 		aim_pitch += clampf(step.y, -cap, cap)
 	_apply_head_stop()
@@ -397,10 +415,9 @@ func _process(delta: float) -> void:
 	if rig == null:
 		return
 	var w := weapon()
-	if w.since_shot > 0.12:
-		var rec := 1.0 - exp(-7.0 * delta)
-		recoil_pitch = lerpf(recoil_pitch, 0.0, rec)
-		recoil_yaw = lerpf(recoil_yaw, 0.0, rec)
+	var rec := 1.0 - exp(-(9.0 if w.since_shot > 0.08 else 3.5) * delta)
+	recoil_pitch = lerpf(recoil_pitch, 0.0, rec)
+	recoil_yaw = lerpf(recoil_yaw, 0.0, rec)
 	shake = maxf(shake - delta * 2.5, 0.0)
 	var target_y := eye_height() + 0.02 if alive else 0.6
 	if victory_cam:

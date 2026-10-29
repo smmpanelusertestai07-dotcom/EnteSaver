@@ -9,6 +9,7 @@ const EDGE_DAMAGE := 60.0     # at 5 m, then fading out to RADIUS
 const MODEL := "res://assets/props/grenade.glb"
 
 var thrower: Fighter
+var cosmetic := false      # a Wi-Fi copy of the other phone's grenade: it hurts no fighter here
 var _fuse := FUSE
 var _bounced := false
 
@@ -65,7 +66,7 @@ func _explode() -> void:
 		scene.shake_camera(pos, 1.0)
 	for node in get_tree().get_nodes_in_group("fighters"):
 		var f := node as Fighter
-		if f == null or not f.alive:
+		if f == null or not f.alive or cosmetic:
 			continue
 		var target := f.chest_position()
 		var d := pos.distance_to(target)

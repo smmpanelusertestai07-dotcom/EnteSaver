@@ -11,6 +11,6 @@ Run from LoneWolfArena/ and report every number:
   pull time, head stop error, tracking %, red crosshair
 - `tools/qa/soak.sh 5` (every match must finish, zero SCRIPT ERROR lines, both sides must be able to win)
 - `tools/qa/capture.sh <dir> 1560x720 perf` (draw calls, primitives, nodes, orphans; leak = nodes growing between rounds)
-- if an APK is given: `aapt dump badging` (no INTERNET permission), `apksigner verify --print-certs`
+- if an APK is given: `aapt dump badging` (only VIBRATE and the Wi-Fi play permissions), `apksigner verify --print-certs`
 Compare against the targets in design/STYLE_SPEC.txt (section "4. Game feel", and the draw-call /
 primitive budget in "2. Map") and list failures first with the exact numbers. Do not edit anything.

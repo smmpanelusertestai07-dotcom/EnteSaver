@@ -328,6 +328,9 @@ func _on_down(index: int, pos: Vector2) -> void:
 	var id := _widget_at(pos, vs)
 	if id != "":
 		_press(id, index)
+		if String(_touches[index].kind) == "fire":
+			_touches[index]["start"] = pos
+			_touches[index]["pos"] = pos
 		return
 	if _joy_touch == -1 and _in_joy_zone(pos, vs):
 		_start_joystick(index, pos, vs)
@@ -432,7 +435,19 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 		"look":
 			player.add_look(rel, false)
 		"fire":
+			_touches[index]["pos"] = pos
 			player.add_look(rel, true)
+
+
+## A held FIRE button follows the finger like the floating joystick (by the drag since the
+## press, kept on screen) and snaps back when it is let go.
+func _fire_center(id: String, home: Vector2, r: float, vs: Vector2) -> Vector2:
+	for k in _touches:
+		var t: Dictionary = _touches[k]
+		if String(t.kind) == "fire" and String(t.id) == id and t.has("pos"):
+			var c: Vector2 = home + (t.pos as Vector2) - (t.start as Vector2)
+			return Vector2(clampf(c.x, r, vs.x - r), clampf(c.y, r, vs.y - r))
+	return home
 
 
 ## canceled: the system took the touch away (app switch, notification shade), so a held FIRE
@@ -759,8 +774,10 @@ func _draw_button(id: String, vs: Vector2) -> void:
 		HudDraw.glyph_button(self, c, r, _glyph(id), o, pressed)
 		return
 	var glyph := _glyph(id)
-	if (id == "fire_r" or id == "fire_l") and player != null and not editor_mode and Weapons.is_melee(player.weapon().def):
-		glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
+	if (id == "fire_r" or id == "fire_l") and not editor_mode:
+		c = _fire_center(id, c, r, vs)
+		if player != null and Weapons.is_melee(player.weapon().def):
+			glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
 	if id == "fire_r":
 		_draw_fire_halo(c, r, o, pressed)
 	HudDraw.button(self, c, r, glyph, o, pressed, act, en, float(GLYPH_SCALE.get(id, 0.6)))

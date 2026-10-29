@@ -16,8 +16,11 @@ app (Ente Saver) and must not be touched for game work.
   review a branch for these (and for exploitable debug hooks) before pushing.
 - Reference screenshots of other games are for private analysis only: keep them outside the
   repo (or in a git-ignored `reference_private/` folder) and never ship or commit them.
-- The game must stay offline: no INTERNET permission, no ads/analytics SDKs, no downloads at
-  runtime. Everything ships inside the APK.
+- No internet services: the game talks to no server, has no ads/analytics SDKs and downloads
+  nothing at runtime; everything ships inside the APK. The one network feature is the
+  owner-requested Wi-Fi 1 vs 1 (scripts/lan.gd): phones on the same local network find each other
+  and play directly, which is why the APK has INTERNET (Android needs it for any socket) and the
+  Wi-Fi state/multicast permissions.
 
 ## Originality (legal)
 - The game should FEEL like popular mobile battle-royale "Lone Wolf" modes (layout, flow,

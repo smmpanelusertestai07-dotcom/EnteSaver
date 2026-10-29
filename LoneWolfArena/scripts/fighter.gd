@@ -550,6 +550,8 @@ func deploy_shield(toward := Vector3.ZERO) -> bool:
 	wall.global_position = pos
 	wall.look_at(pos + fwd, Vector3.UP)
 	shields -= 1
+	if is_player and arena and arena.has_method("net_wall"):
+		arena.net_wall(pos, fwd)
 	return true
 
 
@@ -585,6 +587,8 @@ func _release_grenade() -> void:
 		var grav := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)) * g.gravity_scale
 		g.linear_velocity = (to / t + Vector3.UP * 0.5 * grav * t).limit_length(22.0)
 	Audio.play_at("grenade_throw", global_position, -4.0)
+	if is_player and arena and arena.has_method("net_grenade"):
+		arena.net_grenade(g.global_position, g.linear_velocity)
 
 
 # ---------------------------------------------------------------- stances

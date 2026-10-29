@@ -449,6 +449,9 @@ func _play_again() -> void:
 	if _again.disabled:
 		return
 	_again.disabled = true
+	if Game.online:
+		Game.goto_lobby()          # a Wi-Fi rematch is a new challenge from the lobby
+		return
 	Loading.start_match(get_tree().current_scene)
 
 
