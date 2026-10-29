@@ -1488,23 +1488,25 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 		var spots := [below, above, left, right] if below.y < vs.y - lh * 0.5 else [above, left, right, below]
 		spots.append(below + Vector2(0, lh))
 		spots.append(above - Vector2(0, lh))
-		# First free spot; when none is free (a widget dragged onto others) the least bad one:
-		# never off screen, never on another label, on a widget only if it must.
+		# First free spot, slid back on screen at the edges; when none is free (a widget dragged
+		# onto others) the one that covers the least: other labels count ten times more than
+		# widgets, so a label never lands on another label while a free-ish spot exists.
 		var lr := Rect2()
 		var best := INF
+		var area := lw * lh
 		for sp: Vector2 in spots:
 			var cand := Rect2(sp - Vector2(lw, lh) * 0.5, Vector2(lw, lh))
-			var score := 0.0 if Rect2(Vector2.ZERO, vs).encloses(cand) else 100.0
+			cand.position = cand.position.clamp(Vector2.ZERO, (vs - cand.size).max(Vector2.ZERO))
+			var inner := cand.grow(-1.0)
+			var score := 0.0
 			for t in taken:
-				if t.intersects(cand):
-					score += 10.0
+				score += 10.0 * t.intersection(inner).get_area() / area
 			for t in widgets:
-				if t.intersects(cand):
-					score += 1.0
-			if score < best:
+				score += t.intersection(inner).get_area() / area
+			if score < best - 0.0001:
 				best = score
 				lr = cand
-			if score == 0.0:
+			if score <= 0.0:
 				break
 		taken.append(lr)
 		HudDraw.text(self, label, lr.get_center(), lfs, Color(HudDraw.YELLOW, 1.0) if sel else Color(1, 1, 1, 0.8), 1, 3, "bold")

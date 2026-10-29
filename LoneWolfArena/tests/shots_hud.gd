@@ -86,11 +86,17 @@ func run(at: Node) -> int:
 	b.hp = maxf(b.hp, 150.0)
 	_check(int(p.stats.hits) > 0, "shots hit the bot", at)
 	# Three hits that cannot merge (body, head, another source) at one point: a row, not a pile.
+	# The HUD is held still for the picture (at 1-3 FPS a frame can outlast a number's life).
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
 	hud._dmg_numbers.clear()
 	for hit: Array in [[b, 22.0, false], [b, 41.0, true], [null, 22.0, false]]:
 		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
 	_check(hud._dmg_numbers.size() == 3 and _numbers_apart(hud, p, vs), "separate damage numbers line up side by side", at)
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	hud.queue_redraw()
 	await at.shot("hud_06b_number_row")
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# Red-dot ADS.
 	p.toggle_ads()
 	for i in 5:
