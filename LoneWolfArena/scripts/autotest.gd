@@ -202,12 +202,16 @@ func _run_screens() -> void:
 		await _wait(0.05)
 		t += 0.05
 	_touch(5, _win(fire_c), false)
+	if b.alive and p.alive:
+		# At the capture box's frame rate the scripted fight can run out of time: end it, so the
+		# walkthrough always reaches the results screen.
+		b.take_damage(9999.0, "head", p, p.global_position)
 	await _wait(1.2)
 	await _shot("09_end")
-	var waited := 0.0
-	while not arena.get("_result_shown") and waited < 20.0:
+	# The end delay runs on game time, which lags far behind real time at a few FPS.
+	var start := Time.get_ticks_msec()
+	while not arena.get("_result_shown") and Time.get_ticks_msec() - start < 90000:
 		await _wait(0.5)
-		waited += 0.5
 	await _wait(1.0)
 	await _shot("10_results")
 	_log("screens done: player_hp=%d bot_hp=%d" % [roundi(p.hp), roundi(b.hp)])
