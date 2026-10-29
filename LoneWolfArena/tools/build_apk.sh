@@ -86,20 +86,24 @@ GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$LW_KEY_PASS" \
   godot --headless --path . --export-release "$PRESET" "$OUT"
 test -s "$OUT"
 
-# Checks: signature, permissions (no network), size.
+# Checks: signature, permissions (no network), size. Each tool's whole output is captured first:
+# with pipefail, "tool | grep -q" fails when grep stops reading early (the tool gets SIGPIPE).
 SDK="$(grep -m1 android_sdk_path "$HOME/.config/godot/editor_settings-4.7.tres" | sed 's/.*= *"\(.*\)"/\1/')"
 BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
-"$BT/apksigner" verify --print-certs "$OUT" 2>/dev/null | grep -E "Signer #1 certificate (DN|SHA-256)"
+CERTS="$("$BT/apksigner" verify --print-certs "$OUT" 2>/dev/null)"
+grep -E "Signer #1 certificate (DN|SHA-256)" <<< "$CERTS"
 # The game must accept its own signature, or every match would be voided.
-SIGNED="$("$BT/apksigner" verify --print-certs "$OUT" 2>/dev/null | grep -m1 "Signer #1 certificate SHA-256" | sed 's/.*: *//')"
+SIGNED="$(grep -m1 "Signer #1 certificate SHA-256" <<< "$CERTS" | sed 's/.*: *//')"
 [ "$SIGNED" = "$SIGNER" ] || { echo "ERROR: APK signer $SIGNED is not the key the game expects ($SIGNER)"; exit 1; }
 # The keys ship compiled, and no plain key file does.
-unzip -l "$OUT" | grep -q "assets/build_keys.gdc" || { echo "ERROR: the build keys are missing from the APK"; exit 1; }
-if unzip -l "$OUT" | grep -qE "build_(signer|secret)\.txt|build_keys\.gd$"; then
+FILES="$(unzip -l "$OUT")"
+grep -q "assets/build_keys.gdc" <<< "$FILES" || { echo "ERROR: the build keys are missing from the APK"; exit 1; }
+if grep -qE "build_(signer|secret)\.txt|build_keys\.gd$" <<< "$FILES"; then
   echo "ERROR: the APK carries a plain build key file"; exit 1
 fi
-"$BT/aapt" dump badging "$OUT" | grep -E "^package:|uses-permission|sdkVersion|native-code"
-if "$BT/aapt" dump badging "$OUT" | grep -q "android.permission.INTERNET"; then
+BADGING="$("$BT/aapt" dump badging "$OUT")"
+grep -E "^package:|uses-permission|sdkVersion|native-code" <<< "$BADGING"
+if grep -q "android.permission.INTERNET" <<< "$BADGING"; then
   echo "ERROR: the APK requests INTERNET permission"; exit 1
 fi
 ls -la "$OUT"
