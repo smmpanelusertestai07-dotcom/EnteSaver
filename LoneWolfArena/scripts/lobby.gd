@@ -32,11 +32,12 @@ var model: CharacterModel
 var camera: Camera3D
 var ui: CanvasLayer
 var start_btn: Button
-var _wifi_list: VBoxContainer
-var _wifi_status: Label
-var _wifi_sig := ""
-var _wifi_note := ""
-var _wifi_refresh_t := 0.0
+var _net_kind := "online"
+var _net_list: VBoxContainer
+var _net_status: Label
+var _net_sig := ""
+var _net_note := ""
+var _net_refresh_t := 0.0
 var wardrobe: Control
 var _main_ui: Control
 var _preview_bundle := ""
@@ -78,13 +79,9 @@ func _ready() -> void:
 	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	Game.settings_changed.connect(_apply_quality)
-	var lan := Game.lan_service()
-	lan.invited.connect(_on_wifi_invited)
-	lan.invite_cancelled.connect(_on_wifi_invite_cancelled)
-	lan.invite_answered.connect(_on_wifi_answered)
-	lan.session_started.connect(_on_wifi_session)
-	lan.session_ended.connect(_on_wifi_ended)
-	lan.start_discovery()
+	_connect_net(Game.lan_service())
+	_connect_net(Game.cloud_service())
+	Game.lan.start_discovery()
 
 
 ## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
@@ -101,14 +98,14 @@ func _mark_start() -> void:
 
 
 func _exit_tree() -> void:
+	for svc: Node in [Game.lan, Game.cloud]:
+		if svc:
+			_disconnect_net(svc)
+			svc.cancel_invite()
 	if Game.lan:
-		Game.lan.invited.disconnect(_on_wifi_invited)
-		Game.lan.invite_cancelled.disconnect(_on_wifi_invite_cancelled)
-		Game.lan.invite_answered.disconnect(_on_wifi_answered)
-		Game.lan.session_started.disconnect(_on_wifi_session)
-		Game.lan.session_ended.disconnect(_on_wifi_ended)
-		Game.lan.cancel_invite()
 		Game.lan.stop_discovery()
+	if Game.cloud:
+		Game.cloud.stop_lobby()
 	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
 	var vp := get_viewport()
 	if vp:
@@ -748,7 +745,7 @@ func _build_left_menu(root: Control) -> void:
 	root.add_child(menu)
 	var items := [
 		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
-		["PLAY ON WI-FI", "v_player", "WifiButton", _open_wifi],
+		["PLAY WITH FRIENDS", "v_player", "FriendsButton", _open_friends],
 		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
@@ -975,72 +972,102 @@ func _start() -> void:
 	Loading.start_match(self)
 
 
-# ---------------------------------------------------------------- Wi-Fi 1 vs 1 (see Lan)
+# ---------------------------------------------------------------- play with friends (Lan / Cloud)
 
-## Phones on the same Wi-Fi (or one phone's hotspot) list each other by player name; CHALLENGE
-## sends a request, the other phone accepts or declines. No internet and no server.
-func _open_wifi() -> void:
-	var v := _open_modal("PLAY ON WI-FI", 920.0)
-	var info := UI.label("Same Wi-Fi or one phone's hotspot. No internet, no server: nearby players show up by name.", 17, UI.TEXT_DIM, "semi")
+## Two ways to find a friend: ONLINE (internet, through the game's own realtime project, see
+## Cloud) and SAME WI-FI (the same network or one phone's hotspot, no server, see Lan). Players
+## show up by name; CHALLENGE sends a request, the other phone accepts or declines. The ONLINE
+## list connects only once this tab is opened.
+func _open_friends(kind := "online") -> void:
+	_net_kind = kind
+	var svc: Node = _net_service()
+	if kind == "online":
+		Game.cloud_service().start_lobby()
+	var v := _open_modal("PLAY WITH FRIENDS", 940.0)
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 10)
+	for t: Array in [["online", "ONLINE"], ["wifi", "SAME WI-FI"]]:
+		var b := UI.button(String(t[1]), 20, "primary" if t[0] == kind else "dark", Vector2(220, 48))
+		var tk := String(t[0])
+		b.pressed.connect(func() -> void:
+			if tk != _net_kind:
+				_open_friends(tk))
+		tabs.add_child(b)
+	v.add_child(tabs)
+	var note := "Play from anywhere over the internet. Messages go encrypted through the game's own realtime project and are not stored." \
+		if kind == "online" else "Same Wi-Fi or one phone's hotspot. No internet, no server: nearby players show up by name."
+	var info := UI.label(note, 17, UI.TEXT_DIM, "semi")
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
-	_wifi_status = UI.label("", 20, UI.ACCENT, "bold")
-	v.add_child(_wifi_status)
-	_wifi_list = VBoxContainer.new()
-	_wifi_list.add_theme_constant_override("separation", 8)
-	_wifi_list.custom_minimum_size = Vector2(0, 180)
-	v.add_child(_wifi_list)
-	_wifi_sig = "-"
-	_refresh_wifi()
+	_net_status = UI.label("", 20, UI.ACCENT, "bold")
+	v.add_child(_net_status)
+	_net_list = VBoxContainer.new()
+	_net_list.add_theme_constant_override("separation", 8)
+	_net_list.custom_minimum_size = Vector2(0, 170)
+	v.add_child(_net_list)
+	_net_sig = "-"
+	_net_note = ""
+	if svc:
+		_refresh_friends()
 
 
-func _refresh_wifi() -> void:
-	if _wifi_list == null or not is_instance_valid(_wifi_list):
+func _net_service() -> Node:
+	return (Game.cloud_service() as Node) if _net_kind == "online" else (Game.lan_service() as Node)
+
+
+func _refresh_friends() -> void:
+	if _net_list == null or not is_instance_valid(_net_list):
 		return
-	var lan := Game.lan_service()
-	var waiting := lan.waiting_for()
-	if lan.local_address() == "":
-		_wifi_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
+	var svc: Node = _net_service()
+	var waiting := String(svc.waiting_for())
+	var peers: Dictionary = svc.peers
+	if _net_kind == "online" and not bool(svc.configured()):
+		_net_status.text = "ONLINE PLAY IS NOT SET UP IN THIS BUILD"
+	elif _net_kind == "online" and String(svc.status) != "online":
+		_net_status.text = "CONNECTING..." if String(svc.status) == "connecting" else "NO INTERNET: RETRYING..."
+	elif _net_kind == "wifi" and String(svc.local_address()) == "":
+		_net_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
 	elif waiting != "":
-		_wifi_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
-	elif lan.peers.is_empty():
-		_wifi_status.text = "LOOKING FOR PLAYERS ON THIS WI-FI..."
-	elif _wifi_note == "":
-		_wifi_status.text = "PLAYERS NEARBY"
-	if _wifi_note != "" and waiting == "":
-		_wifi_status.text = _wifi_note
+		_net_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
+	elif _net_note != "":
+		_net_status.text = _net_note
+	elif peers.is_empty():
+		_net_status.text = "LOOKING FOR PLAYERS ONLINE..." if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
+	else:
+		_net_status.text = "PLAYERS ONLINE" if _net_kind == "online" else "PLAYERS NEARBY"
 	var sig := waiting
-	for id in lan.peers:
-		sig += "|%s:%s" % [id, lan.peers[id].name]
-	if sig == _wifi_sig:
+	for id in peers:
+		sig += "|%s:%s" % [id, peers[id].name]
+	if sig == _net_sig:
 		return
-	_wifi_sig = sig
-	for c in _wifi_list.get_children():
+	_net_sig = sig
+	for c in _net_list.get_children():
 		c.queue_free()
-	for id: String in lan.peers:
+	for id: String in peers:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 16)
-		var who := UI.label(String(lan.peers[id].name), 26, UI.TEXT, "heavy")
+		var who := UI.label("%s  #%s" % [String(peers[id].name), id.left(4).to_upper()], 26, UI.TEXT, "heavy")
 		who.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		who.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		row.add_child(who)
 		var b := UI.button("CANCEL" if waiting != "" else "CHALLENGE", 20, "light" if waiting != "" else "primary", Vector2(230, 52))
 		b.pressed.connect(func() -> void:
-			_wifi_note = ""
-			if Game.lan.waiting_for() != "":
-				Game.lan.cancel_invite()
-			elif not Game.lan.invite(id):
-				_wifi_note = "COULD NOT OPEN THE GAME PORT"
-			_wifi_sig = "-"
-			_refresh_wifi())
+			var sv: Node = _net_service()
+			_net_note = ""
+			if String(sv.waiting_for()) != "":
+				sv.cancel_invite()
+			elif not bool(sv.invite(id)):
+				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
+			_net_sig = "-"
+			_refresh_friends())
 		row.add_child(b)
-		_wifi_list.add_child(row)
+		_net_list.add_child(row)
 
 
-func _on_wifi_invited(who: String) -> void:
-	_wifi_list = null
+func _on_net_invited(who: String, svc: Node) -> void:
+	_net_list = null
 	var v := _open_modal("CHALLENGE", 640.0)
-	var t := UI.label("%s wants a 1 vs 1 on Wi-Fi" % who, 26, UI.TEXT, "heavy")
+	var t := UI.label("%s wants a 1 vs 1 (%s)" % [who, "online" if svc is Cloud else "Wi-Fi"], 26, UI.TEXT, "heavy")
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(t)
 	var row := HBoxContainer.new()
@@ -1048,45 +1075,61 @@ func _on_wifi_invited(who: String) -> void:
 	row.add_theme_constant_override("separation", 12)
 	var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
 	no.pressed.connect(func() -> void:
-		Game.lan.answer(false)
+		svc.answer(false)
 		_close_modal())
 	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
 	yes.name = "AcceptButton"
 	yes.pressed.connect(func() -> void:
 		yes.disabled = true
 		UI.set_caption(yes, "CONNECTING")
-		Game.lan.answer(true))
+		svc.answer(true))
 	row.add_child(no)
 	row.add_child(yes)
 	v.add_child(row)
 
 
-func _on_wifi_invite_cancelled() -> void:
+func _on_net_invite_cancelled(_svc: Node) -> void:
 	if _modal and is_instance_valid(_modal) and _modal.find_child("AcceptButton", true, false):
 		_close_modal()
 
 
-func _on_wifi_answered(accepted: bool, who: String) -> void:
+func _on_net_answered(accepted: bool, who: String, _svc: Node) -> void:
 	if not accepted:
-		_wifi_note = "%s DECLINED (OR DID NOT ANSWER)" % who
-		_wifi_sig = "-"
+		_net_note = "%s DECLINED (OR DID NOT ANSWER)" % who
+		_net_sig = "-"
 
 
-func _on_wifi_session(_host: bool) -> void:
+func _on_net_session(_host: bool, svc: Node) -> void:
 	if start_btn.disabled:
 		return
 	Game.practice = false
 	Game.online = true
+	Game.session = svc
 	_close_modal()
 	start_btn.disabled = true
 	UI.set_caption(start_btn, "MATCHING")
 	Loading.start_match(self)
 
 
-func _on_wifi_ended(reason: String) -> void:
+func _on_net_ended(reason: String, _svc: Node) -> void:
 	Game.online = false
-	_wifi_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
-	_wifi_sig = "-"
+	_net_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
+	_net_sig = "-"
+
+
+func _connect_net(svc: Node) -> void:
+	svc.invited.connect(_on_net_invited.bind(svc))
+	svc.invite_cancelled.connect(_on_net_invite_cancelled.bind(svc))
+	svc.invite_answered.connect(_on_net_answered.bind(svc))
+	svc.session_started.connect(_on_net_session.bind(svc))
+	svc.session_ended.connect(_on_net_ended.bind(svc))
+
+
+func _disconnect_net(svc: Node) -> void:
+	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended"]:
+		for c: Dictionary in svc.get_signal_connection_list(sig):
+			if (c.callable as Callable).get_object() == self:
+				svc.disconnect(sig, c.callable)
 
 
 ## Practice against a training dummy that never goes down (no zone, no clock, nothing recorded).
@@ -1584,11 +1627,11 @@ func _in_drag_zone(p: Vector2) -> bool:
 func _process(delta: float) -> void:
 	_time += delta
 	_idle_t += delta
-	if _wifi_list and is_instance_valid(_wifi_list):
-		_wifi_refresh_t -= delta
-		if _wifi_refresh_t <= 0.0:
-			_wifi_refresh_t = 0.4
-			_refresh_wifi()
+	if _net_list and is_instance_valid(_net_list):
+		_net_refresh_t -= delta
+		if _net_refresh_t <= 0.0:
+			_net_refresh_t = 0.4
+			_refresh_friends()
 	if _cam_t < 1.0:
 		_cam_t = minf(1.0, _cam_t + delta / 0.45)
 		var k := 1.0 - pow(1.0 - _cam_t, 3.0)

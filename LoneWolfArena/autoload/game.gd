@@ -70,9 +70,19 @@ var shots_dir := ""
 ## The next arena run is practice (lobby PRACTICE): a training dummy with endless HP, no zone, no
 ## clock, nothing recorded. START clears it.
 var practice := false
-## The next arena run is a Wi-Fi match against the phone in `lan.opponent` (see Lan).
+## The next arena run is a match against another phone: `session` is the Lan (same Wi-Fi) or
+## the Cloud (internet) that connected them; both have the same interface.
 var online := false
+var session        # Lan or Cloud (untyped: the two share an interface, not a base class)
 var lan: Lan
+var cloud: Cloud
+
+
+func cloud_service() -> Cloud:
+	if cloud == null:
+		cloud = Cloud.new()
+		add_child(cloud)
+	return cloud
 
 
 ## The local-network service (made on first use; it outlives scene changes).

@@ -55,7 +55,7 @@ var _draw := false
 var _invalid := false
 var _rng := RandomNumberGenerator.new()
 var practice := false      # Game.practice: a training dummy with endless HP, no zone, no clock, no record
-var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Lan)
+var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Lan/Cloud)
 var _net_t := 0.0
 var _net_begun := false
 var _net_their_ready := false
@@ -76,7 +76,7 @@ func _ready() -> void:
 	zone_center = map.zone_center
 	zone_start_radius = map.zone_start_radius
 	practice = Game.practice
-	online = Game.online and Game.lan != null and Game.lan.in_session
+	online = Game.online and Game.session != null and bool(Game.session.get("in_session"))
 	if Game.online and not online:
 		Game.online = false
 		Game.goto_lobby.call_deferred()        # the other phone left while this one was loading
@@ -120,34 +120,34 @@ func _exit_tree() -> void:
 	Audio.stop_ambience()
 	if online:
 		Game.online = false
-		Game.lan.event_received.disconnect(_on_net_event)
-		Game.lan.state_received.disconnect(_on_net_state)
-		Game.lan.session_ended.disconnect(_on_net_ended)
-		Game.lan.end_session("left")
+		Game.session.event_received.disconnect(_on_net_event)
+		Game.session.state_received.disconnect(_on_net_state)
+		Game.session.session_ended.disconnect(_on_net_ended)
+		Game.session.end_session("left")
 
 
-# ---------------------------------------------------------------- Wi-Fi match (see Lan)
+# ---------------------------------------------------------------- match against another phone (Lan or Cloud)
 
 ## Both phones load the arena at their own pace: each says "ready", and the host starts the prep
 ## on both once it has heard the guest.
 func _net_setup() -> void:
-	Game.lan.event_received.connect(_on_net_event)
-	Game.lan.state_received.connect(_on_net_state)
-	Game.lan.session_ended.connect(_on_net_ended)
-	var queued: Array = Game.lan.queue.duplicate()
-	Game.lan.queue.clear()
-	Game.lan.send_event("ready")
+	Game.session.event_received.connect(_on_net_event)
+	Game.session.state_received.connect(_on_net_state)
+	Game.session.session_ended.connect(_on_net_ended)
+	var queued: Array = Game.session.queue.duplicate()
+	Game.session.queue.clear()
+	Game.session.send_event("ready")
 	for q: Array in queued:
 		_on_net_event(String(q[0]), q[1])
-	Game.mark("wifi match: " + ("host" if Game.lan.is_host else "guest"))
+	Game.mark("wifi match: " + ("host" if Game.session.is_host else "guest"))
 
 
 func _net_begin() -> void:
 	if _net_begun:
 		return
 	_net_begun = true
-	if Game.lan.is_host:
-		Game.lan.send_event("begin")
+	if Game.session.is_host:
+		Game.session.send_event("begin")
 	_start_prep()
 
 
@@ -160,10 +160,10 @@ func _on_net_event(kind: String, data: Array) -> void:
 	match kind:
 		"ready":
 			_net_their_ready = true
-			if Game.lan.is_host:
+			if Game.session.is_host:
 				_net_begin()
 		"begin":
-			if not Game.lan.is_host:
+			if not Game.session.is_host:
 				_net_begin()
 		"pick":
 			if data.size() == 1 and Weapons.PICKABLE.has(String(data[0])):
@@ -195,7 +195,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 				wall.global_position = pos
 				wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
 		"timeup":
-			if data.size() == 2 and not Game.lan.is_host:
+			if data.size() == 2 and not Game.session.is_host:
 				_timeout(float(data[0]), float(data[1]))
 
 
@@ -210,22 +210,22 @@ func _on_net_ended(_reason: String) -> void:
 
 ## Called by RemoteFighter for every hit this phone's player lands on it.
 func net_hit(amount: float, zone: String, from_pos: Vector3) -> void:
-	Game.lan.send_event("hit", [amount, zone, from_pos.x, from_pos.y, from_pos.z])
+	Game.session.send_event("hit", [amount, zone, from_pos.x, from_pos.y, from_pos.z])
 
 
 func net_shot(origin: Vector3, dir: Vector3) -> void:
 	if online:
-		Game.lan.send_event("shot", [origin.x, origin.y, origin.z, dir.x, dir.y, dir.z])
+		Game.session.send_event("shot", [origin.x, origin.y, origin.z, dir.x, dir.y, dir.z])
 
 
 func net_grenade(pos: Vector3, vel: Vector3) -> void:
 	if online:
-		Game.lan.send_event("grenade", [pos.x, pos.y, pos.z, vel.x, vel.y, vel.z])
+		Game.session.send_event("grenade", [pos.x, pos.y, pos.z, vel.x, vel.y, vel.z])
 
 
 func net_wall(pos: Vector3, fwd: Vector3) -> void:
 	if online:
-		Game.lan.send_event("wall", [pos.x, pos.y, pos.z, atan2(-fwd.x, -fwd.z)])
+		Game.session.send_event("wall", [pos.x, pos.y, pos.z, atan2(-fwd.x, -fwd.z)])
 
 
 # ---------------------------------------------------------------- world
@@ -270,7 +270,7 @@ func _spawn_fighters() -> void:
 	player.display_name = String(Game.profile.name)
 	player.arena = self
 	add_child(player)
-	var guest := online and not Game.lan.is_host       # the invited phone starts at the other end
+	var guest: bool = online and not Game.session.is_host       # the invited phone starts at the other end
 	player.global_position = map.spawn_b if guest else map.spawn_a
 	player.setup_fighter(String(Game.profile.bundle), pick)
 	player.aim_yaw = map.spawn_b_yaw if guest else map.spawn_a_yaw
@@ -285,8 +285,8 @@ func _spawn_fighters() -> void:
 	var bot_bundles := ["desert", "neon", "shadow", "royal", "default"]
 	var bot_bundle := String(bot_bundles[_rng.randi() % bot_bundles.size()])
 	if online:
-		bot.display_name = String(Game.lan.opponent.get("name", "PLAYER"))
-		bot_bundle = String(Game.lan.opponent.get("bundle", "default"))
+		bot.display_name = String(Game.session.opponent.get("name", "PLAYER"))
+		bot_bundle = String(Game.session.opponent.get("bundle", "default"))
 	bot.setup_fighter(bot_bundle, pick)
 	bot.aim_yaw = map.spawn_a_yaw if guest else map.spawn_b_yaw
 	bot.configure(int(Game.settings.difficulty), player)
@@ -401,7 +401,7 @@ func _on_weapon_picked(id: String) -> void:
 		if not online or f == player:
 			f.set_loadout(id)
 	if online:
-		Game.lan.send_event("pick", [id])
+		Game.session.send_event("pick", [id])
 	Game.mark("weapon picked: " + id)
 
 
@@ -436,9 +436,9 @@ func _start_fight() -> void:
 func _physics_process(delta: float) -> void:
 	if online and phase != Phase.END:
 		_net_t += delta
-		if _net_t >= 0.05:
+		if _net_t >= float(Game.session.state_interval):
 			_net_t = 0.0
-			Game.lan.send_state(RemoteFighter.pack(player))
+			Game.session.send_state(RemoteFighter.pack(player))
 	match phase:
 		Phase.PREP:
 			prep_left -= delta
@@ -457,7 +457,7 @@ func _physics_process(delta: float) -> void:
 				time_left -= delta
 				_update_zone(delta)
 				if time_left <= 0.0:
-					if online and not Game.lan.is_host:
+					if online and not Game.session.is_host:
 						# The host's clock decides a time-out; decide alone if its word never comes.
 						_net_timeup_t = maxf(_net_timeup_t, 0.0) + delta
 						if _net_timeup_t > 3.0:
@@ -536,8 +536,8 @@ func _timeout(my_hp := -1.0, their_hp := -1.0) -> void:
 	if my_hp < 0.0:
 		my_hp = player.hp
 		their_hp = bot.hp
-		if online and Game.lan.is_host:
-			Game.lan.send_event("timeup", [their_hp, my_hp])     # as the guest sees it: its HP first
+		if online and Game.session.is_host:
+			Game.session.send_event("timeup", [their_hp, my_hp])     # as the guest sees it: its HP first
 	if absf(my_hp - their_hp) < 0.5:
 		_draw = true
 	else:
@@ -561,7 +561,7 @@ func _freeze_all() -> void:
 func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	Game.mark("match over: %s eliminated" % ("player" if victim == player else "bot"))
 	if online and victim == player:
-		Game.lan.send_event("died", [headshot])
+		Game.session.send_event("died", [headshot])
 	var weapon_icon := ""
 	var weapon_name := "ZONE"
 	if killer and is_instance_valid(killer):

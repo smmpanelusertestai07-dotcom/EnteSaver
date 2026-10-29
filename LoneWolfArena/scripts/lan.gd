@@ -38,6 +38,7 @@ var opponent := {}          # {"id", "name", "bundle", "ip"}
 var dest_ports: Array[int] = [DISCOVERY_PORT]
 var listen_port := DISCOVERY_PORT
 var queue: Array = []       # events that arrived before the arena listened
+var state_interval := 0.05  # seconds between state packets
 var _udp: PacketPeerUDP
 var _udp_port := 0
 var _discovering := false

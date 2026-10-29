@@ -69,9 +69,21 @@ fi
 SECRET="$(tr -d ' \n' < "$SECRET_SRC")"
 [[ "$SECRET" =~ ^[0-9a-f]{32,}$ ]] || { echo "save-signing secret in $SECRET_SRC is not 32+ hex digits"; exit 1; }
 
+# Internet play (scripts/cloud.gd): the owner's Supabase project URL and its public anon key, from
+# LW_ONLINE_URL / LW_ONLINE_KEY or ~/.lonewolf/online.cfg (lines "url=..." and "key=..."). Without
+# them the build simply has no ONLINE tab.
+ONLINE_CFG="$(dirname "$LW_KEYSTORE")/online.cfg"
+ONLINE_URL="${LW_ONLINE_URL:-$( [ -f "$ONLINE_CFG" ] && sed -n 's/^url=//p' "$ONLINE_CFG" | head -1 )}"
+ONLINE_KEY="${LW_ONLINE_KEY:-$( [ -f "$ONLINE_CFG" ] && sed -n 's/^key=//p' "$ONLINE_CFG" | head -1 )}"
+if [ -n "$ONLINE_URL" ]; then
+  [[ "$ONLINE_URL" =~ ^https://[a-z0-9-]+\.supabase\.co/?$ ]] || { echo "online url must look like https://<project>.supabase.co"; exit 1; }
+  [[ "$ONLINE_KEY" =~ ^[A-Za-z0-9._-]{20,}$ ]] || { echo "online key (the project's anon public key) looks wrong"; exit 1; }
+  echo "online play: $ONLINE_URL"
+fi
+
 trap 'rm -f build_keys.gd build_keys.gd.uid' EXIT
-(umask 077; printf '# Written by tools/build_apk.sh for one build and deleted after it. Never commit.\nconst SIGNERS := [%s]\nconst SAVE_SECRET := "%s"\n' \
-  "$SIGNERS" "$SECRET" > build_keys.gd)
+(umask 077; printf '# Written by tools/build_apk.sh for one build and deleted after it. Never commit.\nconst SIGNERS := [%s]\nconst SAVE_SECRET := "%s"\nconst ONLINE_URL := "%s"\nconst ONLINE_KEY := "%s"\n' \
+  "$SIGNERS" "$SECRET" "${ONLINE_URL:-}" "${ONLINE_KEY:-}" > build_keys.gd)
 
 # A fresh checkout's first import can exit non-zero before the class cache exists; retry once.
 godot --headless --path . --import > build_import.log 2>&1 || godot --headless --path . --import > build_import.log 2>&1 \

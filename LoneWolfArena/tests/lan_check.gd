@@ -39,10 +39,14 @@ func run(autotest: Node) -> int:
 	if not started[0]:
 		return _done("no session")
 	at.log_line("session up as %s, opponent %s" % ["host" if host else "guest", lan.opponent.get("name", "?")])
-	Game.online = true
-	Game.goto_arena()
-	await at.wait(1.0)
+	# The lobby takes it from here, as for a player: match loading, then the arena.
+	t = 0.0
+	while (get_tree().current_scene == null or get_tree().current_scene.name != "Arena") and t < 30.0:
+		await at.wait(0.25)
+		t += 0.25
 	var arena: Node = get_tree().current_scene
+	if arena == null or arena.name != "Arena":
+		return _done("the lobby never started the match")
 	await at.wait_for_phase(arena, 1, 60.0)
 	if arena.get("phase") != 1:
 		return _done("never reached FIGHT")
