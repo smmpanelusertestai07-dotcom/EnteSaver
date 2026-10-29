@@ -54,8 +54,6 @@ var hp: float:
 	set(v):
 		_hp.set_value(v)
 var alive := true
-var vest_reduction := Weapons.VEST_REDUCTION
-var helmet_reduction := Weapons.HELMET_REDUCTION
 var weapons: Array[WeaponState] = []
 var current := 0
 var stance := Stance.STAND
@@ -267,7 +265,8 @@ func gun() -> WeaponState:
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3) -> float:
 	if not alive or invulnerable:
 		return 0.0
-	var dmg := minf(Weapons.after_armor(amount, zone, vest_reduction, helmet_reduction), hp)
+	# Armour is read from the constants (a per-fighter value could be frozen in memory).
+	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, hp)
 	hp -= dmg
 	stats.taken += dmg
 	last_damage_time = _now()

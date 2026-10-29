@@ -73,7 +73,10 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	settings = DEFAULT_SETTINGS.duplicate(true)
 	var saved: Variant = _load_json(SETTINGS_PATH)
-	if saved is Dictionary and int((saved as Dictionary).get("settings_version", 1)) < SETTINGS_VERSION:
+	var version: Variant = (saved as Dictionary).get("settings_version", 1) if saved is Dictionary else 1
+	if not (version is int or version is float):
+		version = 1
+	if saved is Dictionary and int(version) < SETTINGS_VERSION:
 		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
 		for k in ["sens_general", "sens_reddot", "sens_fire", "crosshair_color", "left_fire", "aim_assist_strength", "settings_version"]:
 			(saved as Dictionary).erase(k)
@@ -155,8 +158,8 @@ func reset_settings() -> void:
 	save_settings()
 
 
-## The profile (level, XP, wins) is signed with a device-bound HMAC; an edited file is
-## rejected and the profile starts fresh (keeping only the player name).
+## The profile (level, XP, wins) is signed with a device-bound HMAC; an edited or unsigned file
+## is rejected and the profile starts fresh (keeping only the player name).
 func _load_profile() -> void:
 	var raw: Variant = _load_json(PROFILE_PATH)
 	if not raw is Dictionary or (raw as Dictionary).is_empty():
@@ -164,14 +167,32 @@ func _load_profile() -> void:
 	var check := Guard.verify_dict(raw)
 	if check.ok:
 		_merge_into(profile, check.data)
-		if check.unsigned:
-			save_profile()
 	else:
 		var keep_name: Variant = (raw as Dictionary).get("name", profile.name)
 		if typeof(keep_name) == TYPE_STRING:
-			profile.name = String(keep_name).substr(0, 14)
+			profile.name = String(keep_name)
 		Guard.flag("save")
+	_sanitize_profile()
+	if not check.ok:
 		save_profile()
+
+
+func _sanitize_profile() -> void:
+	var n := clean_name(String(profile.name))
+	profile.name = n if n != "" else "ROOKIE"
+	profile.bundle = String(CharacterModel.bundle_info(String(profile.bundle)).id)
+	for k in ["matches", "wins", "kills", "xp"]:
+		profile[k] = clampi(int(profile[k]), 0, 1000000000)
+	profile.wins = mini(int(profile.wins), int(profile.matches))
+
+
+## Player names: upper-case A-Z, 0-9, space, _ - . and at most 14 characters.
+static func clean_name(t: String) -> String:
+	var out := ""
+	for ch in t.strip_edges().to_upper():
+		if (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch in [" ", "_", "-", "."]:
+			out += ch
+	return out.strip_edges().substr(0, 14)
 
 
 func save_profile() -> void:
@@ -221,9 +242,16 @@ func vibrate(ms: int) -> void:
 		Input.vibrate_handheld(ms)
 
 
+## A fight counts as played once it starts, so leaving mid-fight (QUIT MATCH, closing the app)
+## still records it, as a loss.
+func count_match() -> void:
+	profile.matches = int(profile.matches) + 1
+	save_profile()
+
+
+## The end of a counted fight: wins, kills and XP.
 func record_match(result: Dictionary) -> void:
 	last_result = result
-	profile.matches = int(profile.matches) + 1
 	if result.get("won", false):
 		profile.wins = int(profile.wins) + 1
 	profile.kills = int(profile.kills) + int(result.get("kills", 0))

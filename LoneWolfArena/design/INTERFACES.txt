@@ -46,7 +46,7 @@ listed here. If a part needs something new from the core, add it in its own file
 - `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout`), `lobby ready`,
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
   `player moved`, `match over: <why>`, `results shown`, `signature <state>` (Guard, "ok" when the
-  package manager confirms the signer in build_signer.txt).
+  package manager confirms a signer listed in the build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
   (start, fire, joystick) so the test taps controls where the current layout puts them;
   `[LoneWolf] first touch <x> <y> window <size> screen <size>` checks the tap mapping.
@@ -63,7 +63,7 @@ listed here. If a part needs something new from the core, add it in its own file
   `grenades`, `crosshair_on_target` (crosshair turns red), `current_spread()` (deg),
   `camera`, `firing`, `assist_target`, `hold_fire` (prep: cannot shoot)
 - signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`
-- `Fighter.helmet_reduction` / `vest_reduction` (Lv2 armour; show level 2 icons)
+- `Weapons.HELMET_REDUCTION` / `VEST_REDUCTION` (Lv2 armour; show level 2 icons)
 
 ## Weapons (scripts/weapons.gd)
 - `Weapons.DEFS[id]` with `name`, `class` (AR/SMG/SG/PISTOL/SNIPER/MELEE), `icon` (texture name in

@@ -5,19 +5,22 @@ extends Node
 ##   XOR-masked with a checksum in SecureNum, so they can't be found and edits are detected;
 ## - speed hacks: the game clock is compared with the wall clock;
 ## - edited save files: the profile is signed with an HMAC tied to this device and to a secret
-##   that exists only in release builds (res://build_secret.txt, written by tools/build_apk.sh from
-##   a key kept with the signing key, never in the repository);
+##   that exists only in release builds;
 ## - repackaged APKs: on Android 9+ the system's package manager must confirm that the app is
-##   signed with the certificate of the official build (res://build_signer.txt, written by
-##   tools/build_apk.sh). A question it cannot answer counts as "unknown" (allowed), only a
-##   different certificate counts.
+##   signed with a certificate of the official build. A question it cannot answer counts as
+##   "unknown" (allowed); a different certificate, or a release build without the list, counts.
+## The secret and the certificate list are constants in res://build_keys.gd, which
+## tools/build_apk.sh (and the CI export) writes for one build and deletes afterwards; it is
+## git-ignored and ships compiled inside the APK, never as a plain file.
 ## A detection ends the running match without XP ("INTEGRITY CHECK FAILED").
 
 signal tampered(reason: String)
 
-const SIGNER_FILE := "res://build_signer.txt"
-const SECRET_FILE := "res://build_secret.txt"
+const KEYS_SCRIPT := "res://build_keys.gd"     # const SIGNERS := [...], const SAVE_SECRET := "..."
 const SPEED_WINDOW_USEC := 3000000
+const SPEED_FAST := 1.6              # game clock vs real time over one window
+const SPEED_SLOW := 0.6
+const SPEED_STRIKES := 2             # in a row: one odd window is the wall clock being set
 const CERT_INPUT_SHA256 := 1        # android.content.pm.PackageManager.CERT_INPUT_SHA256
 
 var flags: PackedStringArray = []
@@ -37,11 +40,10 @@ func _ready() -> void:
 	rng.randomize()
 	_salt = rng.randi() | (rng.randi() << 31)
 	_mask_state = rng.randi() | 1
-	var secret := "dev"      # editor, tests and CI builds; release builds ship their own
-	if FileAccess.file_exists(SECRET_FILE):
-		var s := FileAccess.get_file_as_string(SECRET_FILE).strip_edges()
-		if s.length() >= 32:
-			secret = s
+	var secret := "dev"      # editor and test runs; every exported build ships its own
+	var keys := build_keys()
+	if typeof(keys.get("SAVE_SECRET")) == TYPE_STRING and String(keys.SAVE_SECRET).length() >= 32:
+		secret = String(keys.SAVE_SECRET)
 	_hmac_key = ("lw-arena|%s|%s" % [OS.get_unique_id(), secret]).sha256_buffer()
 	_reset_clock()
 	_check_signature.call_deferred()
@@ -87,20 +89,31 @@ func _process(_delta: float) -> void:
 	var ticks := Time.get_ticks_usec() - _tick_start
 	if ticks < SPEED_WINDOW_USEC:
 		return
-	var wall := Time.get_unix_time_from_system() - _wall_start
-	# A speed hack makes the game clock run ahead of real time. (Slower is ignored: the
-	# monotonic clock legitimately stops while the phone sleeps.)
-	if wall > 0.5 and float(ticks) / 1e6 / wall > 1.6:
-		_speed_strikes += 1
-		if _speed_strikes >= 2:
-			flag("speed")
-	else:
-		_speed_strikes = maxi(_speed_strikes - 1, 0)
+	# A wall clock that is set (network time, by hand) gives one odd window, so only odd windows
+	# in a row count.
+	match speed_window(float(ticks) / 1e6, Time.get_unix_time_from_system() - _wall_start):
+		1:
+			_speed_strikes += 1
+			if _speed_strikes >= SPEED_STRIKES:
+				flag("speed")
+		0:
+			_speed_strikes = 0
 	_reset_clock()
 
 
+## One window of game-clock seconds against wall-clock seconds: 1 when the game clock ran ahead
+## of real time (a speed tool: faster play) or behind it (more time to aim), 0 when normal,
+## -1 when the wall clock went backwards (it was set; no verdict).
+static func speed_window(ticks_s: float, wall_s: float) -> int:
+	if wall_s <= 0.0:
+		return -1
+	var ratio := ticks_s / wall_s
+	return 1 if ratio > SPEED_FAST or ratio < SPEED_SLOW else 0
+
+
 func _notification(what: int) -> void:
-	if what in [NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_PAUSED]:
+	# The monotonic clock stops while the phone sleeps; the app is paused then.
+	if what in [NOTIFICATION_APPLICATION_RESUMED, NOTIFICATION_APPLICATION_PAUSED]:
 		_reset_clock()
 		_speed_strikes = 0
 
@@ -141,14 +154,15 @@ func sign_dict(data: Dictionary) -> Dictionary:
 	return out
 
 
-## Returns {"ok": bool, "unsigned": bool, "data": Dictionary-without-signature}.
+## Returns {"ok": bool, "data": Dictionary-without-signature}. A missing or malformed signature
+## fails like a wrong one: every build that a player can update from signs its profile.
 func verify_dict(data: Dictionary) -> Dictionary:
 	var body: Dictionary = _canonical(data)
-	var sig := String(body.get("_sig", ""))
+	var sig: Variant = body.get("_sig")
 	body.erase("_sig")
-	if sig == "":
-		return {"ok": true, "unsigned": true, "data": body}
-	return {"ok": sig == sign_text(JSON.stringify(body, "", true)), "unsigned": false, "data": body}
+	if typeof(sig) != TYPE_STRING or String(sig).is_empty():
+		return {"ok": false, "data": body}
+	return {"ok": String(sig) == sign_text(JSON.stringify(body, "", true)), "data": body}
 
 
 # ---------------------------------------------------------------- APK signature (Android)
@@ -157,18 +171,26 @@ func _check_signature() -> void:
 	signature_state = _signature_state()
 	if OS.get_name() == "Android":
 		print("[LoneWolf] signature ", signature_state)
-	if signature_state == "mismatch":
+	if signature_state.begins_with("mismatch"):
 		flag("signature")
+
+
+## The constants of res://build_keys.gd ({} when the build has none).
+static func build_keys() -> Dictionary:
+	if not ResourceLoader.exists(KEYS_SCRIPT):
+		return {}
+	var scr: Variant = load(KEYS_SCRIPT)
+	return (scr as Script).get_script_constant_map() if scr is Script else {}
 
 
 func _signature_state() -> String:
 	if OS.get_name() != "Android":
 		return "not android"
-	if not FileAccess.file_exists(SIGNER_FILE):
-		return "unknown (no signer file)"
-	var accepted := signer_digests(FileAccess.get_file_as_string(SIGNER_FILE))
+	var listed: Variant = build_keys().get("SIGNERS", [])
+	var accepted := signer_digests("\n".join(PackedStringArray(listed if listed is Array else [])))
 	if accepted.is_empty():
-		return "unknown (bad signer file)"
+		# Every official release build carries the list, so a release without it was altered.
+		return "mismatch (no signer list)" if OS.has_feature("template_release") else "unknown (no signer list)"
 	# The installed APK can't be read directly: Godot only opens files in the app's own storage.
 	if not Engine.has_singleton("AndroidRuntime"):
 		return "unknown (no android runtime)"
@@ -192,8 +214,8 @@ func _signature_state() -> String:
 	return "mismatch"
 
 
-## The certificate SHA-256s in build_signer.txt, one per line (hex, with or without colons), as
-## 32-byte arrays; empty when any line is not one.
+## Certificate SHA-256s, one per line (hex, with or without colons), as 32-byte arrays; empty
+## when any line is not one.
 static func signer_digests(text: String) -> Array[PackedByteArray]:
 	var out: Array[PackedByteArray] = []
 	for line in text.split("\n", false):

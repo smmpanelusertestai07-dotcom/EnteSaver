@@ -174,7 +174,20 @@ func _test_guard() -> void:
 	_check(Guard.verify_dict(parsed).ok, "signature survives a JSON round trip (ints become floats)")
 	parsed["xp"] = 999999
 	_check(not Guard.verify_dict(parsed).ok, "edited profile is rejected")
-	_check(Guard.verify_dict({"name": "OLD"}).unsigned, "old unsigned profile is accepted once")
+	_check(not Guard.verify_dict({"name": "OLD", "xp": 99999}).ok, "an unsigned profile is rejected")
+	_check(not Guard.verify_dict({"name": "OLD", "_sig": 12345}).ok and not Guard.verify_dict({"_sig": []}).ok,
+		"a profile with a malformed signature is rejected")
+	_check(Guard.speed_window(3.0, 3.0) == 0 and Guard.speed_window(3.0, 3.3) == 0, "speed check: a normal clock passes")
+	_check(Guard.speed_window(3.0, 1.5) == 1 and Guard.speed_window(3.0, 6.0) == 1, "speed check: a 2x faster or slower game clock strikes")
+	_check(Guard.speed_window(3.0, -2.0) == -1 and Guard.speed_window(3.0, 0.0) == -1, "speed check: a wall clock set backwards gives no verdict")
+	_check(Game.clean_name("  [color=red]hacker[/color]\u0007\u202e") == "COLORREDHACKER", "player names keep only A-Z 0-9 space _ - . (14 max)")
+	var saved_profile := Game.profile.duplicate(true)
+	Game.profile.merge({"name": "", "bundle": "nope", "matches": -5, "wins": 9, "kills": -1, "xp": -40}, true)
+	Game._sanitize_profile()
+	_check(Game.profile.name == "ROOKIE" and Game.profile.bundle == "default", "profile: empty name and unknown outfit fall back")
+	_check(Game.profile.matches == 0 and Game.profile.wins == 0 and Game.profile.kills == 0 and Game.profile.xp == 0,
+		"profile: counts are never negative and wins never exceed matches")
+	Game.profile = saved_profile
 
 
 func _test_signer_digests() -> void:

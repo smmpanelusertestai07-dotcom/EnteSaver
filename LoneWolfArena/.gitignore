@@ -8,10 +8,10 @@ export_credentials.cfg
 .import/
 # Private reference screenshots of other games (analysis only, never committed).
 reference_private/
-# Written by tools/build_apk.sh at export time (certificate hash of the signing key).
-build_signer.txt
-# Written by tools/build_apk.sh at export time (the save-signing secret of release builds).
-build_secret.txt
+# Written by tools/build_apk.sh (and the CI export) for one build: the signing certificate
+# hashes and the save-signing secret. Never commit.
+build_keys.gd
+build_keys.gd.uid
 __pycache__/
 # Scratch renders of the props pipeline
 tools/props/_render_tmp/

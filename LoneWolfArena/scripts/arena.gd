@@ -272,6 +272,7 @@ func _on_weapon_picked(id: String) -> void:
 
 func _start_fight() -> void:
 	phase = Phase.FIGHT
+	Game.count_match()
 	if picked_weapon == "":
 		hud.close_weapon_pick()
 		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
@@ -405,9 +406,11 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 
 
 func _on_tampered(reason: String) -> void:
+	if _result_shown:
+		return
+	_invalid = true          # also when the fight is over but its result not yet recorded
 	if phase == Phase.END:
 		return
-	_invalid = true
 	phase = Phase.END
 	_freeze_all()
 	hud.show_center("INTEGRITY CHECK FAILED", 3.0, UI.BAD, 60, "this match will not count (%s)" % reason)
