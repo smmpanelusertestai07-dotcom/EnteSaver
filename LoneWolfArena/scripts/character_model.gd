@@ -572,6 +572,18 @@ func play_death() -> void:
 		tw.parallel().tween_property(_fb.hips, "position:y", 0.25, 0.6)
 
 
+## On its feet again for the next round (undoes play_death and play_victory).
+func revive() -> void:
+	_dead = false
+	show_weapon = true
+	if anim:
+		anim.stop()
+	if tree:
+		tree.active = true
+	if fallback and _fb.has("hips"):
+		(_fb.hips as Node3D).rotation.x = 0.0
+
+
 func play_victory() -> void:
 	if weapon_node:
 		weapon_node.visible = false

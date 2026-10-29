@@ -3,13 +3,13 @@ extends Node3D
 ## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
 ## UI in the battle-royale lobby layout (original art): player card (avatar, name + EDIT, level,
 ## XP line) and an offline coin strip top-left, logo + glyph buttons top-right, a text menu on
-## the left (BUNDLES, CUSTOM HUD, SETTINGS, HOW TO PLAY, CREDITS), the mode card
+## the left (PRACTICE, PLAY WITH FRIENDS, BUNDLES, CUSTOM HUD, SETTINGS, HOW TO PLAY), the mode card
 ## "LONE WOLF / CARGO CAGE" with difficulty chips, match stats and the big START bottom-right.
 ## BUNDLES opens the wardrobe (vault-like: rarity tabs, item cards with rarity glow and bar,
 ## preview on the podium, EQUIP / BACK). START shows the match loading overlay
 ## (Loading.start_match) and then enters the arena.
 ## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton,
-## CreditsButton, Bundle_<id>, EquipButton.
+## Bundle_<id>, EquipButton.
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -750,7 +750,6 @@ func _build_left_menu(root: Control) -> void:
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
 		["HOW TO PLAY", "v_info", "HowToPlayButton", _how_to_play],
-		["CREDITS", "v_star", "CreditsButton", _open_credits],
 	]
 	for it in items:
 		menu.add_child(_menu_row(String(it[0]), String(it[1]), String(it[2]), it[3]))
@@ -938,7 +937,7 @@ func _build_bottom_left(root: Control) -> void:
 	_bundle_label = UI.shadowed(UI.label("", 22, UI.RARITY_COLORS[info.rarity], "bold"))
 	box.add_child(_bundle_label)
 	_update_bundle_label(String(Game.profile.bundle))
-	var ver := UI.label("v%s  ·  offline  ·  made with Godot" % ProjectSettings.get_setting("application/config/version", "1.0"), 13, Color(1, 1, 1, 0.45), "semi")
+	var ver := UI.label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 13, Color(1, 1, 1, 0.45), "semi")
 	box.add_child(ver)
 
 
@@ -994,8 +993,8 @@ func _open_friends(kind := "online") -> void:
 				_open_friends(tk))
 		tabs.add_child(b)
 	v.add_child(tabs)
-	var note := "Play from anywhere, no account. A free public relay passes the messages; everything in a match is end-to-end encrypted on the two phones." \
-		if kind == "online" else "Same Wi-Fi or one phone's hotspot. No internet, no server: nearby players show up by name."
+	var note := "Play a friend from anywhere over the internet. No sign-up needed: friends who are online show up by name." \
+		if kind == "online" else "Same Wi-Fi or one phone's hotspot: nearby players show up by name."
 	var info := UI.label(note, 17, UI.TEXT_DIM, "semi")
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
@@ -1024,9 +1023,9 @@ func _refresh_friends() -> void:
 	if _net_kind == "online" and String(svc.status) != "online":
 		match String(svc.status):
 			"preparing":
-				_net_status.text = "PREPARING ENCRYPTION KEYS..."
+				_net_status.text = "GETTING READY..."
 			"connecting":
-				_net_status.text = "CONNECTING TO THE RELAY (%s)..." % String(svc.server_name)
+				_net_status.text = "CONNECTING..."
 			_:
 				_net_status.text = "NO INTERNET: RETRYING..."
 	elif _net_kind == "wifi" and String(svc.local_address()) == "":
@@ -1036,7 +1035,7 @@ func _refresh_friends() -> void:
 	elif _net_note != "":
 		_net_status.text = _net_note
 	elif peers.is_empty():
-		_net_status.text = ("LOOKING FOR PLAYERS ONLINE (RELAY %s)..." % String(svc.server_name)) if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
+		_net_status.text = "LOOKING FOR PLAYERS ONLINE..." if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
 	else:
 		_net_status.text = "PLAYERS ONLINE" if _net_kind == "online" else "PLAYERS NEARBY"
 	var sig := waiting
@@ -1159,13 +1158,6 @@ func _find_settings() -> SettingsPanel:
 	return null
 
 
-func _open_credits() -> void:
-	for c in get_children():
-		if c is CreditsPanel:
-			return
-	add_child(CreditsPanel.new())
-
-
 # ---------------------------------------------------------------- modals (how to play, name)
 
 ## A popup in the reference look: the light header strip (dark caps title, hazard line, X on a
@@ -1213,9 +1205,9 @@ func _close_modal() -> void:
 const HOW_TO := [
 	["MOVE & LOOK", [
 		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
-		["v_eye", "LOOK", "Drag anywhere on the right side to turn the camera."],
+		["v_eye", "LOOK", "Drag anywhere on the right side to turn the camera. Hold the eye and drag to look around (even at your own front)."],
 		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
-		["v_crosshair", "LEFT FIRE", "A second fire button for your left thumb (Settings > Controls)."],
+		["v_crosshair", "LEFT FIRE", "A second fire button for your left thumb."],
 		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
 		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
 		["v_reload", "RELOAD", "Tap reload (or it reloads by itself when the magazine is empty)."],
@@ -1226,8 +1218,8 @@ const HOW_TO := [
 		["item_grenade", "FRAG GRENADE  x1", "Up to 150 damage at the centre (a vest halves it), 3-second fuse."],
 	]],
 	["THE MATCH", [
-		["v_player", "ONE ROUND VS A BOT", "1 vs 1, 200 HP each, Lv2 helmet and vest. Eliminate the bot to win."],
-		["v_timer", "PREP: PICK A WEAPON", "10 seconds behind the red barrier: the gun you pick is used by both of you."],
+		["v_player", "FIRST TO 5 ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win 5 rounds to win the match."],
+		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use; the pick takes turns."],
 		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
 	]],
 ]
@@ -1595,12 +1587,7 @@ func _move_camera(pos: Vector3, look: Vector3) -> void:
 # ---------------------------------------------------------------- input / anim
 
 func _modal_open() -> bool:
-	if _modal or _find_settings():
-		return true
-	for c in get_children():
-		if c is CreditsPanel:
-			return true
-	return false
+	return _modal != null or _find_settings() != null
 
 
 func _input(event: InputEvent) -> void:
@@ -1668,10 +1655,6 @@ func _notification(what: int) -> void:
 		return                      # the match is loading
 	if _find_settings():
 		return                      # the panel closes itself
-	for c in get_children():
-		if c is CreditsPanel:
-			c.queue_free()
-			return
 	if _modal:
 		_close_modal()
 	elif wardrobe:

@@ -13,10 +13,11 @@
 #   tests/anim_check.gd    every clip merged, toe fix, swap timing, flinch limit, grenade release
 #   tests/bot_check.gd     grenade arc accuracy, the bot survives the closing zone
 #   tests/flow_soak.gd     several matches in one process: no leaks, corpses stay on the floor
+#   tests/rounds_check.gd  a match over rounds: resets, alternating gun pick, the final result
 #   tests/guard_check.gd   a detection made before a match voids it
 #   tests/lan_check.gd     Wi-Fi 1 vs 1 with two copies of the game: find, challenge, accept,
 #                          play, a lethal hit and the result on both
-#   tests/cloud_check.gd   the same online (end-to-end encrypted), through tests/mqtt_mock.gd
+#   tests/cloud_check.gd   the same online over two rounds (end-to-end encrypted), through tests/mqtt_mock.gd
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -24,6 +25,8 @@ LOGS="$(mktemp -d)"
 # Godot's user data (logs, anything a run writes to user://) goes to a scratch folder: the
 # checks never touch the player's own data and parallel runs share nothing (Linux).
 export XDG_DATA_HOME="$LOGS/userdata"
+# Matches are first to 5 rounds; the checks play one-round matches unless they test the rounds.
+export LW_ROUNDS_TO_WIN=1
 fail=0
 step() { # step <name> <command...>
   local name="$1"; shift
@@ -49,12 +52,13 @@ if [ "${1:-}" != "quick" ]; then
   step anim godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
   step bot godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
   step soak env LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
+  step rounds env LW_ROUNDS_TO_WIN=2 godot --headless --path . -- --autotest=script:res://tests/rounds_check.gd
   step guard godot --headless --path . -- --autotest=script:res://tests/guard_check.gd
   step lan bash -c 'LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd > "$0" 2>&1 &
     h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd; g=$?
     wait $h; r=$?; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/lan_host.txt"
   step cloud bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47810 > /dev/null 2>&1 & m=$!
-    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810 LW_ROUNDS_TO_WIN=2
     LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &
     h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/cloud_host.txt"

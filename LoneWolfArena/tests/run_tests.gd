@@ -210,14 +210,14 @@ func _test_signer_digests() -> void:
 
 func _test_settings_sanitize() -> void:
 	var saved := Game.settings.duplicate(true)
-	Game.settings.aim_assist_strength = 5000
+	Game.settings.sens_reddot = 5000
 	Game.settings.sens_general = -40
 	Game.settings.difficulty = 9
 	Game.settings.graphics = -1
 	Game.settings.fps = 7
 	Game.settings.last_pick = "railgun"
 	Game._sanitize_settings()
-	_check(Game.settings.aim_assist_strength == 100, "edited aim assist strength is clamped to 100")
+	_check(Game.settings.sens_reddot == 200, "edited red-dot sensitivity is clamped to 200")
 	_check(Game.settings.sens_general == 1, "edited sensitivity is clamped to 1..200")
 	_check(Game.settings.difficulty == 2 and Game.DIFFICULTY_NAMES.size() > Game.settings.difficulty, "difficulty stays a valid index")
 	_check(Game.settings.graphics == 0, "graphics level clamped")

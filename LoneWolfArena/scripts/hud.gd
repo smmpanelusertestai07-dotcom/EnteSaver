@@ -16,16 +16,16 @@ extends Control
 signal pause_pressed
 
 const BUTTONS := ["fire_r", "fire_l", "scope", "jump", "crouch", "prone", "sprint", "reload", "medkit", "wall",
-	"grenade", "settings", "scoreboard"]
+	"grenade", "settings", "scoreboard", "freelook"]
 const GLYPHS := {
 	"fire_r": "v_fire", "fire_l": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
 	"prone": "stance_prone", "sprint": "stance_sprint", "reload": "v_reload", "medkit": "v_medkit", "wall": "v_wall",
-	"grenade": "item_grenade", "settings": "v_settings", "scoreboard": "v_scoreboard",
+	"grenade": "item_grenade", "settings": "v_settings", "scoreboard": "v_scoreboard", "freelook": "v_eye",
 }
 const GLYPH_FALLBACK := {"prone": "v_prone", "sprint": "v_sprint", "jump": "v_chevron"}
 const GLYPH_SCALE := {
 	"fire_r": 0.54, "fire_l": 0.56, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
-	"reload": 0.56, "medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "scoreboard": 0.5,
+	"reload": 0.56, "medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "scoreboard": 0.5, "freelook": 0.56,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
@@ -135,8 +135,15 @@ func show_center(text: String, seconds: float, color := Color.WHITE, fsize := 96
 	_center = {"text": text, "sub": sub, "t": seconds, "dur": maxf(seconds, 0.01), "col": color, "size": fsize}
 
 
-func show_round_banner(round_index: int, area: String) -> void:
-	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area}
+## sub replaces the AREA line (the reference shows "Match Point!" there).
+func show_round_banner(round_index: int, area: String, sub := "") -> void:
+	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area, "sub": sub}
+
+
+## End of a round that does not end the match: VICTORY / DEFEAT / DRAW over the same band with
+## the score on it (yours on the blue side, theirs on the orange one).
+func show_round_result(title: String, mine: int, theirs: int) -> void:
+	_round_banner = {"t": 2.6, "dur": 2.6, "title": title, "mine": mine, "theirs": theirs}
 
 
 func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable) -> void:
@@ -411,6 +418,9 @@ func _press(id: String, index: int) -> void:
 			pause_pressed.emit()
 		"scoreboard":
 			_toggle_scoreboard()
+		"freelook":
+			_touches[index] = {"kind": "free", "id": id}
+			player.start_free_look()
 		"weapons:main":
 			if player.current == 0:
 				player.do_reload()
@@ -435,6 +445,8 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 				_joy_vec = (pos - _joy_center) / jr
 		"look":
 			player.add_look(rel, false)
+		"free":
+			player.add_free_look(rel)
 		"fire":
 			_touches[index]["pos"] = pos
 			player.add_look(rel, true)
@@ -465,6 +477,8 @@ func _on_up(index: int, canceled := false) -> void:
 			_joy_vec = Vector2.ZERO
 			_joy_out_t = 0.0
 			_sprint_lock = false
+		"free":
+			player.end_free_look()
 		"fire":
 			_held.erase(String(t.id))
 			var still := false
@@ -697,7 +711,7 @@ func _draw() -> void:
 		_draw_scope(c, vs)
 	_draw_damage_dirs(c, u)
 	if alive:
-		if not scoped:
+		if not scoped and not player.is_free_looking():
 			_draw_crosshair(c, u)
 		_draw_heal(c, u)
 	_draw_kill_x(u)
@@ -1372,6 +1386,9 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 		var my := vs.y * 0.415
 		HudDraw.plate(self, Rect2(cx - mw * 0.5 - 0.09 * u, my - 0.032 * u, mw + 0.18 * u, 0.064 * u), 0.62)
 		HudDraw.text_parts(self, parts, Vector2(cx, my), mfs, 1, 3, "bold")
+	var note := String(arena.get("pick_note"))
+	if note != "":
+		HudDraw.text(self, note, Vector2(cx, vs.y * 0.49), int(0.03 * u), Color(1.0, 0.86, 0.35), 1, 3, "bold")
 
 
 ## "ROUND n / AREA: name" on a band fading from blue (left) to orange (right).
@@ -1379,11 +1396,11 @@ func _draw_round_banner(vs: Vector2, u: float) -> void:
 	var t := float(_round_banner.t)
 	if t <= 0.0:
 		return
-	var age := ROUND_BANNER_TIME - t
+	var age := float(_round_banner.get("dur", ROUND_BANNER_TIME)) - t
 	var a := clampf(age / 0.18, 0.0, 1.0) * clampf(t / 0.4, 0.0, 1.0)
 	var slide := (1.0 - ease(clampf(age / 0.28, 0.0, 1.0), 0.35)) * vs.x * 0.12
 	var h := 0.13 * u
-	var y0 := vs.y * 0.3
+	var y0 := vs.y * (0.5 if _round_banner.has("mine") else 0.3)      # a result sits under the kill badge
 	var w := minf(vs.x * 0.66, 1.3 * u)
 	var x0 := (vs.x - w) * 0.5 - slide
 	var xm := x0 + w * 0.5
@@ -1399,10 +1416,20 @@ func _draw_round_banner(vs: Vector2, u: float) -> void:
 		PackedColorArray([orange, Color(orange, 0.0), Color(orange, 0.0), orange]))
 	draw_line(Vector2(x0 + fade, y0), Vector2(x0 + w - fade, y0), Color(1, 1, 1, 0.25 * a), 1.5)
 	draw_line(Vector2(x0 + fade, y0 + h), Vector2(x0 + w - fade, y0 + h), Color(1, 1, 1, 0.25 * a), 1.5)
+	if _round_banner.has("mine"):
+		var title := String(_round_banner.title)
+		var tcol := HudDraw.YELLOW if title == "VICTORY" else Color(0.86, 0.86, 0.86)
+		HudDraw.text(self, title, Vector2(xm, y0 - 0.05 * u), int(0.05 * u), Color(tcol, a), 1, 3, "bold")
+		HudDraw.text_parts(self, [[str(int(_round_banner.mine)), Color.WHITE], ["   VS   ", Color(1, 1, 1, 0.9)],
+			[str(int(_round_banner.theirs)), Color.WHITE]], Vector2(xm, y0 + h * 0.52), int(0.085 * u), 1, 3, "title", a)
+		return
 	var tc := Vector2(xm, y0 + h * 0.4)
 	HudDraw.text_parts(self, [["ROUND ", Color.WHITE], [str(int(_round_banner.round)), HudDraw.YELLOW]], tc, int(0.078 * u), 1, 3, "bold", a)
-	HudDraw.text_parts(self, [["AREA: ", Color(1, 1, 1, 0.95)], [String(_round_banner.area), HudDraw.YELLOW]],
-		Vector2(xm, y0 + h * 0.8), int(0.03 * u), 1, 2, "bold", a)
+	if String(_round_banner.get("sub", "")) != "":
+		HudDraw.text(self, String(_round_banner.sub), Vector2(xm, y0 + h * 0.8), int(0.032 * u), Color(HudDraw.YELLOW, a), 1, 2, "bold")
+	else:
+		HudDraw.text_parts(self, [["AREA: ", Color(1, 1, 1, 0.95)], [String(_round_banner.area), HudDraw.YELLOW]],
+			Vector2(xm, y0 + h * 0.8), int(0.03 * u), 1, 2, "bold", a)
 
 
 ## Elimination badge (our own emblem) with HEADSHOT / ELIMINATED and the victim's name plate.

@@ -5,6 +5,8 @@ extends Bot
 ## second (smoothed), shows its shots, and never loses HP by itself: hits on it are sent to its
 ## phone, which applies them and reports its HP and its death back.
 
+const STATE_SIZE := 10
+
 var _net_pos := Vector3.INF
 var _net_yaw := 0.0
 var _net_pitch := 0.0
@@ -12,12 +14,20 @@ var _net_floor := true
 var _net_heal := false
 
 
-## [x, y, z, yaw, pitch, stance, flags, weapon index, hp]; flags: 1 sprint, 2 ads, 4 healing,
-## 8 on the floor.
-static func pack(f: Fighter) -> PackedFloat32Array:
+## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; flags: 1 sprint, 2 ads,
+## 4 healing, 8 on the floor.
+static func pack(f: Fighter, round_index := 1) -> PackedFloat32Array:
 	var flags := (1 if f.sprinting else 0) | (2 if f.ads else 0) | (4 if f.healing else 0) | (8 if f.is_on_floor() else 0)
 	var at := f.global_position
-	return PackedFloat32Array([at.x, at.y, at.z, f.aim_yaw, f.aim_pitch, float(f.stance), float(flags), float(f.current), f.hp])
+	return PackedFloat32Array([at.x, at.y, at.z, f.aim_yaw, f.aim_pitch, float(f.stance), float(flags), float(f.current), f.hp, float(round_index)])
+
+
+func reset_for_round(pos: Vector3, yaw: float) -> void:
+	super(pos, yaw)
+	_net_pos = pos
+	_net_yaw = yaw
+	_net_pitch = 0.0
+	_net_heal = false
 
 
 func apply_state(s: PackedFloat32Array) -> void:

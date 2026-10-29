@@ -136,6 +136,18 @@ func _drag(index: int, pos: Vector2, rel: Vector2) -> void:
 	Input.parse_input_event(ev)
 
 
+## Whether a shot aimed at point (camera settled) reaches b first, as Player._try_fire traces it.
+func _crosshair_hits(p: Player, b: Fighter, point: Vector3) -> bool:
+	for k in 2:
+		_aim_at(p, point)
+		await get_tree().process_frame
+		await get_tree().physics_frame
+	var xf := p.camera.global_transform
+	var fwd := -xf.basis.z
+	var hit := p.trace(xf.origin + fwd * maxf((p.eye_position() - xf.origin).dot(fwd), 0.0), fwd, 60.0)
+	return hit.get("collider") is Area3D and (hit.collider as Area3D).get_meta("fighter", null) == b
+
+
 func _aim_at(p: Player, target: Vector3) -> void:
 	# Aim like a skilled player: compensate the camera recoil offset.
 	var dir := (target - p.camera.global_position).normalized()
@@ -444,13 +456,12 @@ func _run_perf() -> void:
 
 ## Aim-assist checks (headless): a frozen bot stands 14 m in front of the player.
 ##  1. start 3 deg off the chest, hold FIRE: the pull must bring the crosshair onto the body;
-##  2. on the body, a fast upward drag while firing must stop on the head (no overshoot);
+##  2. a drag from the chest: too short stays on the body, the right length stops on the head
+##     (a forgiving band), too long goes over it; the first bullet follows the drag;
 ##  3. the bot strafes: with assist the crosshair stays on target more often than without;
 ##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away.
 ## Prints AIM lines and exits 1 if a check fails.
 func _run_aim() -> void:
-	Game.settings.aim_assist = true
-	Game.settings.aim_assist_strength = 60
 	Game.goto_arena()
 	var arena: Node = null
 	for i in 300:
@@ -463,21 +474,21 @@ func _run_aim() -> void:
 	b.frozen = true
 	b.invulnerable = true
 	p.invulnerable = true
-	# Same gun and settings every run (the map keeps changing).
-	Game.settings.aim_precision = 0
+	# Same gun every run (the map keeps changing).
 	p.set_loadout("ar")
 	b.set_loadout("ar")
-	# Stand the bot 10-16 m from the player where the player has a clear view of its head and
-	# chest (cover moves with map work, so a fixed spot is not enough).
+	# Stand the bot 10-16 m from the player where the player sees its head and chest and the
+	# crosshair ray (from the shoulder camera) reaches both (cover moves with map work).
 	var placed := false
 	for dist in [14.0, 12.0, 16.0, 10.0]:
 		for ang in [0.0, 12.0, -12.0, 25.0, -25.0, 40.0, -40.0, 60.0, -60.0, 90.0, -90.0, 180.0]:
 			var dir := Vector3(0, 0, -1).rotated(Vector3.UP, p.aim_yaw + deg_to_rad(ang))
 			b.global_position = arena.call("closest_nav_point", p.global_position + dir * dist)
-			await get_tree().physics_frame
-			await get_tree().process_frame
+			b.velocity = Vector3.ZERO
+			await _wait(0.25)          # let it settle on the floor before judging the view
 			if absf(p.global_position.distance_to(b.global_position) - dist) < 3.0 \
-					and p.can_see(b.chest_position()) and p.can_see(b.head_position()):
+					and p.can_see(b.chest_position()) and p.can_see(b.head_position()) \
+					and await _crosshair_hits(p, b, b.chest_position()) and await _crosshair_hits(p, b, b.head_position()):
 				placed = true
 				break
 		if placed:
@@ -498,26 +509,75 @@ func _run_aim() -> void:
 	_log("AIM pull: on target after %.2fs (want < 0.6s)" % acquired)
 	if acquired < 0.0 or acquired > 0.6:
 		fails += 1
-	# 2. drag up while firing -> head stop
+	# 2. drag sweep from the chest in 2 px steps: body, then the head band, then over the head
 	await _wait(0.3)
-	_aim_at(p, b.chest_position())
-	p.set_firing(true)
-	await get_tree().physics_frame
-	for i in 12:
-		p.add_look(Vector2(0, -25), true)
+	for k in 3:
+		_aim_at(p, b.chest_position())
+		await get_tree().process_frame
 		await get_tree().physics_frame
-	var cam_dir := -p.camera.global_basis.z
-	var head := b.head_position()
-	var to_head := (head - p.camera.global_position).normalized()
-	var pitch_err := rad_to_deg(asin(clampf(cam_dir.y, -1, 1)) - asin(clampf(to_head.y, -1, 1)))
-	p.set_firing(false)
-	_log("AIM head stop: crosshair %.2f deg vs head centre after a 300 px upward drag (want -1.5..+0.8)" % pitch_err)
-	if pitch_err > 0.8 or pitch_err < -1.5:
+	var zones := PackedStringArray()
+	for i in 200:
+		p.add_look(Vector2(0, -2), true)
+		await get_tree().physics_frame
+		zones.append(p.aim_zone if p.aim_zone != "" else "-")
+		if zones.size() > 8 and "head" in zones and zones.slice(zones.size() - 8).count("-") == 8:
+			break
+	var first_head := zones.find("head")
+	var last_head := zones.rfind("head")
+	var head_run := last_head - first_head + 1 if first_head >= 0 else 0
+	var over := first_head >= 0 and zones[zones.size() - 1] == "-"
+	var clean := first_head > 0 and zones.slice(0, first_head).count("body") == first_head \
+		and zones.slice(first_head, last_head + 1).count("head") == head_run
+	_log("AIM drag sweep: body for %d steps, head for %d, then over the head=%s (want >0, >=5, true)" % [maxi(first_head, 0), head_run, over])
+	if not clean or head_run < 5 or not over:
 		fails += 1
+	# 2b. the first bullet goes where the drag that began with the press stopped
+	b.invulnerable = false
+	b.endless_hp = true             # hits count, HP stays
+	var mid := (first_head + last_head) / 2 + 1
+	var first := {}
+	for trial in ["drag", "still"]:
+		await _wait(0.5)
+		for k in 3:   # the camera sits on the shoulder: re-aim once it has moved
+			_aim_at(p, b.chest_position())
+			await get_tree().process_frame
+			await get_tree().physics_frame
+		p.weapon().cancel_reload()
+		p.weapon().ammo = 20
+		p.weapon().cooldown = 0.0
+		var shots0 := int(p.stats.shots)
+		var heads0 := int(p.stats.headshots)
+		var hits0 := int(p.stats.hits)
+		p.set_firing(true)
+		var at_shot := ""
+		if trial == "drag":
+			for i in mid:
+				p.add_look(Vector2(0, -2), true)
+				if i % 4 == 3:
+					await get_tree().physics_frame
+					if int(p.stats.shots) > shots0 and at_shot == "":
+						at_shot = "fired mid-drag at step %d of %d" % [i + 1, mid]
+		for i in 30:
+			await get_tree().physics_frame
+			if int(p.stats.shots) > shots0:
+				break
+		if trial == "drag":
+			var cam := p.camera.global_transform
+			var to_head := (b.head_position() - cam.origin).normalized()
+			_log("AIM first drag shot: %s, crosshair %.2f deg above the head centre, zone %s" % [
+				at_shot if at_shot != "" else "fired after the drag", rad_to_deg(asin(-cam.basis.z.y) - asin(to_head.y)), p.aim_zone])
+		first[trial] = "head" if int(p.stats.headshots) > heads0 else ("body" if int(p.stats.hits) > hits0 else \
+			("miss" if int(p.stats.shots) > shots0 else "no shot (ammo %d, reloading %s)" % [p.weapon().ammo, p.weapon().reloading]))
+		p.set_firing(false)
+	_log("AIM first bullet: right drag=%s, no drag=%s (want head, body)" % [first.drag, first.still])
+	if first.drag != "head" or first.still != "body":
+		fails += 1
+	b.endless_hp = false
+	b.invulnerable = true
 	# 3. strafing target, with and without assist
 	var on := {}
 	for assist in [false, true]:
-		Game.settings.aim_assist = assist
+		p.assist_on = assist
 		await _wait(0.3)
 		_aim_at(p, b.chest_position())
 		var base: Vector3 = b.global_position
@@ -533,7 +593,7 @@ func _run_aim() -> void:
 	if on[true] <= on[false]:
 		fails += 1
 	# 4. red crosshair flag
-	Game.settings.aim_assist = true
+	p.assist_on = true
 	for k in 3:   # the camera sits on the shoulder, so re-aim once it has moved
 		_aim_at(p, b.chest_position())
 		await get_tree().process_frame

@@ -83,8 +83,8 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
 | Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
-| Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; firing locks onto the body (pull 20/s, up to 160 deg/s); on target the look slows to 0.4 and follows 100 % of the target's motion at full strength, scaled by Aim Assist strength (default 90) and the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); pull while firing, head stop on upward drag; Aim precision ASSISTED / HIP ONLY (none while scoped) / MANUAL (values: player.gd ASSIST) |
-| Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; head stop error -1.5..+0.8 deg; on-target % with assist > without; red crosshair only on the body |
+| Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; firing locks onto the body (pull 20/s, up to 160 deg/s); on target the look slows to 0.4 (0.25 over the head band, +-0.2 m) and follows 100 % of the target's motion, at strength 0.9 scaled by the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); firing pulls sideways onto the body and holds the height of the part it is on once a drag stops (never down from over the head); a drag decides: short = body, right = head, long = over the head; the first shot waits up to 0.15 s for a drag that starts with the press, first bullet after a pause at half spread (values: player.gd ASSIST) |
+| Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; 2 px drag sweep from the chest: body, then >= 5 steps on the head, then over the head; first bullet: right drag = head, no drag = body; on-target % with assist > without; red crosshair only on the body |
 
 ## 5. Screens
 - Loading (boot, the main scene): full-bleed key art of our own character in a container yard
@@ -94,15 +94,15 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
   chips (ROUNDS 1, 1 VS BOT, bot difficulty), big map wordmark, the bar.
 - Lobby: character large on a lit podium in a 3D container yard; top bar (emblem avatar, level,
   name with EDIT, XP line, offline coins and wins); left text menu (BUNDLES, CUSTOM HUD,
-  SETTINGS, HOW TO PLAY, CREDITS); featured duel card top-left; right: stats chips, bot
+  SETTINGS, HOW TO PLAY); featured duel card top-left; right: stats chips, bot
   difficulty, mode card "LONE WOLF / CARGO CAGE" and the big yellow START bottom-right.
 - Wardrobe (BUNDLES): rarity tabs, 3-column item cards with the rendered outfit portrait and a
   rarity bar, live preview on the podium, EQUIP and BACK.
 - Result: mode/map text top-left, our medal with gold "VICTORY" / grey "DEFEAT" / white "DRAW" /
   red "INVALID", round score plates, stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY,
   TIME, HP LEFT), honour tag, XP bar, PLAY AGAIN / LOBBY.
-- Settings: tab column BASIC (graphics LOW .. EXTREME, 30/60/90 FPS, show FPS, damage numbers,
-  vibration), CONTROLS (aim precision, aim assist and strength, left fire, custom HUD, ...),
-  SENSITIVITY (general, red dot, sniper scope, fire-button drag), SOUND; per-tab RESET.
+- Settings (only what the reference mode offers): BASIC (graphics LOW .. EXTREME, 30/60/90 FPS),
+  CONTROLS (dynamic joystick, custom HUD), SENSITIVITY (general, red dot, sniper scope,
+  fire-button drag), SOUND; per-tab RESET. Everything else is fixed at its best value.
 - Pause: full-width dark band, PAUSED, score / time left / HP chips, RESUME, SETTINGS, QUIT MATCH
   (asks again).

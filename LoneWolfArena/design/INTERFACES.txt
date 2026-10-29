@@ -5,8 +5,10 @@ gameplay core. HUD, map and menus are separate files that talk to the core only 
 listed here. If a part needs something new from the core, add it in its own file or note it.
 
 ## Arena (scripts/arena.gd) -> read by HUD / menus
-- `phase` (Phase.PREP=0, FIGHT=1, END=2), `prep_left` (s), `time_left` (s), `elapsed` (s),
-  `round_index`, `rounds_to_win`, `score` {"player": int, "bot": int}, `picked_weapon` (id)
+- `phase` (Phase.PREP=0, FIGHT=1, END=2 (match over), BREAK=3 (between rounds)), `prep_left` (s),
+  `time_left` (s), `elapsed` (s, this round), `match_time` (s), `round_index`, `rounds_to_win`
+  (5; LW_ROUNDS_TO_WIN in test builds), `score` {"player": int, "bot": int}, `picked_weapon` (id),
+  `pick_note` (prep line: who picks the gun, or which it is)
 - zone: `zone_state` ("stationary" | "shrinking" | "closed"), `zone_next()` (s until it
   changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text or "")
 - `fighters` (Array[Fighter]), `player`, `bot`, `map_name` ("CARGO CAGE"), `map_rect` (Rect2,
@@ -47,7 +49,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout` and
   `boot timeout: <n> files still loading`), `lobby ready`,
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
-  `player moved`, `pause opened`, `pause closed`, `match over: <why>`, `results shown`,
+  `player moved`, `pause opened`, `pause closed`, `<player|bot> eliminated`, `time up`,
+  `round over`, `round <n>`, `match over: <won|lost|draw>`, `results shown`,
   `wifi match: <host|guest>` (a Wi-Fi 1 vs 1, see scripts/lan.gd),
   `signature <state>` (Guard, "ok" when the package manager confirms a signer listed in the
   build's res://build_keys.gd).
@@ -111,13 +114,13 @@ listed here. If a part needs something new from the core, add it in its own file
   change emits `Game.settings_changed` so the arena re-applies its quality at once. With
   `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
   note (`EditHudNote`): leaving for the editor would abandon the match.
-- Lobby Android back closes the top layer (popup, settings, credits, wardrobe), then shows a quit
+- Lobby Android back closes the top layer (popup, settings, wardrobe), then shows a quit
   dialog (`QuitDialog`, `QuitCancel`, `QuitConfirm`); it is ignored during the START overlay.
-- `CreditsPanel.new()` (CanvasLayer 60): credits and the licence notices the shipped parts need
-  (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL in
-  assets/fonts/LICENSE.txt); signal `closed`. Opened by the lobby's `CreditsButton`.
+- No credits screen: `Licences.publish()` prints the licence notices the shipped parts need
+  (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
+  assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
-  `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`, `CreditsButton`,
+  `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`,
   `PlayerCard` (opens the name editor), `PlayerName`, `Logo`, `Modal`, `PlayAgain`, `Lobby`,
   `Close`, `SaveButton`.

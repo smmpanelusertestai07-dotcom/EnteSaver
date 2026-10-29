@@ -64,6 +64,27 @@ func configure(diff: int, enemy: Fighter) -> void:
 	strafe_dir = 1.0 if rng.randf() < 0.5 else -1.0
 
 
+func reset_for_round(pos: Vector3, yaw: float) -> void:
+	super(pos, yaw)
+	state = S.SEARCH
+	see_target = false
+	has_info = false
+	last_seen_time = -999.0
+	reaction = 0.0
+	track_time = 0.0
+	burst_left = 0
+	burst_pause = 0.0
+	cover_point = Vector3.INF
+	wander_point = Vector3.INF
+	_stuck_timer = 0.0
+	_last_pos = pos
+	_shield_cooldown = 0.0
+	_decision_timer = 0.0
+	_grenade_timer = 0.0
+	_zone_goal = Vector3.INF
+	_zone_goal_timer = 0.0
+
+
 # ---------------------------------------------------------------- perception
 
 func _perceive() -> void:

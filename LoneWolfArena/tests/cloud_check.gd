@@ -54,14 +54,27 @@ func run(autotest: Node) -> int:
 	at.log_line("remote at %s, its spawn %s, remote hp %.0f" % [str(b.global_position), str(their_spawn), b.hp])
 	if not (b is RemoteFighter) or b.global_position.distance_to(their_spawn) > 3.0:
 		_fail("the remote player does not follow the other phone's state")
-	if host:
-		b.take_damage(9999.0, "head", p, p.global_position)
-	t = 0.0
-	while not arena.get("_result_shown") and t < 20.0:
-		await at.wait(0.25)
-		t += 0.25
-	if not arena.get("_result_shown"):
-		return _done("results never shown")
+	# The host takes every round (LW_ROUNDS_TO_WIN sets how many): each next round must start on
+	# both phones with both players back up at full HP, and the match end with the host's win.
+	var round_now := 1
+	while true:
+		if host:
+			b.take_damage(9999.0, "head", p, p.global_position)
+		t = 0.0
+		while t < 30.0 and not arena.get("_result_shown") and not (int(arena.get("round_index")) > round_now and arena.get("phase") == 1):
+			await at.wait(0.25)
+			t += 0.25
+		if arena.get("_result_shown"):
+			break
+		if int(arena.get("round_index")) <= round_now:
+			return _done("round %d never ended" % round_now)
+		round_now = int(arena.get("round_index"))
+		await at.wait(1.0)
+		at.log_line("round %d: me %.0f HP alive=%s, remote %.0f HP alive=%s, score %s" % [round_now, p.hp, p.alive, b.hp, b.alive, str(arena.get("score"))])
+		if not p.alive or not b.alive or p.hp < Fighter.MAX_HP or b.hp < Fighter.MAX_HP - 1.0:
+			_fail("round %d did not reset both players" % round_now)
+	if round_now < 2:
+		_fail("the match ended after one round")
 	var winner: Variant = arena.get("_winner")
 	at.log_line("result: winner=%s me alive=%s remote alive=%s" % [
 		"me" if winner == p else ("them" if winner == b else "none"), p.alive, b.alive])

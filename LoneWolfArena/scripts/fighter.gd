@@ -165,6 +165,7 @@ func _build_hitboxes() -> void:
 	# zone, anchor roles (midpoint), radius
 	var defs := [
 		["head", "head", ["head"], 0.16],
+		["neck", "body", ["neck", "head"], 0.1],          # closes the gap between the head and the chest
 		["chest", "body", ["spine2", "spine3"], 0.21],
 		["belly", "body", ["spine1", "pelvis"], 0.2],
 		["thigh_l", "limb", ["thigh_l", "calf_l"], 0.11],
@@ -290,6 +291,39 @@ func die(killer: Fighter, headshot := false) -> void:
 		hb.collision_layer = 0
 	model.play_death()
 	died.emit(self, killer, headshot)
+
+
+## Back on its feet at a spawn for the next round: full HP and items, the round's gun with a full
+## magazine, collisions on again. The stats carry over (they are the match's).
+func reset_for_round(pos: Vector3, yaw: float) -> void:
+	alive = true
+	round_over = false
+	cancel_heal()
+	_stop_heal_sound()
+	healing = false
+	_throwing = false
+	_throw_target = Vector3.INF
+	hp = MAX_HP
+	medkits = 2
+	shields = 2
+	grenades = 1
+	ads = false
+	sprinting = false
+	move_dir = Vector2.ZERO
+	want_jump = false
+	velocity = Vector3.ZERO
+	global_position = pos
+	aim_yaw = yaw
+	aim_pitch = 0.0
+	set_stance(Stance.STAND, true)
+	collision_layer = LAYER_BODY
+	collision_mask = LAYER_WORLD | LAYER_BODY | LAYER_SHIELD
+	for hb in hitboxes:
+		hb.collision_layer = LAYER_HITBOX
+	model.revive()
+	set_loadout(weapons[0].id if not weapons.is_empty() else Weapons.DEFAULT_PICK)
+	last_damage_time = -99.0
+	last_attacked_time = -99.0
 
 
 func _now() -> float:

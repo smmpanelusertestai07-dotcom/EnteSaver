@@ -13,24 +13,11 @@ const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"graphics": 1,
 	"fps": 60,
-	"show_fps": false,
-	"vibration": true,
-	"damage_numbers": true,
 	"sens_general": 100,
 	"sens_reddot": 100,
 	"sens_sniper": 71,
 	"sens_fire": 100,
-	"aim_assist": true,
-	"aim_assist_strength": 90,
-	"aim_precision": 0,
-	"hold_fire_scope": true,
-	"left_fire": 0,
-	"reload_on_crosshair": true,
-	"run_mode": 2,
 	"dynamic_joystick": true,
-	"dynamic_crosshair": true,
-	"crosshair_color": 0,
-	"crosshair_size": 50,
 	"vol_master": 85,
 	"vol_sfx": 90,
 	"vol_music": 45,
@@ -38,22 +25,25 @@ const DEFAULT_SETTINGS := {
 	"last_pick": "ar",
 }
 
+## Behaviour the settings screen no longer offers (it keeps to graphics, sensitivity, joystick,
+## custom HUD and sound): always these values, whatever an older settings file says.
+const FIXED_SETTINGS := {
+	"show_fps": false, "vibration": true, "damage_numbers": true, "hold_fire_scope": true,
+	"left_fire": 0, "reload_on_crosshair": true, "run_mode": 2, "dynamic_crosshair": true,
+	"crosshair_color": 0, "crosshair_size": 50,
+}
+
 ## Valid ranges of the numeric settings. Values outside them (an edited or corrupted settings
 ## file) are clamped on load and on save, so nothing can index past a list or overdrive a value.
 const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_sniper": [1, 200],
-	"sens_fire": [1, 200], "aim_assist_strength": [0, 100], "aim_precision": [0, 2], "left_fire": [0, 2],
-	"run_mode": [0, 2], "crosshair_color": [0, 3], "crosshair_size": [0, 100], "vol_master": [0, 100],
-	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2],
+	"sens_fire": [1, 200], "vol_master": [0, 100], "vol_sfx": [0, 100], "vol_music": [0, 100],
+	"difficulty": [0, 2],
 }
 const FPS_OPTIONS := [30, 60, 90]
 
 ## The crosshair's idle colour (it always turns red on an enemy).
 const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
-const CROSSHAIR_COLOR_NAMES := ["WHITE", "GREEN", "YELLOW", "CYAN"]
-const AIM_PRECISION_NAMES := ["ASSISTED", "HIP ONLY", "MANUAL"]     # assist always / not while scoped / never
-const LEFT_FIRE_NAMES := ["ALWAYS", "WHEN SCOPED", "OFF"]
-const RUN_MODE_NAMES := ["TAP", "DRAG", "MIXED"]
 const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
 const GRAPHICS_NAMES := ["LOW", "MEDIUM", "HIGH", "EXTREME"]
 const XP_PER_LEVEL := 500
@@ -110,11 +100,10 @@ func _ready() -> void:
 		version = 1
 	if saved is Dictionary and int(version) < 2:
 		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
-		for k in ["sens_general", "sens_reddot", "sens_fire", "crosshair_color", "left_fire", "aim_assist_strength", "settings_version"]:
+		for k in ["sens_general", "sens_reddot", "sens_fire", "settings_version"]:
 			(saved as Dictionary).erase(k)
-	if saved is Dictionary and int(version) < 3:
-		(saved as Dictionary).erase("aim_assist_strength")      # v3: the stronger default body lock
 	_merge_into(settings, saved)
+	settings.merge(FIXED_SETTINGS, true)
 	settings.settings_version = SETTINGS_VERSION
 	_sanitize_settings()
 	_load_profile()
@@ -122,6 +111,8 @@ func _ready() -> void:
 	hud_layout = hud if hud is Dictionary else {}
 	_setup_audio_buses()
 	apply_settings()
+	if autotest == "":
+		Licences.publish.call_deferred()
 	if autotest != "":
 		var runner: Node = load("res://scripts/autotest.gd").new()
 		runner.name = "AutoTest"

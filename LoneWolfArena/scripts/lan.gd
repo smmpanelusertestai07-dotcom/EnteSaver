@@ -24,7 +24,6 @@ signal state_received(state: PackedFloat32Array)
 const DISCOVERY_PORT := 47790
 const GAME_PORT := 47791
 const PROTOCOL := 1
-const STATE_SIZE := 9
 const PEER_TIMEOUT_MS := 4500
 const INVITE_TIMEOUT_MS := 20000
 const MAX_PACKET := 512
@@ -325,7 +324,7 @@ func send_event(kind: String, data: Array = []) -> void:
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func _r_state(s: PackedFloat32Array) -> void:
-	if not in_session or multiplayer.get_remote_sender_id() != _peer_id or s.size() != STATE_SIZE:
+	if not in_session or multiplayer.get_remote_sender_id() != _peer_id or s.size() != RemoteFighter.STATE_SIZE:
 		return
 	state_received.emit(s)
 

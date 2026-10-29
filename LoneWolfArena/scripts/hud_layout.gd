@@ -25,13 +25,14 @@ const STRIP_H := 0.17            # zone status strip under the minimap, in minim
 const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button
 
 ## Hit-test order (first wins when two widgets overlap) and editor list.
-const ORDER := ["settings", "scoreboard", "weapons", "fire_r", "fire_l", "scope", "jump", "crouch", "prone",
+const ORDER := ["settings", "scoreboard", "weapons", "fire_r", "fire_l", "scope", "freelook", "jump", "crouch", "prone",
 	"sprint", "reload", "medkit", "wall", "grenade", "minimap", "joystick"]
 const DEFAULTS := {
 	"joystick": {"x": 0.177, "y": 0.79, "s": 0.25, "o": 0.8, "a": "l"},
 	"fire_r": {"x": 0.82, "y": 0.69, "s": 0.22, "o": 0.9, "a": "r"},
 	"fire_l": {"x": 0.075, "y": 0.5, "s": 0.13, "o": 0.85, "a": "l"},
 	"scope": {"x": 0.932, "y": 0.55, "s": 0.13, "o": 0.85, "a": "r"},
+	"freelook": {"x": 0.932, "y": 0.4, "s": 0.1, "o": 0.85, "a": "r"},
 	"jump": {"x": 0.932, "y": 0.725, "s": 0.115, "o": 0.85, "a": "r"},
 	"crouch": {"x": 0.932, "y": 0.925, "s": 0.11, "o": 0.85, "a": "r"},
 	"prone": {"x": 0.859, "y": 0.925, "s": 0.11, "o": 0.85, "a": "r"},
@@ -48,7 +49,7 @@ const DEFAULTS := {
 const LABELS := {
 	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP",
 	"crouch": "CROUCH", "prone": "PRONE", "sprint": "SPRINT", "reload": "RELOAD", "medkit": "MEDKIT",
-	"wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "scoreboard": "SCOREBOARD",
+	"wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "scoreboard": "SCOREBOARD", "freelook": "FREE LOOK",
 	"weapons": "WEAPONS", "minimap": "MAP",
 }
 

@@ -5,14 +5,16 @@ extends Node3D
 ## on HP, or an integrity flag) -> results screen. Also renders the top-down minimap image once,
 ## runs the pause menu and feeds the HUD and scoreboard.
 
-enum Phase { PREP, FIGHT, END }
+enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two rounds
 
 const PREP_TIME := 10.0
+const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
+const BREAK_TIME := 3.5
 const ROUND_TIME := 90.0
 const ZONE_HOLD := 25.0
 const ZONE_SHRINK := 40.0
 const ZONE_MIN := 4.0
-const ROUNDS_TO_WIN := 1
+const ROUNDS_TO_WIN := 5         # the reference mode: first to 5 rounds (best of 9)
 const MODE_NAME := "LONE WOLF"
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
 
@@ -25,10 +27,12 @@ var phase := Phase.PREP
 var prep_left := PREP_TIME
 var time_left := ROUND_TIME
 var elapsed := 0.0
+var match_time := 0.0
 var round_index := 1
 var rounds_to_win := ROUNDS_TO_WIN
 var score := {"player": 0, "bot": 0}
 var picked_weapon := ""
+var pick_note := ""                # prep line under PREPARE: who picks the gun, or which it is
 var zone_center := Vector3.ZERO
 var zone_radius := 999.0
 var zone_start_radius := 30.0
@@ -60,6 +64,9 @@ var _net_t := 0.0
 var _net_begun := false
 var _net_their_ready := false
 var _net_timeup_t := -1.0
+var _break_t := 0.0
+var _bot_pick_t := -1.0
+var _forfeit := false            # the other phone left: the match is ours
 
 
 func _ready() -> void:
@@ -76,6 +83,8 @@ func _ready() -> void:
 	zone_center = map.zone_center
 	zone_start_radius = map.zone_start_radius
 	practice = Game.practice
+	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
+		rounds_to_win = maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)     # tests: shorter matches
 	online = Game.online and Game.session != null and bool(Game.session.get("in_session"))
 	if Game.online and not online:
 		Game.online = false
@@ -152,7 +161,9 @@ func _net_begin() -> void:
 
 
 func _on_net_state(s: PackedFloat32Array) -> void:
-	(bot as RemoteFighter).apply_state(s)
+	# The last value is the sender's round: a packet from before a round's reset is dropped.
+	if s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index and phase != Phase.BREAK:
+		(bot as RemoteFighter).apply_state(s)
 
 
 func _on_net_event(kind: String, data: Array) -> void:
@@ -166,8 +177,10 @@ func _on_net_event(kind: String, data: Array) -> void:
 			if not Game.session.is_host:
 				_net_begin()
 		"pick":
-			if data.size() == 1 and Weapons.PICKABLE.has(String(data[0])):
-				remote.set_loadout(String(data[0]))
+			# Its pick for this round (late ones still count: both must hold the same gun).
+			if data.size() == 2 and Weapons.PICKABLE.has(String(data[0])) and int(data[1]) == round_index \
+					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT):
+				_apply_pick(String(data[0]))
 		"shot":
 			if data.size() == 6:
 				remote.remote_shot(Vector3(float(data[0]), float(data[1]), float(data[2])), Vector3(float(data[3]), float(data[4]), float(data[5])))
@@ -195,17 +208,26 @@ func _on_net_event(kind: String, data: Array) -> void:
 				wall.global_position = pos
 				wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
 		"timeup":
-			if data.size() == 2 and not Game.session.is_host:
+			if data.size() == 3 and not Game.session.is_host and int(data[2]) == round_index:
 				_timeout(float(data[0]), float(data[1]))
+		"round":
+			# The host starts each next round and sends the score as it counts it.
+			if data.size() == 3 and not Game.session.is_host and phase == Phase.BREAK and int(data[0]) == round_index + 1:
+				score.player = int(data[2])
+				score.bot = int(data[1])
+				_next_round()
 
 
 func _on_net_ended(_reason: String) -> void:
 	if phase == Phase.END:
 		return
-	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+	_forfeit = true
 	var remote := bot as RemoteFighter
-	if remote.alive:
+	if remote.alive and phase != Phase.BREAK:
 		remote.die(null, false)
+	else:
+		_end_round(null)
+	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
 
 
 ## Called by RemoteFighter for every hit this phone's player lands on it.
@@ -376,43 +398,67 @@ func apply_graphics() -> void:
 
 # ---------------------------------------------------------------- match flow
 
+## The gun is picked every two rounds and the picker alternates (the reference mode's rule):
+## rounds 1-2 you (online: the inviter), 3-4 the opponent, and so on. Both fighters get it.
 func _start_prep() -> void:
 	phase = Phase.PREP
-	prep_left = PREP_TIME
+	var pick_round := (round_index - 1) % 2 == 0
+	prep_left = PREP_TIME if pick_round else PREP_SHORT
 	map.set_barriers(true)
 	for f in fighters:
 		f.hold_fire = true
+	player.frozen = false
 	bot.frozen = true
-	hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), PREP_TIME - 1.0, _on_weapon_picked)
-	if int(Game.profile.matches) < 3:
+	pick_note = ""
+	_bot_pick_t = -1.0
+	if pick_round:
+		picked_weapon = ""
+		if _i_pick():
+			hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
+		else:
+			pick_note = "%s IS PICKING THE WEAPON" % bot.display_name
+			if not online:
+				_bot_pick_t = _rng.randf_range(1.5, 3.5)
+	else:
+		pick_note = "WEAPON: " + String(player.gun().def.name)
+	if round_index == 1 and int(Game.profile.matches) < 3:
 		hud.tips_time = 9.0
 	Game.mark("prep started")
 
 
-## Both fighters get the picked gun (the reference mode's rule); on Wi-Fi each phone picks its
-## own and tells the other.
+func _i_pick() -> bool:
+	var first := ((round_index - 1) / 2) % 2 == 0
+	return not first if online and not Game.session.is_host else first
+
+
+## This phone's player picked (or the pick timer ran out on its turn).
 func _on_weapon_picked(id: String) -> void:
 	if not Weapons.DEFS.has(id):
 		id = Weapons.DEFAULT_PICK
-	picked_weapon = id
 	Game.settings.last_pick = id
 	Game.save_settings()
-	for f in fighters:
-		if not online or f == player:
-			f.set_loadout(id)
+	_apply_pick(id)
 	if online:
-		Game.session.send_event("pick", [id])
+		Game.session.send_event("pick", [id, round_index])
+
+
+func _apply_pick(id: String) -> void:
+	picked_weapon = id
+	for f in fighters:
+		f.set_loadout(id)
+	pick_note = "" if _i_pick() else "%s PICKED: %s" % [bot.display_name, String(Weapons.DEFS[id].name)]
 	Game.mark("weapon picked: " + id)
 
 
 func _start_fight() -> void:
 	phase = Phase.FIGHT
 	_net_timeup_t = -1.0
-	if not practice:
+	if not practice and round_index == 1:
 		Game.count_match()
-	if picked_weapon == "":
+	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:
 		f.hold_fire = false
@@ -429,7 +475,8 @@ func _start_fight() -> void:
 		zone_radius = 999.0
 		hud.show_center("PRACTICE", 2.0, Color(1.0, 0.82, 0.22), 80, "THE DUMMY NEVER GOES DOWN")
 	else:
-		hud.show_round_banner(round_index, map_name)
+		var point := rounds_to_win > 1 and maxi(int(score.player), int(score.bot)) == rounds_to_win - 1
+		hud.show_round_banner(round_index, map_name, "MATCH POINT!" if point else "")
 	Audio.play("countdown_go", 0.0)
 
 
@@ -438,9 +485,13 @@ func _physics_process(delta: float) -> void:
 		_net_t += delta
 		if _net_t >= float(Game.session.state_interval):
 			_net_t = 0.0
-			Game.session.send_state(RemoteFighter.pack(player))
+			Game.session.send_state(RemoteFighter.pack(player, round_index))
 	match phase:
 		Phase.PREP:
+			if _bot_pick_t > 0.0:
+				_bot_pick_t -= delta
+				if _bot_pick_t <= 0.0:
+					_apply_pick(String(Weapons.PICKABLE[_rng.randi() % Weapons.PICKABLE.size()]))
 			prep_left -= delta
 			var n := ceili(prep_left)
 			if prep_left <= 3.0 and n != _last_count and n > 0:
@@ -450,6 +501,7 @@ func _physics_process(delta: float) -> void:
 				_start_fight()
 		Phase.FIGHT:
 			elapsed += delta
+			match_time += delta
 			if practice:
 				time_left = elapsed          # the clock counts the practice time up
 				_refill_practice_ammo()
@@ -470,6 +522,32 @@ func _physics_process(delta: float) -> void:
 				Engine.time_scale = 1.0
 			if _end_t > 2.6 and not _result_shown:
 				_show_results()
+		Phase.BREAK:
+			_break_t += delta / maxf(Engine.time_scale, 0.01)
+			if _break_t > 1.0 and Engine.time_scale < 1.0:
+				Engine.time_scale = 1.0
+			# Online the host starts the next round; the guest goes on alone if that never comes.
+			if (_break_t >= BREAK_TIME and (not online or Game.session.is_host)) or _break_t >= BREAK_TIME + 3.0:
+				_next_round()
+
+
+## Both back at their spawns with full HP, items and ammo for the next round (stats carry over).
+func _next_round() -> void:
+	round_index += 1
+	if online and Game.session.is_host:
+		Game.session.send_event("round", [round_index, int(score.player), int(score.bot)])
+	Engine.time_scale = 1.0
+	hud.match_over = false
+	for c in get_children():
+		if c is ShieldWall or c is Grenade:
+			c.queue_free()
+	var guest: bool = online and not Game.session.is_host
+	player.reset_for_round(map.spawn_b if guest else map.spawn_a, map.spawn_b_yaw if guest else map.spawn_a_yaw)
+	bot.reset_for_round(map.spawn_a if guest else map.spawn_b, map.spawn_a_yaw if guest else map.spawn_b_yaw)
+	for f in fighters:
+		_outside[f] = 0.0
+	Game.mark("round %d" % round_index)
+	_start_prep()
 
 
 ## Practice: the bot stands still in the open centre bay, facing the player's spawn, and takes
@@ -529,25 +607,18 @@ func in_zone(p: Vector3) -> bool:
 
 
 func _timeout(my_hp := -1.0, their_hp := -1.0) -> void:
-	if phase == Phase.END:
+	if phase != Phase.FIGHT:
 		return
-	phase = Phase.END
-	Game.mark("match over: time up")
 	if my_hp < 0.0:
 		my_hp = player.hp
 		their_hp = bot.hp
 		if online and Game.session.is_host:
-			Game.session.send_event("timeup", [their_hp, my_hp])     # as the guest sees it: its HP first
-	if absf(my_hp - their_hp) < 0.5:
-		_draw = true
-	else:
-		_winner = (player as Fighter) if my_hp > their_hp else (bot as Fighter)
-		score["player" if _winner == player else "bot"] += 1
-	hud.show_center("TIME UP", 2.0, Color.WHITE, 96, "DRAW" if _draw else ("HIGHER HP WINS: " + _winner.display_name))
-	_freeze_all()
-	if _winner == player:
-		player.model.play_victory()
-		player.victory_cam = true
+			Game.session.send_event("timeup", [their_hp, my_hp, round_index])     # as the guest sees it: its HP first
+	var winner: Fighter = null
+	if absf(my_hp - their_hp) >= 0.5:
+		winner = (player as Fighter) if my_hp > their_hp else (bot as Fighter)
+	Game.mark("time up")
+	_end_round(winner, false, true)
 
 
 func _freeze_all() -> void:
@@ -559,7 +630,7 @@ func _freeze_all() -> void:
 
 
 func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
-	Game.mark("match over: %s eliminated" % ("player" if victim == player else "bot"))
+	Game.mark("%s eliminated" % ("player" if victim == player else "bot"))
 	if online and victim == player:
 		Game.session.send_event("died", [headshot])
 	var weapon_icon := ""
@@ -568,22 +639,51 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		weapon_icon = String(killer.weapon().def.icon)
 		weapon_name = String(killer.weapon().def.name)
 	hud.add_kill_feed(killer.display_name if killer else "ZONE", victim.display_name, weapon_name, weapon_icon, headshot, killer == player)
-	if phase == Phase.END:
+	if phase == Phase.END or phase == Phase.BREAK:
 		return
-	phase = Phase.END
-	_winner = killer if killer and killer != victim else ((player as Fighter) if victim == bot else (bot as Fighter))
-	score["player" if _winner == player else "bot"] += 1
-	Engine.time_scale = 0.35
+	var winner := killer if killer and killer != victim else ((player as Fighter) if victim == bot else (bot as Fighter))
+	_end_round(winner, headshot, false, killer)
+
+
+## A round is decided (an elimination, or the time-out: winner null = a draw). The score goes up;
+## the match is over at rounds_to_win wins, after the last round of the best-of (2 x rounds_to_win
+## - 1, drawn rounds count) or when the other phone left; otherwise the next round follows a break.
+func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: Fighter = null) -> void:
+	if winner != null:
+		score["player" if winner == player else "bot"] += 1
+	var mine := int(score.player)
+	var theirs := int(score.bot)
+	var decided := practice or _forfeit or mine >= rounds_to_win or theirs >= rounds_to_win or round_index >= 2 * rounds_to_win - 1
+	var line := "%d  -  %d" % [mine, theirs]
 	_freeze_all()
-	if victim == bot:
-		hud.show_center("VICTORY!", 2.5, UI.ACCENT, 110, "%s eliminated" % bot.display_name)
-		hud.kill_banner(bot.display_name, headshot)
+	if decided:
+		phase = Phase.END
+		_draw = mine == theirs and not _forfeit
+		_winner = null if _draw else ((player as Fighter) if mine > theirs or _forfeit else (bot as Fighter))
+		Game.mark("match over: " + ("draw" if _draw else ("won" if _winner == player else "lost")))
+	else:
+		phase = Phase.BREAK
+		_break_t = 0.0
+		Game.mark("round over")
+	if not decided:
+		hud.show_round_result("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs)
+	elif timed_out:
+		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line)
+	elif _winner == player:
+		hud.show_center("VICTORY!", 2.5, UI.ACCENT, 110, line)
+	else:
+		hud.show_center("ELIMINATED", 2.5, UI.BAD, 100, "by %s    %s" % [killer.display_name if killer else "the zone", line])
+	if not timed_out:
+		Engine.time_scale = 0.35
+		if winner == player:
+			hud.kill_banner(bot.display_name, headshot)
+	if winner == player:
+		Audio.play("victory_sting", 0.0)
+	elif winner != null:
+		Audio.play("defeat_sting", 0.0)
+	if decided and _winner == player:
 		player.model.play_victory()
 		player.victory_cam = true
-		Audio.play("victory_sting", 0.0)
-	else:
-		hud.show_center("ELIMINATED", 2.5, UI.BAD, 100, "by %s" % (killer.display_name if killer else "the zone"))
-		Audio.play("defeat_sting", 0.0)
 
 
 func _on_tampered(reason: String) -> void:
@@ -644,11 +744,11 @@ func _show_results() -> void:
 	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
 	var xp := 0
 	if not _invalid:
-		# capped: a 1v1 round has one opponent
-		xp = 40 + (120 if won else 0) + mini(int(st.kills), 1) * 60 + mini(int(float(st.damage) / 4.0), 120) + mini(int(st.headshots), 20) * 10
+		# capped: one opponent, at most one kill per round
+		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
 	result = {
 		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": int(st.damage),
-		"headshots": int(st.headshots), "accuracy": acc, "time": elapsed, "xp": xp, "enemy": bot.display_name,
+		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
 		"mode": MODE_NAME, "map": map_name, "weapon": String(player.gun().def.name),
 		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
 		"difficulty": Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),

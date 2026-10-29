@@ -172,13 +172,6 @@ func _build_boot() -> void:
 	ver.offset_bottom = -10
 	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	add_child(ver)
-	var note := UI.label("Made with Godot Engine", 14, Color(1, 1, 1, 0.4), "semi")
-	note.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	note.offset_left = 22
-	note.offset_right = 300
-	note.offset_top = -34
-	note.offset_bottom = -10
-	add_child(note)
 
 
 ## Bar at y = 0.905 H from x = 0.155 W to 0.84 W, percent at its right, status above its left

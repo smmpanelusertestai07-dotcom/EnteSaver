@@ -25,8 +25,7 @@ signal event_received(kind: String, data: Array)
 signal state_received(state: PackedFloat32Array)
 
 const ROOT := "lonewolfarena/v1"
-const BROKERS := [["wss://broker.emqx.io:8084/mqtt", "EMQX"], ["wss://broker.hivemq.com:8884/mqtt", "HIVEMQ"]]
-const STATE_SIZE := 9
+const BROKERS := ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"]
 const ANNOUNCE_S := 3.0
 const PEER_TIMEOUT_MS := 10000
 const INVITE_TIMEOUT_MS := 25000
@@ -44,7 +43,6 @@ var is_host := false
 var opponent := {}             # {"id", "name", "bundle"}
 var queue: Array = []
 var status := ""               # "preparing", "connecting", "online", "offline"
-var server_name := ""
 var _brokers: Array = BROKERS
 var _broker_i := 0
 var _ws: WebSocketPeer
@@ -78,7 +76,7 @@ func _ready() -> void:
 	name = "Cloud"
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if not OS.has_feature("template") and OS.get_environment("LW_MQTT_URL") != "":
-		_brokers = [[OS.get_environment("LW_MQTT_URL"), "TEST"]]      # tests: a local broker
+		_brokers = [OS.get_environment("LW_MQTT_URL")]      # tests: a local broker
 
 
 func configured() -> bool:
@@ -125,8 +123,7 @@ func _connect() -> void:
 	_connected = false
 	_sent_connect = false
 	_connect_t = 0.0
-	server_name = String(_brokers[_broker_i][1])
-	if _ws.connect_to_url(String(_brokers[_broker_i][0])) != OK:
+	if _ws.connect_to_url(String(_brokers[_broker_i])) != OK:
 		_ws = null
 		_next_broker()
 		return
@@ -540,7 +537,7 @@ func _on_room(msg: PackedByteArray) -> void:
 				session_started.emit(is_host)
 		"st":
 			var s: Variant = (d as Dictionary).get("s", [])
-			if in_session and s is Array and (s as Array).size() == STATE_SIZE:
+			if in_session and s is Array and (s as Array).size() == RemoteFighter.STATE_SIZE:
 				var out := PackedFloat32Array()
 				for v: Variant in s:
 					if typeof(v) != TYPE_FLOAT and typeof(v) != TYPE_INT:

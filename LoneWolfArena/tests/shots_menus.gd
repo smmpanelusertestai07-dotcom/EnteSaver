@@ -174,17 +174,6 @@ func run(at: Node) -> int:
 		_back()
 		await _settle(0.4)
 		_check(closed[0] and _settings(lobby) == null and lobby.get("_modal") == null, "back saves and closes the settings (and nothing else)")
-	# Credits; back closes them.
-	await _tap(lobby.find_child("CreditsButton", true, false) as Control)
-	await _settle(0.8)
-	await at.shot("m12_credits")
-	_back()
-	await _settle(0.4)
-	var credits_open := false
-	for c in lobby.get_children():
-		if c is CreditsPanel and not c.is_queued_for_deletion():
-			credits_open = true
-	_check(not credits_open, "back closes the credits")
 	# Back with nothing open asks before quitting; CANCEL and back both close the dialog.
 	_back()
 	await _settle(0.4)

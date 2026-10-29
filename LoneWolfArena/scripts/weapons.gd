@@ -13,7 +13,7 @@ const DEFS := {
 		"reload": 2.4, "pellets": 1, "spread_hip": 1.2, "spread_ads": 0.3, "spread_move": 1.2, "spread_air": 4.0,
 		"spread_per_shot": 0.25, "spread_max": 3.0, "spread_recover": 8.0,
 		"recoil_v": 0.22, "recoil_h": 0.12, "recoil_ramp": 0.03, "scope": "reddot", "ads_fov": 50.0,
-		"move": 0.92, "fire_move": 0.85, "equip": 0.35, "assist": 1.0, "head_lock": 0.6, "crosshair": "ring",
+		"move": 0.92, "fire_move": 0.85, "equip": 0.35, "assist": 1.0, "crosshair": "ring",
 	},
 	"smg": {
 		"name": "WASP SMG", "class": "SMG", "icon": "weapon_smg", "model": "weapon_smg", "sound": "smg_shot",
@@ -22,7 +22,7 @@ const DEFS := {
 		"reload": 2.3, "pellets": 1, "spread_hip": 2.0, "spread_ads": 0.8, "spread_move": 0.8, "spread_air": 3.0,
 		"spread_per_shot": 0.35, "spread_max": 4.0, "spread_recover": 9.0,
 		"recoil_v": 0.18, "recoil_h": 0.15, "recoil_ramp": 0.015, "scope": "reddot", "ads_fov": 56.0,
-		"move": 0.98, "fire_move": 0.95, "equip": 0.3, "assist": 1.15, "head_lock": 0.7, "crosshair": "ring",
+		"move": 0.98, "fire_move": 0.95, "equip": 0.3, "assist": 1.15, "crosshair": "ring",
 	},
 	"sg": {
 		"name": "THUNDER SG", "class": "SG", "icon": "weapon_sg", "model": "weapon_sg", "sound": "sg_shot",
@@ -31,7 +31,7 @@ const DEFS := {
 		"reload": 3.0, "pellets": 8, "spread_hip": 5.0, "spread_ads": 3.8, "spread_move": 1.0, "spread_air": 2.5,
 		"spread_per_shot": 0.0, "spread_max": 0.0, "spread_recover": 8.0,
 		"recoil_v": 1.2, "recoil_h": 0.4, "recoil_ramp": 0.0, "scope": "none", "ads_fov": 58.0,
-		"move": 0.92, "fire_move": 0.85, "equip": 0.45, "assist": 1.2, "head_lock": 1.0, "crosshair": "wide",
+		"move": 0.92, "fire_move": 0.85, "equip": 0.45, "assist": 1.2, "crosshair": "wide",
 	},
 	"lever": {
 		"name": "M1887", "class": "SG", "icon": "weapon_sg_lever", "model": "weapon_sg", "sound": "sg_shot",
@@ -40,7 +40,7 @@ const DEFS := {
 		"reload": 2.2, "pellets": 8, "spread_hip": 2.4, "spread_ads": 1.8, "spread_move": 1.0, "spread_air": 2.5,
 		"spread_per_shot": 0.0, "spread_max": 0.0, "spread_recover": 8.0,
 		"recoil_v": 1.3, "recoil_h": 0.4, "recoil_ramp": 0.0, "scope": "none", "ads_fov": 58.0,
-		"move": 0.93, "fire_move": 0.85, "equip": 0.45, "assist": 1.2, "head_lock": 1.0, "crosshair": "wide",
+		"move": 0.93, "fire_move": 0.85, "equip": 0.45, "assist": 1.2, "crosshair": "wide",
 		"tint": Color(0.75, 0.55, 0.35),
 	},
 	"pistol": {
@@ -50,7 +50,7 @@ const DEFS := {
 		"reload": 1.9, "pellets": 1, "spread_hip": 1.4, "spread_ads": 0.3, "spread_move": 1.0, "spread_air": 3.0,
 		"spread_per_shot": 1.0, "spread_max": 3.0, "spread_recover": 7.0,
 		"recoil_v": 1.1, "recoil_h": 0.25, "recoil_ramp": 0.0, "scope": "reddot", "ads_fov": 58.0,
-		"move": 0.96, "fire_move": 0.9, "equip": 0.25, "assist": 1.0, "head_lock": 1.0, "crosshair": "ring",
+		"move": 0.96, "fire_move": 0.9, "equip": 0.25, "assist": 1.0, "crosshair": "ring",
 	},
 	"sniper": {
 		"name": "FALCON SR", "class": "SNIPER", "icon": "weapon_sniper", "model": "weapon_sniper", "sound": "sniper_shot",
@@ -59,7 +59,7 @@ const DEFS := {
 		"reload": 2.8, "pellets": 1, "spread_hip": 6.0, "spread_ads": 0.0, "spread_move": 3.0, "spread_air": 8.0,
 		"spread_per_shot": 0.0, "spread_max": 0.0, "spread_recover": 8.0,
 		"recoil_v": 2.4, "recoil_h": 0.3, "recoil_ramp": 0.0, "scope": "sniper", "ads_fov": 14.0,
-		"move": 0.93, "fire_move": 0.6, "equip": 0.6, "assist": 0.5, "head_lock": 0.0, "crosshair": "dot",
+		"move": 0.93, "fire_move": 0.6, "equip": 0.6, "assist": 0.5, "crosshair": "dot",
 	},
 	"fists": {
 		"name": "FISTS", "class": "MELEE", "icon": "v_fist", "model": "", "sound": "hit_body",
@@ -68,7 +68,7 @@ const DEFS := {
 		"reload": 0.0, "pellets": 1, "spread_hip": 0.0, "spread_ads": 0.0, "spread_move": 0.0, "spread_air": 0.0,
 		"spread_per_shot": 0.0, "spread_max": 0.0, "spread_recover": 8.0,
 		"recoil_v": 0.0, "recoil_h": 0.0, "recoil_ramp": 0.0, "scope": "none", "ads_fov": 68.0,
-		"move": 1.0, "fire_move": 1.0, "equip": 0.2, "assist": 1.0, "head_lock": 0.0, "crosshair": "dot",
+		"move": 1.0, "fire_move": 1.0, "equip": 0.2, "assist": 1.0, "crosshair": "dot",
 		"melee": true,
 	},
 }

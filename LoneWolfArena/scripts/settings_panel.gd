@@ -1,7 +1,7 @@
 class_name SettingsPanel
 extends Control
-## Settings: a full-screen modal with a tab column on the left (BASIC, CONTROLS, SENSITIVITY,
-## SOUND), sectioned rows on dark plates, a close X (node "Close") top-right and a per-tab
+## Settings: a full-screen modal with a tab column on the left (BASIC: graphics and frame rate;
+## CONTROLS: joystick and custom HUD; SENSITIVITY; SOUND), sectioned rows on dark plates, a close X (node "Close") top-right and a per-tab
 ## RESET bottom-left. Every change applies at once (Game.settings + Game.apply_settings());
 ## closing saves (Game.save_settings()) and emits `closed`. Works while the tree is paused.
 ## _show_tab(i) takes the index in TABS (the screenshot walkthrough opens 2 = CONTROLS).
@@ -14,10 +14,9 @@ const TABS := ["BASIC", "SENSITIVITY", "CONTROLS", "SOUND"]
 ## Menu order on screen (indices into TABS).
 const ORDER := [0, 2, 1, 3]
 const TAB_KEYS := [
-	["graphics", "fps", "show_fps", "damage_numbers", "vibration"],
+	["graphics", "fps"],
 	["sens_general", "sens_reddot", "sens_sniper", "sens_fire"],
-	["aim_precision", "aim_assist", "aim_assist_strength", "left_fire", "hold_fire_scope", "reload_on_crosshair",
-		"run_mode", "dynamic_joystick", "dynamic_crosshair", "crosshair_color", "crosshair_size"],
+	["dynamic_joystick"],
 	["vol_master", "vol_sfx", "vol_music"],
 ]
 const SENS_PRESETS := {
@@ -192,11 +191,6 @@ func _show_tab(i: int) -> void:
 			for f in fps_opts:
 				labels.append("%d FPS" % f)
 			_body.add_child(UI.plate_row("Frame rate", UI.segmented(labels, maxi(fps_opts.find(int(Game.settings.fps)), 0), func(v: int) -> void: _apply("fps", fps_opts[v]), 17, 104.0)))
-			_body.add_child(UI.plate_row("Show FPS", _toggle("show_fps")))
-			_body.add_child(UI.spacer(6))
-			_body.add_child(UI.section("GAMEPLAY"))
-			_body.add_child(UI.plate_row("Damage numbers", _toggle("damage_numbers"), "Floating hit damage over the target"))
-			_body.add_child(UI.plate_row("Vibration", _toggle("vibration"), "Short buzz on hits and eliminations"))
 			_hint.text = "Graphics and frame rate apply at once. A lower frame rate saves battery."
 		1:
 			var head := HBoxContainer.new()
@@ -214,25 +208,8 @@ func _show_tab(i: int) -> void:
 			_sens_row("Fire-button drag", "sens_fire", "Turning while you hold and drag FIRE")
 			_hint.text = "1-200. Higher turns the camera faster for the same swipe. DEFAULT = 100 / 100 / 71 / 100."
 		2:
-			_body.add_child(UI.section("SHOOTING"))
-			_body.add_child(UI.plate_row("Aim precision", UI.segmented(Game.AIM_PRECISION_NAMES, int(Game.settings.aim_precision), func(v: int) -> void: _apply("aim_precision", v), 15, 150.0),
-				"Assisted: always. Hip only: off while scoped. Manual: off"))
-			_body.add_child(UI.plate_row("Aim assist", _toggle("aim_assist")))
-			_body.add_child(UI.plate_row("Aim assist strength", UI.slider(Game.settings.aim_assist_strength, 0, 100, func(v: float) -> void: _apply("aim_assist_strength", int(v)))))
-			_body.add_child(UI.plate_row("Left fire button", UI.segmented(Game.LEFT_FIRE_NAMES, int(Game.settings.left_fire), func(v: int) -> void: _apply("left_fire", v), 15, 140.0)))
-			_body.add_child(UI.plate_row("Hold fire to scope", _toggle("hold_fire_scope"), "Sniper rifles: hold FIRE to scope, release to shoot"))
-			_body.add_child(UI.plate_row("Reload progress on crosshair", _toggle("reload_on_crosshair")))
-			_body.add_child(UI.spacer(6))
 			_body.add_child(UI.section("MOVEMENT"))
-			_body.add_child(UI.plate_row("Run mode", UI.segmented(Game.RUN_MODE_NAMES, int(Game.settings.run_mode), func(v: int) -> void: _apply("run_mode", v), 15, 120.0),
-				"Drag: push the stick past the ring to sprint"))
 			_body.add_child(UI.plate_row("Dynamic joystick", _toggle("dynamic_joystick"), "The stick follows your thumb"))
-			_body.add_child(UI.spacer(6))
-			_body.add_child(UI.section("CROSSHAIR"))
-			_body.add_child(UI.plate_row("Crosshair colour", UI.segmented(Game.CROSSHAIR_COLOR_NAMES, int(Game.settings.crosshair_color), func(v: int) -> void: _apply("crosshair_color", v), 15, 104.0),
-				"Always turns red on an enemy"))
-			_body.add_child(UI.plate_row("Crosshair size", UI.slider(Game.settings.crosshair_size, 0, 100, func(v: float) -> void: _apply("crosshair_size", int(v)))))
-			_body.add_child(UI.plate_row("Dynamic crosshair", _toggle("dynamic_crosshair"), "Spreads while moving and firing"))
 			_body.add_child(UI.spacer(6))
 			if in_match:
 				var note := UI.label("IN THE LOBBY", 17, UI.TEXT_DIM, "bold")
