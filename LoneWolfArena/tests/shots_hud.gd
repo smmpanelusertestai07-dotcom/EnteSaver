@@ -96,6 +96,8 @@ func run(at: Node) -> int:
 	await at.get_tree().process_frame
 	hud.queue_redraw()
 	await at.shot("hud_06b_number_row")
+	# The staged row is not part of the next shots (the slow software clock would keep it up).
+	hud._dmg_numbers.clear()
 	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# Red-dot ADS.
 	p.toggle_ads()
