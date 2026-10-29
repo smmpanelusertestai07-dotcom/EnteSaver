@@ -520,17 +520,17 @@ func play_swap(model_name: String, tint: Color, seconds: float) -> void:
 		equip_weapon(model_name, tint)
 		return
 	var length := anim.get_animation("swap").length
-	var scale := clampf(length / maxf(seconds, 0.15), 0.8, 3.0)
-	tree.set("parameters/swap_ts/scale", scale)
+	var speed := clampf(length / maxf(seconds, 0.15), 0.8, 3.0)
+	tree.set("parameters/swap_ts/scale", speed)
 	tree.set("parameters/swap_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 	var now := Time.get_ticks_msec() / 1000.0
-	_follow_until = maxf(_follow_until, now + length / scale)
+	_follow_until = maxf(_follow_until, now + length / speed)
 	if weapon_id == "":
 		_pending_equip = []
 		equip_weapon(model_name, tint)    # coming from fists: the gun rises from low
 	else:
 		_pending_equip = [model_name, tint]
-		_equip_at = now + 0.5 * length / scale
+		_equip_at = now + 0.5 * length / speed
 
 
 ## Short upper-body flinch when hit; the gun follows the hands while it plays.
@@ -725,10 +725,6 @@ func bone_position(role: String) -> Vector3:
 		if a.has(role):
 			return (a[role] as Node3D).global_position
 	return global_position + Vector3.UP * 1.0
-
-
-func has_skeleton() -> bool:
-	return skeleton != null
 
 
 # ---------------------------------------------------------------- procedural fallback

@@ -1,6 +1,6 @@
 extends Node
-## Unit tests for the pure gameplay logic. Run:
-##   godot --headless --path . -s res://tests/run_tests.gd
+## Unit tests for the pure gameplay logic. Run through the scene, so the autoloads exist:
+##   godot --headless --path . res://tests/run_tests.tscn
 
 var _fails := 0
 var _passes := 0
@@ -26,6 +26,7 @@ func _ready() -> void:
 	_test_guard()
 	_test_signer_digests()
 	_test_settings_sanitize()
+	_test_honour()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -221,3 +222,14 @@ func _test_settings_sanitize() -> void:
 	_check(Game.settings.fps == 60, "unknown frame rate falls back to 60")
 	_check(Game.settings.last_pick == Weapons.DEFAULT_PICK, "unknown weapon pick falls back to the default")
 	Game.settings = saved
+
+
+func _test_honour() -> void:
+	var win := {"won": true, "hp_left": 20, "taken": 180, "headshots": 0}
+	_check(ResultsScreen.honour(win) == "CLUTCH", "a win under 30 HP is a clutch")
+	_check(ResultsScreen.honour({"won": false, "hp_left": 20, "taken": 180}) == "FIGHTER", "a draw with low HP is no clutch")
+	_check(ResultsScreen.honour({"won": false, "hp_left": 0, "taken": 200}) == "FIGHTER", "a defeat is no clutch")
+	_check(ResultsScreen.honour({"won": true, "hp_left": 20, "taken": 180, "headshots": 2}) == "SHARPSHOOTER", "2+ headshots win over clutch")
+	_check(ResultsScreen.honour({"won": true, "hp_left": 170, "taken": 30}) == "UNTOUCHABLE", "under 50 damage taken and alive")
+	_check(ResultsScreen.honour({"won": false, "hp_left": 0, "taken": 30}) == "FIGHTER", "a dead player is never untouchable")
+	_check(ResultsScreen.honour({"invalid": true, "won": true, "hp_left": 20, "headshots": 3}) == "", "a voided match has no honour")

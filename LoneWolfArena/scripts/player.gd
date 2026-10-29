@@ -38,7 +38,6 @@ var recoil_yaw := 0.0
 var shake := 0.0
 var assist_target: Fighter
 var head_lock := 0.0    # s left of the armed head stop
-var input_enabled := true
 var victory_cam := false
 var crosshair_on_target := false      # HUD: crosshair turns red
 var _track_dir := Vector3.ZERO        # last camera->target chest direction (for tracking)
@@ -94,7 +93,7 @@ func is_scoped() -> bool:
 	return ads and scope_type() == "sniper"
 
 
-## Sensitivity for the current view (settings are 0..200, 100 = default speed).
+## Sensitivity for the current view (settings are 1..200, 100 = default speed).
 func _sensitivity() -> float:
 	var s: float = Game.settings.sens_general
 	if ads:
@@ -115,7 +114,7 @@ func _assist_active() -> bool:
 
 
 func add_look(rel: Vector2, from_fire_button := false) -> void:
-	if not alive or not input_enabled:
+	if not alive:
 		return
 	var s := _sensitivity()
 	if from_fire_button:
@@ -139,15 +138,24 @@ func _assist_strength() -> float:
 	return clampf(float(Game.settings.aim_assist_strength) / 100.0, 0.0, 1.0) * float(weapon().def.get("assist", 1.0))
 
 
+## Lets go of FIRE without the release shooting (pause, end of the round): a held sniper scope
+## closes instead of firing.
+func cancel_input() -> void:
+	if _scope_hold:
+		_scope_hold = false
+		ads = false
+	firing = false
+
+
 func set_firing(on: bool) -> void:
 	var was := firing
-	firing = on and alive and input_enabled
+	firing = on and alive
 	if firing and healing:
 		cancel_heal()
 	if firing:
 		sprinting = false
 	# Snipers: holding FIRE scopes in, releasing shoots (setting "hold fire to scope").
-	if scope_type() == "sniper" and Game.settings.hold_fire_scope and input_enabled:
+	if scope_type() == "sniper" and Game.settings.hold_fire_scope:
 		if firing and not was and not ads:
 			ads = true
 			_scope_hold = true
@@ -173,62 +181,49 @@ func toggle_ads() -> void:
 
 
 func do_jump() -> void:
-	if input_enabled:
-		want_jump = true
+	want_jump = true
 
 
 ## Crouch button: toggles stand <-> crouch (from prone it goes to crouch), like the reference mode.
 func toggle_crouch() -> void:
-	if input_enabled:
-		set_stance(Stance.STAND if stance == Stance.CROUCH else Stance.CROUCH)
+	set_stance(Stance.STAND if stance == Stance.CROUCH else Stance.CROUCH)
 
 
 func toggle_prone() -> void:
-	if input_enabled:
-		set_stance(Stance.STAND if stance == Stance.PRONE else Stance.PRONE)
+	set_stance(Stance.STAND if stance == Stance.PRONE else Stance.PRONE)
 
 
 func set_sprint(on: bool) -> void:
-	if input_enabled:
-		sprinting = on and stance == Stance.STAND and not ads and not healing
+	sprinting = on and stance == Stance.STAND and not ads and not healing
 
 
 func do_reload() -> void:
-	if input_enabled:
-		start_reload()
+	start_reload()
 
 
 func select_weapon(i: int) -> void:
-	if input_enabled:
-		switch_weapon(i)
-		ads = false
+	switch_weapon(i)
+	ads = false
 
 
 func use_medkit() -> void:
-	if input_enabled:
-		if healing:
-			cancel_heal()
-		else:
-			start_heal()
+	if healing:
+		cancel_heal()
+	else:
+		start_heal()
 
 
 func use_shield() -> void:
-	if input_enabled:
-		deploy_shield()
+	deploy_shield()
 
 
 func use_grenade() -> void:
-	if input_enabled:
-		throw_grenade()
+	throw_grenade()
 
 
 # ---------------------------------------------------------------- tick
 
 func _think(delta: float) -> void:
-	if not input_enabled:
-		move_dir = Vector2.ZERO
-		firing = false
-		return
 	_keyboard_fallback()
 	if move_dir.length() > 0.5:
 		Game.mark("player moved")
@@ -289,13 +284,6 @@ func _apply_recoil(w: WeaponState) -> void:
 	shake = minf(shake + (0.35 if int(d.pellets) > 1 else 0.1), 0.7)
 	if int(d.pellets) > 1 or String(d["class"]) == "SNIPER":
 		Game.vibrate(25)
-
-
-func _assist_angle(point: Vector3) -> float:
-	if camera == null:
-		return PI
-	var xf := camera.global_transform
-	return (-xf.basis.z).angle_to((point - xf.origin).normalized())
 
 
 ## Yaw/pitch (radians) the aim needs so the camera's crosshair (including recoil) points at p.

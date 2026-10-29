@@ -8,7 +8,6 @@ const SIZE := Vector3(3.5, 2.0, 0.4)
 const MODEL := "res://assets/props/shield_wall.glb"
 
 var hp := MAX_HP
-var owner_fighter: Fighter
 var _life := LIFETIME
 var _visual: Node3D
 var _glass_mats: Array[StandardMaterial3D] = []

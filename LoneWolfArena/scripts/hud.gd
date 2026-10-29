@@ -44,7 +44,6 @@ const FEED_Y := [0.853, 0.81, 0.767]
 var player: Player
 var arena: Node
 var layout := {}
-var active := true
 var editor_mode := false
 var selected_id := ""
 var match_over := false
@@ -137,8 +136,6 @@ func show_center(text: String, seconds: float, color := Color.WHITE, fsize := 96
 
 func show_round_banner(round_index: int, area: String) -> void:
 	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area}
-	if String(_center.text) == "LONE WOLF":
-		_center.t = 0.0
 
 
 func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable) -> void:
@@ -183,7 +180,7 @@ func release_all() -> void:
 	_sprint_lock = false
 	_auto_sprint = false
 	if player:
-		player.set_firing(false)
+		player.cancel_input()
 		player.move_dir = Vector2.ZERO
 		if _sprint_wanted:
 			player.set_sprint(false)
@@ -269,12 +266,12 @@ func _dmg_free_offset(n: Dictionary) -> Vector2:
 	for attempt in 8:
 		var r := Rect2(base.position + off * u, base.size)
 		var hit := false
-		for tr in taken:
-			if tr.intersects(r):
+		for other in taken:
+			if other.intersects(r):
 				# step to the right of the number in the way; far from the hit, start a row above
-				off.x = (tr.end.x - base.position.x) / u + 0.006
+				off.x = (other.end.x - base.position.x) / u + 0.006
 				if off.x > 0.2:
-					off = Vector2(0.0, (tr.position.y - base.end.y) / u - 0.004)
+					off = Vector2(0.0, (other.position.y - base.end.y) / u - 0.004)
 				hit = true
 				break
 		if not hit:
@@ -303,7 +300,7 @@ func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fi
 # ---------------------------------------------------------------- touch input
 
 func _input(event: InputEvent) -> void:
-	if editor_mode or not active or player == null:
+	if editor_mode or player == null:
 		return
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
@@ -581,15 +578,14 @@ func _process(delta: float) -> void:
 	if not _ui_marked and player != null and size.y >= 240.0:
 		# Where FIRE and the joystick are on screen, for the on-device CI test (logged once).
 		_ui_marked = true
-		if Game.has_method("mark_ui"):
-			Game.call("mark_ui", "fire", self, HudLayout.center(layout.fire_r, size))
-			Game.call("mark_ui", "joystick", self, HudLayout.center(layout.joystick, size))
+		Game.mark_ui("fire", self, HudLayout.center(layout.fire_r, size))
+		Game.mark_ui("joystick", self, HudLayout.center(layout.joystick, size))
 	queue_redraw()
 	minimap.queue_redraw()
 
 
 func _update_movement(delta: float) -> void:
-	if match_over or not active or not player.alive:
+	if match_over or not player.alive:
 		player.move_dir = Vector2.ZERO
 		_auto_sprint = false
 		_sprint_lock = false
@@ -690,7 +686,7 @@ func _draw() -> void:
 	_draw_hp_block(vs, u)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
-	_draw_zone_strip(vs, u)
+	_draw_zone_strip(vs)
 	_draw_zone_banner(vs, u)
 	_draw_prep(vs, u)
 	_draw_round_banner(vs, u)
@@ -893,7 +889,7 @@ func _infinity(c: Vector2, half_w: float, col: Color) -> void:
 
 # ---------------------------------------------------------------- crosshair & scopes
 
-func _spread_px(u: float) -> float:
+func _spread_px() -> float:
 	var fov := player.camera.fov if player.camera else 68.0
 	return tan(deg_to_rad(player.current_spread())) / tan(deg_to_rad(fov) * 0.5) * size.y * 0.5
 
@@ -918,7 +914,7 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 				if Weapons.is_melee(w.def):
 					HudDraw.ring(self, c, 9.0 * sc, Color(col, 0.35), 1.2)
 			"wide":
-				ring_r = clampf(maxf(0.055 * u, _spread_px(u) if dyn else 0.0), 0.05 * u, 0.14 * u) * sc
+				ring_r = clampf(maxf(0.055 * u, _spread_px() if dyn else 0.0), 0.05 * u, 0.14 * u) * sc
 				for k in (0 if w.reloading and Game.settings.get("reload_on_crosshair", true) else 4):
 					var a0 := -PI * 0.5 + PI * 0.5 * k + 0.32
 					draw_arc(c, ring_r, a0, a0 + PI * 0.5 - 0.64, 16, outline, 3.6, true)
@@ -927,7 +923,7 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 				HudDraw.disk(self, c, 1.8 * sc, col)
 			_:
 				# the ring shows the real spread (reference: ~0.05-0.07 h across, blooming a little)
-				ring_r = clampf(maxf(0.026 * u, _spread_px(u) if dyn else 0.0), 0.024 * u, 0.07 * u) * sc
+				ring_r = clampf(maxf(0.026 * u, _spread_px() if dyn else 0.0), 0.024 * u, 0.07 * u) * sc
 				if not (w.reloading and Game.settings.get("reload_on_crosshair", true)):
 					HudDraw.ring(self, c, ring_r, outline, 3.4)
 					HudDraw.ring(self, c, ring_r, col, 1.6)
@@ -1207,9 +1203,7 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
 		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
-		var tw := 0.0
-		for part in parts:
-			tw += HudDraw.text_width(String(part[0]), fs, "bold")
+		var tw := HudDraw.parts_width(parts, fs)
 		var y := vs.y * float(FEED_Y[i])
 		draw_rect(Rect2(vs.x * 0.5 - tw * 0.5 - fs * 0.6, y - fs * 0.72, tw + fs * 1.2, fs * 1.44), Color(0.03, 0.03, 0.04, 0.5 * a))
 		HudDraw.text_parts(self, parts, Vector2(vs.x * 0.5, y), fs, 1, 3, "bold", a)
@@ -1269,7 +1263,7 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 	HudDraw.text_parts(self, [["OBJECTIVE: ", Color(1, 1, 1, 0.95)], [str(goal), HudDraw.YELLOW]], Vector2(cx, ph * 0.8), int(0.025 * u), 1, 2, "bold")
 
 
-func _draw_zone_strip(vs: Vector2, u: float) -> void:
+func _draw_zone_strip(vs: Vector2) -> void:
 	var w: Dictionary = layout.minimap
 	var o := float(w.o)
 	var mr := HudLayout.minimap_rect(w, vs)
@@ -1294,9 +1288,7 @@ func _draw_zone_strip(vs: Vector2, u: float) -> void:
 		parts.append(["  %d:%02d" % [s / 60, s % 60], HudDraw.YELLOW])
 	var fs := int(h * 0.56)
 	var avail := r.size.x - h * 1.25
-	var tw := 0.0
-	for p in parts:
-		tw += HudDraw.text_width(String(p[0]), fs, "bold")
+	var tw := HudDraw.parts_width(parts, fs)
 	if tw > avail:
 		fs = maxi(8, int(fs * avail / tw))
 	HudDraw.text_parts(self, parts, Vector2(r.position.x + h * 1.1, r.get_center().y), fs, 0, 0, "bold", o)
@@ -1349,9 +1341,7 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 		var parts := [[player.display_name, Color(0.62, 0.86, 1.0)], ["   VS   ", Color(1, 1, 1, 0.85)],
 			[(b as Fighter).display_name, Color(1.0, 0.72, 0.52)]]
 		var mfs := int(0.032 * u)
-		var mw := 0.0
-		for part in parts:
-			mw += HudDraw.text_width(String(part[0]), mfs, "bold")
+		var mw := HudDraw.parts_width(parts, mfs)
 		var my := vs.y * 0.415
 		HudDraw.plate(self, Rect2(cx - mw * 0.5 - 0.09 * u, my - 0.032 * u, mw + 0.18 * u, 0.064 * u), 0.62)
 		HudDraw.text_parts(self, parts, Vector2(cx, my), mfs, 1, 3, "bold")
@@ -1462,7 +1452,7 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	HudDraw.disk(self, c, 2.0, Color.WHITE)
 	_draw_score_bar(vs, u)
 	_draw_hp_block(vs, u)
-	_draw_zone_strip(vs, u)
+	_draw_zone_strip(vs)
 	var fs := int(0.03 * u)
 	var feed := [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]]
 	var feed_c := Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0]))

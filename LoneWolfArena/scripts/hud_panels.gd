@@ -316,15 +316,15 @@ func _draw_board() -> void:
 	draw_rect(Rect2(Vector2(r.position.x + 0.03 * u, hy - 0.016 * u), Vector2(0.007 * u, 0.032 * u)), Color(HudDraw.YELLOW, a))
 	var rfs := int(0.026 * u)
 	var right_parts := [["ROUND %d   ·   OBJECTIVE " % round_i, Color(1, 1, 1, 0.85)], [str(goal), HudDraw.YELLOW]]
-	var right_w := _parts_width(right_parts, rfs, "semi")
+	var right_w := HudDraw.parts_width(right_parts, rfs, "semi")
 	var right_x := r.end.x - 0.1 * u
 	var title_x := r.position.x + 0.05 * u
 	var room := right_x - right_w - 0.03 * u - title_x
 	var tfs := int(0.032 * u)
 	var title := [["SCOREBOARD   ", Color(1, 1, 1)], [mode + "  ·  " + map_name, Color(0.72, 0.76, 0.82)]]
-	if _parts_width(title, tfs, "bold") > room:
+	if HudDraw.parts_width(title, tfs, "bold") > room:
 		title = [["SCOREBOARD   ", Color(1, 1, 1)], [map_name, Color(0.72, 0.76, 0.82)]]
-	var tw := _parts_width(title, tfs, "bold")
+	var tw := HudDraw.parts_width(title, tfs, "bold")
 	if tw > room:
 		tfs = maxi(10, int(tfs * room / tw))
 	HudDraw.text_parts(self, title, Vector2(title_x, hy), tfs, 0, 0, "bold", a)
@@ -388,10 +388,3 @@ func _draw_board() -> void:
 		y += row_h
 	HudDraw.text(self, "TAP THE SCORE BAR OR THE LIST BUTTON TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
 		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")
-
-
-func _parts_width(parts: Array, fs: int, kind: String) -> float:
-	var w := 0.0
-	for p in parts:
-		w += HudDraw.text_width(String(p[0]), fs, kind)
-	return w

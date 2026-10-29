@@ -87,6 +87,7 @@ var aim_pitch := 0.0
 var move_dir := Vector2.ZERO
 var want_jump := false
 var frozen := false
+var round_over := false        # the result is decided: no more shots or damage (a grenade in the air)
 var stats := {"shots": 0, "hits": 0, "headshots": 0, "damage": 0.0, "kills": 0, "taken": 0.0, "healed": 0.0}
 var model: CharacterModel
 var arena: Node
@@ -111,6 +112,7 @@ var _throwing := false
 var _throw_target := Vector3.INF
 var _exclude: Array[RID] = []
 var _collider: CollisionShape3D
+var _heal_sound: AudioStreamPlayer3D
 var _capsule: CapsuleShape3D
 var _step_timer := 0.0
 var _boxes := {}
@@ -154,26 +156,6 @@ func set_loadout(weapon_id: String) -> void:
 	if model:
 		model.equip_weapon(String(weapons[0].def.model), weapons[0].def.get("tint", Color.WHITE))
 	weapon_switched.emit()
-
-
-## Round start: full HP, fresh items and ammo, standing.
-func reset_for_round() -> void:
-	hp = MAX_HP
-	alive = true
-	medkits = 2
-	shields = 2
-	grenades = 1
-	healing = false
-	ads = false
-	sprinting = false
-	_throwing = false
-	for w in weapons:
-		w.ammo = int(w.def.mag)
-		w.reserve = int(w.def.get("reserve", 0))
-		w.reloading = false
-		w.cooldown = 0.0
-		w.bloom = 0.0
-	set_stance(Stance.STAND, true)
 
 
 # ---------------------------------------------------------------- hitboxes
@@ -263,7 +245,7 @@ func gun() -> WeaponState:
 # ---------------------------------------------------------------- damage
 
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3) -> float:
-	if not alive or (invulnerable and not OS.has_feature("template")):     # a test switch only
+	if not alive or round_over or (invulnerable and not OS.has_feature("template")):     # invulnerable: a test switch only
 		return 0.0
 	# Armour is read from the constants (a per-fighter value could be frozen in memory).
 	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, hp)
@@ -288,10 +270,14 @@ func die(killer: Fighter, headshot := false) -> void:
 		return
 	alive = false
 	healing = false
+	_stop_heal_sound()
 	ads = false
 	sprinting = false
 	velocity = Vector3(0, minf(velocity.y, 0.0), 0)
-	_collider.set_deferred("disabled", true)
+	# The body keeps resting on the floor (a disabled shape fell through it, and the death
+	# camera with it); nothing collides with it any more.
+	set_deferred("collision_layer", 0)
+	set_deferred("collision_mask", LAYER_WORLD)
 	for hb in hitboxes:
 		hb.collision_layer = 0
 	model.play_death()
@@ -347,7 +333,7 @@ func is_firing_recently() -> bool:
 ## (camera-aligned for the player, eyes for bots). Returns true if a shot happened.
 func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	var w := weapon()
-	if not w.can_fire() or healing or not alive or stance_lock > 0.0 or hold_fire:
+	if not w.can_fire() or healing or not alive or stance_lock > 0.0 or hold_fire or round_over:
 		return false
 	if sprinting:
 		sprinting = false
@@ -496,7 +482,7 @@ func start_heal() -> bool:
 	ads = false
 	weapon().cancel_reload()
 	model.play_heal(true)
-	Audio.play_at("heal", global_position, -6.0)
+	_heal_sound = Audio.play_at("heal", global_position, -6.0)
 	return true
 
 
@@ -504,6 +490,14 @@ func cancel_heal() -> void:
 	if healing:
 		healing = false
 		model.play_heal(false)
+		_stop_heal_sound()
+
+
+## The heal sound loops, so it never finishes on its own.
+func _stop_heal_sound() -> void:
+	if is_instance_valid(_heal_sound):
+		_heal_sound.queue_free()
+	_heal_sound = null
 
 
 func _update_heal(delta: float) -> void:
@@ -522,6 +516,7 @@ func _update_heal(delta: float) -> void:
 	if _heal_t >= HEAL_TIME or hp >= MAX_HP - 0.001:
 		healing = false
 		model.play_heal(false)
+		_stop_heal_sound()
 		Audio.play_at("heal_done", global_position, -4.0)
 
 
@@ -542,7 +537,6 @@ func deploy_shield(toward := Vector3.ZERO) -> bool:
 	if not res.is_empty():
 		dist = maxf(global_position.distance_to(res.position) - 0.7, 0.9)
 	var wall := ShieldWall.new()
-	wall.owner_fighter = self
 	get_tree().current_scene.add_child(wall)
 	var pos := global_position + fwd * dist
 	wall.global_position = pos
@@ -587,7 +581,7 @@ func _release_grenade() -> void:
 
 # ---------------------------------------------------------------- stances
 
-func set_stance(s: int, instant := false) -> bool:
+func set_stance(s: Stance, instant := false) -> bool:
 	if s == stance:
 		return true
 	if not alive:
@@ -604,8 +598,6 @@ func set_stance(s: int, instant := false) -> bool:
 	_capsule.height = h
 	_collider.position.y = h * 0.5
 	stance_lock = 0.0 if instant else float(STANCE_TIME[s])
-	if s == Stance.PRONE:
-		ads = ads and true
 	stance_changed.emit(s)
 	return true
 
@@ -619,13 +611,9 @@ func _stance_height(s: int) -> float:
 	return STAND_HEIGHT
 
 
-## Kept for older callers: crouch on/off.
+## Crouch on/off (the bot's cover logic).
 func set_crouch(on: bool) -> void:
 	set_stance(Stance.CROUCH if on else Stance.STAND)
-
-
-func set_prone(on: bool) -> void:
-	set_stance(Stance.PRONE if on else Stance.STAND)
 
 
 # ---------------------------------------------------------------- movement / tick

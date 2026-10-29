@@ -34,19 +34,8 @@ func _ready() -> void:
 	(head.get_node("Close") as Button).pressed.connect(func() -> void:
 		closed.emit()
 		queue_free())
-	var panel := PanelContainer.new()
+	var panel := UI.popup_body()
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var st := UI.box(Color(0.075, 0.072, 0.068, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
-	st.border_width_left = 1
-	st.border_width_right = 1
-	st.border_width_bottom = 1
-	st.border_color = Color(1, 1, 1, 0.1)
-	st.content_margin_top = 18
-	st.content_margin_bottom = 22
-	panel.add_theme_stylebox_override("panel", st)
-	panel.draw.connect(func() -> void:
-		var s := panel.size
-		panel.draw_colored_polygon(PackedVector2Array([Vector2(s.x, s.y - 18), Vector2(s.x, s.y), Vector2(s.x - 18, s.y)]), UI.ACCENT))
 	frame.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
@@ -89,8 +78,8 @@ static func credits_text() -> String:
 	out.append("")
 	out.append("LICENCE TEXTS")
 	var lic: Dictionary = Engine.get_license_info()
-	for name in lic:
-		out.append(String(name))
-		out.append(String(lic[name]).strip_edges())
+	for licence in lic:
+		out.append(String(licence))
+		out.append(String(lic[licence]).strip_edges())
 		out.append("")
 	return "\n".join(out)

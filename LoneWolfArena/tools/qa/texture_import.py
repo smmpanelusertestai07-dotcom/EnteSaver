@@ -19,8 +19,6 @@ def want(name):
     opts = {"compress/mode": "2", "mipmaps/generate": "true", "detect_3d/compress_to": "0"}
     if name.endswith("_n.png"):
         opts["compress/normal_map"] = "1"
-    if name in ("floor_hatch.png", "signs.png"):
-        opts["compress/mode"] = "2"
     return opts
 
 

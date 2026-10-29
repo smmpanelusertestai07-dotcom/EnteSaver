@@ -75,13 +75,15 @@ func play(sound_name: String, volume_db := 0.0, pitch := 1.0) -> void:
 	p.play()
 
 
-func play_at(sound_name: String, pos: Vector3, volume_db := 0.0, pitch := 1.0, max_distance := 90.0) -> void:
+## Plays a sound at a place in the world; returns its player (freed when it finishes, so a
+## looping sound must be stopped by the caller), or null.
+func play_at(sound_name: String, pos: Vector3, volume_db := 0.0, pitch := 1.0, max_distance := 90.0) -> AudioStreamPlayer3D:
 	var s := stream(sound_name)
 	if s == null:
-		return
+		return null
 	var tree := get_tree()
 	if tree == null or tree.current_scene == null:
-		return
+		return null
 	var p := AudioStreamPlayer3D.new()
 	p.stream = s
 	p.bus = "SFX"
@@ -93,6 +95,7 @@ func play_at(sound_name: String, pos: Vector3, volume_db := 0.0, pitch := 1.0, m
 	p.global_position = pos
 	p.finished.connect(p.queue_free)
 	p.play()
+	return p
 
 
 func play_music(sound_name: String, volume_db := -3.0) -> void:

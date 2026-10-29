@@ -82,7 +82,7 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Armour | helmet Lv2 45 %, vest Lv2 50 % |
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
-| Frag | 150 at centre -> 60 at 5 m, 3 s fuse |
+| Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
 | Aim assist | hip cone 5 deg within 25 m, scoped 2.5 deg to 80 m, slow-down 0.6 on target, tracking 30 % of target motion, pull while firing, head stop on upward drag; modes DEFAULT / PRECISE ON SCOPE / FULL CONTROL |
 | Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; head stop error -1.5..+0.8 deg; on-target % with assist > without; red crosshair only on the body |
 

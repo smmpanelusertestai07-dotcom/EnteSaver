@@ -46,9 +46,9 @@ func setup(result: Dictionary) -> void:
 		return
 	_built = true
 	var won: bool = result.get("won", false)
-	var draw: bool = result.get("draw", false)
+	var is_draw: bool = result.get("draw", false)
 	var invalid: bool = result.get("invalid", false)
-	_kind = "invalid" if invalid else ("draw" if draw else ("victory" if won else "defeat"))
+	_kind = "invalid" if invalid else ("draw" if is_draw else ("victory" if won else "defeat"))
 	_hide_match_hud()
 	_enemy = _enemy_row()
 	_build()
@@ -85,7 +85,7 @@ static func honour(result: Dictionary) -> String:
 		return "SHARPSHOOTER"
 	if int(result.get("taken", 999)) < 50 and alive:
 		return "UNTOUCHABLE"
-	if alive and int(result.get("hp_left", 0)) < 30:
+	if bool(result.get("won", false)) and alive and int(result.get("hp_left", 0)) < 30:
 		return "CLUTCH"
 	return "FIGHTER"
 
@@ -511,8 +511,8 @@ func _draw_medal() -> void:
 		for k in 3:
 			var y := c.y - 30 + k * 22
 			var x0 := c.x + sgn * (78 + k * 6)
-			var len := 92.0 - k * 22.0
-			var pts := PackedVector2Array([Vector2(x0, y), Vector2(x0 + sgn * len, y - 10), Vector2(x0 + sgn * (len - 14), y + 8), Vector2(x0, y + 14)])
+			var bar := 92.0 - k * 22.0
+			var pts := PackedVector2Array([Vector2(x0, y), Vector2(x0 + sgn * bar, y - 10), Vector2(x0 + sgn * (bar - 14), y + 8), Vector2(x0, y + 14)])
 			var cols := PackedColorArray([light, light.lerp(dark, 0.4), dark, dark])
 			_medal.draw_polygon(pts, cols)
 	# hexagon shield

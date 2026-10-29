@@ -33,7 +33,6 @@ var zone_center := Vector3.ZERO
 var zone_radius := 999.0
 var zone_start_radius := 30.0
 var zone_state := "stationary"      # "stationary" (before the shrink), "shrinking", "closed"
-var zone_shrinking := false
 var zone_warning := ""
 var map_name := "CARGO CAGE"
 var map_rect := Rect2(-22, -16, 44, 32)   # world XZ area shown by the minimap
@@ -330,7 +329,6 @@ func _update_zone(delta: float) -> void:
 	if elapsed >= ZONE_HOLD:
 		if zone_state == "stationary":
 			zone_state = "shrinking"
-			zone_shrinking = true
 			hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
 			Audio.play("countdown_beep", -6.0, 0.7)
 		var t := clampf((elapsed - ZONE_HOLD) / ZONE_SHRINK, 0.0, 1.0)
@@ -363,7 +361,7 @@ func _timeout() -> void:
 	if absf(player.hp - bot.hp) < 0.5:
 		_draw = true
 	else:
-		_winner = player if player.hp > bot.hp else bot
+		_winner = (player as Fighter) if player.hp > bot.hp else (bot as Fighter)
 		score["player" if _winner == player else "bot"] += 1
 	hud.show_center("TIME UP", 2.0, Color.WHITE, 96, "DRAW" if _draw else ("HIGHER HP WINS: " + _winner.display_name))
 	_freeze_all()
@@ -377,6 +375,7 @@ func _freeze_all() -> void:
 	hud.release_all()
 	for f in fighters:
 		f.frozen = true
+		f.round_over = true
 
 
 func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
@@ -390,7 +389,7 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	if phase == Phase.END:
 		return
 	phase = Phase.END
-	_winner = killer if killer and killer != victim else (player if victim == bot else bot)
+	_winner = killer if killer and killer != victim else ((player as Fighter) if victim == bot else (bot as Fighter))
 	score["player" if _winner == player else "bot"] += 1
 	Engine.time_scale = 0.35
 	_freeze_all()

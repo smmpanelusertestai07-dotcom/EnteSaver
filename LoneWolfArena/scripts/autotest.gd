@@ -1,7 +1,14 @@
 extends Node
-## Automated runs used for testing (never active in normal play):
+## Automated runs used for testing (never active in an exported build; they start from the
+## default settings and profile and save nothing, see Game):
 ##   --autotest=screens : walks through every screen, plays a scripted fight and saves PNGs.
-##   --autotest=sim     : headless full match simulation (scripted player vs bot), prints results.
+##   --autotest=sim     : headless full match (scripted player vs bot) at 3x speed, prints results.
+##   --autotest=death   : the player is killed in a match; logs the end sequence.
+##   --autotest=pose    : renders the character from the sides and in a few stances (PNGs).
+##   --autotest=victory : a scripted fight to the end; captures the banner and the results.
+##   --autotest=perf    : draw calls / primitives / objects from a few spots (needs a renderer).
+##   --autotest=aim     : aim-assist checks (pull, head stop, tracking, red crosshair).
+##   --autotest=script:res://tests/<name>.gd : runs that script's run(autotest) (tours, checks).
 ## Pass with: godot --path . -- --autotest=screens --shots=/abs/dir
 
 const BOOT_SCENE := "res://scenes/loading.tscn"
@@ -156,7 +163,6 @@ func _run_screens() -> void:
 	lobby.call("_open_settings")
 	await _wait(0.8)
 	await _shot("03_settings")
-	var sp := lobby.find_child("*", true, false)
 	for n in lobby.get("ui").get_children():
 		if n is SettingsPanel:
 			(n as SettingsPanel).call("_show_tab", 2)
@@ -221,10 +227,10 @@ func _run_screens() -> void:
 # ---------------------------------------------------------------- headless match simulation
 
 func _run_sim() -> void:
-	Engine.time_scale = 3.0
 	Game.settings.difficulty = 1
 	Game.goto_arena()
 	await _wait(0.5)
+	Engine.time_scale = 3.0     # after the scene change, which resets it
 	var arena := _scene()
 	var p: Player = arena.get("player")
 	var b: Bot = arena.get("bot")
@@ -457,7 +463,7 @@ func _run_aim() -> void:
 	b.frozen = true
 	b.invulnerable = true
 	p.invulnerable = true
-	# Same gun and settings every run (settings persist in user://, the map keeps changing).
+	# Same gun and settings every run (the map keeps changing).
 	Game.settings.aim_precision = 0
 	p.set_loadout("ar")
 	b.set_loadout("ar")

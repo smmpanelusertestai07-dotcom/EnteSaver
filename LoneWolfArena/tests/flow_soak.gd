@@ -4,7 +4,7 @@ extends Node
 ##   LW_ROUNDS=8 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
 ## Each match: prep (weapon pick timer), fight until the bot is killed (alternating with the
 ## player being killed or a time-out), results screen, back to the lobby.
-## Prints one line per round and "FLOW SOAK DONE bad=N".
+## A killed fighter must stay on the floor. Prints one line per round and "FLOW SOAK DONE bad=N".
 
 var bad := 0
 var at: Node
@@ -28,22 +28,30 @@ func run(autotest: Node) -> int:
 		var p: Fighter = arena.get("player")
 		var b: Fighter = arena.get("bot")
 		await at.wait(1.5)
+		var victim: Fighter = null
 		match i % 3:
 			0:
 				b.take_damage(9999.0, "head", p, p.global_position)
+				victim = b
 			1:
 				p.take_damage(9999.0, "body", b, b.global_position)
+				victim = p
 			_:
 				p.invulnerable = true
 				b.invulnerable = true
 		var t := 0.0
+		var lowest := INF
 		while not arena.get("_result_shown") and t < 200.0:
 			await at.wait(0.5)
 			t += 0.5
+			if victim:
+				lowest = minf(lowest, victim.global_position.y)
 		Engine.time_scale = 1.0
 		if not arena.get("_result_shown"):
 			_fail("round %d: results never shown" % i)
 			break
+		if victim and lowest < -0.1:      # the hall floor is at 0: a corpse must stay on it
+			_fail("round %d: the dead fighter sank to y=%.2f" % [i, lowest])
 		await at.wait(0.8)
 		Game.goto_lobby()
 		await at.wait(1.5)

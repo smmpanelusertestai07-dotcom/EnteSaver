@@ -34,7 +34,7 @@ const TIPS := [
 	"Pick your gun in the 10-second prep. Both of you use it.",
 	"The safe zone starts closing after 25 seconds. Stay inside.",
 	"Crouch or go prone to make yourself a smaller target.",
-	"A frag grenade does up to 150 damage after a 3-second fuse.",
+	"A frag does up to 150 damage after a 3-second fuse. A vest halves it.",
 ]
 const GOLD := Color(0.94, 0.745, 0.24)
 

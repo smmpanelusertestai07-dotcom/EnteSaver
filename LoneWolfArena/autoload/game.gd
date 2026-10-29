@@ -1,6 +1,8 @@
 extends Node
 ## Global state: settings, profile, HUD layout and persistence.
-## Everything is stored locally as JSON in user:// (offline, no database).
+## Everything is stored locally as JSON in user:// (offline, no database). Automated runs
+## (--autotest) read and write none of it: they start from the defaults and keep their changes
+## in memory, so a test never changes the player's saves and parallel runs share nothing.
 
 const SETTINGS_PATH := "user://settings.json"
 const PROFILE_PATH := "user://profile.json"
@@ -71,6 +73,12 @@ signal settings_changed
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	if not OS.has_feature("template"):
+		for arg in OS.get_cmdline_user_args():
+			if arg.begins_with("--autotest="):
+				autotest = arg.substr(11)
+			elif arg.begins_with("--shots="):
+				shots_dir = arg.substr(8)
 	settings = DEFAULT_SETTINGS.duplicate(true)
 	var saved: Variant = _load_json(SETTINGS_PATH)
 	var version: Variant = (saved as Dictionary).get("settings_version", 1) if saved is Dictionary else 1
@@ -86,12 +94,6 @@ func _ready() -> void:
 	_load_profile()
 	var hud: Variant = _load_json(HUD_PATH)
 	hud_layout = hud if hud is Dictionary else {}
-	if not OS.has_feature("template"):
-		for arg in OS.get_cmdline_user_args():
-			if arg.begins_with("--autotest="):
-				autotest = arg.substr(11)
-			elif arg.begins_with("--shots="):
-				shots_dir = arg.substr(8)
 	_setup_audio_buses()
 	apply_settings()
 	if autotest != "":
@@ -131,7 +133,7 @@ func _sanitize_settings() -> void:
 
 
 func _load_json(path: String) -> Variant:
-	if not FileAccess.file_exists(path):
+	if autotest != "" or not FileAccess.file_exists(path):
 		return {}
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -141,6 +143,8 @@ func _load_json(path: String) -> Variant:
 
 
 func _save_json(path: String, data: Dictionary) -> void:
+	if autotest != "":
+		return
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data, "\t"))
@@ -151,11 +155,6 @@ func save_settings() -> void:
 	_save_json(SETTINGS_PATH, settings)
 	apply_settings()
 	settings_changed.emit()
-
-
-func reset_settings() -> void:
-	settings = DEFAULT_SETTINGS.duplicate(true)
-	save_settings()
 
 
 ## The profile (level, XP, wins) is signed with a device-bound HMAC; an edited or unsigned file
@@ -187,7 +186,7 @@ func _sanitize_profile() -> void:
 
 
 ## Player names: upper-case A-Z, 0-9, space, _ - . and at most 14 characters.
-static func clean_name(t: String) -> String:
+func clean_name(t: String) -> String:
 	var out := ""
 	for ch in t.strip_edges().to_upper():
 		if (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch in [" ", "_", "-", "."]:
@@ -201,11 +200,6 @@ func save_profile() -> void:
 
 func save_hud_layout(layout: Dictionary) -> void:
 	hud_layout = layout.duplicate(true)
-	_save_json(HUD_PATH, hud_layout)
-
-
-func reset_hud_layout() -> void:
-	hud_layout = {}
 	_save_json(HUD_PATH, hud_layout)
 
 
@@ -274,16 +268,6 @@ func mark(what: String) -> void:
 	if not _marks.has(what):
 		_marks[what] = true
 		print("[LoneWolf] ", what)
-
-
-## The first touch the game receives, with the window size: lets the emulator test see where its
-## taps land (once per session).
-func _input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch and event.pressed and not _marks.has("first touch"):
-		_marks["first touch"] = true
-		var p: Vector2 = (event as InputEventScreenTouch).position
-		print("[LoneWolf] first touch %d %d window %s screen %s" % [roundi(p.x), roundi(p.y),
-			str(DisplayServer.window_get_size()), str(DisplayServer.screen_get_size())])
 
 
 ## Logs where a control is on screen, once per name and session: "[LoneWolf] ui <name> <x> <y>"

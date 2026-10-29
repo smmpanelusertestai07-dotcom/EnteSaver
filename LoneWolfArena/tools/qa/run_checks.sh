@@ -4,8 +4,9 @@
 #   tools/qa/run_checks.sh quick      import, compile check and unit tests only
 # Checks (each fails the run on its own):
 #   tests/check.tscn       every script compiles with the autoloads present
-#   tests/run_tests.tscn   unit tests: damage/TTK, weapon state, HUD layout, guard, APK signing
-#                          block parser, settings clamping
+#   warnings               the same load with the debugger on (-d) reports no GDScript warning
+#   tests/run_tests.tscn   unit tests: damage/TTK, spread, weapon state, HUD layout, guard,
+#                          signer list parsing, settings clamping, results honours
 #   --autotest=sim         a full headless match (scripted player vs bot) ends with results
 #   --autotest=aim         aim assist: pull, head stop, tracking with vs without, red crosshair
 #   tests/anim_check.gd    every clip merged, toe fix, swap timing, flinch limit, grenade release
@@ -30,6 +31,9 @@ step() { # step <name> <command...>
 # A fresh checkout's first import can exit non-zero before the class cache exists; retry once.
 step import bash -c 'godot --headless --path . --import || godot --headless --path . --import'
 step compile godot --headless --path . res://tests/check.tscn
+# GDScript reports warnings (shadowed names, unused variables, int-to-enum) only to a debugger.
+step warnings bash -c 'out="$(godot --headless -d --path . res://tests/check.tscn </dev/null 2>&1)"
+  code=$?; printf "%s\n" "$out"; [ $code -eq 0 ] && ! grep -q "GDScript::reload" <<<"$out"'
 step unit godot --headless --path . res://tests/run_tests.tscn
 if [ "${1:-}" != "quick" ]; then
   step sim godot --headless --path . -- --autotest=sim

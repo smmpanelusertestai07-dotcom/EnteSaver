@@ -54,7 +54,6 @@ const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISA
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
 var _modal: Control
-var _modal_kind := ""
 var _ward_grid: GridContainer
 var _ward_filter := "all"
 var _ward_info_name: Label
@@ -82,7 +81,7 @@ func _apply_quality() -> void:
 	var q: Array = STAGE_QUALITY[clampi(int(Game.settings.graphics), 0, STAGE_QUALITY.size() - 1)]
 	var vp := get_viewport()
 	vp.scaling_3d_scale = float(q[0])
-	vp.msaa_3d = int(q[1])
+	vp.msaa_3d = int(q[1]) as Viewport.MSAA
 
 
 func _mark_start() -> void:
@@ -183,7 +182,7 @@ func _build_stage() -> void:
 	var ft := UI.texture("res://assets/textures/floor_concrete.png")
 	if ft:
 		floor_m.albedo_texture = ft
-		floor_m.uv1_scale = Vector3(14, 14, 1)
+		floor_m.uv1_scale = Vector3(42, 42, 1)      # about 5.7 m per tile on the 240 m plane
 		var fn := UI.texture("res://assets/textures/floor_concrete_n.png")
 		if fn:
 			floor_m.normal_enabled = true
@@ -194,7 +193,6 @@ func _build_stage() -> void:
 	pm.size = Vector2(240, 240)            # reaches under the skyline card on the horizon
 	floor_mi.mesh = pm
 	floor_mi.material_override = floor_m
-	floor_m.uv1_scale = Vector3(42, 42, 1)
 	add_child(floor_mi)
 	_build_podium()
 	_build_backdrop()
@@ -636,23 +634,23 @@ func _build_top_bar(root: Control) -> void:
 		lr.offset_bottom = 54
 		lr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		root.add_child(lr)
-	var tr := HBoxContainer.new()
-	tr.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	tr.offset_left = -200
-	tr.offset_right = -10
-	tr.offset_top = 6
-	tr.offset_bottom = 56
-	tr.alignment = BoxContainer.ALIGNMENT_END
-	tr.add_theme_constant_override("separation", 8)
-	root.add_child(tr)
+	var top_right := HBoxContainer.new()
+	top_right.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	top_right.offset_left = -200
+	top_right.offset_right = -10
+	top_right.offset_top = 6
+	top_right.offset_bottom = 56
+	top_right.alignment = BoxContainer.ALIGNMENT_END
+	top_right.add_theme_constant_override("separation", 8)
+	root.add_child(top_right)
 	var info := UI.glyph_button("v_info", 46, "?")
 	info.name = "HelpButton"
 	info.pressed.connect(_how_to_play)
-	tr.add_child(info)
+	top_right.add_child(info)
 	var gear := UI.glyph_button("v_settings", 46, "SET")
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
-	tr.add_child(gear)
+	top_right.add_child(gear)
 
 
 func _pencil_button() -> Button:
@@ -978,9 +976,8 @@ func _open_credits() -> void:
 
 ## A popup in the reference look: the light header strip (dark caps title, hazard line, X on a
 ## dark tile), then the near-black body with a yellow corner mark. Returns the body column.
-func _open_modal(title: String, width := 980.0, kind := "") -> VBoxContainer:
+func _open_modal(title: String, width := 980.0) -> VBoxContainer:
 	_close_modal()
-	_modal_kind = kind
 	_modal = Control.new()
 	_modal.name = "Modal"
 	UI.full_rect(_modal)
@@ -1003,18 +1000,7 @@ func _open_modal(title: String, width := 980.0, kind := "") -> VBoxContainer:
 	var head := UI.popup_header(title, 26, 54.0)
 	(head.get_node("Close") as Button).pressed.connect(_close_modal)
 	frame.add_child(head)
-	var panel := PanelContainer.new()
-	var st := UI.box(Color(0.075, 0.072, 0.068, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
-	st.border_width_left = 1
-	st.border_width_right = 1
-	st.border_width_bottom = 1
-	st.border_color = Color(1, 1, 1, 0.1)
-	st.content_margin_top = 18
-	st.content_margin_bottom = 22
-	panel.add_theme_stylebox_override("panel", st)
-	panel.draw.connect(func() -> void:
-		var s := panel.size
-		panel.draw_colored_polygon(PackedVector2Array([Vector2(s.x, s.y - 18), Vector2(s.x, s.y), Vector2(s.x - 18, s.y)]), UI.ACCENT))
+	var panel := UI.popup_body()
 	frame.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 12)
@@ -1028,7 +1014,6 @@ func _close_modal() -> void:
 	if _modal:
 		_modal.queue_free()
 		_modal = null
-	_modal_kind = ""
 
 
 const HOW_TO := [
@@ -1044,7 +1029,7 @@ const HOW_TO := [
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
 		["v_wall", "SHIELD WALL  x2", "Throws up cover that soaks 600 damage for 45 seconds."],
-		["item_grenade", "FRAG GRENADE  x1", "Up to 150 damage at the centre, 3-second fuse."],
+		["item_grenade", "FRAG GRENADE  x1", "Up to 150 damage at the centre (a vest halves it), 3-second fuse."],
 	]],
 	["THE MATCH", [
 		["v_player", "ONE ROUND VS A BOT", "1 vs 1, 200 HP each, Lv2 helmet and vest. Eliminate the bot to win."],
@@ -1133,7 +1118,7 @@ func _edit_name() -> void:
 	var ok := UI.button("OK", 22, "primary", Vector2(170, 52))
 	ok.name = "NameOk"
 	var apply := func() -> void:
-		var n := _clean_name(le.text)
+		var n := Game.clean_name(le.text)
 		if n != "":
 			Game.profile.name = n
 			Game.save_profile()
@@ -1147,14 +1132,6 @@ func _edit_name() -> void:
 	v.add_child(row)
 	le.grab_focus()
 	le.caret_column = le.text.length()
-
-
-func _clean_name(t: String) -> String:
-	var out := ""
-	for ch in t.strip_edges().to_upper():
-		if (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch in [" ", "_", "-", "."]:
-			out += ch
-	return out.strip_edges().substr(0, 14)
 
 
 # ---------------------------------------------------------------- wardrobe
@@ -1512,7 +1489,6 @@ func _confirm_quit() -> void:
 	_close_modal()
 	_modal = Control.new()
 	_modal.name = "QuitDialog"
-	_modal_kind = "quit"
 	UI.full_rect(_modal)
 	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui.add_child(_modal)

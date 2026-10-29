@@ -50,8 +50,7 @@ listed here. If a part needs something new from the core, add it in its own file
   `player moved`, `match over: <why>`, `results shown`, `signature <state>` (Guard, "ok" when the
   package manager confirms a signer listed in the build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
-  (start, fire, joystick) so the test taps controls where the current layout puts them;
-  `[LoneWolf] first touch <x> <y> window <size> screen <size>` checks the tap mapping.
+  (start, fire, joystick) so the test taps controls where the current layout puts them.
 
 ## Player (scripts/player.gd) -> called by the HUD's touch controls
 - movement `move_dir: Vector2` (joystick, length 0..1, y forward), `set_sprint(on)`

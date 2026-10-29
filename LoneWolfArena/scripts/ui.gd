@@ -7,20 +7,16 @@ extends RefCounted
 ## skins), so it scales to any screen. Textures (icons, key art) are loaded once and cached.
 
 const ACCENT := Color(1.0, 0.76, 0.055)           # main yellow (#FFC20E)
-const ACCENT_DARK := Color(0.86, 0.56, 0.0)
 const GOLD := Color(0.965, 0.71, 0.0)             # victory gold
 const AMBER := Color(0.89, 0.667, 0.16)           # casual mode names
 const BLUE := Color(0.106, 0.569, 0.851)          # own side
 const ORANGE := Color(0.875, 0.447, 0.216)        # enemy side
 const INK := Color(0.07, 0.065, 0.05)             # text on yellow / light buttons
 const PANEL := Color(0.075, 0.07, 0.065, 0.88)    # near-black translucent panels
-const PANEL_2 := Color(0.19, 0.185, 0.176, 0.94)  # cards inside panels
 const ROW := Color(1, 1, 1, 0.045)                # setting rows on a panel
 const LIGHT := Color(0.851, 0.847, 0.839)         # secondary buttons (#D9D8D6)
-const LINE := Color(1, 1, 1, 0.12)
 const TEXT := Color(0.97, 0.97, 0.96)
 const TEXT_DIM := Color(0.64, 0.64, 0.66)
-const GOOD := Color(0.36, 0.86, 0.42)
 const BAD := Color(0.95, 0.30, 0.24)
 const RARITY_COLORS := {
 	"common": Color(0.62, 0.63, 0.65),
@@ -723,6 +719,24 @@ static func popup_header(title: String, size := 26, height := 56.0) -> HBoxConta
 	close.pressed.connect(func() -> void: Audio.play("ui_back", -4.0))
 	h.add_child(close)
 	return h
+
+
+## The near-black body under a popup_header, flush with it: a faint border on three sides and
+## the accent corner mark bottom-right. Add the content to the returned panel.
+static func popup_body() -> PanelContainer:
+	var body := PanelContainer.new()
+	var st := box(Color(0.075, 0.072, 0.068, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
+	st.border_width_left = 1
+	st.border_width_right = 1
+	st.border_width_bottom = 1
+	st.border_color = Color(1, 1, 1, 0.1)
+	st.content_margin_top = 18
+	st.content_margin_bottom = 22
+	body.add_theme_stylebox_override("panel", st)
+	body.draw.connect(func() -> void:
+		var s := body.size
+		body.draw_colored_polygon(PackedVector2Array([Vector2(s.x, s.y - 18), Vector2(s.x, s.y), Vector2(s.x - 18, s.y)]), ACCENT))
+	return body
 
 
 ## The system-dialog band (reference information dialog, pause menu, quit dialog): full width,

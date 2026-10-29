@@ -13,9 +13,7 @@ const GLYPH := Color(1, 1, 1, 0.96)
 const GOLD := Color(1.0, 0.8, 0.26)
 const YELLOW := Color(1.0, 0.82, 0.22)
 const BLUE := Color(0.106, 0.569, 0.851)
-const BLUE_DARK := Color(0.05, 0.36, 0.6)
 const ORANGE := Color(0.875, 0.447, 0.216)
-const ORANGE_DARK := Color(0.62, 0.27, 0.1)
 const RED := Color(0.93, 0.2, 0.18)
 const KILL_RED := Color(0.792, 0.306, 0.259)
 const DMG_BODY := Color(0.93, 0.86, 0.36)
@@ -55,25 +53,15 @@ static func preload_icons(names: Array) -> void:
 		tex(String(n))
 
 
-## Icon name of a weapon definition. The lever shotgun shares the pump gun's model (and, until
-## Weapons.DEFS names its own icon, its icon name): it gets its own lever-action silhouette here.
+## Icon name of a weapon definition.
 static func weapon_icon_name(def: Dictionary) -> String:
-	var icon := String(def.get("icon", "weapon_ar"))
-	if icon == "weapon_sg":
-		var lever: Dictionary = Weapons.DEFS.get("lever", {})
-		if not lever.is_empty() and String(def.get("name", "")) == String(lever.get("name", "")):
-			return "weapon_sg_lever"
-	return icon
+	return String(def.get("icon", "weapon_ar"))
 
 
 ## Weapon silhouette for a weapon definition (missing icons fall back to the pump gun / the AR).
 static func weapon_tex(def: Dictionary) -> Texture2D:
-	var icon := weapon_icon_name(def)
-	return tex(icon, "weapon_sg" if icon == "weapon_sg_lever" else "weapon_ar")
-
-
-static func font(kind := "bold") -> Font:
-	return UI.font(kind)
+	var icon_name := weapon_icon_name(def)
+	return tex(icon_name, "weapon_sg" if icon_name == "weapon_sg_lever" else "weapon_ar")
 
 
 ## Draws `t` with its vertical centre at pos.y; align: 0 left, 1 centre, 2 right (of pos.x).
@@ -101,12 +89,18 @@ static func text_width(t: String, size: int, kind := "bold") -> float:
 	return UI.font(kind).get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, maxi(size, 6)).x
 
 
-## Text made of coloured parts: [[text, Color], ...] laid out on one line.
-static func text_parts(ci: CanvasItem, parts: Array, pos: Vector2, size: int, align := 1, outline := 0,
-		kind := "bold", alpha := 1.0) -> float:
+## Width of text made of coloured parts ([[text, Color], ...]) on one line.
+static func parts_width(parts: Array, size: int, kind := "bold") -> float:
 	var total := 0.0
 	for p in parts:
 		total += text_width(String(p[0]), size, kind)
+	return total
+
+
+## Text made of coloured parts: [[text, Color], ...] laid out on one line.
+static func text_parts(ci: CanvasItem, parts: Array, pos: Vector2, size: int, align := 1, outline := 0,
+		kind := "bold", alpha := 1.0) -> float:
+	var total := parts_width(parts, size, kind)
 	var x := pos.x
 	if align == 1:
 		x -= total * 0.5

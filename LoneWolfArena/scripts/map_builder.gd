@@ -379,8 +379,9 @@ func _floor() -> void:
 		_collider(Vector3(AL_D + 0.8, 2.0, AL_HW * 2.0 + 1.4), Transform3D(Basis.IDENTITY, Vector3(sx * (HX + AL_D * 0.5), -1, 0)), false)
 
 
-## Flat floor decal (hatched pad, hazard strip, painted line) in the current half.
-## rect corners in authored (west-half) coordinates; uv_per_m: texture repeats per metre.
+## Flat floor decal (hatched pad, hazard strip, painted line) in the current half: centre `c` in
+## authored (west-half) coordinates, `size` in metres, turned `yaw_deg` about Y, `uv_scale`
+## texture repeats per metre on each side, `y` above the floor.
 func _decal(mat_key: String, c: Vector3, size: Vector2, yaw_deg: float, uv_scale: Vector2, y := 0.012) -> void:
 	var b := Basis(Vector3.UP, deg_to_rad(yaw_deg))
 	var hx := size.x * 0.5

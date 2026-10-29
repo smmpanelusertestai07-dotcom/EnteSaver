@@ -77,10 +77,6 @@ func flag(reason: String) -> void:
 	tampered.emit(reason)
 
 
-func is_clean() -> bool:
-	return flags.is_empty()
-
-
 func _reset_clock() -> void:
 	_tick_start = Time.get_ticks_usec()
 	_wall_start = Time.get_unix_time_from_system()
