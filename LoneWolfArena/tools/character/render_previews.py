@@ -1,4 +1,4 @@
-"""Render the deliverable previews into assets/character/previews (uses preview_anim.py).
+"""Render the deliverable previews into tools/character/previews (uses preview_anim.py).
 The dark rifle in gameplay previews is a preview-only placeholder parented to hand_r; it is not
 part of character.glb."""
 import os

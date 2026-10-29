@@ -1,6 +1,7 @@
 """grenade.glb - frag grenade ~0.11 m. Origin bottom centre, lever (spoon) on +Y, ring on +X."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 OL = mat('GrenadeBody', '#4f5f32', metallic=0.1, rough=0.6)

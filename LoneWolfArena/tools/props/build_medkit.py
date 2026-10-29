@@ -1,6 +1,7 @@
 """medkit.glb - first-aid case 0.32 x 0.22 x 0.12 m (X x Y x Z). Origin bottom centre, handle on +Y."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 WH = mat('MedWhite', '#ececea', metallic=0.0, rough=0.45)

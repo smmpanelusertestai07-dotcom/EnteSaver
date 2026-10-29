@@ -1,6 +1,9 @@
 """Stage C: procedural gameplay animations (30 fps, in place), written as baked FK actions.
 idle, run_fwd, run_back, run_left, run_right, crouch_idle, crouch_fwd, jump, death, victory,
-lobby_idle. Saves WORK/stage_c.blend and WORK/anim_info.json"""
+lobby_idle. Saves WORK/stage_c.blend and WORK/anim_info.json
+
+As a module (e.g. tools/character/anim_extra.py): `import animate; animate.setup(armature)` initialises
+the helpers on an already loaded armature without opening stage_b.blend."""
 import os
 import sys
 import json
@@ -15,15 +18,9 @@ import animlib as A
 from animlib import rot, lerp, smooth, foot_pose
 
 FPS = 30
-bpy.ops.wm.open_mainfile(filepath=os.path.join(CFG.WORK, "stage_b.blend"))
-arm = bpy.data.objects["Armature"]
-for pb in arm.pose.bones:
-    for c in list(pb.constraints):
-        pb.constraints.remove(c)
-A.init(arm)
-bpy.context.scene.render.fps = FPS
-
-PELVIS_REST = A.REST["pelvis"].translation.copy()     # (0, -0.004, 0.972)
+arm = None              # the armature object, set by setup()
+PELVIS_REST = None      # rest head of the pelvis, set by setup()  (0, -0.004, 0.972)
+CHEST_REF = None        # spine_03 world matrix of a neutral standing pose, set by setup()
 X, Y, Z = (1, 0, 0), (0, 1, 0), (0, 0, 1)
 
 # ----------------------------------------------------------------------------- rifle design (world, idle)
@@ -156,9 +153,6 @@ def calibrate():
     pr, sp, neck, head, cl, cr = idle_upper_rots()
     set_upper(pose, PELVIS_REST + Vector((0, 0, -PELVIS_DROP_IDLE)), pr, sp, neck, head, cl, cr)
     capture_rifle_chest(pose)
-
-
-calibrate()
 
 
 # ============================================================================= generic helpers
@@ -460,11 +454,24 @@ def pose_death(t):
     return pose
 
 
-# reference chest (spine_03 world matrix) of a neutral standing pose: used to express free-arm targets
-_ref = A.Pose()
-_ref.set_pelvis(PELVIS_REST + Vector((0, 0, -0.012)), Matrix.Identity(3))
-_ref.fk()
-CHEST_REF = _ref.P["spine_03"].copy()
+def setup(armature):
+    """Initialise the toolkit on `armature` (once): strip pose constraints, animlib init, scene fps,
+    rifle grip calibration (calibrate()) and the reference chest CHEST_REF."""
+    global arm, PELVIS_REST, CHEST_REF
+    arm = armature
+    for pb in arm.pose.bones:
+        for c in list(pb.constraints):
+            pb.constraints.remove(c)
+    A.init(arm)
+    bpy.context.scene.render.fps = FPS
+    PELVIS_REST = A.REST["pelvis"].translation.copy()     # (0, -0.004, 0.972)
+    calibrate()
+    # reference chest (spine_03 world matrix) of a neutral standing pose: used to express free-arm targets
+    _ref = A.Pose()
+    _ref.set_pelvis(PELVIS_REST + Vector((0, 0, -0.012)), Matrix.Identity(3))
+    _ref.fk()
+    CHEST_REF = _ref.P["spine_03"].copy()
+    return arm
 
 
 # ============================================================================= build all actions
@@ -509,6 +516,8 @@ def build(only=None):
 
 
 if __name__ == "__main__":
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(CFG.WORK, "stage_b.blend"))
+    setup(bpy.data.objects["Armature"])
     only = None
     if "--only" in sys.argv:
         only = sys.argv[sys.argv.index("--only") + 1].split(",")

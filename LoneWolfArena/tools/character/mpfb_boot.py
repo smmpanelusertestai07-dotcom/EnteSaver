@@ -13,10 +13,11 @@ import types
 
 import bpy
 
-MPFB_SRC = "/root/mh/ext/mpfb"                      # extracted extension zip
-PACKS_DIR = "/root/mh/ext/packs"                    # each pack extracted into its own dir
-EXT_DIR = "/root/.config/blender/5.0/extensions/user_default/mpfb"
-MERGED_DATA = "/root/mh/mpfb_user_data"             # merged (symlinked) asset tree
+MH_ROOT = os.environ.get("MH_ROOT", os.path.expanduser("~/mh"))
+MPFB_SRC = os.path.join(MH_ROOT, "ext", "mpfb")                # extracted extension zip
+PACKS_DIR = os.path.join(MH_ROOT, "ext", "packs")              # each pack extracted into its own dir
+EXT_DIR = os.path.expanduser("~/.config/blender/5.0/extensions/user_default/mpfb")
+MERGED_DATA = os.path.join(MH_ROOT, "mpfb_user_data")          # merged (symlinked) asset tree
 PKG = "bl_ext.user_default.mpfb"
 
 ASSET_SUBDIRS = ["clothes", "skins", "eyebrows", "eyelashes", "eyes", "hair", "proxymeshes",

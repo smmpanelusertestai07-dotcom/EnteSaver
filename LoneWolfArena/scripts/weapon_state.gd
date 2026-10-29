@@ -1,22 +1,39 @@
 class_name WeaponState
 extends RefCounted
-## Runtime state of one weapon (ammo, cooldown, reload, spread bloom).
+## Runtime state of one weapon (magazine + reserve ammo, cooldown, reload, spread bloom).
+## Melee weapons have mag = -1 (infinite, never reload).
 
 var id: String
 var def: Dictionary
-var ammo: int
+var ammo: int:
+	get:
+		return int(_ammo.value())
+	set(v):
+		_ammo.set_value(v)
+var reserve: int:
+	get:
+		return int(_reserve.value())
+	set(v):
+		_reserve.set_value(v)
 var cooldown := 0.0
 var reloading := false
 var reload_left := 0.0
 var bloom := 0.0
 var burst := 0
 var since_shot := 99.0
+var _ammo := SecureNum.new(0)
+var _reserve := SecureNum.new(0)
 
 
 func _init(weapon_id: String) -> void:
 	id = weapon_id
 	def = Weapons.DEFS[weapon_id]
 	ammo = int(def.mag)
+	reserve = int(def.get("reserve", 0))
+
+
+func infinite() -> bool:
+	return int(def.mag) < 0
 
 
 ## Advances timers. Returns true when a reload finished during this tick.
@@ -31,13 +48,20 @@ func tick(delta: float) -> bool:
 		reload_left -= delta
 		if reload_left <= 0.0:
 			reloading = false
-			ammo = int(def.mag)
+			var need := int(def.mag) - ammo
+			var take := mini(need, reserve)
+			ammo += take
+			reserve -= take
 			return true
 	return false
 
 
+func can_reload() -> bool:
+	return not infinite() and not reloading and ammo < int(def.mag) and reserve > 0
+
+
 func start_reload() -> bool:
-	if reloading or ammo >= int(def.mag):
+	if not can_reload():
 		return false
 	reloading = true
 	reload_left = def.reload
@@ -49,7 +73,7 @@ func cancel_reload() -> void:
 
 
 func can_fire() -> bool:
-	return not reloading and cooldown <= 0.0 and ammo > 0
+	return not reloading and cooldown <= 0.0 and (infinite() or ammo > 0)
 
 
 func reload_progress() -> float:
@@ -59,7 +83,8 @@ func reload_progress() -> float:
 
 
 func on_fire() -> void:
-	ammo -= 1
+	if not infinite():
+		ammo -= 1
 	cooldown = def.interval
 	since_shot = 0.0
 	burst += 1

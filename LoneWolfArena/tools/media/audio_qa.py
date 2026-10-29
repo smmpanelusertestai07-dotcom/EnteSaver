@@ -14,7 +14,8 @@ import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from scipy import signal
 
-FONT = "/root/work/assets/fonts/Rajdhani-SemiBold.ttf"
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+FONT = os.path.join(ROOT, "assets", "fonts", "ui_semibold.ttf")
 
 
 def seam_report(x, sr):

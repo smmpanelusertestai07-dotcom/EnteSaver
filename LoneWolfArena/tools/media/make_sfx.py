@@ -1,7 +1,9 @@
 """Procedural one-shot sound effects for Lone Wolf Arena.
 
 Every sound is synthesised from oscillators / noise (no samples).
-`build(out_dir)` writes the WAVs and returns manifest entries.
+`build(out_dir)` writes the WAVs and returns manifest entries. Run tools/media/build_audio.py to
+rebuild the game's audio: it renders into tools/media/_work/audio/ (also this script's default
+out_dir) and copies the shipped files into assets/audio/.
 """
 from __future__ import annotations
 
@@ -173,23 +175,29 @@ def pistol_shot():
                    mech=(0.032, 3400, 0.13), ir=(0.3, 0.24), presence=(3800, 3.5), hpf=85)
 
 
-@sfx("shot_far", "Distant gunshot (enemy fire): low-passed muffled boom with outdoor echo slaps.")
-def shot_far():
-    rng = np.random.default_rng(404)
-    n = ns(1.6)
-    out = np.zeros(n)
-    b = peq(bp(white(n, rng), 260, 3000, 2), 750, 1.0, 6) * env_ad(n, 0.0015, 0.035)
-    out += normalize(b)
-    out += 0.3 * normalize(lp(white(n, rng), 600, 4) * env_ad(n, 0.004, 0.06))
-    out += 0.25 * sat(thud(n, 160, 80, 0.05, 0.05, 0.003), 1.5)
-    out = hp(out, 120, 2)
-    out = sat(normalize(out), 2.2)
-    out = lp(out, 1900, 4)
-    ir = make_ir(0.95, rng, predelay=0.02, hf_ratio=0.3, buildup=0.03,
-                 early=[(0.085, 1.0), (0.19, 0.75), (0.31, 0.55), (0.45, 0.35)])
-    out = reverb(out, ir, wet=0.6, dry=0.9)
-    out = lp(out, 2600, 2)
-    return finalize(out, max_len=0.62, fout=0.22)
+@sfx("smg_shot", "SMG shot: tight high crack, light snappy body, very short tail for a fast rate of fire.")
+def smg_shot():
+    return gunshot(505, 0.24, thump=(240, 95, 0.028, 0.022, 0.4),
+                   body=(0.018, 320, 9000, 2100, 7, 1.0), crack=(0.62, 0.0022, 3100),
+                   boom=(800, 0.028, 0.35), roar=(3200, 0.045, 0.35), drive=2.6,
+                   mech=(0.03, 3600, 0.08), ir=(0.28, 0.22), presence=(3600, 3.5), hpf=95)
+
+
+@sfx("sniper_shot", "Sniper shot: huge supersonic crack, deep boom, long rolling tail, bolt cycled at the end.")
+def sniper_shot():
+    rng = np.random.default_rng(606)
+    shot = gunshot(606, 0.95, thump=(150, 48, 0.09, 0.08, 0.85),
+                   body=(0.05, 180, 8000, 1300, 6, 1.0), crack=(0.8, 0.004, 2200),
+                   boom=(420, 0.12, 0.8), roar=(2000, 0.2, 0.75), drive=3.4,
+                   ir=(0.9, 0.36), presence=(2800, 3.0), hpf=45)
+    out = np.zeros(ns(1.25))
+    out[: shot.size] += shot
+    # bolt: lift + pull back, then push forward + lock
+    place(out, 0.22 * metal_click(rng, ns(0.08), 2300, 0.012), 0.72, 1.0)
+    place(out, 0.18 * normalize(scrape(rng, 0.09, 1800, 3200, grit=0.5)), 0.76, 1.0)
+    place(out, 0.18 * normalize(scrape(rng, 0.08, 3000, 1900, grit=0.5)), 0.93, 1.0)
+    place(out, 0.26 * metal_click(rng, ns(0.08), 2600, 0.01), 1.02, 1.0)
+    return finalize(out, max_len=1.2, fout=0.08)
 
 
 @sfx("reload_mag", "Rifle magazine reload: release click, mag slide out, mag in clack + latch, bolt pull and slam.")
@@ -249,17 +257,6 @@ def pump():
     place(out, normalize(c2), 0.205, 1.0)
     out = reverb(out, room(rng, 0.25), wet=0.13)
     return finalize(out, max_len=0.36, fout=0.07)
-
-
-@sfx("empty_click", "Dry-fire click: hammer fall on empty chamber plus faint trigger reset.")
-def empty_click():
-    rng = np.random.default_rng(808)
-    n = ns(0.2)
-    out = np.zeros(n)
-    place(out, metal_click(rng, ns(0.08), 2100, 0.012, ratios=(1.0, 1.62, 2.67, 3.8), noise_gain=0.8), 0.0, 1.0)
-    place(out, metal_click(rng, ns(0.05), 3300, 0.005), 0.045, 0.3)
-    out = reverb(out, room(rng, 0.15), wet=0.08)
-    return finalize(out, max_len=0.15, fout=0.03)
 
 
 # ----------------------------------------------------------------------------
@@ -649,4 +646,4 @@ def build(out_dir):
 
 if __name__ == "__main__":
     import sys
-    build(sys.argv[1] if len(sys.argv) > 1 else "/root/work/assets/audio")
+    build(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "_work", "audio"))

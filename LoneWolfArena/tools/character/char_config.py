@@ -1,10 +1,13 @@
 """Shared configuration for the hero character pipeline."""
 import os
 
-D = "/root/mh/mpfb_user_data"          # merged MPFB user data (symlinks into /root/mh/ext/packs/*)
-OUT_DIR = "/root/work/assets/character"
-PREVIEW_DIR = os.path.join(OUT_DIR, "previews")
-WORK = "/root/work/tools/character/work"   # intermediate .blend + processed textures
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+# MakeHuman / MPFB inputs (not in the repository): MH_ROOT, default ~/mh (see mpfb_boot.py).
+MH_ROOT = os.environ.get("MH_ROOT", os.path.expanduser("~/mh"))
+D = os.path.join(MH_ROOT, "mpfb_user_data")   # merged MPFB user data (symlinks into MH_ROOT/ext/packs/*)
+OUT_DIR = os.path.join(ROOT, "assets", "character")
+PREVIEW_DIR = os.path.join(ROOT, "tools", "character", "previews")   # outside res:// (git-ignored)
+WORK = os.path.join(ROOT, "tools", "character", "work")   # intermediate .blend + processed textures (git-ignored)
 TEX_DIR = os.path.join(WORK, "tex")
 
 TARGET_HEIGHT = 1.78

@@ -6,10 +6,19 @@ on:
     paths:
       - "LoneWolfArena/**"
       - ".github/workflows/lonewolf-arena.yml"
+  pull_request:
+    paths:
+      - "LoneWolfArena/**"
+      - ".github/workflows/lonewolf-arena.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer push to the same branch / PR supersedes the running check.
+concurrency:
+  group: lonewolf-arena-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   android:
@@ -21,7 +30,11 @@ jobs:
     env:
       GODOT_VERSION: "4.7.2"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # The token is not left in .git/config for the build to find.
+          persist-credentials: false
 
       - name: Free disk space
         run: |
@@ -51,20 +64,24 @@ jobs:
               "$ANDROID_HOME" "${JAVA_HOME_17_X64:-$JAVA_HOME}" "$HOME/.android/debug.keystore" > "$HOME/.config/godot/$f"
           done
 
-      - name: Import project, unit tests, headless match simulation
+      - name: Import, compile, unit tests, headless match and gameplay checks
         working-directory: LoneWolfArena
-        run: |
-          godot --headless --path . --import > import.log 2>&1 || (tail -50 import.log; exit 1)
-          godot --headless --path . res://tests/check.tscn
-          godot --headless --path . res://tests/run_tests.tscn
-          godot --headless --path . -- --autotest=sim
+        run: tools/qa/run_checks.sh
 
       - name: Export signed APK (throwaway CI key, emulator build)
         working-directory: LoneWolfArena
         run: |
           mkdir -p build
           keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 1000 \
-            -storepass cipass123 -keypass cipass123 -dname "CN=CI,O=CI,C=IN"
+            -storepass cipass123 -keypass cipass123 -dname "CN=CI"
+          # The game checks its own signing certificate against the list in res://build_keys.gd
+          # (autoload/guard.gd); the emulator test expects "[LoneWolf] signature ok".
+          SIGNER="$(keytool -list -v -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -storepass cipass123 \
+            | grep -m1 "SHA256:" | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
+          [[ "$SIGNER" =~ ^[0-9a-f]{64}$ ]]
+          SECRET="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          printf '# CI build (throwaway key).\nconst SIGNERS := ["%s"]\nconst SAVE_SECRET := "%s"\n' "$SIGNER" "$SECRET" > build_keys.gd
+          godot --headless --path . --import > /dev/null 2>&1 || true
           GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$RUNNER_TEMP/ci.keystore" GODOT_ANDROID_KEYSTORE_RELEASE_USER=ci \
           GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=cipass123 \
             godot --headless --path . --export-release "Android-x86_64" build/LoneWolfArena.apk
@@ -78,7 +95,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Install and play on Android emulator (API 34, x86_64)
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
           arch: x86_64
@@ -111,7 +128,7 @@ jobs:
           PY
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: lonewolf-arena-ci

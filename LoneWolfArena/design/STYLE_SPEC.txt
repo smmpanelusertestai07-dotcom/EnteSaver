@@ -1,0 +1,108 @@
+# Lone Wolf Arena: style and feel spec
+
+Measurable targets for the game, distilled from private reference research (facts in our own
+words; the reference screenshots themselves are never stored in the repo). Everything here is
+implemented with ORIGINAL assets and names. Positions are fractions of screen width/height
+(x, y of the centre) on a landscape phone; sizes are fractions of screen height.
+QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check against this file.
+
+## 1. Mode and round flow (reference: 1v1 "Lone Wolf" duels)
+| Item | Target |
+|---|---|
+| Format | 1 vs 1 bot, ONE round per START (owner's choice; the reference mode is first-to-5) |
+| Flow | Lobby START -> loading -> PREP 10 s (spawn alcove behind a glowing red floor barrier, red countdown, weapon pick panel) -> "ROUND 1 / AREA: CARGO CAGE" banner -> FIGHT 90 s -> result |
+| Weapon pick | Grid of weapons, the chosen gun is used by BOTH players; 10 s; default pick if the timer ends |
+| Loadout | Chosen gun + fists, 2 medkits, 2 shield walls, 1 frag grenade, Lv2 helmet + Lv2 vest |
+| HP | 200, resets each round; no knock-down in 1v1 (0 HP = eliminated) |
+| Zone | Holds 25 s, then shrinks over 40 s to r = 4 m; damage 5 HP/s (first 10 s outside), then 10, then 20 |
+| Time-out | Higher HP wins; equal HP -> draw |
+| Score HUD | Top centre: [your bar][blue box: your rounds][timer + "OBJECTIVE 1"][orange box: enemy rounds][enemy bar]; timer red in the last 10 s and during prep |
+
+## 2. Map "Cargo Cage" (original, warehouse duel arena)
+- Enclosed industrial hall, 42 x 30 m inside, 9 m walls, 180-degree rotational symmetry, spawn
+  alcoves at both short ends (red barrier during prep).
+- Corrugated steel walls: ochre-orange lower band (0-2.6 m), light grey above; a row of high
+  windows (bright daylight); rust-brown roof trusses with hanging fluorescent tubes.
+- Grey polished concrete floor with 4 m slab joints, yellow-black hazard stripes, yellow hatched
+  floor pads, dashed lane lines.
+- Shipping containers in light blue, deep blue, rust red, orange and cream (20 ft and 40 ft, some
+  stacked 2-high, an open walk-through container), steel ramps and crate steps up to the
+  high ground: a 40 ft container on each side of an open 8.5 m centre bay (bare floor where the
+  safe zone's final 4 m circle closes), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
+  bollards, roll-up doors, fire cabinets, area signs (A / B).
+- Lighting: neutral bright daylight + fluorescent ambience, soft shadows, vivid colours.
+- Performance budget (phone): <= 220 draw calls and <= 250k primitives per frame in the arena.
+
+## 3. In-match HUD (default layout, 16:9 .. 20:9)
+Positions of the movable widgets are those of the reference 20:9 phone and live in code:
+`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor, so the
+layout keeps its look on 16:9; y and sizes in screen heights). The table quotes them on 20:9.
+| Element | Position (x, y) | Size | Style |
+|---|---|---|---|
+| Minimap (square) | top-left 0.10, 0.155 | 0.26 h | dark translucent square, floor plan from above, player arrow, enemy red dot when revealed; safe-zone strip under it |
+| Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
+| Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
+| Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
+| Weapon panel | top-right 0.891, 0.158 (main slot x 0.813-0.969, y 0.05-0.155; small slots y 0.166-0.266) | slot 0.105 h | main slot (big mag + small /reserve, QUICK RELOAD / RELOADING, gun silhouette, underline bar, top-right corner cut) over three small slots (gun + total ammo, empty, fists with infinity); near-black slots at ~0.7 alpha; AUTO / SINGLE at 0.775, 0.075 |
+| HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
+| Joystick | 0.177, 0.79 | 0.25 | translucent ring + knob, floating in the left part; push past the ring to sprint |
+| Sprint | 0.174, 0.475 | 0.148 | running-figure glyph |
+| Fire (right) | 0.82, 0.69 | 0.22 | big circle, bullet glyph, dotted outer ring, warm while firing |
+| Fire (left) | 0.075, 0.50 | 0.13 | same glyph, smaller |
+| Scope / ADS | right column 0.932, 0.55 | 0.13 | reticle glyph |
+| Jump | right column 0.932, 0.725 | 0.115 | leaping-figure silhouette |
+| Crouch | right column 0.932, 0.925 | 0.11 | crouching-figure silhouette |
+| Prone | 0.859, 0.925 | 0.11 | lying-figure silhouette |
+| Reload | left-below fire 0.735, 0.80 | 0.10 | circular arrow |
+| Medkit | 0.28, 0.925 | 0.11 | kit glyph + count badge |
+| Shield wall | right of the joystick 0.29, 0.70 | 0.148 | wall glyph + count badge |
+| Grenade | 0.648, 0.925 | 0.11 | grenade silhouette + count |
+| Settings / pause | top-right corner 0.952, 0.027 | 0.046 (touch radius >= 0.036 h) | small gear on a soft dark disk |
+| Scoreboard | left of the weapon panel 0.785, 0.216 | 0.062 | list glyph (the score bar opens it too) |
+- Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
+- Crosshair: WHITE by default, a ring + centre dot (a 4-arc ring for shotguns, a dot for the
+  sniper and fists) that spreads with movement/firing; turns RED when on an enemy; red-dot reticle when
+  aiming (ADS), full scope for the sniper.
+- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; hits on the
+  same target within 0.32 s add up into one number, separate numbers line up side by side.
+- Hit marker: white X; headshot: orange X + head icon; kill: big red X on the enemy and the
+  elimination badge (our emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
+- Damage direction: red arc segments around the centre; low HP: red vignette pulse.
+- Prep: big red countdown digits; round banner: horizontal band blue (left) fading to orange (right).
+
+## 4. Game feel (numbers)
+| Item | Target |
+|---|---|
+| Run / sprint / walk | 5.0 / 6.0 / 2.0 m/s (sprint = joystick pushed past the ring for 0.3 s) |
+| Crouch / prone | 1.75 / 0.75 m/s; stance change 0.2 s / 0.45 s |
+| ADS / firing speed | x0.70 / x0.85 (SMG x0.95) |
+| Jump | apex ~1.3 m (can climb 1.2 m crates), gravity 22 m/s2 |
+| Fall damage | none up to 4 m, then 12 HP per extra metre |
+| Head multiplier | pistols/snipers 5.5, ARs 4.0, SMGs 3.5, shotgun pellets 3.0 (decays to 80 % at range for SMG/SG) |
+| Armour | helmet Lv2 45 %, vest Lv2 50 % |
+| Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
+| Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
+| Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
+| Aim assist | hip cone 6 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; on target the look slows to 0.55 and follows 70 % of the target's motion at full strength, scaled by Aim Assist strength (default 70) and the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); pull while firing, head stop on upward drag; Aim precision ASSISTED / HIP ONLY (none while scoped) / MANUAL (values: player.gd ASSIST) |
+| Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; head stop error -1.5..+0.8 deg; on-target % with assist > without; red crosshair only on the body |
+
+## 5. Screens
+- Loading (boot, the main scene): full-bleed key art of our own character in a container yard
+  at sunset (slow push-in), logo top-left, a thin gold progress bar near the bottom with the
+  percentage, status text and rotating tips, the version.
+- Match loading (START / PLAY AGAIN): key-art backdrop, LONE WOLF / CARGO CAGE mode card with
+  chips (ROUNDS 1, 1 VS BOT, bot difficulty), big map wordmark, the bar.
+- Lobby: character large on a lit podium in a 3D container yard; top bar (emblem avatar, level,
+  name with EDIT, XP line, offline coins and wins); left text menu (BUNDLES, CUSTOM HUD,
+  SETTINGS, HOW TO PLAY, CREDITS); featured duel card top-left; right: stats chips, bot
+  difficulty, mode card "LONE WOLF / CARGO CAGE" and the big yellow START bottom-right.
+- Wardrobe (BUNDLES): rarity tabs, 3-column item cards with the rendered outfit portrait and a
+  rarity bar, live preview on the podium, EQUIP and BACK.
+- Result: mode/map text top-left, our medal with gold "VICTORY" / grey "DEFEAT" / white "DRAW" /
+  red "INVALID", round score plates, stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY,
+  TIME, HP LEFT), honour tag, XP bar, PLAY AGAIN / LOBBY.
+- Settings: tab column BASIC (graphics LOW .. EXTREME, 30/60/90 FPS, show FPS, damage numbers,
+  vibration), CONTROLS (aim precision, aim assist and strength, left fire, custom HUD, ...),
+  SENSITIVITY (general, red dot, sniper scope, fire-button drag), SOUND; per-tab RESET.
+- Pause: full-width dark band, PAUSED, score / time left / HP chips, RESUME, SETTINGS, QUIT MATCH
+  (asks again).

@@ -1,7 +1,8 @@
 """container.glb - 20 ft ISO container 6.058 x 2.438 x 2.591 m, length along X, doors at +X.
 Origin bottom centre."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 
 reset()

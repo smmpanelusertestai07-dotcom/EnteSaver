@@ -8,6 +8,7 @@ const MAX_HOLES := 40
 static var _mats := {}
 static var _meshes := {}
 static var _holes: Array = []
+static var _hole_mat: StandardMaterial3D
 static var muzzle_tex: Texture2D
 static var glow_tex: Texture2D
 static var lights_enabled := true
@@ -147,8 +148,8 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 	_burst(parent, pos + normal * 0.02, normal, Color(1.0, 0.75, 0.35, 1), 7, 5.0, 0.025, 0.22)
 	_burst(parent, pos + normal * 0.05, normal, Color(0.55, 0.52, 0.48, 0.55), 4, 1.2, 0.09, 0.45, 0.5)
 	var hole := MeshInstance3D.new()
-	hole.mesh = _quad(Vector2(0.09, 0.09))
-	hole.material_override = _mat(Color(0.05, 0.05, 0.05, 0.85), false)
+	hole.mesh = _quad(Vector2(0.07, 0.07))
+	hole.material_override = _hole_material()
 	hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(hole)
 	var up := Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT
@@ -159,6 +160,28 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 		if is_instance_valid(old):
 			(old as Node).queue_free()
 	_free_after(hole, 12.0)
+
+
+## Bullet hole: a dark round core with a soft edge and a faint chipped rim, lit like the surface
+## it sits on (texture drawn once).
+static func _hole_material() -> StandardMaterial3D:
+	if _hole_mat != null:
+		return _hole_mat
+	var n := 64
+	var img := Image.create_empty(n, n, false, Image.FORMAT_RGBA8)
+	for y in n:
+		for x in n:
+			var r := Vector2(x + 0.5 - n * 0.5, y + 0.5 - n * 0.5).length() / (n * 0.5)
+			var c := Color(0.03, 0.028, 0.025).lerp(Color(0.34, 0.31, 0.27), clampf((r - 0.3) / 0.25, 0.0, 1.0))
+			c.a = maxf((1.0 - smoothstep(0.26, 0.4, r)) * 0.95, (1.0 - smoothstep(0.4, 0.95, r)) * 0.35)
+			img.set_pixel(x, y, c)
+	img.generate_mipmaps()
+	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_texture = ImageTexture.create_from_image(img)
+	m.roughness = 1.0
+	_hole_mat = m
+	return m
 
 
 static func hit_spark(ctx: Node, pos: Vector3, normal: Vector3, headshot: bool) -> void:
@@ -213,3 +236,43 @@ static func explosion(ctx: Node, pos: Vector3) -> void:
 		var tl := l.create_tween()
 		tl.tween_property(l, "light_energy", 0.0, 0.4)
 		tl.tween_callback(l.queue_free)
+
+
+## Spawns every effect once far below the floor and shows them to a tiny camera of their own, so
+## their shaders compile during the prep phase instead of stuttering on the first shot or
+## explosion. They sit on the actors' visual layer, which the minimap's top-down render skips.
+static func warm_up(ctx: Node) -> void:
+	load_textures()
+	var parent := _scene(ctx)
+	if parent == null:
+		return
+	var first := parent.get_child_count()
+	var p := Vector3(0, -50, 0)
+	tracer(ctx, p, p + Vector3(0, 0, -5))
+	muzzle_flash(ctx, p, Vector3.FORWARD, false)
+	muzzle_flash(ctx, p, Vector3.FORWARD, true)
+	impact(ctx, p, Vector3.UP)
+	hit_spark(ctx, p, Vector3.UP, false)
+	hit_spark(ctx, p, Vector3.UP, true)
+	shield_hit(ctx, p, Vector3.UP)
+	shield_break(ctx, p)
+	explosion(ctx, p)
+	for i in range(first, parent.get_child_count()):
+		_set_layers(parent.get_child(i), CharacterModel.LAYER_ACTORS)
+	var vp := SubViewport.new()
+	vp.size = Vector2i(64, 64)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	parent.add_child(vp)
+	var cam := Camera3D.new()
+	cam.cull_mask = CharacterModel.LAYER_ACTORS
+	vp.add_child(cam)
+	cam.look_at_from_position(p + Vector3(0, 1.0, 6.0), p)
+	cam.current = true
+	_free_after(vp, 0.6)
+
+
+static func _set_layers(node: Node, layers: int) -> void:
+	if node is VisualInstance3D:
+		(node as VisualInstance3D).layers = layers
+	for c in node.get_children():
+		_set_layers(c, layers)

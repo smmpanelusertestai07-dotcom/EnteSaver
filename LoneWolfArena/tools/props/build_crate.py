@@ -1,6 +1,7 @@
 """crate.glb - 1.2 m wooden crate, plank frame + cross braces. Origin bottom centre."""
+import os
 import sys
-sys.path.insert(0, '/root/work/tools/props')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 reset()
 WD = mat('Wood', '#a5743f', metallic=0.0, rough=0.7)

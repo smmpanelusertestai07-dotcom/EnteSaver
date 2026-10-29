@@ -1,9 +1,10 @@
-"""Assemble previews/<name>.png strips into previews/contact_sheet.png."""
+"""Assemble tools/props/previews/<name>.png strips (preview.py) into tools/props/previews/contact_sheet.png."""
 from PIL import Image, ImageDraw
 import os
-P = '/root/work/assets/props/previews'
-names = ['weapon_ar', 'weapon_sg', 'weapon_pistol', 'container', 'shield_wall', 'house', 'watchtower', 'medkit', 'grenade',
-         'crate', 'barrier', 'sandbags', 'tree_pine', 'tree_round', 'rock', 'lamp_post', 'mountains']
+P = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'previews')
+names = ['weapon_ar', 'weapon_smg', 'weapon_sg', 'weapon_pistol', 'weapon_sniper', 'medkit', 'grenade', 'shield_wall',
+         'container', 'container_40', 'container_open', 'crate', 'wall_bay', 'wall_column', 'rollup_door', 'roof_truss',
+         'lamp_tube', 'barrel', 'pallet', 'bollard', 'fire_cabinet']
 cw = 1280
 tiles = []
 for n in names:

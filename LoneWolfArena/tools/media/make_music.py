@@ -2,6 +2,11 @@
 
 Loops are rendered *circularly*: every note tail, delay echo and reverb tail that
 runs past the loop end wraps around to the start, so the file loops seamlessly.
+
+`build(out_dir)` also writes lobby_music.wav, the master that audio_qa.py checks for the loop
+seam; the game ships only its .ogg copy. Run tools/media/build_audio.py to rebuild the game's
+audio: it renders into tools/media/_work/audio/ (also this script's default out_dir) and copies
+only the shipped files into assets/audio/.
 """
 from __future__ import annotations
 
@@ -502,7 +507,10 @@ def build(out_dir):
     try:
         import soundfile as sf
         ogg = os.path.join(out_dir, "lobby_music.ogg")
-        sf.write(ogg, x, SR, format="OGG", subtype="VORBIS", compression_level=0.2)
+        # Vorbis quality 0.4 (= 1 - compression_level; libsndfile's default, ~128 kbps) reproduces the
+        # shipped lobby_music.ogg. The 0.2 passed before was evidently ignored where that file was made;
+        # honoured (soundfile 0.14), it doubles the file (~256 kbps).
+        sf.write(ogg, x, SR, format="OGG", subtype="VORBIS", compression_level=0.6)
         entries.append({"name": "lobby_music.ogg", "duration": round(x.shape[0] / SR, 3), "channels": 2,
                         "loop": True, "description": "Ogg Vorbis copy of lobby_music.wav (smaller; "
                         "same loop)."})
@@ -515,4 +523,4 @@ def build(out_dir):
 
 if __name__ == "__main__":
     import sys
-    build(sys.argv[1] if len(sys.argv) > 1 else "/root/work/assets/audio")
+    build(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "_work", "audio"))

@@ -1,8 +1,17 @@
 extends Node
-## Automated runs used for testing (never active in normal play):
+## Automated runs used for testing (never active in an exported build; they start from the
+## default settings and profile and save nothing, see Game):
 ##   --autotest=screens : walks through every screen, plays a scripted fight and saves PNGs.
-##   --autotest=sim     : headless full match simulation (scripted player vs bot), prints results.
+##   --autotest=sim     : headless full match (scripted player vs bot) at 3x speed, prints results.
+##   --autotest=death   : the player is killed in a match; logs the end sequence.
+##   --autotest=pose    : renders the character from the sides and in a few stances (PNGs).
+##   --autotest=victory : a scripted fight to the end; captures the banner and the results.
+##   --autotest=perf    : draw calls / primitives / objects from a few spots (needs a renderer).
+##   --autotest=aim     : aim-assist checks (pull, head stop, tracking, red crosshair).
+##   --autotest=script:res://tests/<name>.gd : runs that script's run(autotest) (tours, checks).
 ## Pass with: godot --path . -- --autotest=screens --shots=/abs/dir
+
+const BOOT_SCENE := "res://scenes/loading.tscn"
 
 var shots_dir := ""
 var log_lines: PackedStringArray = []
@@ -13,6 +22,10 @@ func _ready() -> void:
 	shots_dir = Game.shots_dir if Game.shots_dir != "" else OS.get_user_data_dir().path_join("shots")
 	DirAccess.make_dir_recursive_absolute(shots_dir)
 	_log("autotest mode=%s shots=%s" % [Game.autotest, shots_dir])
+	# The boot screen hands over to the lobby by itself. Start once it has, so that a test's own
+	# scene change is not undone by that handover.
+	while get_tree().current_scene == null or get_tree().current_scene.scene_file_path == BOOT_SCENE:
+		await get_tree().process_frame
 	match Game.autotest:
 		"screens":
 			_run_screens.call_deferred()
@@ -24,6 +37,66 @@ func _ready() -> void:
 			_run_pose.call_deferred()
 		"victory":
 			_run_victory.call_deferred()
+		"perf":
+			_run_perf.call_deferred()
+		"aim":
+			_run_aim.call_deferred()
+		_:
+			# --autotest=script:res://tests/shots_xxx.gd runs that script's run(autotest)
+			# coroutine (screenshot tours owned by the HUD, map and menu work).
+			if Game.autotest.begins_with("script:"):
+				_run_script.call_deferred(Game.autotest.substr(7))
+
+
+func _run_script(path: String) -> void:
+	# Only the project's own test scripts (never a file from elsewhere on the device).
+	if not path.begins_with("res://tests/") or ".." in path:
+		_log("refusing script outside res://tests/: " + path)
+		get_tree().quit(2)
+		return
+	var scr: Script = load(path)
+	if scr == null:
+		_log("cannot load " + path)
+		get_tree().quit(2)
+		return
+	var runner: Node = scr.new()
+	add_child(runner)
+	var code: Variant = await runner.call("run", self)
+	get_tree().quit(int(code) if typeof(code) == TYPE_INT else 0)
+
+
+## Helpers for tour scripts: shot(name), wait(sec), touch(index, pos, pressed), drag(index, pos, rel).
+func shot(shot_name: String) -> void:
+	await _shot(shot_name)
+
+
+func wait(sec: float) -> void:
+	await _wait(sec)
+
+
+## touch()/drag() take window pixels (what Input.parse_input_event expects); see _win().
+func touch(index: int, pos: Vector2, pressed: bool) -> void:
+	_touch(index, pos, pressed)
+
+
+func drag(index: int, pos: Vector2, rel: Vector2) -> void:
+	_drag(index, pos, rel)
+
+
+## Canvas (viewport) coordinates -> window pixels: differ on stretched windows (e.g. 2400x1080).
+func _win(canvas_pos: Vector2) -> Vector2:
+	return get_tree().root.get_final_transform() * canvas_pos
+
+
+func log_line(t: String) -> void:
+	_log(t)
+
+
+func wait_for_phase(arena: Node, want: int, timeout := 60.0) -> void:
+	var t := 0.0
+	while arena.get("phase") != want and t < timeout:
+		await _wait(0.1)
+		t += 0.1
 
 
 func _log(t: String) -> void:
@@ -90,7 +163,6 @@ func _run_screens() -> void:
 	lobby.call("_open_settings")
 	await _wait(0.8)
 	await _shot("03_settings")
-	var sp := lobby.find_child("*", true, false)
 	for n in lobby.get("ui").get_children():
 		if n is SettingsPanel:
 			(n as SettingsPanel).call("_show_tab", 2)
@@ -121,13 +193,13 @@ func _run_screens() -> void:
 	var vs := get_viewport().get_visible_rect().size
 	var fire_c := HudLayout.center(HudLayout.current().fire_r, vs)
 	_aim_at(p, b.chest_position())
-	_touch(5, fire_c, true)
+	_touch(5, _win(fire_c), true)
 	for i in 30:
 		await _wait(0.05)
 		if not b.alive:
 			break
 		_aim_at(p, b.chest_position() + Vector3(0, randf_range(-0.05, 0.12), 0))
-		_drag(5, fire_c + Vector2(randf_range(-2, 2), randf_range(-2, 2)), Vector2(randf_range(-1, 1), randf_range(-1, 1)))
+		_drag(5, _win(fire_c + Vector2(randf_range(-2, 2), randf_range(-2, 2))), get_tree().root.get_final_transform().basis_xform(Vector2(randf_range(-1, 1), randf_range(-1, 1))))
 		if i == 12:
 			await _shot("08_firing")
 	var t := 0.0
@@ -135,13 +207,17 @@ func _run_screens() -> void:
 		_aim_at(p, b.head_position() if randf() < 0.3 else b.chest_position())
 		await _wait(0.05)
 		t += 0.05
-	_touch(5, fire_c, false)
+	_touch(5, _win(fire_c), false)
+	if b.alive and p.alive:
+		# At the capture box's frame rate the scripted fight can run out of time: end it, so the
+		# walkthrough always reaches the results screen.
+		b.take_damage(9999.0, "head", p, p.global_position)
 	await _wait(1.2)
 	await _shot("09_end")
-	var waited := 0.0
-	while not arena.get("_result_shown") and waited < 20.0:
+	# The end delay runs on game time, which lags far behind real time at a few FPS.
+	var start := Time.get_ticks_msec()
+	while not arena.get("_result_shown") and Time.get_ticks_msec() - start < 90000:
 		await _wait(0.5)
-		waited += 0.5
 	await _wait(1.0)
 	await _shot("10_results")
 	_log("screens done: player_hp=%d bot_hp=%d" % [roundi(p.hp), roundi(b.hp)])
@@ -151,10 +227,10 @@ func _run_screens() -> void:
 # ---------------------------------------------------------------- headless match simulation
 
 func _run_sim() -> void:
-	Engine.time_scale = 3.0
 	Game.settings.difficulty = 1
 	Game.goto_arena()
 	await _wait(0.5)
+	Engine.time_scale = 3.0     # after the scene change, which resets it
 	var arena := _scene()
 	var p: Player = arena.get("player")
 	var b: Bot = arena.get("bot")
@@ -243,7 +319,7 @@ func _run_pose() -> void:
 		cam.current = true
 		await _wait(0.6)
 		await _shot(String(v[0]))
-	p.crouching = false
+	p.set_stance(Fighter.Stance.STAND, true)
 	p.set_crouch(true)
 	await _wait(0.8)
 	cam.global_position = p.global_position + p.global_basis.x * 2.4 + Vector3.UP * 1.2
@@ -293,14 +369,14 @@ func _run_victory() -> void:
 			_aim_at(p, b.head_position() if randf() < 0.25 else b.chest_position())
 			p.move_dir = Vector2(sin(t * 2.0) * 0.6, 0.0)
 			if not firing:
-				_touch(6, fire_c, true)
+				_touch(6, _win(fire_c), true)
 				firing = true
 			if not shot_taken and t > 1.0:
 				shot_taken = true
 				await _shot("v1_fight")
 		else:
 			if firing:
-				_touch(6, fire_c, false)
+				_touch(6, _win(fire_c), false)
 				firing = false
 			path_t -= 0.05
 			var nav_map: RID = arena.get("nav_map")
@@ -319,7 +395,7 @@ func _run_victory() -> void:
 					p.aim_pitch = 0.0
 					p.move_dir = Vector2(0, 1)
 	if firing:
-		_touch(6, fire_c, false)
+		_touch(6, _win(fire_c), false)
 	_log("victory run: player_hp=%d bot_hp=%d t=%.1f" % [roundi(p.hp), roundi(b.hp), t])
 	await _wait(1.5)
 	await _shot("v2_end")
@@ -330,3 +406,145 @@ func _run_victory() -> void:
 	await _wait(1.0)
 	await _shot("v3_results")
 	get_tree().quit(0)
+
+
+## Renders the arena from a few spots and prints draw calls / primitives / objects per frame
+## and node counts after two back-to-back matches (leak check). Needs a real renderer (Xvfb).
+func _run_perf() -> void:
+	var report := {}
+	for round_i in 2:
+		Game.goto_arena()
+		var arena: Node = null
+		for i in 300:
+			await _wait(0.1)
+			arena = _scene()
+			if arena and arena.get("phase") == 1:
+				break
+		var p: Player = arena.get("player")
+		var worst := {"draw_calls": 0, "primitives": 0, "objects": 0}
+		for k in 8:
+			p.aim_yaw = k * TAU / 8.0
+			await _wait(0.4)
+			var vp := get_viewport().get_viewport_rid()
+			var dc := RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME)
+			var pr := RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME)
+			var ob := RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+			worst.draw_calls = maxi(worst.draw_calls, dc)
+			worst.primitives = maxi(worst.primitives, pr)
+			worst.objects = maxi(worst.objects, ob)
+		report["round_%d" % round_i] = {"worst": worst, "nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
+				"objects": Performance.get_monitor(Performance.OBJECT_COUNT), "orphans": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
+				"static_mem_mb": snappedf(Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, 0.1)}
+		_log("PERF round %d %s" % [round_i, JSON.stringify(report["round_%d" % round_i])])
+	Game.goto_lobby()
+	await _wait(1.0)
+	_log("PERF lobby nodes=%d orphans=%d" % [Performance.get_monitor(Performance.OBJECT_NODE_COUNT), Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)])
+	get_tree().quit(0)
+
+
+## Aim-assist checks (headless): a frozen bot stands 14 m in front of the player.
+##  1. start 3 deg off the chest, hold FIRE: the pull must bring the crosshair onto the body;
+##  2. on the body, a fast upward drag while firing must stop on the head (no overshoot);
+##  3. the bot strafes: with assist the crosshair stays on target more often than without;
+##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away.
+## Prints AIM lines and exits 1 if a check fails.
+func _run_aim() -> void:
+	Game.settings.aim_assist = true
+	Game.settings.aim_assist_strength = 60
+	Game.goto_arena()
+	var arena: Node = null
+	for i in 300:
+		await _wait(0.1)
+		arena = _scene()
+		if arena and arena.get("phase") == 1:
+			break
+	var p: Player = arena.get("player")
+	var b: Bot = arena.get("bot")
+	b.frozen = true
+	b.invulnerable = true
+	p.invulnerable = true
+	# Same gun and settings every run (the map keeps changing).
+	Game.settings.aim_precision = 0
+	p.set_loadout("ar")
+	b.set_loadout("ar")
+	# Stand the bot 10-16 m from the player where the player has a clear view of its head and
+	# chest (cover moves with map work, so a fixed spot is not enough).
+	var placed := false
+	for dist in [14.0, 12.0, 16.0, 10.0]:
+		for ang in [0.0, 12.0, -12.0, 25.0, -25.0, 40.0, -40.0, 60.0, -60.0, 90.0, -90.0, 180.0]:
+			var dir := Vector3(0, 0, -1).rotated(Vector3.UP, p.aim_yaw + deg_to_rad(ang))
+			b.global_position = arena.call("closest_nav_point", p.global_position + dir * dist)
+			await get_tree().physics_frame
+			await get_tree().process_frame
+			if absf(p.global_position.distance_to(b.global_position) - dist) < 3.0 \
+					and p.can_see(b.chest_position()) and p.can_see(b.head_position()):
+				placed = true
+				break
+		if placed:
+			break
+	_log("AIM setup: bot at %.1f m in clear view=%s" % [p.global_position.distance_to(b.global_position), placed])
+	await _wait(0.5)
+	var fails := 0 if placed else 1
+	# 1. pull onto the body while firing
+	_aim_at(p, b.chest_position())
+	p.aim_yaw += deg_to_rad(3.0)
+	p.set_firing(true)
+	var acquired := -1.0
+	for i in 60:
+		await get_tree().physics_frame
+		if p.crosshair_on_target and acquired < 0.0:
+			acquired = i / 60.0
+	p.set_firing(false)
+	_log("AIM pull: on target after %.2fs (want < 0.6s)" % acquired)
+	if acquired < 0.0 or acquired > 0.6:
+		fails += 1
+	# 2. drag up while firing -> head stop
+	await _wait(0.3)
+	_aim_at(p, b.chest_position())
+	p.set_firing(true)
+	await get_tree().physics_frame
+	for i in 12:
+		p.add_look(Vector2(0, -25), true)
+		await get_tree().physics_frame
+	var cam_dir := -p.camera.global_basis.z
+	var head := b.head_position()
+	var to_head := (head - p.camera.global_position).normalized()
+	var pitch_err := rad_to_deg(asin(clampf(cam_dir.y, -1, 1)) - asin(clampf(to_head.y, -1, 1)))
+	p.set_firing(false)
+	_log("AIM head stop: crosshair %.2f deg vs head centre after a 300 px upward drag (want -1.5..+0.8)" % pitch_err)
+	if pitch_err > 0.8 or pitch_err < -1.5:
+		fails += 1
+	# 3. strafing target, with and without assist
+	var on := {}
+	for assist in [false, true]:
+		Game.settings.aim_assist = assist
+		await _wait(0.3)
+		_aim_at(p, b.chest_position())
+		var base: Vector3 = b.global_position
+		var hits := 0
+		for i in 90:
+			b.global_position = base + p.camera.global_basis.x * sin(i / 60.0 * 5.0) * 1.2
+			await get_tree().physics_frame
+			if p.crosshair_on_target:
+				hits += 1
+		b.global_position = base
+		on[assist] = hits / 90.0
+	_log("AIM tracking: on-target %.0f%% with assist vs %.0f%% without (want more with)" % [on[true] * 100.0, on[false] * 100.0])
+	if on[true] <= on[false]:
+		fails += 1
+	# 4. red crosshair flag
+	Game.settings.aim_assist = true
+	for k in 3:   # the camera sits on the shoulder, so re-aim once it has moved
+		_aim_at(p, b.chest_position())
+		await get_tree().process_frame
+		await get_tree().physics_frame
+	var red_on := p.crosshair_on_target
+	p.aim_yaw += deg_to_rad(8.0)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var red_off := p.crosshair_on_target
+	_log("AIM red crosshair: on body=%s, 8 deg away=%s" % [red_on, red_off])
+	if not red_on or red_off:
+		fails += 1
+	_log("AIM RESULT fails=%d" % fails)
+	get_tree().quit(1 if fails > 0 else 0)

@@ -1,0 +1,49 @@
+# Lone Wolf Arena: rules for anyone (human or AI) working here
+
+This folder is a self-contained Godot 4.7.2 game. The rest of the repository is a different
+app (Ente Saver) and must not be touched for game work.
+
+## Scope
+- Edit only files under `LoneWolfArena/`. The one exception is the game's own CI workflow,
+  `.github/workflows/lonewolf-arena.yml`. Never edit `app/`, Gradle files or other workflows.
+
+## Privacy and safety (owner's standing instruction)
+- Develop privately: no personal data in web searches, no uploading code, assets, logs or chat
+  content to any third-party service (pastebins, online converters, AI tools, file hosts).
+- The GitHub repository is PUBLIC. The owner approved publishing the game's source there
+  (2026-10-28) on condition that it stays clean: never commit personal data, signing keys,
+  passwords, `export_credentials.cfg`, machine-specific paths or private reference material, and
+  review a branch for these (and for exploitable debug hooks) before pushing.
+- Reference screenshots of other games are for private analysis only: keep them outside the
+  repo (or in a git-ignored `reference_private/` folder) and never ship or commit them.
+- The game must stay offline: no INTERNET permission, no ads/analytics SDKs, no downloads at
+  runtime. Everything ships inside the APK.
+
+## Originality (legal)
+- The game should FEEL like popular mobile battle-royale "Lone Wolf" modes (layout, flow,
+  controls, pacing), but every asset, icon, name and logo must be original. Never use another
+  game's names, logos, characters, bundles, icons, sounds or ripped assets, or its trademarked
+  phrases (its victory call, its item and ability names): use our own words (VICTORY!, SHIELD
+  WALL, FRAG). The concrete list, where present, is in the git-ignored
+  `reference_private/originality.txt`.
+
+## Build and test
+```bash
+tools/agents/install.sh                                   # once per clone: links the agent files below
+tools/qa/run_checks.sh                                    # import, compile, unit tests, gameplay checks
+tools/qa/capture.sh /tmp/shots 1560x720 screens           # screenshot walkthrough (Xvfb + llvmpipe)
+python3 tools/qa/compare.py /tmp/shots_old /tmp/shots /tmp/cmp   # screen-by-screen diff
+tools/build_apk.sh                                        # signed release APK (see script header)
+```
+
+## No documents in the repository
+The repository carries source and what builds and checks it, nothing else: Ente Saver's own
+tests fail on any tracked `.md` file. Player-facing text lives in the game (How to play,
+credits); developer notes live in the scripts they describe. The files Claude Code reads
+(`CLAUDE.md`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`) are git-ignored links that
+`tools/agents/install.sh` makes to the plain-text sources in `tools/agents/` - edit those.
+
+## Reference-matching loop (agents)
+See `tools/agents/skills/match-reference/SKILL.txt`: research -> spec (`design/`) -> build ->
+capture -> compare against the spec and private references -> fix, until every checklist item
+in `design/STYLE_SPEC.txt` passes.
