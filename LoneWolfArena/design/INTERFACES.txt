@@ -31,7 +31,7 @@ listed here. If a part needs something new from the core, add it in its own file
 - helpers live in their own files: `hud_draw.gd` (HudDraw: icons, buttons, text, shapes shared
   with the editor), `hud_minimap.gd` (HudMinimap), `hud_panels.gd` (HudPanels)
 
-## HUD layout (scripts/hud_layout.gd, version 2)
+## HUD layout (scripts/hud_layout.gd, version 3)
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
   screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
   "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
@@ -40,7 +40,8 @@ listed here. If a part needs something new from the core, add it in its own file
   dropped), `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
   `to_save(layout)` -> what `Game.save_hud_layout()` stores.
 - Pixels: `center(w, vs)`, `place(w, pos, vs)` (picks the anchor from the screen third),
-  `hit_rect(id, w, vs)`, `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
+  `hit_rect(id, w, vs)`, `touch_radius(w, vs)` (round buttons, at least `MIN_TOUCH` = 0.036 h),
+  `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
 
 ## Android log lines (read by tools/ci/emulator_test.sh)
 - `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout`), `lobby ready`,

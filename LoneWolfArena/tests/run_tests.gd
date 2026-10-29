@@ -122,6 +122,8 @@ func _test_hud_layout() -> void:
 	var saved := Game.hud_layout
 	Game.hud_layout = {"fire_r": {"x": 0.3}}
 	_check(HudLayout.current().fire_r.x == HudLayout.DEFAULTS.fire_r.x, "a layout from an older HUD version is ignored")
+	Game.hud_layout = {"_v": [], "fire_r": {"x": 0.3}}
+	_check(HudLayout.current().fire_r.x == HudLayout.DEFAULTS.fire_r.x, "a layout with a wrongly typed version is ignored")
 	Game.hud_layout = saved
 	var def := HudLayout.resolve({})
 	var phone := Vector2(2400, 1080)

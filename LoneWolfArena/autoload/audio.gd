@@ -25,6 +25,14 @@ func _ready() -> void:
 	add_child(_ambience)
 
 
+func _exit_tree() -> void:
+	# Let go of every stream before the engine checks for leaked resources at exit.
+	for p: AudioStreamPlayer in _players + [_music, _ambience]:
+		p.stop()
+		p.stream = null
+	_cache.clear()
+
+
 func stream(sound_name: String) -> AudioStream:
 	if _cache.has(sound_name):
 		return _cache[sound_name]

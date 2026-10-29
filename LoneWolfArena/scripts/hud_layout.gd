@@ -90,7 +90,8 @@ static func resolve(overrides: Dictionary) -> Dictionary:
 
 static func current() -> Dictionary:
 	var saved: Dictionary = Game.hud_layout
-	return resolve(saved if int(saved.get("_v", 0)) == VERSION else {})
+	var v: Variant = saved.get("_v", 0)
+	return resolve(saved if (v is int or v is float) and int(v) == VERSION else {})
 
 
 ## Layout ready for Game.save_hud_layout().

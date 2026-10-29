@@ -238,10 +238,15 @@ static func explosion(ctx: Node, pos: Vector3) -> void:
 		tl.tween_callback(l.queue_free)
 
 
-## Spawns every effect once far below the floor so their shaders compile during the prep
-## phase instead of stuttering on the first shot/explosion.
+## Spawns every effect once far below the floor and shows them to a tiny camera of their own, so
+## their shaders compile during the prep phase instead of stuttering on the first shot or
+## explosion. They sit on the actors' visual layer, which the minimap's top-down render skips.
 static func warm_up(ctx: Node) -> void:
 	load_textures()
+	var parent := _scene(ctx)
+	if parent == null:
+		return
+	var first := parent.get_child_count()
 	var p := Vector3(0, -50, 0)
 	tracer(ctx, p, p + Vector3(0, 0, -5))
 	muzzle_flash(ctx, p, Vector3.FORWARD, false)
@@ -252,3 +257,22 @@ static func warm_up(ctx: Node) -> void:
 	shield_hit(ctx, p, Vector3.UP)
 	shield_break(ctx, p)
 	explosion(ctx, p)
+	for i in range(first, parent.get_child_count()):
+		_set_layers(parent.get_child(i), CharacterModel.LAYER_ACTORS)
+	var vp := SubViewport.new()
+	vp.size = Vector2i(64, 64)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	parent.add_child(vp)
+	var cam := Camera3D.new()
+	cam.cull_mask = CharacterModel.LAYER_ACTORS
+	vp.add_child(cam)
+	cam.look_at_from_position(p + Vector3(0, 1.0, 6.0), p)
+	cam.current = true
+	_free_after(vp, 0.6)
+
+
+static func _set_layers(node: Node, layers: int) -> void:
+	if node is VisualInstance3D:
+		(node as VisualInstance3D).layers = layers
+	for c in node.get_children():
+		_set_layers(c, layers)

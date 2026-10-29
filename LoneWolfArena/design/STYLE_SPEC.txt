@@ -26,8 +26,9 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 - Grey polished concrete floor with 4 m slab joints, yellow-black hazard stripes, yellow hatched
   floor pads, dashed lane lines.
 - Shipping containers in light blue, deep blue, rust red, orange and cream (20 ft and 40 ft, some
-  stacked 2-high, an open walk-through container), steel ramps up to a central container block
-  (high ground), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
+  stacked 2-high, an open walk-through container), steel ramps and crate steps up to the
+  high ground: a 40 ft container on each side of an open 8.5 m centre bay (bare floor where the
+  safe zone's final 4 m circle closes), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
   bollards, roll-up doors, fire cabinets, area signs (A / B).
 - Lighting: neutral bright daylight + fluorescent ambience, soft shadows, vivid colours.
 - Performance budget (phone): <= 220 draw calls and <= 250k primitives per frame in the arena.
@@ -42,10 +43,10 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
 | Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
 | Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
-| Weapon panel | top-right 0.891, 0.208 | slot 0.105 h | main slot (gun silhouette, ammo "mag / reserve") over three small slots (gun, empty, fists) |
+| Weapon panel | top-right 0.891, 0.158 (main slot x 0.813-0.969, y 0.05-0.155; small slots y 0.166-0.266) | slot 0.105 h | main slot (big mag + small /reserve, QUICK RELOAD / RELOADING, gun silhouette, underline bar, top-right corner cut) over three small slots (gun + total ammo, empty, fists with infinity); near-black slots at ~0.7 alpha; AUTO / SINGLE at 0.775, 0.075 |
 | HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
 | Joystick | 0.177, 0.79 | 0.25 | translucent ring + knob, floating in the left part; push past the ring to sprint |
-| Sprint | 0.174, 0.475 | 0.13 | running-figure glyph |
+| Sprint | 0.174, 0.475 | 0.148 | running-figure glyph |
 | Fire (right) | 0.82, 0.69 | 0.22 | big circle, bullet glyph, dotted outer ring, warm while firing |
 | Fire (left) | 0.075, 0.50 | 0.13 | same glyph, smaller |
 | Scope / ADS | right column 0.932, 0.55 | 0.13 | reticle glyph |
@@ -54,15 +55,16 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Prone | 0.859, 0.925 | 0.11 | lying-figure silhouette |
 | Reload | left-below fire 0.735, 0.80 | 0.10 | circular arrow |
 | Medkit | 0.28, 0.925 | 0.11 | kit glyph + count badge |
-| Shield wall | right of the joystick 0.29, 0.70 | 0.13 | wall glyph + count badge |
+| Shield wall | right of the joystick 0.29, 0.70 | 0.148 | wall glyph + count badge |
 | Grenade | 0.648, 0.925 | 0.11 | grenade silhouette + count |
-| Settings / pause | top-right corner 0.977, 0.055 | 0.072 | gear |
-| Scoreboard | next to settings 0.94, 0.055 | 0.072 | list glyph |
+| Settings / pause | top-right corner 0.952, 0.027 | 0.046 (touch radius >= 0.036 h) | small gear on a soft dark disk |
+| Scoreboard | left of the weapon panel 0.785, 0.216 | 0.062 | list glyph (the score bar opens it too) |
 - Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
 - Crosshair: WHITE by default, a ring + centre dot (a 4-arc ring for shotguns, a dot for the
   sniper and fists) that spreads with movement/firing; turns RED when on an enemy; red-dot reticle when
   aiming (ADS), full scope for the sniper.
-- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger.
+- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; hits on the
+  same target within 0.32 s add up into one number, separate numbers line up side by side.
 - Hit marker: white X; headshot: orange X + head icon; kill: big red X on the enemy and the
   elimination badge (our emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
 - Damage direction: red arc segments around the centre; low HP: red vignette pulse.
@@ -79,7 +81,7 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Head multiplier | pistols/snipers 5.5, ARs 4.0, SMGs 3.5, shotgun pellets 3.0 (decays to 80 % at range for SMG/SG) |
 | Armour | helmet Lv2 45 %, vest Lv2 50 % |
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
-| Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
+| Shield wall | right of the joystick 0.29, 0.70 | 0.148 | wall glyph + count badge |
 | Frag | 150 at centre -> 60 at 5 m, 3 s fuse |
 | Aim assist | hip cone 5 deg within 25 m, scoped 2.5 deg to 80 m, slow-down 0.6 on target, tracking 30 % of target motion, pull while firing, head stop on upward drag; modes DEFAULT / PRECISE ON SCOPE / FULL CONTROL |
 | Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; head stop error -1.5..+0.8 deg; on-target % with assist > without; red crosshair only on the body |
