@@ -30,17 +30,11 @@ func _ready() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
 	panel.add_child(v)
-	var head := HBoxContainer.new()
+	var head := UI.popup_header("CREDITS & LICENCES")
 	v.add_child(head)
-	var title := UI.label("CREDITS & LICENCES", 34, UI.TEXT, "title")
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(title)
-	var close := UI.close_button()
-	close.name = "Close"
-	close.pressed.connect(func() -> void:
+	(head.get_node("Close") as Button).pressed.connect(func() -> void:
 		closed.emit()
 		queue_free())
-	head.add_child(close)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

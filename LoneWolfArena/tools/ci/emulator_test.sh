@@ -72,6 +72,11 @@ read -r FX FY < <(ui_pos fire "$(px "0.845*$VW*$S")" "$(px "0.63*720*$S")")
 log "hold FIRE at $FX,$FY"
 adb shell input swipe "$FX" "$FY" "$FX" "$FY" 3000
 shot 04_after_fire
+# Android back during the fight opens the pause menu; a second back closes it again.
+adb shell input keyevent KEYCODE_BACK
+wait_mark "pause opened" 60 && shot 04b_paused
+adb shell input keyevent KEYCODE_BACK
+wait_mark "pause closed" 60
 read -r JX JY < <(ui_pos joystick "$(px "0.15*$VW*$S")" "$(px "0.71*720*$S")")
 JY2=$(( JY - $(px "0.16*720*$S") ))
 adb shell input swipe "$JX" "$JY" "$JX" "$JY2" 3000
@@ -91,7 +96,7 @@ grep -iE " godot " "$OUT/logcat.txt" | grep -iE "error|script|OpenGL API" | head
 log "markers:"; cat "$OUT/markers.txt"
 log "crash lines: $(wc -l < "$OUT/crashes.txt")  godot error lines: $(wc -l < "$OUT/godot_errors.txt")"
 status=0
-for m in "lobby ready" "match started" "player fired" "player moved" "signature ok"; do
+for m in "lobby ready" "match started" "player fired" "player moved" "signature ok" "pause opened" "pause closed"; do
   grep -q "\] $m" "$OUT/markers.txt" || { log "MISSING marker: $m"; status=3; }
 done
 if [ "$(alive)" != "yes" ]; then log "GAME NOT RUNNING AT END"; status=2; fi

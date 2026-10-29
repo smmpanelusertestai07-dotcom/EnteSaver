@@ -487,8 +487,10 @@ func open_pause() -> void:
 	get_tree().paused = true
 	var menu := PauseMenu.new()
 	pause_layer.add_child(menu)
+	Game.mark("pause opened")
 	menu.closed.connect(func() -> void:
 		get_tree().paused = false
+		Game.mark("pause closed")
 		hud.reload_layout())
 
 
