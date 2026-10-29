@@ -221,11 +221,13 @@ func _add_damage_number(target: Fighter, amount: float, headshot: bool, pos: Vec
 		if n.target == target and bool(n.head) == headshot and tick - int(n.tick) <= merge_ticks:
 			n.amount = float(n.amount) + amount
 			n.tick = tick
+			n.hits = int(n.hits) + 1
 			n.t = minf(float(n.t), 0.15)
 			n.bump = 0.14
 			return
-	var nn := {"pos": pos + Vector3(0, 0.2, 0), "amount": amount, "head": headshot, "t": 0.0, "tick": tick, "bump": 0.0,
-		"target": target, "off": Vector2.ZERO}
+	# tick0 / tick: physics frame of the first / latest hit in this number, hits: how many
+	var nn := {"pos": pos + Vector3(0, 0.2, 0), "amount": amount, "head": headshot, "t": 0.0, "tick0": tick, "tick": tick,
+		"hits": 1, "bump": 0.0, "target": target, "off": Vector2.ZERO}
 	nn.off = _dmg_free_offset(nn)
 	_dmg_numbers.append(nn)
 	if _dmg_numbers.size() > 8:

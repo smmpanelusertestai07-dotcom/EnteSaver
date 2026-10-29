@@ -5,6 +5,8 @@ extends Control
 ## RESET bottom-left. Every change applies at once (Game.settings + Game.apply_settings());
 ## closing saves (Game.save_settings()) and emits `closed`. Works while the tree is paused.
 ## _show_tab(i) takes the index in TABS (the screenshot walkthrough opens 2 = CONTROLS).
+## In a match (opened from the pause menu, or over the arena) the EDIT CUSTOM HUD button is
+## replaced by a note: going to the editor would abandon the match.
 
 signal closed
 
@@ -31,10 +33,15 @@ var _menu_buttons := {}
 var _current := 0
 var _sens_rows := {}
 var _hint: Label
+## True when opened during a match (set by the pause menu; also detected from the scene).
+var in_match := false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	var scene := get_tree().current_scene
+	if scene and scene.has_method("open_pause"):
+		in_match = true
 	UI.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	var shade := ColorRect.new()
@@ -147,10 +154,10 @@ func _menu_button(text: String, idx: int) -> Button:
 	b.add_theme_color_override("font_hover_color", UI.TEXT)
 	b.add_theme_color_override("font_pressed_color", UI.INK)
 	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	# hazard mark on the selected tab's left edge
+	# hazard stripes, corner cut and notch on the selected (yellow) tab
 	b.draw.connect(func() -> void:
 		if b.button_pressed:
-			UI.draw_hazard(b, Rect2(0, 0, 8, b.size.y), 5.0, UI.INK))
+			UI.draw_tab_selected(b, b.size))
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_select", -6.0)
 		_show_tab(idx))
@@ -227,15 +234,21 @@ func _show_tab(i: int) -> void:
 			_body.add_child(UI.plate_row("Crosshair size", UI.slider(Game.settings.crosshair_size, 0, 100, func(v: float) -> void: _apply("crosshair_size", int(v)))))
 			_body.add_child(UI.plate_row("Dynamic crosshair", _toggle("dynamic_crosshair"), "Spreads while moving and firing"))
 			_body.add_child(UI.spacer(6))
-			var hud_btn := UI.button("EDIT CUSTOM HUD", 20, "light", Vector2(300, 52))
-			hud_btn.name = "EditHud"
-			hud_btn.pressed.connect(func() -> void:
-				Game.save_settings()
-				Game.goto_hud_editor())
-			var r := HBoxContainer.new()
-			r.add_child(hud_btn)
-			_body.add_child(r)
-			_hint.text = "Custom HUD: move, resize and fade every in-match button."
+			if in_match:
+				var note := UI.label("IN THE LOBBY", 17, UI.TEXT_DIM, "bold")
+				note.name = "EditHudNote"
+				_body.add_child(UI.plate_row("Custom HUD", note, "Leaving for the editor now would end this match"))
+				_hint.text = "Custom HUD: open it from the lobby to move, resize and fade every in-match button."
+			else:
+				var hud_btn := UI.button("EDIT CUSTOM HUD", 20, "light", Vector2(300, 52))
+				hud_btn.name = "EditHud"
+				hud_btn.pressed.connect(func() -> void:
+					Game.save_settings()
+					Game.goto_hud_editor())
+				var r := HBoxContainer.new()
+				r.add_child(hud_btn)
+				_body.add_child(r)
+				_hint.text = "Custom HUD: move, resize and fade every in-match button."
 		3:
 			_body.add_child(UI.section("VOLUME"))
 			_body.add_child(UI.plate_row("Master", UI.stepper(Game.settings.vol_master, 0, 100, func(v: float) -> void: _apply("vol_master", int(v)), 5.0)))

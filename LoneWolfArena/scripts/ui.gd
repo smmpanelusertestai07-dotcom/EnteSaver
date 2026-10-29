@@ -628,9 +628,11 @@ static func draw_tick_corner(ci: CanvasItem, card_size: Vector2, s := 30.0) -> v
 	ci.draw_polyline(PackedVector2Array([a + Vector2(-s * 0.16, -s * 0.14), a, a + Vector2(s * 0.26, -s * 0.34)]), INK, maxf(2.0, s * 0.08), true)
 
 
-## Hazard stripes (yellow on dark) filling `r`, slanted like the rest of the kit.
-static func draw_hazard(ci: CanvasItem, r: Rect2, stripe := 8.0, col := ACCENT) -> void:
-	ci.draw_rect(r, Color(0.05, 0.05, 0.05, 0.9))
+## Hazard stripes filling `r`, slanted like the rest of the kit: `col` stripes over `bg` (dark
+## by default; Color.TRANSPARENT stripes straight onto what is below, e.g. black on a yellow tab).
+static func draw_hazard(ci: CanvasItem, r: Rect2, stripe := 8.0, col := ACCENT, bg := Color(0.05, 0.05, 0.05, 0.9)) -> void:
+	if bg.a > 0.0:
+		ci.draw_rect(r, bg)
 	var x := r.position.x - r.size.y
 	while x < r.end.x:
 		var p := PackedVector2Array([Vector2(x, r.end.y), Vector2(x + r.size.y, r.position.y),
@@ -639,6 +641,110 @@ static func draw_hazard(ci: CanvasItem, r: Rect2, stripe := 8.0, col := ACCENT) 
 		for poly in clipped:
 			ci.draw_colored_polygon(poly, col)
 		x += stripe * 2.0
+
+
+## Marks of a selected (yellow) tab, like the reference vault tabs: black hazard stripes down
+## the left edge, a thin cut line across the top-left corner and a dark notch bottom-right.
+static func draw_tab_selected(ci: CanvasItem, s: Vector2) -> void:
+	draw_hazard(ci, Rect2(0, 0, 9, s.y), 4.0, Color(INK, 0.85), Color.TRANSPARENT)
+	ci.draw_line(Vector2(9, 15), Vector2(24, 0), Color(INK, 0.55), 1.5, true)
+	var n := 13.0
+	ci.draw_colored_polygon(PackedVector2Array([Vector2(s.x - n - 4, s.y), Vector2(s.x - 4, s.y - n), Vector2(s.x - 4, s.y)]), Color(INK, 0.5))
+
+
+static var _glows := {}
+
+
+## Soft radial glow (cached per colour): `col` in the middle fading out at the edge of the
+## rect it is drawn into, so it never spills outside a card.
+static func radial_glow(col: Color) -> Texture2D:
+	var key := col.to_html()
+	if _glows.has(key):
+		return _glows[key]
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.35, 0.7, 1.0])
+	g.colors = PackedColorArray([col, Color(col, col.a * 0.55), Color(col, col.a * 0.16), Color(col, 0.0)])
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	t.width = 128
+	t.height = 128
+	_glows[key] = t
+	return t
+
+
+## Light popup header (reference popups): a light-grey strip with the title in dark caps, a
+## darker slanted plate toward the right, a hazard line along its bottom edge and the close X on
+## a dark tile at the right end (the tile is a Button named "Close": connect its `pressed`).
+static func popup_header(title: String, size := 26, height := 56.0) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 0)
+	h.custom_minimum_size = Vector2(0, height)
+	var strip := Control.new()
+	strip.name = "Strip"
+	strip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.draw.connect(func() -> void:
+		var s := strip.size
+		strip.draw_rect(Rect2(Vector2.ZERO, s), Color(0.925, 0.925, 0.915))
+		var x0 := s.x * 0.62
+		strip.draw_colored_polygon(PackedVector2Array([Vector2(x0 + s.y, 0), Vector2(s.x, 0), Vector2(s.x, s.y - 6),
+			Vector2(x0, s.y - 6)]), Color(0.80, 0.80, 0.79))
+		strip.draw_line(Vector2(s.x - 54, 3), Vector2(s.x - 14, s.y - 9), Color(0.55, 0.55, 0.54), 1.0, true)
+		draw_hazard(strip, Rect2(0, s.y - 6, s.x * 0.74, 6), 5.0, ACCENT, Color(0.09, 0.08, 0.06)))
+	h.add_child(strip)
+	var t := label(title.to_upper(), size, Color(0.17, 0.17, 0.17), "bold")
+	t.name = "Title"
+	t.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	t.offset_left = 26
+	t.offset_bottom = -6
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	strip.add_child(t)
+	var close := Button.new()
+	close.name = "Close"
+	close.custom_minimum_size = Vector2(height + 4, height)
+	close.focus_mode = Control.FOCUS_NONE
+	var st := box(Color(0.10, 0.095, 0.09), 0, 0, Color.TRANSPARENT, 0.0)
+	var pr := box(Color(ACCENT, 0.45), 0, 0, Color.TRANSPARENT, 0.0)
+	close.add_theme_stylebox_override("normal", st)
+	close.add_theme_stylebox_override("hover", box(Color(0.18, 0.17, 0.16), 0, 0, Color.TRANSPARENT, 0.0))
+	close.add_theme_stylebox_override("pressed", pr)
+	close.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	close.draw.connect(func() -> void:
+		var s := close.size
+		draw_hazard(close, Rect2(0, 0, s.x - 3, s.y), 7.0, Color(1, 1, 1, 0.045), Color.TRANSPARENT)
+		close.draw_rect(Rect2(s.x - 3, 0, 3, s.y), ACCENT)
+		var c := Vector2((s.x - 3) * 0.5, s.y * 0.5)
+		var r := s.y * 0.2
+		close.draw_line(c - Vector2(r, r), c + Vector2(r, r), TEXT, 3.0, true)
+		close.draw_line(c + Vector2(-r, r), c + Vector2(r, -r), TEXT, 3.0, true))
+	close.pressed.connect(func() -> void: Audio.play("ui_back", -4.0))
+	h.add_child(close)
+	return h
+
+
+## The system-dialog band (reference information dialog, pause menu, quit dialog): full width,
+## near-black warm brown, a lighter wash on the left, faint diagonal streaks on the right, a
+## hazard tab top-left and a thin accent line along the bottom.
+static func draw_dialog_band(ci: CanvasItem, s: Vector2, line := ACCENT) -> void:
+	ci.draw_rect(Rect2(Vector2.ZERO, s), Color(0.114, 0.10, 0.075, 0.95))
+	ci.draw_rect(Rect2(0, 0, s.x * 0.45, s.y), Color(1, 1, 1, 0.022))
+	for i in 7:
+		var x := s.x * (0.72 + i * 0.035)
+		ci.draw_line(Vector2(x + s.y * 0.35, s.y * 0.08), Vector2(x, s.y * 0.6), Color(1, 1, 1, 0.035), 1.0, true)
+	draw_hazard(ci, Rect2(0, 0, 150, 7), 7.0)
+	ci.draw_rect(Rect2(0, 7, s.x, 1), Color(1, 1, 1, 0.07))
+	draw_hazard(ci, Rect2(0, s.y - 9, s.x, 5), 6.0, Color(1, 1, 1, 0.05), Color.TRANSPARENT)
+	ci.draw_rect(Rect2(0, s.y - 3, s.x, 3), Color(line, 0.8))
+
+
+## Long names end in "..." inside the label's width (instead of growing or cutting a glyph).
+static func ellipsis(l: Label) -> Label:
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return l
 
 
 ## A full-rect TextureRect showing `tex` like CSS "cover" (crops, never letterboxes).

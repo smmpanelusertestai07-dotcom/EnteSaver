@@ -9,11 +9,17 @@ Scenes:
             field) and the opponent standing on a container stack in the distance (a duel).
   portrait  one outfit (bundle) full body, 3/4 front, on a transparent background, studio key
             + rim lights: the item art of the wardrobe cards.
+  faceoff   the mode art (lobby mode card, match loading card): two fighters squaring up across
+            a hazard line inside a slice of the Cargo Cage hall, built from the map's own props
+            (wall bays with high windows, columns, roof trusses, hanging tubes, containers,
+            crates), blue rim light on the left fighter and orange on the right one.
 
 usage: blender -b --python tools/media/render_keyart.py -- --scene hero --out art.png
            [--bundle shadow] [--opponent desert|none] [--res 1920x1080] [--samples 64]
        blender -b --python tools/media/render_keyart.py -- --scene portrait --bundle neon --out p.png
-           [--res 360x480] [--samples 48]"""
+           [--res 360x480] [--samples 48]
+       blender -b --python tools/media/render_keyart.py -- --scene faceoff --out duel.png
+           [--bundle neon] [--opponent desert] [--res 1280x720] [--samples 48]"""
 import json
 import math
 import os
@@ -32,10 +38,10 @@ def arg(name, default=None):
 
 
 SCENE = arg("--scene", "hero")
-BUNDLE = arg("--bundle", "neon" if SCENE == "hero" else "default")
-OPPONENT = arg("--opponent", "shadow")
+BUNDLE = arg("--bundle", "neon" if SCENE in ("hero", "faceoff") else "default")
+OPPONENT = arg("--opponent", "desert" if SCENE == "faceoff" else "shadow")
 OUT = arg("--out", os.path.join(os.getcwd(), "keyart.png"))
-RES = [int(v) for v in arg("--res", "1920x1080" if SCENE == "hero" else "360x480").split("x")]
+RES = [int(v) for v in arg("--res", {"hero": "1920x1080", "faceoff": "1280x720"}.get(SCENE, "360x480")).split("x")]
 SAMPLES = int(arg("--samples", "64" if SCENE == "hero" else "48"))
 CHAR = os.path.join(ROOT, "assets", "character", "character.glb")
 PROPS = os.path.join(ROOT, "assets", "props")

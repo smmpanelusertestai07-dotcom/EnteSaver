@@ -8,7 +8,9 @@ extends Control
 ## the fighters use, every sound) load on worker threads (ResourceLoader.load_threaded_request).
 ## They stay referenced by a small holder node under the root ("LoadingCache"), so later scene
 ## changes reuse them instead of reading the disk again; the sounds also go into Audio's cache.
-## Then Game.goto_lobby(). It never hangs: after TIMEOUT_S it goes to the lobby anyway.
+## Then Game.goto_lobby(). It never hangs: after TIMEOUT_S it goes to the lobby anyway; the
+## files that are still loading then are collected by the holder as they finish (every threaded
+## request gets its load_threaded_get, so no load token is left behind).
 ## Automated runs (Game.autotest) skip straight to the lobby (their scripts expect it) unless a
 ## screenshot tour sets `hold_for_test` to look at this screen.
 ##
@@ -38,6 +40,35 @@ const GOLD := Color(0.94, 0.745, 0.24)
 
 ## Screenshot tours set this to keep the boot screen up (no automatic lobby).
 static var hold_for_test := false
+
+
+## The root node "LoadingCache": keeps the boot preloads referenced (meta "resources") and
+## collects the requests that were still in flight when the boot screen timed out.
+class Cache extends Node:
+	var pending: Array[String] = []
+
+	func _ready() -> void:
+		process_mode = Node.PROCESS_MODE_ALWAYS
+		set_process(not pending.is_empty())
+
+	func collect(paths: Array[String]) -> void:
+		pending.append_array(paths)
+		set_process(not pending.is_empty())
+
+	func _process(_delta: float) -> void:
+		var keep: Array = get_meta("resources", [])
+		for i in range(pending.size() - 1, -1, -1):
+			var st := ResourceLoader.load_threaded_get_status(pending[i])
+			if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+				continue
+			if st == ResourceLoader.THREAD_LOAD_LOADED or st == ResourceLoader.THREAD_LOAD_FAILED:
+				var r := ResourceLoader.load_threaded_get(pending[i])
+				if r:
+					keep.append(r)
+			pending.remove_at(i)
+		set_meta("resources", keep)
+		if pending.is_empty():
+			set_process(false)
 
 var mode := "boot"
 var progress := 0.0                # shown value 0..1 (smoothed, never goes back)
@@ -348,24 +379,37 @@ func _poll_boot() -> void:
 		_target = 1.0
 
 
+## Takes every finished request (load_threaded_get) into the holder; requests still in flight
+## (only after a timeout) are left to the holder, which collects them when they finish (a get
+## now would block the main thread).
 func _finish_boot() -> void:
 	var keep: Array[Resource] = []
+	var pending: Array[String] = []
 	for p in _paths:
-		if ResourceLoader.load_threaded_get_status(p) == ResourceLoader.THREAD_LOAD_LOADED:
+		var st := ResourceLoader.load_threaded_get_status(p)
+		if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			pending.append(p)
+		elif st == ResourceLoader.THREAD_LOAD_LOADED or st == ResourceLoader.THREAD_LOAD_FAILED:
 			var r := ResourceLoader.load_threaded_get(p)
 			if r:
 				keep.append(r)
 				if p.begins_with("res://assets/audio/"):
 					Audio.stream(p.get_file().get_basename())
-	CharacterModel.extra_animations()
+	if not pending.has("res://assets/character/anims_extra.glb"):
+		CharacterModel.extra_animations()
 	var root := get_tree().root
 	var holder := root.get_node_or_null("LoadingCache")
 	if holder == null:
-		holder = Node.new()
+		holder = Cache.new()
 		holder.name = "LoadingCache"
 		root.add_child.call_deferred(holder)
 	holder.set_meta("resources", keep)
-	Game.mark("boot loaded %d files in %.1fs" % [keep.size(), _t])
+	if holder is Cache:
+		(holder as Cache).collect(pending)
+	if pending.is_empty():
+		Game.mark("boot loaded %d files in %.1fs" % [keep.size(), _t])
+	else:
+		Game.mark("boot timeout: %d files still loading" % pending.size())
 
 
 func _process(delta: float) -> void:
@@ -405,6 +449,7 @@ func _process_boot(delta: float) -> void:
 		elif (Time.get_ticks_msec() - _start_ms) / 1000.0 > TIMEOUT_S:   # real time: never hangs
 			done = true
 			Game.mark("boot timeout")
+			_finish_boot()
 		else:
 			_status.text = "LOADING GAME FILES" if progress < 0.6 else "PREPARING THE ARENA"
 	elif not _leaving and not hold_for_test:

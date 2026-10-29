@@ -12,13 +12,21 @@ extends Node3D
 ## CreditsButton, Bundle_<id>, EquipButton.
 
 const PODIUM_TOP := 0.24
-const CAM_MAIN_POS := Vector3(0.66, 0.98, 3.55)
-const CAM_MAIN_LOOK := Vector3(0.66, 1.12, 0.0)
-const CAM_WARD_POS := Vector3(-1.5, 1.0, 3.75)
-const CAM_WARD_LOOK := Vector3(-1.5, 1.13, 0.0)
+## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
+## screen aspect so the character stands at HERO_X (main) / WARD_X (wardrobe) of the width.
+const CAM_DIST := 3.55
+const CAM_Y := 0.98
+const CAM_LOOK_Y := 1.12
+const CAM_WARD_DIST := 3.75
+const CAM_WARD_Y := 1.0
+const CAM_WARD_LOOK_Y := 1.13
+const CAM_FOV := 38.0
+const HERO_X := 0.41
+const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
 const RARITY_ORDER := ["legendary", "epic", "rare", "common"]
 const CARD_SIZE := Vector2(168, 222)
+const SKYLINE := "res://assets/ui/lobby_skyline.png"
 
 var model: CharacterModel
 var camera: Camera3D
@@ -35,11 +43,14 @@ var _name_plate: Control
 var _plate_label: Label
 var _time := 0.0
 var _cam_t := 1.0
-var _cam_from_pos := CAM_MAIN_POS
-var _cam_from_look := CAM_MAIN_LOOK
-var _cam_to_pos := CAM_MAIN_POS
-var _cam_to_look := CAM_MAIN_LOOK
+var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
+var _cam_from_look := Vector3(0, CAM_LOOK_Y, 0)
+var _cam_to_pos := Vector3(0, CAM_Y, CAM_DIST)
+var _cam_to_look := Vector3(0, CAM_LOOK_Y, 0)
+var _vp_msaa := Viewport.MSAA_DISABLED
+var _vp_scale := 1.0
 var _modal: Control
+var _modal_kind := ""
 var _ward_grid: GridContainer
 var _ward_filter := "all"
 var _ward_info_name: Label
@@ -57,16 +68,61 @@ func _ready() -> void:
 	# Where START is on screen, for the emulator test, once the layout has settled (a method
 	# connection is dropped automatically if the lobby is left first).
 	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
+	get_viewport().size_changed.connect(_on_viewport_resized)
 
 
 func _mark_start() -> void:
 	Game.mark_ui("start", start_btn, start_btn.size / 2.0)
 
 
+func _exit_tree() -> void:
+	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
+	var vp := get_viewport()
+	if vp:
+		vp.msaa_3d = _vp_msaa
+		vp.scaling_3d_scale = _vp_scale
+
+
+## Camera x that puts the character (at x = 0) at `frac` of the screen width on this aspect
+## (the camera keeps its vertical field of view, so wider screens see more to the sides).
+func _cam_x(frac: float, dist: float) -> float:
+	var vs := get_viewport().get_visible_rect().size
+	var aspect := vs.x / maxf(vs.y, 1.0)
+	return -(frac - 0.5) * 2.0 * tan(deg_to_rad(CAM_FOV * 0.5)) * aspect * dist
+
+
+func _main_view() -> Array:
+	var x := _cam_x(HERO_X, CAM_DIST)
+	return [Vector3(x, CAM_Y, CAM_DIST), Vector3(x, CAM_LOOK_Y, 0.0)]
+
+
+func _ward_view() -> Array:
+	var x := _cam_x(WARD_X, CAM_WARD_DIST)
+	return [Vector3(x, CAM_WARD_Y, CAM_WARD_DIST), Vector3(x, CAM_WARD_LOOK_Y, 0.0)]
+
+
+func _on_viewport_resized() -> void:
+	if camera == null:
+		return
+	var v := _ward_view() if wardrobe else _main_view()
+	_cam_to_pos = v[0]
+	_cam_to_look = v[1]
+	if _cam_t >= 1.0:
+		camera.position = _cam_to_pos
+		camera.look_at(_cam_to_look)
+
+
 # ---------------------------------------------------------------- 3D stage
 
 func _build_stage() -> void:
 	var hi := int(Game.settings.graphics) >= 1
+	# The lobby is light (about 70 draw calls), so it always renders at full resolution with
+	# MSAA: clean edges on the character, the podium and the container ribs.
+	var vp := get_viewport()
+	_vp_msaa = vp.msaa_3d
+	_vp_scale = vp.scaling_3d_scale
+	vp.msaa_3d = Viewport.MSAA_4X if hi else Viewport.MSAA_2X
+	vp.scaling_3d_scale = 1.0
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
@@ -84,7 +140,7 @@ func _build_stage() -> void:
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.58, 0.5, 0.62)
-	e.ambient_light_energy = 0.5
+	e.ambient_light_energy = 0.34          # low, so white fabric keeps its folds and shading
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.tonemap_exposure = 0.95
 	e.tonemap_white = 4.0                 # roll off highlights (white outfits) instead of clipping
@@ -123,9 +179,10 @@ func _build_stage() -> void:
 			floor_m.normal_texture = fn
 	var floor_mi := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(80, 80)
+	pm.size = Vector2(240, 240)            # reaches under the skyline card on the horizon
 	floor_mi.mesh = pm
 	floor_mi.material_override = floor_m
+	floor_m.uv1_scale = Vector3(42, 42, 1)
 	add_child(floor_mi)
 	_build_podium()
 	_build_backdrop()
@@ -136,12 +193,14 @@ func _build_stage() -> void:
 	model.rotation.y = MODEL_YAW
 	model.setup(String(Game.profile.bundle), false)
 	model.play_lobby()
-	# Lights: warm key with the only shadow, cool + warm rims, soft fill.
+	# Lights: warm key from the side with the only shadow (a gradient across the body), cool +
+	# warm rims, soft fill.
 	var key := SpotLight3D.new()
-	key.position = Vector3(2.2, 4.2, 3.6)
-	key.light_energy = 2.7
+	key.position = Vector3(3.1, 4.0, 2.7)
+	key.light_energy = 2.5
 	key.spot_range = 12.0
 	key.spot_angle = 28.0
+	key.spot_attenuation = 0.8
 	key.light_color = Color(1.0, 0.9, 0.8)
 	key.shadow_enabled = hi
 	add_child(key)
@@ -164,15 +223,20 @@ func _build_stage() -> void:
 	rim2.look_at(Vector3(0, 1.2, 0))
 	var fill := OmniLight3D.new()
 	fill.position = Vector3(-1.6, 1.5, 2.6)
-	fill.light_energy = 0.55
+	fill.light_energy = 0.42
 	fill.omni_range = 6.0
 	fill.light_color = Color(0.75, 0.8, 1.0)
 	add_child(fill)
 	camera = Camera3D.new()
-	camera.fov = 38.0
+	camera.fov = CAM_FOV
 	add_child(camera)
-	camera.position = CAM_MAIN_POS
-	camera.look_at(CAM_MAIN_LOOK)
+	var view := _main_view()
+	_cam_from_pos = view[0]
+	_cam_to_pos = view[0]
+	_cam_from_look = view[1]
+	_cam_to_look = view[1]
+	camera.position = view[0]
+	camera.look_at(view[1])
 	camera.current = true
 
 
@@ -198,8 +262,10 @@ func _build_podium() -> void:
 	top_m.roughness = 0.38
 	var dp := UI.texture("res://assets/textures/diamond_plate.png")
 	if dp:
+		# projected along each axis, so the 0.24 m side faces get the same plate size as the top
 		top_m.albedo_texture = dp
-		top_m.uv1_scale = Vector3(2.5, 2.5, 1)
+		top_m.uv1_triplanar = true
+		top_m.uv1_scale = Vector3(1.3, 1.3, 1.3)
 		var dn := UI.texture("res://assets/textures/diamond_plate_n.png")
 		if dn:
 			top_m.normal_enabled = true
@@ -227,7 +293,8 @@ func _build_podium() -> void:
 	edge.rings = 1
 	var em := MeshInstance3D.new()
 	em.mesh = edge
-	em.material_override = _unshaded(Color(1.0, 0.72, 0.12) * 2.4)
+	# amber like the UI accent: red well above green, so tone mapping does not push it to lime
+	em.material_override = _unshaded(Color(1.0, 0.50, 0.04) * 1.7)
 	em.position = Vector3(0, PODIUM_TOP - 0.03, 0)
 	em.rotation.y = PI / 6.0
 	add_child(em)
@@ -307,32 +374,23 @@ func _build_backdrop() -> void:
 		spr.shaded = false
 		spr.modulate = Color(1, 0.92, 0.85, 0.95)
 		add_child(spr)
-	# skyline: a gantry crane and low warehouse blocks on the horizon, hazy in the fog
+	# skyline: the painted card (port cranes, warehouses with lit windows, the city), hazy in
+	# the fog; plain blocks only if the card is missing
 	var dark := StandardMaterial3D.new()
 	dark.albedo_color = Color(0.10, 0.07, 0.11)
 	dark.roughness = 0.9
-	for b in [[Vector3(8, 12, -66), Vector3(1.6, 24, 1.6)], [Vector3(44, 12, -66), Vector3(1.6, 24, 1.6)],
-			[Vector3(26, 24.6, -66), Vector3(46, 2.2, 2.4)], [Vector3(14, 25.6, -56), Vector3(2.0, 1.2, 20)],
-			[Vector3(30, 22.4, -65), Vector3(4, 2.6, 3)],
-			[Vector3(-46, 4, -80), Vector3(34, 8, 12)], [Vector3(-10, 3, -86), Vector3(26, 6, 12)],
-			[Vector3(34, 5, -82), Vector3(30, 10, 12)], [Vector3(62, 3.5, -76), Vector3(20, 7, 12)]]:
-		var bi := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = b[1]
-		bi.mesh = bm
-		bi.material_override = dark
-		bi.position = b[0]
-		bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(bi)
-	var lamp := _unshaded(Color(1.0, 0.8, 0.5) * 3.0)
-	for x in [12.0, 24.0, 38.0]:
-		var li := MeshInstance3D.new()
-		var lm := BoxMesh.new()
-		lm.size = Vector3(1.2, 0.4, 0.4)
-		li.mesh = lm
-		li.material_override = lamp
-		li.position = Vector3(x, 23.2, -64.6)
-		add_child(li)
+	if not _build_skyline():
+		for b in [[Vector3(8, 12, -66), Vector3(1.6, 24, 1.6)], [Vector3(44, 12, -66), Vector3(1.6, 24, 1.6)],
+				[Vector3(26, 24.6, -66), Vector3(46, 2.2, 2.4)], [Vector3(-46, 4, -80), Vector3(34, 8, 12)],
+				[Vector3(34, 5, -82), Vector3(30, 10, 12)]]:
+			var bi := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = b[1]
+			bi.mesh = bm
+			bi.material_override = dark
+			bi.position = b[0]
+			bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(bi)
 	# floodlight masts with bright lamp heads (the glow does the rest)
 	for side: float in [-1.0, 1.0]:
 		var mast := MeshInstance3D.new()
@@ -350,6 +408,32 @@ func _build_backdrop() -> void:
 			head.material_override = _unshaded(Color(1.0, 0.93, 0.78) * 3.2)
 			head.position = Vector3(side * 13.5 + (k - 0.5) * 1.05, 12.1, -20.8)
 			add_child(head)
+
+
+## The skyline card: one big unshaded quad far behind the yard (one draw call), its texture
+## painted by tools/media/make_keyart.py with transparency above the silhouettes, so the
+## procedural sunset sky shows through. Its lower edge sits under the floor.
+func _build_skyline() -> bool:
+	var tex := UI.texture(SKYLINE)
+	if tex == null:
+		return false
+	var w := 280.0
+	var h := w * tex.get_height() / float(tex.get_width())
+	var q := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(w, h)
+	q.mesh = qm
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_texture = tex
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	m.disable_receive_shadows = true
+	q.material_override = m
+	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	q.position = Vector3(14.0, h * 0.5 - h * 0.08, -96.0)
+	add_child(q)
+	return true
 
 
 # ---------------------------------------------------------------- UI
@@ -378,19 +462,31 @@ func _build_ui() -> void:
 
 
 func _build_top_bar(root: Control) -> void:
-	# Player card: avatar with level badge, name + EDIT, level and a thin XP line.
-	var card := Control.new()
+	# Player card: avatar with level badge, name + EDIT, level and a thin XP line. The whole card
+	# is a button that opens the name editor (a big touch target); the pencil does the same.
+	var card := Button.new()
+	card.name = "PlayerCard"
 	card.position = Vector2(0, 0)
 	card.size = Vector2(300, 62)
 	card.custom_minimum_size = card.size
+	card.focus_mode = Control.FOCUS_NONE
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	card.draw.connect(func() -> void:
 		var pts := PackedVector2Array([Vector2(0, 0), Vector2(300, 0), Vector2(286, 62), Vector2(0, 62)])
-		card.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, 0.78), Color(0.1, 0.1, 0.12, 0.55), Color(0.1, 0.1, 0.12, 0.55), Color(0, 0, 0, 0.78)]))
+		var a := 0.9 if card.is_pressed() else 0.78
+		card.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, a), Color(0.1, 0.1, 0.12, 0.55), Color(0.1, 0.1, 0.12, 0.55), Color(0, 0, 0, a)]))
 		card.draw_rect(Rect2(0, 60, 286, 2), Color(UI.ACCENT, 0.9)))
+	card.button_down.connect(card.queue_redraw)
+	card.button_up.connect(card.queue_redraw)
+	card.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		_edit_name())
 	root.add_child(card)
 	var av := Panel.new()
 	av.position = Vector2(8, 5)
 	av.size = Vector2(52, 52)
+	av.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	av.add_theme_stylebox_override("panel", UI.box(Color(0.1, 0.1, 0.12), 0, 2, UI.ACCENT, 0.0))
 	card.add_child(av)
 	var em := UI.texture("emblem.png")
@@ -402,8 +498,10 @@ func _build_top_bar(root: Control) -> void:
 		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		t.position = Vector2(3, 3)
 		t.size = Vector2(46, 46)
+		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		av.add_child(t)
 	var lvb := PanelContainer.new()
+	lvb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lvb.add_theme_stylebox_override("panel", UI.box(UI.ACCENT, 0, 0, Color.TRANSPARENT, 3.0))
 	var lvl := UI.label(str(Game.level()), 14, UI.INK, "heavy")
 	lvl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -411,14 +509,15 @@ func _build_top_bar(root: Control) -> void:
 	lvb.position = Vector2(42, 40)
 	lvb.custom_minimum_size = Vector2(22, 18)
 	card.add_child(lvb)
-	_name_label = UI.label(String(Game.profile.name), 24, UI.TEXT, "bold")
+	# ellipsis first, then the size: an unclipped label would keep its full text width
+	_name_label = UI.ellipsis(UI.label(String(Game.profile.name), 24, UI.TEXT, "bold"))
+	_name_label.name = "PlayerName"
 	_name_label.position = Vector2(72, 4)
-	_name_label.size = Vector2(170, 30)
-	_name_label.clip_text = true
+	_name_label.size = Vector2(166, 30)
 	card.add_child(_name_label)
 	var edit := _pencil_button()
 	edit.name = "EditName"
-	edit.position = Vector2(248, 8)
+	edit.position = Vector2(244, 4)
 	edit.pressed.connect(_edit_name)
 	card.add_child(edit)
 	var lv_txt := UI.label("LV %d" % Game.level(), 14, UI.ACCENT, "bold")
@@ -426,7 +525,8 @@ func _build_top_bar(root: Control) -> void:
 	card.add_child(lv_txt)
 	var xp := Control.new()
 	xp.position = Vector2(110, 42)
-	xp.size = Vector2(140, 4)
+	xp.size = Vector2(124, 4)
+	xp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	xp.draw.connect(func() -> void:
 		xp.draw_rect(Rect2(Vector2.ZERO, xp.size), Color(1, 1, 1, 0.15))
 		xp.draw_rect(Rect2(Vector2.ZERO, Vector2(xp.size.x * Game.level_progress(), xp.size.y)), UI.ACCENT))
@@ -464,27 +564,33 @@ func _build_top_bar(root: Control) -> void:
 	off.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	off.add_child(UI.label("OFFLINE", 13, UI.ACCENT, "bold"))
 	sh.add_child(off)
-	# Top-right: logo + glyph buttons.
+	# Logo wordmark centred at about 0.75 W (the reference's place), glyph buttons top-right.
+	var lg := UI.texture("logo.png")
+	if lg:
+		var lr := TextureRect.new()
+		lr.name = "Logo"
+		lr.texture = lg
+		lr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		lr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		lr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		var lw := 48.0 * lg.get_width() / lg.get_height()
+		lr.anchor_left = 0.755
+		lr.anchor_right = 0.755
+		lr.offset_left = -lw * 0.5
+		lr.offset_right = lw * 0.5
+		lr.offset_top = 6
+		lr.offset_bottom = 54
+		lr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(lr)
 	var tr := HBoxContainer.new()
 	tr.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	tr.offset_left = -420
+	tr.offset_left = -200
 	tr.offset_right = -10
 	tr.offset_top = 6
 	tr.offset_bottom = 56
 	tr.alignment = BoxContainer.ALIGNMENT_END
 	tr.add_theme_constant_override("separation", 8)
 	root.add_child(tr)
-	var lg := UI.texture("logo.png")
-	if lg:
-		var lr := TextureRect.new()
-		lr.texture = lg
-		lr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		lr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		lr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		lr.custom_minimum_size = Vector2(46.0 * lg.get_width() / lg.get_height(), 46)
-		lr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tr.add_child(lr)
-		tr.add_child(UI.spacer(0))
 	var info := UI.glyph_button("v_info", 46, "?")
 	info.name = "HelpButton"
 	info.pressed.connect(_how_to_play)
@@ -497,8 +603,8 @@ func _build_top_bar(root: Control) -> void:
 
 func _pencil_button() -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(30, 26)
-	b.size = Vector2(30, 26)
+	b.custom_minimum_size = Vector2(44, 38)
+	b.size = Vector2(44, 38)
 	b.focus_mode = Control.FOCUS_NONE
 	b.add_theme_stylebox_override("normal", UI.chamfer(Color(1, 1, 1, 0.08), 4, 1, Color(1, 1, 1, 0.25), 0.0, ["br"]))
 	b.add_theme_stylebox_override("hover", UI.chamfer(Color(1, 1, 1, 0.16), 4, 1, Color(1, 1, 1, 0.4), 0.0, ["br"]))
@@ -508,10 +614,11 @@ func _pencil_button() -> Button:
 		var c := b.size * 0.5
 		var d := Vector2(1, -1).normalized()
 		var n := Vector2(1, 1).normalized()
-		var a := c - d * 7.0
-		var e := c + d * 6.0
-		b.draw_colored_polygon(PackedVector2Array([a + n * 2.2, e + n * 2.2, e - n * 2.2, a - n * 2.2]), UI.TEXT)
-		b.draw_colored_polygon(PackedVector2Array([a + n * 2.2, a - n * 2.2, a - d * 4.0]), UI.ACCENT))
+		var k := 1.25
+		var a := c - d * 7.0 * k
+		var e := c + d * 6.0 * k
+		b.draw_colored_polygon(PackedVector2Array([a + n * 2.2 * k, e + n * 2.2 * k, e - n * 2.2 * k, a - n * 2.2 * k]), UI.TEXT)
+		b.draw_colored_polygon(PackedVector2Array([a + n * 2.2 * k, a - n * 2.2 * k, a - d * 4.0 * k]), UI.ACCENT))
 	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
 	return b
 
@@ -603,14 +710,27 @@ func _menu_row(text: String, icon_name: String, node_name: String, action: Calla
 	b.add_theme_color_override("icon_normal_color", UI.TEXT)
 	b.add_theme_color_override("icon_hover_color", UI.ACCENT)
 	b.add_theme_color_override("icon_pressed_color", UI.ACCENT)
-	b.draw.connect(func() -> void:
-		var s := b.size
-		# dark plate fading to the right, accent tick on the left
+	# The dark plate fading to the right is a child drawn BEHIND the button: a Button's own
+	# `draw` signal fires after it has drawn its text and icon, so a plate drawn there would
+	# cover (and grey out) the caption.
+	var plate := Control.new()
+	plate.name = "Plate"
+	plate.show_behind_parent = true
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UI.full_rect(plate)
+	plate.draw.connect(func() -> void:
+		var s := plate.size
+		var a := 0.86 if b.is_pressed() else 0.74
 		var pts := PackedVector2Array([Vector2(0, 2), Vector2(s.x, 2), Vector2(s.x - 14, s.y - 2), Vector2(0, s.y - 2)])
-		b.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, 0.78), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.78)]))
-		b.draw_rect(Rect2(0, 2, 4, s.y - 4), UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.3)))
-	b.mouse_entered.connect(b.queue_redraw)
-	b.mouse_exited.connect(b.queue_redraw)
+		plate.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, a), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.0), Color(0, 0, 0, a)])))
+	b.add_child(plate)
+	# only the accent tick is drawn over the button (left of the icon, never over the text)
+	b.draw.connect(func() -> void:
+		b.draw_rect(Rect2(0, 2, 4, b.size.y - 4), UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.3)))
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		b.connect(sig, func() -> void:
+			b.queue_redraw()
+			plate.queue_redraw())
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
 		action.call())
@@ -801,9 +921,13 @@ func _open_credits() -> void:
 
 # ---------------------------------------------------------------- modals (how to play, name)
 
-func _open_modal(title: String, width := 980.0) -> VBoxContainer:
+## A popup in the reference look: the light header strip (dark caps title, hazard line, X on a
+## dark tile), then the near-black body with a yellow corner mark. Returns the body column.
+func _open_modal(title: String, width := 980.0, kind := "") -> VBoxContainer:
 	_close_modal()
+	_modal_kind = kind
 	_modal = Control.new()
+	_modal.name = "Modal"
 	UI.full_rect(_modal)
 	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui.add_child(_modal)
@@ -811,32 +935,35 @@ func _open_modal(title: String, width := 980.0) -> VBoxContainer:
 	shade.color = Color(0, 0, 0, 0.72)
 	UI.full_rect(shade)
 	_modal.add_child(shade)
+	var frame := VBoxContainer.new()
+	frame.add_theme_constant_override("separation", 0)
+	frame.anchor_left = 0.5
+	frame.anchor_right = 0.5
+	frame.anchor_top = 0.5
+	frame.anchor_bottom = 0.5
+	frame.offset_left = -width * 0.5
+	frame.offset_right = width * 0.5
+	frame.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_modal.add_child(frame)
+	var head := UI.popup_header(title, 26, 54.0)
+	(head.get_node("Close") as Button).pressed.connect(_close_modal)
+	frame.add_child(head)
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UI.chamfer(Color(0.085, 0.08, 0.07, 0.97), 16, 1, Color(1, 1, 1, 0.12), 26.0, ["tl", "br"]))
-	panel.anchor_left = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_top = 0.5
-	panel.anchor_bottom = 0.5
-	panel.offset_left = -width * 0.5
-	panel.offset_right = width * 0.5
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	_modal.add_child(panel)
+	var st := UI.box(Color(0.075, 0.072, 0.068, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
+	st.border_width_left = 1
+	st.border_width_right = 1
+	st.border_width_bottom = 1
+	st.border_color = Color(1, 1, 1, 0.1)
+	st.content_margin_top = 18
+	st.content_margin_bottom = 22
+	panel.add_theme_stylebox_override("panel", st)
+	panel.draw.connect(func() -> void:
+		var s := panel.size
+		panel.draw_colored_polygon(PackedVector2Array([Vector2(s.x, s.y - 18), Vector2(s.x, s.y), Vector2(s.x - 18, s.y)]), UI.ACCENT))
+	frame.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 12)
 	panel.add_child(v)
-	var head := HBoxContainer.new()
-	var sec := UI.section(title, 28)
-	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(sec)
-	var close := UI.close_button(46)
-	close.name = "Close"
-	close.pressed.connect(_close_modal)
-	head.add_child(close)
-	v.add_child(head)
-	var hz := Control.new()
-	hz.custom_minimum_size = Vector2(0, 5)
-	hz.draw.connect(func() -> void: UI.draw_hazard(hz, Rect2(Vector2.ZERO, Vector2(120, 5)), 6.0))
-	v.add_child(hz)
 	_modal.modulate.a = 0.0
 	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.15)
 	return v
@@ -846,6 +973,7 @@ func _close_modal() -> void:
 	if _modal:
 		_modal.queue_free()
 		_modal = null
+	_modal_kind = ""
 
 
 const HOW_TO := [
@@ -987,7 +1115,8 @@ func _open_wardrobe() -> void:
 	wardrobe.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(wardrobe)
 	_main_ui.visible = false
-	_move_camera(CAM_WARD_POS, CAM_WARD_LOOK)
+	var view := _ward_view()
+	_move_camera(view[0], view[1])
 	var shade := UI.gradient_rect([[0.0, Color(0.03, 0.03, 0.04, 0.94)], [0.5, Color(0.03, 0.03, 0.04, 0.88)], [0.66, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
 	UI.full_rect(shade)
 	wardrobe.add_child(shade)
@@ -1110,7 +1239,7 @@ func _ward_tab(f: String) -> Button:
 	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
 	b.draw.connect(func() -> void:
 		if b.button_pressed:
-			UI.draw_hazard(b, Rect2(0, 0, 9, b.size.y), 5.0, UI.INK))
+			UI.draw_tab_selected(b, b.size))
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_select", -6.0)
 		_ward_filter = f
@@ -1149,14 +1278,15 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	var portrait := UI.texture("bundle_%s.png" % id)
+	var glow := UI.radial_glow(Color(rc, 0.62))
+	var floor_glow := UI.radial_glow(Color(rc.lightened(0.15), 0.5))
 	card.draw.connect(func() -> void:
 		var s := card.size
-		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.11, 0.105, 0.1, 0.96))
-		# rarity glow: soft concentric discs behind the outfit
-		var c := Vector2(s.x * 0.5, s.y * 0.44)
-		for i in 7:
-			var rr := s.x * (0.62 - i * 0.07)
-			card.draw_circle(c, rr, Color(rc, 0.05 + i * 0.012))
+		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.075, 0.072, 0.07, 0.97))
+		# rarity glow: a smooth radial gradient behind the outfit, inside the card, plus a
+		# brighter pool at the feet
+		card.draw_texture_rect(glow, Rect2(0, 0, s.x, s.y - 46), false)
+		card.draw_texture_rect(floor_glow, Rect2(s.x * 0.12, s.y * 0.62, s.x * 0.76, s.y * 0.2), false)
 		card.draw_rect(Rect2(0, 0, s.x, s.y * 0.5), Color(1, 1, 1, 0.02))
 		if portrait:
 			var ph := s.y - 58
@@ -1176,10 +1306,9 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.5), false, 2.0)
 		elif not equipped:
 			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0))
-	var nm := UI.label(String(b.name), 18, UI.TEXT, "bold")
+	var nm := UI.ellipsis(UI.label(String(b.name), 18, UI.TEXT, "bold"))
 	nm.position = Vector2(9, CARD_SIZE.y - 50)
 	nm.size = Vector2(CARD_SIZE.x - 18, 24)
-	nm.clip_text = true
 	card.add_child(nm)
 	var rl := UI.label(String(b.rarity).to_upper(), 14, rc, "bold")
 	rl.position = Vector2(9, CARD_SIZE.y - 28)
@@ -1219,7 +1348,8 @@ func _close_wardrobe() -> void:
 		_ward_info_name = null
 		_ward_equip = null
 	_main_ui.visible = true
-	_move_camera(CAM_MAIN_POS, CAM_MAIN_LOOK)
+	var view := _main_view()
+	_move_camera(view[0], view[1])
 
 
 func _move_camera(pos: Vector3, look: Vector3) -> void:
@@ -1293,19 +1423,100 @@ func _process(delta: float) -> void:
 			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5, 0)).round()
 
 
+## Android back: closes the top-most layer (settings, credits, a popup, the wardrobe); with
+## nothing open it asks before quitting; while START's match loading runs it does nothing.
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if _find_settings():
-			return                  # the panel closes itself
-		for c in get_children():
-			if c is CreditsPanel:
-				c.queue_free()
-				return
-		if _modal:
-			_close_modal()
-		elif wardrobe:
-			model.apply_bundle(String(Game.profile.bundle))
-			_update_bundle_label(String(Game.profile.bundle))
-			_close_wardrobe()
-		else:
-			get_tree().quit()
+	if what != NOTIFICATION_WM_GO_BACK_REQUEST:
+		return
+	if start_btn and start_btn.disabled:
+		return                      # the match is loading
+	if _find_settings():
+		return                      # the panel closes itself
+	for c in get_children():
+		if c is CreditsPanel:
+			c.queue_free()
+			return
+	if _modal:
+		_close_modal()
+	elif wardrobe:
+		model.apply_bundle(String(Game.profile.bundle))
+		_update_bundle_label(String(Game.profile.bundle))
+		_close_wardrobe()
+	else:
+		_confirm_quit()
+
+
+## "Quit the game?" as a system dialog: a full-width dark band with the emblem, the question,
+## CANCEL (grey) and QUIT (yellow). Back or CANCEL closes it.
+func _confirm_quit() -> void:
+	_close_modal()
+	_modal = Control.new()
+	_modal.name = "QuitDialog"
+	_modal_kind = "quit"
+	UI.full_rect(_modal)
+	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui.add_child(_modal)
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.62)
+	UI.full_rect(shade)
+	_modal.add_child(shade)
+	var band := Control.new()
+	band.anchor_right = 1.0
+	band.anchor_top = 0.32
+	band.anchor_bottom = 0.68
+	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	band.draw.connect(func() -> void: UI.draw_dialog_band(band, band.size))
+	_modal.add_child(band)
+	var em := UI.texture("emblem.png")
+	if em:
+		var t := TextureRect.new()
+		t.texture = em
+		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		t.anchor_left = 0.16
+		t.anchor_right = 0.16
+		t.anchor_top = 0.5
+		t.anchor_bottom = 0.5
+		t.offset_left = -84
+		t.offset_right = 84
+		t.offset_top = -84
+		t.offset_bottom = 84
+		t.modulate = Color(1, 1, 1, 0.9)
+		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		band.add_child(t)
+	var v := VBoxContainer.new()
+	v.anchor_left = 0.3
+	v.anchor_right = 0.95
+	v.anchor_top = 0.0
+	v.anchor_bottom = 1.0
+	v.offset_top = 34
+	v.offset_bottom = -26
+	v.add_theme_constant_override("separation", 8)
+	band.add_child(v)
+	v.add_child(UI.label("QUIT THE GAME?", 38, UI.TEXT, "bold"))
+	var bar := ColorRect.new()
+	bar.color = UI.ACCENT
+	bar.custom_minimum_size = Vector2(64, 4)
+	bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(bar)
+	v.add_child(UI.spacer(2))
+	v.add_child(UI.label("Your name, outfits, settings and progress stay saved on this phone.", 19, Color(1, 1, 1, 0.86), "semi"))
+	var fill := UI.spacer(0)
+	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(fill)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 14)
+	v.add_child(row)
+	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 52))
+	cancel.name = "QuitCancel"
+	cancel.pressed.connect(_close_modal)
+	row.add_child(cancel)
+	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 52))
+	quit.name = "QuitConfirm"
+	quit.pressed.connect(func() -> void: get_tree().quit())
+	row.add_child(quit)
+	_modal.modulate.a = 0.0
+	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.12)

@@ -64,22 +64,23 @@ func run(at: Node) -> int:
 	# Fire with the right fire button (drag-aim keeps it on the bot).
 	var fire_c := HudLayout.center(hud.layout.fire_r, vs)
 	var hits0 := int(p.stats.hits)
-	var most := 0
+	var merged := true
+	var most_hits := 0
 	_touch(at, 5, fire_c, true)
 	for i in 9:
 		b.hp = maxf(b.hp, 150.0)      # keep the bot standing for the rest of the tour
 		_aim_at(p, b.chest_position() + Vector3(0, 0.05 * sin(i), 0))
 		_drag(at, 5, fire_c + Vector2(1, 0), Vector2(1, 0))
 		await at.wait(0.06)
-		var showing := 0
+		merged = merged and _numbers_merged(hud)
 		for n: Dictionary in hud._dmg_numbers:
-			if float(n.t) < 0.6:
-				showing += 1
-		most = maxi(most, showing)
+			most_hits = maxi(most_hits, int(n.get("hits", 1)))
 	await at.shot("hud_06_firing")
 	var burst_hits := int(p.stats.hits) - hits0
-	_check(burst_hits < 2 or (most >= 1 and most <= 2),
-		"rapid hits stack into one damage number (%d hits, at most %d numbers at once)" % [burst_hits, most], at)
+	# Whether hits merge depends on their spacing (the capture box fires a few frames a second),
+	# so the check is exact instead of a count: no number may exist that should have joined an
+	# older one of the same target and kind.
+	_check(merged, "hits within %.2f s add up into one number (%d hits, up to %d in one number)" % [HUD.DMG_MERGE, burst_hits, most_hits], at)
 	_check(_numbers_apart(hud, p, vs), "damage numbers never cover each other", at)
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
@@ -88,6 +89,13 @@ func run(at: Node) -> int:
 	# Three hits that cannot merge (body, head, another source) at one point: a row, not a pile.
 	# The HUD is held still for the picture (at 1-3 FPS a frame can outlast a number's life).
 	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	hud._dmg_numbers.clear()
+	# Two body hits in the same physics frame make one number; the headshot keeps its own.
+	for hit: Array in [[b, 22.0, false], [b, 22.0, false], [b, 41.0, true]]:
+		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
+	var nums: Array = hud._dmg_numbers
+	_check(nums.size() == 2 and is_equal_approx(float(nums[0].amount), 44.0) and int(nums[0].hits) == 2 and bool(nums[1].head),
+		"two quick body hits add up to one 44, the headshot stays separate", at)
 	hud._dmg_numbers.clear()
 	for hit: Array in [[b, 22.0, false], [b, 41.0, true], [null, 22.0, false]]:
 		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
@@ -223,6 +231,22 @@ func run(at: Node) -> int:
 	_check(eh.selected_id == "jump", "editor selects the dragged control", at)
 	at.log_line("HUD TOUR fails=%d" % _fails)
 	return 1 if _fails > 0 else 0
+
+
+## True when no damage number should have merged into an older one: a later number of the same
+## target and kind (body / head) must start more than the merge window after the older one's
+## latest hit (hud._dmg_numbers is in creation order).
+func _numbers_merged(hud: HUD) -> bool:
+	var window := roundi(HUD.DMG_MERGE * Engine.physics_ticks_per_second)
+	var nums: Array = hud._dmg_numbers
+	for i in nums.size():
+		for j in range(i + 1, nums.size()):
+			var older: Dictionary = nums[i]
+			var newer: Dictionary = nums[j]
+			if older.target == newer.target and bool(older.head) == bool(newer.head) \
+					and int(newer.tick0) - int(older.tick) <= window:
+				return false
+	return true
 
 
 ## True when no two damage numbers on screen overlap.

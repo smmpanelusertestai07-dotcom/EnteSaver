@@ -6,10 +6,15 @@ extends Control
 ## Layout (reference result screens, original art): mode + map top-left; a medal emblem with
 ## the big title (gold VICTORY / grey DEFEAT / white DRAW / red INVALID) top centre; the round
 ## score; a stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY, TIME, HP LEFT) with your
-## row in blue; an honour tag; XP gained with an animated level bar; PLAY AGAIN (yellow, node
-## PlayAgain) and LOBBY (grey, node Lobby) bottom-right. Works unpaused at time scale 1.
+## row in blue and, when the arena offers scoreboard_rows(), the opponent's row in orange; an
+## honour tag (x ~0.18-0.37 W, y 0.83-0.88 H); XP gained with an animated level bar in the
+## bottom-left band; PLAY AGAIN (yellow, node PlayAgain, 0.661-0.819 W) and LOBBY (grey, node
+## Lobby, 0.836-0.992 W) in the 0.894-0.959 H band. Works unpaused at time scale 1. Android back
+## = LOBBY (ignored while PLAY AGAIN's match loading runs).
 
 const COLUMNS := ["ELIMINATIONS", "DAMAGE", "HEADSHOTS", "ACCURACY", "TIME", "HP LEFT"]
+const NAME_W := 250.0
+const MEDAL_SCALE := 0.86
 
 var _result := {}
 var _kind := "victory"            # victory | defeat | draw | invalid
@@ -29,6 +34,7 @@ var _xp_t0 := 0                   # ticks (ms) when the XP bar starts filling (r
 var _intro_t0 := 0                # ticks (ms) of the intro (fade, medal pop, title slide)
 var _title: Control
 var _title_x := 0.0
+var _enemy := {}                  # the opponent's scoreboard row ({} when the scene has none)
 
 
 func setup(result: Dictionary) -> void:
@@ -44,6 +50,7 @@ func setup(result: Dictionary) -> void:
 	var invalid: bool = result.get("invalid", false)
 	_kind = "invalid" if invalid else ("draw" if draw else ("victory" if won else "defeat"))
 	_hide_match_hud()
+	_enemy = _enemy_row()
 	_build()
 	_animate_in()
 
@@ -54,6 +61,20 @@ func _hide_match_hud() -> void:
 	var h: Variant = scene.get("hud") if scene else null
 	if h is CanvasItem:
 		(h as CanvasItem).visible = false
+
+
+## The opponent's row from the arena's scoreboard (Arena.scoreboard_rows(), see
+## design/INTERFACES.txt): kills, damage, headshots, accuracy, hp. {} without one.
+func _enemy_row() -> Dictionary:
+	var scene := get_tree().current_scene if is_inside_tree() else null
+	if scene == null or not scene.has_method("scoreboard_rows"):
+		return {}
+	var rows: Variant = scene.call("scoreboard_rows")
+	if rows is Array:
+		for row: Variant in rows:
+			if row is Dictionary and not bool((row as Dictionary).get("me", false)):
+				return row
+	return {}
 
 
 static func honour(result: Dictionary) -> String:
@@ -117,24 +138,25 @@ func _build() -> void:
 	_medal.anchor_right = 0.5
 	_medal.offset_left = -190
 	_medal.offset_right = 190
-	_medal.offset_top = 6
-	_medal.offset_bottom = 176
+	_medal.offset_top = 0
+	_medal.offset_bottom = 170
 	_medal.pivot_offset = Vector2(190, 85)
+	_medal.scale = Vector2.ONE * MEDAL_SCALE
 	_medal.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_medal.draw.connect(_draw_medal)
 	if _kind == "defeat":
 		_medal.material = _desaturate()
 	add_child(_medal)
-	var title := UI.shadowed(UI.outlined(UI.label(_title_text(), 104, Color.WHITE, "italic"), 12, Color(0.06, 0.04, 0.02, 0.95)), Vector2(0, 6), Color(0, 0, 0, 0.45))
+	var title := UI.shadowed(UI.outlined(UI.label(_title_text(), 94, Color.WHITE, "italic"), 11, Color(0.06, 0.04, 0.02, 0.95)), Vector2(0, 6), Color(0, 0, 0, 0.45))
 	title.name = "Title"
 	title.anchor_left = 0.0
 	title.anchor_right = 1.0
-	title.offset_top = 118
-	title.offset_bottom = 248
+	title.offset_top = 112
+	title.offset_bottom = 230
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title.material = Loading.gradient_text_material(pal[0], pal[1], 130.0)
-	title.pivot_offset = Vector2(0, 65)
+	title.material = Loading.gradient_text_material(pal[0], pal[1], 118.0)
+	title.pivot_offset = Vector2(0, 59)
 	add_child(title)
 	# Round score: [YOU n] : [n BOT]
 	var score := HBoxContainer.new()
@@ -142,8 +164,8 @@ func _build() -> void:
 	score.anchor_right = 0.5
 	score.offset_left = -200
 	score.offset_right = 200
-	score.offset_top = 244
-	score.offset_bottom = 284
+	score.offset_top = 222
+	score.offset_bottom = 258
 	score.alignment = BoxContainer.ALIGNMENT_CENTER
 	score.add_theme_constant_override("separation", 8)
 	add_child(score)
@@ -156,8 +178,8 @@ func _build() -> void:
 		var why := UI.outlined(UI.label("INTEGRITY CHECK FAILED  -  THIS MATCH DOES NOT COUNT", 18, Color(1, 0.6, 0.55), "bold"), 4)
 		why.anchor_left = 0.0
 		why.anchor_right = 1.0
-		why.offset_top = 290
-		why.offset_bottom = 316
+		why.offset_top = 438
+		why.offset_bottom = 464
 		why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		add_child(why)
 	_build_table()
@@ -169,16 +191,15 @@ func _score_plate(who: String, n: int, col: Color, left: bool) -> Control:
 	h.add_theme_constant_override("separation", 0)
 	var name_p := PanelContainer.new()
 	name_p.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.55), 8, 0, Color.TRANSPARENT, 12.0, ["tl"] if left else ["br"]))
-	var nl := UI.label(who, 17, UI.TEXT, "bold")
+	var nl := UI.ellipsis(UI.label(who, 17, UI.TEXT, "bold"))
 	nl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	nl.custom_minimum_size = Vector2(110, 0)
 	nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if left else HORIZONTAL_ALIGNMENT_LEFT
-	nl.clip_text = true
 	name_p.add_child(nl)
 	var num_p := PanelContainer.new()
 	num_p.add_theme_stylebox_override("panel", UI.box(col, 0, 0, Color.TRANSPARENT, 12.0))
-	num_p.custom_minimum_size = Vector2(48, 40)
-	var num := UI.label(str(n), 30, UI.TEXT, "number")
+	num_p.custom_minimum_size = Vector2(46, 36)
+	var num := UI.label(str(n), 28, UI.TEXT, "number")
 	num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	num.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	num_p.add_child(num)
@@ -199,8 +220,8 @@ func _build_table() -> void:
 	table.anchor_right = 0.5
 	table.offset_left = -560
 	table.offset_right = 560
-	table.offset_top = 328
-	table.offset_bottom = 450
+	table.offset_top = 272
+	table.offset_bottom = 430
 	table.add_theme_constant_override("separation", 2)
 	add_child(table)
 	_table = table
@@ -208,12 +229,12 @@ func _build_table() -> void:
 	_layout_table.call_deferred()
 	var header := PanelContainer.new()
 	header.add_theme_stylebox_override("panel", UI.box(Color(0.19, 0.185, 0.18, 0.92), 0, 0, Color.TRANSPARENT, 0.0))
-	header.custom_minimum_size = Vector2(0, 38)
+	header.custom_minimum_size = Vector2(0, 34)
 	table.add_child(header)
 	var hh := HBoxContainer.new()
 	header.add_child(hh)
 	var name_h := UI.label("PLAYER", 16, UI.TEXT_DIM, "bold")
-	name_h.custom_minimum_size = Vector2(250, 0)
+	name_h.custom_minimum_size = Vector2(NAME_W, 0)
 	name_h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_h.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hh.add_child(name_h)
@@ -223,23 +244,43 @@ func _build_table() -> void:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		hh.add_child(l)
-	# Your row.
+	# Your row (blue), then the opponent's (orange) when the arena has a scoreboard.
+	var t := float(r.get("time", 0.0))
+	table.add_child(_stat_row("YourRow", String(Game.profile.get("name", "PLAYER")), "LV %d" % Game.level(), [
+		[float(r.get("kills", 0)), "%d"], [float(r.get("damage", 0)), "%d"], [float(r.get("headshots", 0)), "%d"],
+		[float(r.get("accuracy", 0.0)), "%d%%"], [t, "time"], [float(r.get("hp_left", 0)), "%d"],
+	], true))
+	if not _enemy.is_empty():
+		var e := _enemy
+		table.add_child(_stat_row("EnemyRow", String(e.get("name", r.get("enemy", "BOT"))).to_upper(),
+			"BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
+			[float(e.get("kills", 0)), "%d"], [float(e.get("damage", 0)), "%d"], [float(e.get("headshots", 0)), "%d"],
+			[float(e.get("accuracy", 0)), "%d%%"], [t, "time"], [float(e.get("hp", 0)), "%d"],
+		], false))
+
+
+## One table row: [avatar | name + sub] then the six values. Own row: blue, 64 px, bigger
+## digits; opponent: orange tint, 54 px. Final values at once (a screenshot or a slow frame
+## never shows placeholders); each number pops in turn.
+func _stat_row(node_name: String, who_name: String, sub: String, values: Array, own: bool) -> Control:
 	var row := Control.new()
-	row.custom_minimum_size = Vector2(0, 74)
-	row.name = "YourRow"
+	row.name = node_name
+	row.custom_minimum_size = Vector2(0, 64 if own else 54)
+	var base := Color(0.0, 0.32, 0.55, 0.92) if own else Color(0.36, 0.15, 0.06, 0.9)
+	var cells := Color(0.02, 0.39, 0.6, 0.95) if own else Color(0.50, 0.21, 0.07, 0.9)
+	var edge := Color(0.35, 0.75, 1.0, 0.9) if own else Color(1.0, 0.55, 0.3, 0.75)
 	row.draw.connect(func() -> void:
 		var s := row.size
-		row.draw_rect(Rect2(Vector2.ZERO, s), Color(0.0, 0.32, 0.55, 0.92))
-		row.draw_rect(Rect2(250, 0, s.x - 250, s.y), Color(0.02, 0.39, 0.6, 0.95))
-		row.draw_rect(Rect2(250, 0, s.x - 250, 2), Color(0.35, 0.75, 1.0, 0.9))
-		row.draw_rect(Rect2(250, s.y - 2, s.x - 250, 2), Color(0.35, 0.75, 1.0, 0.9))
-		row.draw_rect(Rect2(0, 0, 250, s.y), Color(0, 0, 0, 0.35)))
-	table.add_child(row)
+		row.draw_rect(Rect2(Vector2.ZERO, s), base)
+		row.draw_rect(Rect2(NAME_W, 0, s.x - NAME_W, s.y), cells)
+		row.draw_rect(Rect2(NAME_W, 0, s.x - NAME_W, 2), edge)
+		row.draw_rect(Rect2(NAME_W, s.y - 2, s.x - NAME_W, 2), edge)
+		row.draw_rect(Rect2(0, 0, NAME_W, s.y), Color(0, 0, 0, 0.35)))
 	var rh := HBoxContainer.new()
 	UI.full_rect(rh)
 	row.add_child(rh)
 	var who := HBoxContainer.new()
-	who.custom_minimum_size = Vector2(250, 0)
+	who.custom_minimum_size = Vector2(NAME_W, 0)
 	who.add_theme_constant_override("separation", 10)
 	rh.add_child(who)
 	who.add_child(UI.spacer(0))
@@ -250,28 +291,22 @@ func _build_table() -> void:
 		a.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		a.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		a.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		a.custom_minimum_size = Vector2(56, 56)
+		a.custom_minimum_size = Vector2(50, 50) if own else Vector2(42, 42)
 		a.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if not own:
+			a.modulate = Color(1.0, 0.62, 0.48)
 		who.add_child(a)
 	var nv := VBoxContainer.new()
 	nv.alignment = BoxContainer.ALIGNMENT_CENTER
 	nv.add_theme_constant_override("separation", -4)
-	var pname := UI.label(String(Game.profile.get("name", "PLAYER")), 24, UI.TEXT, "bold")
-	pname.clip_text = true
-	pname.custom_minimum_size = Vector2(160, 0)
+	var pname := UI.ellipsis(UI.label(who_name, 24 if own else 21, UI.TEXT, "bold"))
+	pname.custom_minimum_size = Vector2(168, 0)
 	nv.add_child(pname)
-	nv.add_child(UI.label("LV %d" % Game.level(), 15, UI.ACCENT, "bold"))
+	nv.add_child(UI.label(sub, 15 if own else 13, UI.ACCENT if own else Color(1.0, 0.72, 0.55), "bold"))
 	who.add_child(nv)
-	var t := float(r.get("time", 0.0))
-	var values := [
-		[float(r.get("kills", 0)), "%d"], [float(r.get("damage", 0)), "%d"], [float(r.get("headshots", 0)), "%d"],
-		[float(r.get("accuracy", 0.0)), "%d%%"], [t, "time"], [float(r.get("hp_left", 0)), "%d"],
-	]
-	# Final values at once (a screenshot or a slow frame never shows placeholders); each
-	# number pops in turn.
 	var i := 0
 	for v in values:
-		var l := UI.label(_fmt(float(v[0]), String(v[1])), 38, UI.TEXT, "number")
+		var l := UI.label(_fmt(float(v[0]), String(v[1])), 36 if own else 30, UI.TEXT, "number")
 		l.name = "Value_" + COLUMNS[i].replace(" ", "_")
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -279,10 +314,11 @@ func _build_table() -> void:
 		rh.add_child(l)
 		l.resized.connect(func() -> void: l.pivot_offset = l.size * 0.5)
 		var tw := create_tween()
-		tw.tween_interval(0.3 + i * 0.06)
+		tw.tween_interval(0.3 + i * 0.06 + (0.0 if own else 0.2))
 		tw.tween_property(l, "scale", Vector2(1.3, 1.3), 0.08)
 		tw.tween_property(l, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		i += 1
+	return row
 
 
 func _layout_table() -> void:
@@ -303,35 +339,42 @@ func _fmt(x: float, fmt: String) -> String:
 
 func _build_footer() -> void:
 	var r := _result
-	# Honour tag + XP (bottom-left).
-	var box := VBoxContainer.new()
-	box.anchor_top = 1.0
-	box.anchor_bottom = 1.0
-	box.offset_left = 40
-	box.offset_right = 560
-	box.offset_top = -214
-	box.offset_bottom = -30
-	box.add_theme_constant_override("separation", 12)
-	add_child(box)
+	# Honour tag: right end at 0.37 W, just above the XP row (reference tag: x .18-.37, y .83-.88).
 	var tag := honour(r)
 	if tag != "":
+		var slot := HBoxContainer.new()
+		slot.name = "HonourSlot"
+		slot.anchor_left = 0.026
+		slot.anchor_right = 0.37
+		slot.anchor_top = 0.828
+		slot.anchor_bottom = 0.882
+		slot.alignment = BoxContainer.ALIGNMENT_END
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(slot)
 		var tp := PanelContainer.new()
 		tp.name = "Honour"
-		tp.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 16.0, ["tl", "br"], 0.0))
-		tp.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		var st := UI.chamfer(UI.ACCENT, 10, 0, Color.TRANSPARENT, 14.0, ["tl", "br"], 0.0)
+		st.content_margin_top = 2
+		st.content_margin_bottom = 2
+		tp.add_theme_stylebox_override("panel", st)
+		tp.size_flags_vertical = Control.SIZE_FILL
+		tp.draw.connect(func() -> void:
+			UI.draw_hazard(tp, Rect2(tp.size.x - 34, tp.size.y - 6, 24, 4), 4.0, Color(UI.INK, 0.6), Color.TRANSPARENT))
 		var th := HBoxContainer.new()
-		th.add_theme_constant_override("separation", 10)
+		th.add_theme_constant_override("separation", 8)
 		var icon_name: String = {"SHARPSHOOTER": "v_headshot", "UNTOUCHABLE": "v_helmet", "CLUTCH": "v_medkit"}.get(tag, "v_fist")
-		th.add_child(UI.icon(icon_name, 30, UI.INK))
-		var tl := UI.label(tag, 28, UI.INK, "heavy")
+		var ic := UI.icon(icon_name, 26, UI.INK)
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		th.add_child(ic)
+		var tl := UI.label(tag, 25, UI.INK, "heavy")
 		tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		th.add_child(tl)
-		var note := UI.label({"SHARPSHOOTER": "2+ HEADSHOTS", "UNTOUCHABLE": "UNDER 50 DAMAGE TAKEN", "CLUTCH": "WON UNDER 30 HP"}.get(tag, "STOOD YOUR GROUND"), 14, Color(UI.INK, 0.7), "bold")
+		var note := UI.label({"SHARPSHOOTER": "2+ HEADSHOTS", "UNTOUCHABLE": "UNDER 50 DAMAGE TAKEN", "CLUTCH": "WON UNDER 30 HP"}.get(tag, "STOOD YOUR GROUND"), 13, Color(UI.INK, 0.7), "bold")
 		note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		th.add_child(note)
 		tp.add_child(th)
-		box.add_child(tp)
-	# XP gained + level bar.
+		slot.add_child(tp)
+	# XP gained + level bar, bottom-left in the buttons' band: [+XP]  [LV n ... a / b XP][bar].
 	var xp := int(r.get("xp", 0))
 	var total := int(Game.profile.get("xp", 0))
 	var recorded := Game.last_result == r
@@ -342,49 +385,78 @@ func _build_footer() -> void:
 	_xp_from = float(before % Game.XP_PER_LEVEL) / Game.XP_PER_LEVEL
 	var to := float(after % Game.XP_PER_LEVEL) / Game.XP_PER_LEVEL + float(lv_after - lv_before)
 	var xr := HBoxContainer.new()
-	xr.add_theme_constant_override("separation", 12)
-	box.add_child(xr)
-	var xpl := UI.shadowed(UI.label("+%d XP" % xp, 34, UI.ACCENT if xp > 0 else UI.TEXT_DIM, "number_italic"))
+	xr.name = "XpRow"
+	xr.anchor_left = 0.026
+	xr.anchor_right = 0.37
+	xr.anchor_top = 0.894
+	xr.anchor_bottom = 0.959
+	xr.add_theme_constant_override("separation", 14)
+	xr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(xr)
+	var xpl := UI.shadowed(UI.label("+%d XP" % xp, 32, UI.ACCENT if xp > 0 else UI.TEXT_DIM, "number_italic"))
 	xpl.name = "XpGain"
+	xpl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	xr.add_child(xpl)
-	_level_label = UI.label("LV %d" % lv_before, 22, UI.TEXT, "bold")
-	_level_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	xr.add_child(_level_label)
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 3)
+	xr.add_child(col)
+	var top := HBoxContainer.new()
+	col.add_child(top)
+	_level_label = UI.label("LV %d" % lv_before, 17, UI.TEXT, "bold")
+	_level_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(_level_label)
+	var lv_note := UI.label("%d / %d XP" % [after % Game.XP_PER_LEVEL, Game.XP_PER_LEVEL], 14, UI.TEXT_DIM, "bold")
+	lv_note.name = "XpNote"
+	top.add_child(lv_note)
 	_xp_bar = Control.new()
-	_xp_bar.custom_minimum_size = Vector2(400, 14)
+	_xp_bar.custom_minimum_size = Vector2(0, 12)
 	_xp_bar.draw.connect(_draw_xp)
-	box.add_child(_xp_bar)
-	var lv_note := UI.label("%d / %d XP TO LEVEL %d" % [after % Game.XP_PER_LEVEL, Game.XP_PER_LEVEL, lv_after + 1], 14, UI.TEXT_DIM, "bold")
-	box.add_child(lv_note)
+	col.add_child(_xp_bar)
 	_xp_fill = _xp_from
 	_levelled = lv_after != lv_before
 	_xp_to = to
 	_lv_before = lv_before
 	_xp_t0 = Time.get_ticks_msec() + 450
-	# Buttons (bottom-right).
-	var btns := HBoxContainer.new()
-	btns.anchor_left = 1.0
-	btns.anchor_right = 1.0
-	btns.anchor_top = 1.0
-	btns.anchor_bottom = 1.0
-	btns.offset_left = -560
-	btns.offset_right = -32
-	btns.offset_top = -96
-	btns.offset_bottom = -30
-	btns.alignment = BoxContainer.ALIGNMENT_END
-	btns.add_theme_constant_override("separation", 16)
-	add_child(btns)
-	var again := UI.hero_button("PLAY AGAIN", 34, Vector2(270, 66))
+	# Buttons in the reference band: PLAY AGAIN (yellow) 0.661-0.819 W, LOBBY (grey) 0.836-0.992 W.
+	var again := UI.hero_button("PLAY AGAIN", 30, Vector2(0, 46))
 	again.name = "PlayAgain"
+	_place(again, 0.661, 0.819)
 	_again = again
-	again.pressed.connect(func() -> void:
-		again.disabled = true
-		Loading.start_match(get_tree().current_scene))
-	btns.add_child(again)
-	var lobby := UI.button("LOBBY", 30, "light", Vector2(230, 66))
+	again.pressed.connect(_play_again)
+	add_child(again)
+	var lobby := UI.button("LOBBY", 26, "light", Vector2(0, 46))
 	lobby.name = "Lobby"
+	_place(lobby, 0.836, 0.992)
 	lobby.pressed.connect(Game.goto_lobby)
-	btns.add_child(lobby)
+	add_child(lobby)
+
+
+func _place(c: Control, x0: float, x1: float) -> void:
+	c.anchor_left = x0
+	c.anchor_right = x1
+	c.anchor_top = 0.894
+	c.anchor_bottom = 0.959
+	c.offset_left = 0
+	c.offset_right = 0
+	c.offset_top = 0
+	c.offset_bottom = 0
+
+
+func _play_again() -> void:
+	if _again.disabled:
+		return
+	_again.disabled = true
+	Loading.start_match(get_tree().current_scene)
+
+
+## Android back = LOBBY, except while PLAY AGAIN's match loading runs.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and is_inside_tree() and _built:
+		if _again and _again.disabled:
+			return
+		Game.goto_lobby()
 
 
 ## The XP bar fills over 0.9 s of real time (it never lags behind on slow frames).
@@ -488,7 +560,7 @@ func _step_intro() -> void:
 	modulate.a = clampf(e / 0.25, 0.0, 1.0)
 	var k := clampf(e / 0.5, 0.0, 1.0) - 1.0
 	var pop := 1.0 + 2.70158 * k * k * k + 1.70158 * k * k          # back ease-out
-	_medal.scale = Vector2.ONE * lerpf(0.4, 1.0, pop)
+	_medal.scale = Vector2.ONE * lerpf(0.4, 1.0, pop) * MEDAL_SCALE
 	if _title:
 		var kt := clampf((e - 0.1) / 0.4, 0.0, 1.0)
 		_title.modulate.a = kt
