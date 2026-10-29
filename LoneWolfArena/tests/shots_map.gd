@@ -3,7 +3,7 @@ extends Node
 ##   tools/qa/capture.sh <dir> 1560x720 script:res://tests/shots_map.gd
 ## Spawn views in PREP (barrier on) and FIGHT, lanes, high ground, the open centre bay, ceiling,
 ## a 3D overview and a top-down debug view with the navmesh islands, the minimap texture,
-## per-view draw calls and primitives (MAPPERF lines) plus a SMOOTH..MAX quality sweep against
+## per-view draw calls and primitives (MAPPERF lines) plus a LOW..EXTREME quality sweep against
 ## the 220 draw call / 250k primitive budget, navmesh path checks and the zone-centre open-floor
 ## check (MAPNAV lines) and a collider dump (colliders.json) for offline gap analysis. Exit code
 ## 1 if a check fails.

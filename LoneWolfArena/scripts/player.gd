@@ -101,7 +101,7 @@ func _sensitivity() -> float:
 	return maxf(s, 1.0) / 100.0
 
 
-## Whether aim assist applies right now (Aim Precision: default / precise on scope / full control).
+## Whether aim assist applies right now (Aim precision: assisted / hip only / manual).
 func _assist_active() -> bool:
 	if not Game.settings.aim_assist:
 		return false

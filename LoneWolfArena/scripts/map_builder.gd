@@ -203,13 +203,13 @@ func set_barriers(on: bool) -> void:
 			cs.set_deferred("disabled", not on)
 
 
-## Graphics quality 0..3 (SMOOTH..MAX): minor decoration hidden on SMOOTH, small props cast
-## shadows on ULTRA / MAX only (containers, ramps and the high ground always do; props flat
+## Graphics quality 0..3 (LOW..EXTREME): minor decoration hidden on LOW, small props cast
+## shadows on HIGH / EXTREME only (containers, ramps and the high ground always do; props flat
 ## against the walls - roll-up doors, fire cabinets - and the thin bollards never do: their
 ## shadows are hardly visible but cost two draw calls per part). Sun shadows are filtered (soft
-## PCF edges, the Compatibility renderer's 5-tap filter; 13 taps on MAX). Frame cost at the
-## busiest views, shadow pass included: about 100 / 170 / 200 draw calls on SMOOTH / STANDARD /
-## ULTRA-MAX (tests/shots_map.gd checks the 220 budget).
+## PCF edges, the Compatibility renderer's 5-tap filter; 13 taps on EXTREME). Frame cost at the
+## busiest views, shadow pass included: about 100 / 170 / 200 draw calls on LOW / MEDIUM /
+## HIGH-EXTREME (tests/shots_map.gd checks the 220 budget).
 func apply_quality(g: int) -> void:
 	RenderingServer.directional_soft_shadow_filter_set_quality(
 		RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM if g >= 3 else RenderingServer.SHADOW_QUALITY_SOFT_LOW)

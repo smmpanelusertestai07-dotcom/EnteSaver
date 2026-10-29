@@ -51,11 +51,11 @@ const FPS_OPTIONS := [30, 60, 90]
 ## The crosshair's idle colour (it always turns red on an enemy).
 const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
 const CROSSHAIR_COLOR_NAMES := ["WHITE", "GREEN", "YELLOW", "CYAN"]
-const AIM_PRECISION_NAMES := ["DEFAULT", "PRECISE ON SCOPE", "FULL CONTROL"]
+const AIM_PRECISION_NAMES := ["ASSISTED", "HIP ONLY", "MANUAL"]     # assist always / not while scoped / never
 const LEFT_FIRE_NAMES := ["ALWAYS", "WHEN SCOPED", "OFF"]
 const RUN_MODE_NAMES := ["TAP", "DRAG", "MIXED"]
 const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
-const GRAPHICS_NAMES := ["SMOOTH", "STANDARD", "ULTRA", "MAX"]
+const GRAPHICS_NAMES := ["LOW", "MEDIUM", "HIGH", "EXTREME"]
 const XP_PER_LEVEL := 500
 
 var settings: Dictionary = {}

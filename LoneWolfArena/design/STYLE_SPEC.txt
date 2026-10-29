@@ -83,7 +83,7 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
 | Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
-| Aim assist | hip cone 6 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; on target the look slows to 0.55 and follows 70 % of the target's motion at full strength, scaled by Aim Assist strength (default 70) and the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); pull while firing, head stop on upward drag; modes DEFAULT / PRECISE ON SCOPE / FULL CONTROL (values: player.gd ASSIST) |
+| Aim assist | hip cone 6 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; on target the look slows to 0.55 and follows 70 % of the target's motion at full strength, scaled by Aim Assist strength (default 70) and the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); pull while firing, head stop on upward drag; Aim precision ASSISTED / HIP ONLY (none while scoped) / MANUAL (values: player.gd ASSIST) |
 | Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; head stop error -1.5..+0.8 deg; on-target % with assist > without; red crosshair only on the body |
 
 ## 5. Screens
@@ -101,7 +101,7 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 - Result: mode/map text top-left, our medal with gold "VICTORY" / grey "DEFEAT" / white "DRAW" /
   red "INVALID", round score plates, stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY,
   TIME, HP LEFT), honour tag, XP bar, PLAY AGAIN / LOBBY.
-- Settings: tab column BASIC (graphics SMOOTH .. MAX, 30/60/90 FPS, show FPS, damage numbers,
+- Settings: tab column BASIC (graphics LOW .. EXTREME, 30/60/90 FPS, show FPS, damage numbers,
   vibration), CONTROLS (aim precision, aim assist and strength, left fire, custom HUD, ...),
   SENSITIVITY (general, red dot, sniper scope, fire-button drag), SOUND; per-tab RESET.
 - Pause: full-width dark band, PAUSED, score / time left / HP chips, RESUME, SETTINGS, QUIT MATCH

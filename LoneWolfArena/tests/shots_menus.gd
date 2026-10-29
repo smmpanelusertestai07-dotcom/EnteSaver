@@ -3,8 +3,8 @@ extends Node
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_menus.gd
 ## Boot/loading screen, lobby (menu captions bright, drag to turn the character, START position
 ## report), name edit (pencil tap, long name ends in "..."), the player card, how to play, the
-## wardrobe (card tap, rarity tab), every settings tab (tab taps, ULTRA, HIGH / DEFAULT
-## presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
+## wardrobe (card tap, rarity tab), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
+## sensitivity presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
 ## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
 ## shortcut), results screens (win, defeat, draw, invalid) with the opponent's row in an empty
 ## scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
@@ -142,10 +142,10 @@ func run(at: Node) -> int:
 	if sp:
 		await at.shot("m07_settings_basic")
 		var g_before := int(Game.settings.graphics)
-		var ultra := _find_text(sp, "ULTRA")
-		if ultra:
-			await _tap(ultra)
-		_check(int(Game.settings.graphics) == 2, "tapping ULTRA sets graphics 2")
+		var high_q := _find_text(sp, "HIGH")
+		if high_q:
+			await _tap(high_q)
+		_check(int(Game.settings.graphics) == 2, "tapping HIGH sets graphics 2")
 		Game.settings.graphics = g_before
 		await _tap(_find_text(sp, "CONTROLS"))
 		await _settle(0.4)

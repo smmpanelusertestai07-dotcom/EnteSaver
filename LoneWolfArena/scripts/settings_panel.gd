@@ -186,7 +186,7 @@ func _show_tab(i: int) -> void:
 		0:
 			_body.add_child(UI.section("DISPLAY"))
 			_body.add_child(UI.plate_row("Graphics", UI.segmented(Game.GRAPHICS_NAMES, int(Game.settings.graphics), func(v: int) -> void: _apply("graphics", v), 17, 104.0),
-				"Smooth runs best on older phones; Max adds shadows, MSAA and glow"))
+				"Low runs best on older phones; Extreme adds shadows, MSAA and glow"))
 			var fps_opts: Array = Game.FPS_OPTIONS
 			var labels := []
 			for f in fps_opts:
@@ -216,7 +216,7 @@ func _show_tab(i: int) -> void:
 		2:
 			_body.add_child(UI.section("SHOOTING"))
 			_body.add_child(UI.plate_row("Aim precision", UI.segmented(Game.AIM_PRECISION_NAMES, int(Game.settings.aim_precision), func(v: int) -> void: _apply("aim_precision", v), 15, 150.0),
-				"Default: aim assist while shooting"))
+				"Assisted: always. Hip only: off while scoped. Manual: off"))
 			_body.add_child(UI.plate_row("Aim assist", _toggle("aim_assist")))
 			_body.add_child(UI.plate_row("Aim assist strength", UI.slider(Game.settings.aim_assist_strength, 0, 100, func(v: float) -> void: _apply("aim_assist_strength", int(v)))))
 			_body.add_child(UI.plate_row("Left fire button", UI.segmented(Game.LEFT_FIRE_NAMES, int(Game.settings.left_fire), func(v: int) -> void: _apply("left_fire", v), 15, 140.0)))

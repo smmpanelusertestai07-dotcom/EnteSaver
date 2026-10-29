@@ -77,7 +77,7 @@ static func credits_text() -> String:
 				who.append(String(c))
 			out.append("%s - %s (%s)" % [comp.get("name", ""), ", ".join(who), part.get("license", "")])
 	out.append("")
-	out.append("ANDROID LIBRARIES - the AndroidX (Jetpack) libraries and the Kotlin standard library, included by Godot's Android export template: Apache License 2.0 (text below).")
+	out.append("ANDROID LIBRARIES - the AndroidX (Jetpack) libraries, the Kotlin standard library with the JetBrains annotations, and Guava's ListenableFuture, all included by Godot's Android export template: Apache License 2.0 (text below).")
 	out.append("")
 	out.append("LICENCE TEXTS")
 	var lic: Dictionary = Engine.get_license_info()

@@ -47,7 +47,7 @@ var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_from_look := Vector3(0, CAM_LOOK_Y, 0)
 var _cam_to_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_to_look := Vector3(0, CAM_LOOK_Y, 0)
-## [3D scale, MSAA] for SMOOTH, STANDARD, ULTRA, MAX.
+## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME.
 const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X],
 	[1.0, Viewport.MSAA_4X]]
 

@@ -79,7 +79,7 @@ listed here. If a part needs something new from the core, add it in its own file
 - `spawn_a`, `spawn_a_yaw` (player), `spawn_b`, `spawn_b_yaw` (bot); `map_name`; `map_rect`;
   `zone_center`; `zone_start_radius`
 - `set_barriers(on: bool)` red spawn barriers (colliders + glow) during PREP
-- `apply_quality(g: int)` 0 SMOOTH .. 3 MAX
+- `apply_quality(g: int)` 0 LOW .. 3 EXTREME
 - Visual layers: the top-down minimap camera sees only layer 1 (floor, containers, crates, the
   white wall caps that outline the walls). Roof, ceiling, trusses and hanging lamps are on 2
   (`LAYER_ROOF`); characters, weapons, effects, the zone wall and the spawn barriers on 4
