@@ -331,7 +331,9 @@ jobs:
       - name: Build the phone-side driver
         working-directory: LoneWolfArena/tools/ci/devicelab
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          # (yes stops with SIGPIPE once sdkmanager is done, which pipefail would count as a failure)
+          [ -d "$ANDROID_HOME/platforms/android-35" ] && [ -d "$ANDROID_HOME/build-tools/35.0.0" ] \
+            || { yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null || true; }
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/gradle.zip" https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
           unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
           JAVA_HOME="$JAVA_HOME_17_X64" "$RUNNER_TEMP/gradle-8.14.3/bin/gradle" --no-daemon -q assembleDebug assembleDebugAndroidTest
