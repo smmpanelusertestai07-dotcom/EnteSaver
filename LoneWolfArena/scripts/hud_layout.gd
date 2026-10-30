@@ -14,7 +14,7 @@ extends RefCounted
 ## medkit and sprint on the left, the weapon panel and its three slots 45 % larger; no left
 ## fire, reload, scoreboard or free-look buttons (reload: tap the panel; scores: tap the bar).
 
-const VERSION := 4
+const VERSION := 5
 const REF_ASPECT := 20.0 / 9.0
 const MIN_ASPECT := 16.0 / 9.0
 const SIZE_MIN := 0.5            # editor size range relative to the default (50 .. 200 %)
@@ -29,18 +29,18 @@ const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a r
 const ORDER := ["settings", "weapons", "fire_r", "scope", "wall", "jump", "crouch", "prone", "sprint",
 	"medkit", "grenade", "minimap", "joystick"]
 const DEFAULTS := {
-	"joystick": {"x": 0.18, "y": 0.66, "s": 0.23, "o": 0.8, "a": "l"},
+	"joystick": {"x": 0.18, "y": 0.71, "s": 0.23, "o": 0.8, "a": "l"},
 	"fire_r": {"x": 0.798, "y": 0.68, "s": 0.26, "o": 0.9, "a": "r"},
 	"scope": {"x": 0.835, "y": 0.4, "s": 0.104, "o": 0.85, "a": "r"},
-	"wall": {"x": 0.754, "y": 0.384, "s": 0.11, "o": 0.85, "a": "r"},
+	"wall": {"x": 0.0375, "y": 0.53, "s": 0.11, "o": 0.85, "a": "l"},
 	"jump": {"x": 0.906, "y": 0.519, "s": 0.166, "o": 0.85, "a": "r"},
 	"crouch": {"x": 0.922, "y": 0.834, "s": 0.166, "o": 0.85, "a": "r"},
 	"prone": {"x": 0.673, "y": 0.073, "s": 0.104, "o": 0.85, "a": "c"},
 	"sprint": {"x": 0.181, "y": 0.438, "s": 0.131, "o": 0.85, "a": "l"},
 	"medkit": {"x": 0.0375, "y": 0.678, "s": 0.104, "o": 0.85, "a": "l"},
 	"grenade": {"x": 0.678, "y": 0.912, "s": 0.13, "o": 0.85, "a": "c"},
-	"settings": {"x": 0.963, "y": 0.027, "s": 0.046, "o": 0.9, "a": "r"},
-	"weapons": {"x": 0.887, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
+	"settings": {"x": 0.9865, "y": 0.035, "s": 0.046, "o": 0.9, "a": "r"},
+	"weapons": {"x": 0.861, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
 }
 const LABELS := {

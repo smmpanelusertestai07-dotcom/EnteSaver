@@ -15,13 +15,13 @@ const TABS := ["BASIC", "SENSITIVITY", "CONTROLS", "SOUND"]
 const ORDER := [0, 2, 1, 3]
 const TAB_KEYS := [
 	["graphics", "fps"],
-	["sens_general", "sens_reddot", "sens_sniper", "sens_fire"],
+	["sens_general", "sens_reddot", "sens_sniper"],
 	["dynamic_joystick"],
 	["vol_master", "vol_sfx", "vol_music"],
 ]
 const SENS_PRESETS := {
-	"DEFAULT": {"sens_general": 100, "sens_reddot": 100, "sens_sniper": 71, "sens_fire": 100},
-	"HIGH": {"sens_general": 185, "sens_reddot": 185, "sens_sniper": 150, "sens_fire": 150},
+	"DEFAULT": {"sens_general": 100, "sens_reddot": 100, "sens_sniper": 71},
+	"HIGH": {"sens_general": 185, "sens_reddot": 185, "sens_sniper": 150},
 }
 const MENU_W := 230.0
 
@@ -205,8 +205,7 @@ func _show_tab(i: int) -> void:
 			_sens_row("General", "sens_general", "Camera turn when dragging the right side")
 			_sens_row("Red Dot", "sens_reddot", "While aiming down the red-dot sight")
 			_sens_row("Sniper Scope", "sens_sniper", "While looking through the sniper scope")
-			_sens_row("Fire-button drag", "sens_fire", "Turning while you hold and drag FIRE")
-			_hint.text = "1-200. Higher turns the camera faster for the same swipe. DEFAULT = 100 / 100 / 71 / 100."
+			_hint.text = "1-200. Higher turns the camera faster for the same swipe. DEFAULT = 100 / 100 / 71."
 		2:
 			_body.add_child(UI.section("MOVEMENT"))
 			_body.add_child(UI.plate_row("Dynamic joystick", _toggle("dynamic_joystick"), "The stick follows your thumb"))

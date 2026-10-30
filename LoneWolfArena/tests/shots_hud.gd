@@ -255,7 +255,7 @@ func _numbers_apart(hud: HUD, p: Player, vs: Vector2) -> bool:
 	var rects: Array[Rect2] = []
 	for n: Dictionary in hud._dmg_numbers:
 		if float(n.t) < HUD.DMG_LIFE - 0.1 and not p.camera.is_position_behind(n.pos):
-			var r: Rect2 = hud._dmg_rect(n, u).grow(-1.0)
+			var r: Rect2 = hud._dmg_rect(n, u).grow(0.01 * u)     # a clear gap: 48 and 32 never read as 4832
 			for o in rects:
 				if o.intersects(r):
 					return false

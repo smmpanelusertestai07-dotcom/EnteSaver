@@ -105,6 +105,43 @@ func _check_throw() -> void:
 	_expect(_grenades() == before, "no grenade on the input frame")
 	await at.wait(Fighter.THROW_RELEASE + 0.15)
 	_expect(_grenades() == before + 1, "grenade released after %.2f s" % Fighter.THROW_RELEASE)
+	await _check_items_in_hand(p as Player)
+
+
+## The wall and grenade buttons only take the item in hand; FIRE uses it when let go, the same
+## button again or a weapon puts it away, and a hand with an item never shoots.
+func _check_items_in_hand(p: Player) -> void:
+	p.shields = 2
+	p.grenades = 1
+	var walls := get_tree().get_nodes_in_group("shield_walls").size()
+	p.use_shield()
+	await get_tree().process_frame
+	_expect(p.ready_item == "wall" and p.shields == 2 and _walls() == walls, "wall button: wall in hand, nothing placed")
+	var ammo := p.weapon().ammo
+	p.set_firing(true)
+	await at.wait(0.2)
+	_expect(_walls() == walls and p.weapon().ammo == ammo and not p.firing, "FIRE held with the wall: no shot, no wall yet")
+	p.set_firing(false)
+	await get_tree().process_frame
+	_expect(p.ready_item == "" and p.shields == 1 and _walls() == walls + 1, "FIRE let go: the wall stands")
+	p.use_shield()
+	p.use_shield()
+	_expect(p.ready_item == "" and p.shields == 1, "the wall button again puts it away")
+	p.use_grenade()
+	p.select_weapon(p.current)
+	_expect(p.ready_item == "" and p.grenades == 1, "a weapon puts the grenade away")
+	var before := _grenades()
+	p.use_grenade()
+	p.set_firing(true)
+	p.set_firing(false)
+	await at.wait(Fighter.THROW_RELEASE + 0.15)
+	_expect(p.grenades == 0 and _grenades() == before + 1, "grenade in hand: FIRE throws it")
+	p.use_grenade()
+	_expect(p.ready_item == "", "no grenade left: nothing in hand")
+
+
+func _walls() -> int:
+	return get_tree().get_nodes_in_group("shield_walls").size()
 
 
 func _grenades() -> int:

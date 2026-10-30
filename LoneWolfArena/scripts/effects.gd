@@ -203,7 +203,18 @@ static func shield_break(ctx: Node, pos: Vector3) -> void:
 	var parent := _scene(ctx)
 	if parent == null:
 		return
-	_burst(parent, pos + Vector3.UP, Vector3.UP, Color(0.5, 0.95, 1.0, 1), 40, 6.0, 0.06, 0.8)
+	_burst(parent, pos + Vector3.UP, Vector3.UP, Color(0.78, 0.93, 1.0, 1), 46, 6.5, 0.07, 0.9)
+	_burst(parent, pos + Vector3.UP * 0.8, Vector3.UP, Color(0.85, 0.95, 1.0, 0.3), 14, 1.6, 0.4, 1.0, 0.4)
+
+
+## A wall forming: frozen foam bursts up along its base, with a puff of cold mist.
+static func shield_form(ctx: Node, xf: Transform3D) -> void:
+	var parent := _scene(ctx)
+	if parent == null:
+		return
+	for k in 3:
+		_burst(parent, xf * Vector3((k - 1) * 1.1, 0.15, 0.15), Vector3.UP, Color(0.85, 0.95, 1.0, 0.9), 10, 4.0, 0.07, 0.45)
+	_burst(parent, xf * Vector3(0, 0.8, 0.3), xf.basis.z, Color(0.8, 0.92, 1.0, 0.3), 12, 1.5, 0.35, 0.9, 0.5)
 
 
 static func explosion(ctx: Node, pos: Vector3) -> void:
@@ -256,7 +267,12 @@ static func warm_up(ctx: Node) -> void:
 	hit_spark(ctx, p, Vector3.UP, true)
 	shield_hit(ctx, p, Vector3.UP)
 	shield_break(ctx, p)
+	shield_form(ctx, Transform3D(Basis(), p))
 	explosion(ctx, p)
+	var wall := ShieldWall.warm_up_node()
+	parent.add_child(wall)
+	wall.global_position = p
+	_free_after(wall, 0.6)
 	for i in range(first, parent.get_child_count()):
 		_set_layers(parent.get_child(i), CharacterModel.LAYER_ACTORS)
 	var vp := SubViewport.new()

@@ -72,6 +72,8 @@ var _ward_tabs := {}
 func _ready() -> void:
 	_build_stage()
 	_build_ui()
+	if not bool(Game.profile.get("name_set", false)):
+		_edit_name.call_deferred(true)
 	Audio.play_music("lobby_music", -4.0)
 	Game.mark("lobby ready")
 	# Where START is on screen, for the emulator test, once the layout has settled (a method
@@ -1162,7 +1164,8 @@ func _find_settings() -> SettingsPanel:
 
 ## A popup in the reference look: the light header strip (dark caps title, hazard line, X on a
 ## dark tile), then the near-black body with a yellow corner mark. Returns the body column.
-func _open_modal(title: String, width := 980.0) -> VBoxContainer:
+## top: the frame sits at the top of the screen, clear of the on-screen keyboard (text entry).
+func _open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
 	_close_modal()
 	_modal = Control.new()
 	_modal.name = "Modal"
@@ -1177,11 +1180,12 @@ func _open_modal(title: String, width := 980.0) -> VBoxContainer:
 	frame.add_theme_constant_override("separation", 0)
 	frame.anchor_left = 0.5
 	frame.anchor_right = 0.5
-	frame.anchor_top = 0.5
-	frame.anchor_bottom = 0.5
+	frame.anchor_top = 0.0 if top else 0.5
+	frame.anchor_bottom = 0.0 if top else 0.5
 	frame.offset_left = -width * 0.5
 	frame.offset_right = width * 0.5
-	frame.grow_vertical = Control.GROW_DIRECTION_BOTH
+	frame.offset_top = 18.0 if top else 0.0
+	frame.grow_vertical = Control.GROW_DIRECTION_END if top else Control.GROW_DIRECTION_BOTH
 	_modal.add_child(frame)
 	var head := UI.popup_header(title, 26, 54.0)
 	(head.get_node("Close") as Button).pressed.connect(_close_modal)
@@ -1200,6 +1204,7 @@ func _close_modal() -> void:
 	if _modal:
 		_modal.queue_free()
 		_modal = null
+		DisplayServer.virtual_keyboard_hide()     # a text field in it may have opened the keyboard
 
 
 const HOW_TO := [
@@ -1213,8 +1218,8 @@ const HOW_TO := [
 	]],
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
-		["v_wall", "SHIELD WALL  x2", "Throws up cover that soaks 600 damage for 45 seconds."],
-		["item_grenade", "FRAG GRENADE  x1", "Up to 150 damage at the centre (a vest halves it), 3-second fuse."],
+		["v_wall", "SHIELD WALL  x2", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
+		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest halves it), 3 s fuse."],
 	]],
 	["THE MATCH", [
 		["v_player", "FIRST TO 5 ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win 5 rounds to win the match."],
@@ -1280,43 +1285,77 @@ func _howto_item(icon_name: String, title: String, text: String) -> Control:
 	return p
 
 
-func _edit_name() -> void:
-	var v := _open_modal("PLAYER NAME", 560.0)
-	v.add_child(UI.label("Up to 14 letters or digits. Shown in matches and results.", 16, UI.TEXT_DIM, "semi"))
+## The name editor. first: asked once at start (new installs and ones from before this prompt):
+## type a name or roll a random one; closing it keeps the current name.
+func _edit_name(first := false) -> void:
+	var v := _open_modal("CHOOSE YOUR NAME" if first else "PLAYER NAME", 640.0, true)
+	v.add_child(UI.label("Type a name or tap RANDOM. Up to 14 letters or digits; shown in matches.", 16, UI.TEXT_DIM, "semi"))
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 10)
 	var le := LineEdit.new()
 	le.name = "NameEdit"
 	le.text = String(Game.profile.name)
 	le.max_length = 14
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	le.custom_minimum_size = Vector2(0, 54)
+	le.virtual_keyboard_enabled = true
+	le.virtual_keyboard_show_on_focus = true
+	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
+	le.select_all_on_focus = first
 	le.add_theme_font_override("font", UI.font("bold"))
 	le.add_theme_font_size_override("font_size", 26)
 	le.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.25), 14.0, ["br"]))
 	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
 	le.add_theme_color_override("font_color", UI.TEXT)
 	le.add_theme_color_override("caret_color", UI.ACCENT)
-	v.add_child(le)
+	line.add_child(le)
+	var dice := UI.button("RANDOM", 20, "light", Vector2(150, 54))
+	dice.name = "NameRandom"
+	dice.pressed.connect(func() -> void:
+		le.text = Game.random_name()
+		le.caret_column = le.text.length()
+		Audio.play("ui_click", -4.0))
+	line.add_child(dice)
+	v.add_child(line)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 12)
-	var cancel := UI.button("CANCEL", 20, "light", Vector2(170, 52))
-	cancel.pressed.connect(_close_modal)
+	var cancel := UI.button("KEEP" if first else "CANCEL", 20, "light", Vector2(170, 52))
+	var keep := func() -> void:
+		if first:
+			Game.profile.name_set = true
+			Game.save_profile()
+		_close_modal()
+	cancel.pressed.connect(keep)
 	var ok := UI.button("OK", 22, "primary", Vector2(170, 52))
 	ok.name = "NameOk"
 	var apply := func() -> void:
 		var n := Game.clean_name(le.text)
 		if n != "":
 			Game.profile.name = n
-			Game.save_profile()
 			_name_label.text = n
 			_plate_label.text = n
+		Game.profile.name_set = true
+		Game.save_profile()
 		_close_modal()
 	ok.pressed.connect(apply)
 	le.text_submitted.connect(func(_t: String) -> void: apply.call())
 	row.add_child(cancel)
 	row.add_child(ok)
 	v.add_child(row)
-	le.grab_focus()
-	le.caret_column = le.text.length()
+	if first:
+		var x := _modal.find_child("Close", true, false) as Button
+		if x:
+			x.pressed.connect(keep)
+		get_tree().process_frame.connect(func() -> void:
+			if is_instance_valid(ok) and ok.is_inside_tree():
+				Game.mark("name prompt")
+				Game.mark_ui("name_ok", ok, ok.size / 2.0), CONNECT_ONE_SHOT | CONNECT_DEFERRED)
+	# Focus once the dialog is up: the keyboard then opens under it, with the field in view.
+	get_tree().create_timer(0.2).timeout.connect(func() -> void:
+		if is_instance_valid(le) and le.is_inside_tree():
+			le.grab_focus()
+			le.caret_column = le.text.length())
 
 
 # ---------------------------------------------------------------- wardrobe

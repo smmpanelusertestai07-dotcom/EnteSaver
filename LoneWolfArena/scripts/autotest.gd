@@ -461,7 +461,8 @@ func _run_perf() -> void:
 ##     head, a huge one goes over it; a resting thumb's jitter keeps the body; the first bullet
 ##     follows the drag (through the head's middle);
 ##  3. the bot strafes: with assist the crosshair stays on target more often than without;
-##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away.
+##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away;
+##  5. red just beside the body (the ray itself misses): a shot fired there hits the body.
 ## Prints AIM lines and exits 1 if a check fails.
 func _run_aim() -> void:
 	Game.goto_arena()
@@ -654,6 +655,32 @@ func _run_aim() -> void:
 	var red_off := p.crosshair_on_target
 	_log("AIM red crosshair: on body=%s, 8 deg away=%s" % [red_on, red_off])
 	if not red_on or red_off:
+		fails += 1
+	# 5. red just beside the body (the crosshair's ray misses it): a shot there still hits the body
+	b.invulnerable = false          # (hits on an invulnerable target do not count)
+	b.endless_hp = true
+	var beside := "not found"
+	for off in [1.5, 2.0, 2.5, 3.0, 3.5]:
+		for k in 3:
+			_aim_at(p, b.chest_position())
+			await get_tree().process_frame
+			await get_tree().physics_frame
+		p.aim_yaw += deg_to_rad(off)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		if p.crosshair_on_target and not p.call("_crosshair_meets", b):
+			p.weapon().cancel_reload()
+			p.weapon().ammo = 20
+			p.weapon().cooldown = 0.0
+			var hits0 := int(p.stats.hits)
+			p.call("_try_fire")
+			await get_tree().physics_frame
+			beside = "%.1f deg off: %s" % [off, "body hit" if int(p.stats.hits) > hits0 else "missed"]
+			break
+	b.endless_hp = false
+	b.invulnerable = true
+	_log("AIM red beside the body: %s (want a body hit)" % beside)
+	if not beside.ends_with("body hit"):
 		fails += 1
 	_log("AIM RESULT fails=%d" % fails)
 	get_tree().quit(1 if fails > 0 else 0)

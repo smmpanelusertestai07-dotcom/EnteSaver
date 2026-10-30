@@ -8,7 +8,7 @@ const SETTINGS_PATH := "user://settings.json"
 const PROFILE_PATH := "user://profile.json"
 const HUD_PATH := "user://hud_layout.json"
 
-const SETTINGS_VERSION := 3
+const SETTINGS_VERSION := 4
 const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"graphics": 1,
@@ -17,7 +17,7 @@ const DEFAULT_SETTINGS := {
 	"sens_reddot": 100,
 	"sens_sniper": 71,
 	"sens_fire": 100,
-	"dynamic_joystick": true,
+	"dynamic_joystick": false,
 	"vol_master": 85,
 	"vol_sfx": 90,
 	"vol_music": 45,
@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS := {
 const FIXED_SETTINGS := {
 	"show_fps": false, "vibration": true, "damage_numbers": true, "hold_fire_scope": true,
 	"reload_on_crosshair": true, "run_mode": 2, "dynamic_crosshair": true,
-	"crosshair_color": 0, "crosshair_size": 50,
+	"crosshair_color": 0, "crosshair_size": 50, "sens_fire": 100,
 }
 
 ## Valid ranges of the numeric settings. Values outside them (an edited or corrupted settings
@@ -49,7 +49,8 @@ const GRAPHICS_NAMES := ["LOW", "MEDIUM", "HIGH", "EXTREME"]
 const XP_PER_LEVEL := 500
 
 var settings: Dictionary = {}
-var profile: Dictionary = {"name": "ROOKIE", "bundle": "default", "matches": 0, "wins": 0, "kills": 0, "xp": 0}
+var profile: Dictionary = {"name": "ROOKIE", "bundle": "default", "matches": 0, "wins": 0, "kills": 0, "xp": 0,
+	"name_set": false}           # false until the player chose a name (also on installs from before the prompt)
 var hud_layout: Dictionary = {}
 var last_result: Dictionary = {}
 
@@ -102,6 +103,9 @@ func _ready() -> void:
 		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
 		for k in ["sens_general", "sens_reddot", "sens_fire", "settings_version"]:
 			(saved as Dictionary).erase(k)
+	if saved is Dictionary and int(version) < 4:
+		# v4: the joystick stays put by default (the reference's default), as on a new install.
+		(saved as Dictionary).erase("dynamic_joystick")
 	_merge_into(settings, saved)
 	settings.merge(FIXED_SETTINGS, true)
 	settings.settings_version = SETTINGS_VERSION
@@ -200,6 +204,19 @@ func _sanitize_profile() -> void:
 	for k in ["matches", "wins", "kills", "xp"]:
 		profile[k] = clampi(int(profile[k]), 0, 1000000000)
 	profile.wins = mini(int(profile.wins), int(profile.matches))
+
+
+## A random player name (two short words and two digits, at most 14 characters).
+func random_name() -> String:
+	const FIRST := ["SWIFT", "SILENT", "IRON", "NEON", "ROGUE", "BLAZE", "STORM", "FROST", "LUCKY", "GHOST",
+		"RAPID", "WILD", "STEEL", "NIGHT", "DUSTY", "RED", "GOLD", "SHADOW", "TURBO", "STONE"]
+	const SECOND := ["WOLF", "FOX", "HAWK", "VIPER", "TIGER", "RAVEN", "LYNX", "SHARK", "FALCON", "BEAR",
+		"RHINO", "COBRA", "PUMA", "BISON", "EAGLE", "JACKAL"]
+	var a: String = FIRST.pick_random()
+	var b: String = SECOND.pick_random()
+	if (a + b).length() > 12:
+		a = a.substr(0, 12 - b.length())
+	return a + b + "%02d" % randi_range(1, 99)
 
 
 ## Player names: upper-case A-Z, 0-9, space, _ - . and at most 14 characters.

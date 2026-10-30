@@ -10,6 +10,7 @@ enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two round
 const PREP_TIME := 10.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
 const BREAK_TIME := 3.5
+const SPECTATE_EXTRA := 1.5       # s more between rounds while the eliminated player watches the killer
 const ROUND_TIME := 90.0
 const ZONE_HOLD := 25.0
 const ZONE_SHRINK := 40.0
@@ -527,7 +528,8 @@ func _physics_process(delta: float) -> void:
 			if _break_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
 			# Online the host starts the next round; the guest goes on alone if that never comes.
-			if (_break_t >= BREAK_TIME and (not online or Game.session.is_host)) or _break_t >= BREAK_TIME + 3.0:
+			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
+			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 3.0:
 				_next_round()
 
 

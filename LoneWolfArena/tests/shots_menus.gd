@@ -1,8 +1,9 @@
 extends Node
 ## Menus screenshot tour (everything outside the match), with real-input checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_menus.gd
-## Boot/loading screen, lobby (menu captions bright, drag to turn the character, START position
-## report), name edit (pencil tap, long name ends in "..."), the player card, how to play, the
+## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
+## captions bright, drag to turn the character, START position report), name edit (pencil tap,
+## long name ends in "..."), the player card, how to play, the
 ## wardrobe (card tap, rarity tab), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
 ## sensitivity presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
 ## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
@@ -60,7 +61,25 @@ func run(at: Node) -> int:
 	Loading.hold_for_test = false
 	Game.goto_lobby()
 	var lobby := await _wait_scene("Lobby", 30.0)
-	await _settle(2.0)
+	await _settle(1.0)
+	# First start (no name chosen yet): the name prompt sits at the top, clear of the keyboard;
+	# RANDOM rolls a name and OK keeps it (the prompt does not come back).
+	if not bool(Game.profile.get("name_set", false)):
+		var first_edit := lobby.find_child("NameEdit", true, false) as LineEdit
+		_check(first_edit != null, "the first start asks for a name")
+		if first_edit:
+			_check(first_edit.get_global_rect().end.y < get_viewport().get_visible_rect().size.y * 0.42,
+				"the name field sits in the top part of the screen, above the on-screen keyboard")
+			var before := first_edit.text
+			await _tap(lobby.find_child("NameRandom", true, false) as Control)
+			await _settle(0.3)
+			_check(first_edit.text != before and Game.clean_name(first_edit.text) == first_edit.text and first_edit.text.length() <= 14,
+				"RANDOM rolls a valid name (%s)" % first_edit.text)
+			await at.shot("m02a_name_prompt")
+			await _tap(lobby.find_child("NameOk", true, false) as Control)
+			await _settle(0.4)
+			_check(bool(Game.profile.name_set) and lobby.get("_modal") == null, "OK keeps the name and closes the prompt")
+	await _settle(1.0)
 	await at.shot("m02_lobby")
 	if OS.get_environment("LW_MENUS_STOP") == "lobby":       # quick look while tuning the stage
 		Game.settings = saved_settings

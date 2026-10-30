@@ -274,11 +274,13 @@ func _dmg_free_offset(n: Dictionary) -> Vector2:
 		var r := Rect2(base.position + off * u, base.size)
 		var hit := false
 		for other in taken:
-			if other.intersects(r):
-				# step to the right of the number in the way; far from the hit, start a row above
-				off.x = (other.end.x - base.position.x) / u + 0.006
+			if other.intersects(r.grow(0.012 * u)):
+				# step to the right of the number in the way, a clear gap and a little higher (two
+				# numbers side by side read as one: 48 and 32 as "4832"); far from the hit, a row above
+				off.x = (other.end.x - base.position.x) / u + 0.03
+				off.y = (other.position.y - base.position.y) / u - 0.02
 				if off.x > 0.2:
-					off = Vector2(0.0, (other.position.y - base.end.y) / u - 0.004)
+					off = Vector2(0.0, (other.position.y - base.end.y) / u - 0.012)
 				hit = true
 				break
 		if not hit:
@@ -347,7 +349,7 @@ func _on_down(index: int, pos: Vector2) -> void:
 
 ## Topmost control under the finger ("" = none). Overlapping buttons: the closest centre wins.
 func _widget_at(pos: Vector2, vs: Vector2) -> String:
-	# The settings gear is drawn over the weapon panel's corner, so it wins a touch there.
+	# The small settings gear sits right beside the weapon panel: it wins a touch at its edge.
 	var gear: Dictionary = layout.settings
 	if pos.distance_to(HudLayout.center(gear, vs)) <= HudLayout.touch_radius(gear, vs) * 1.15:
 		return "settings"
@@ -433,7 +435,7 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 			var jr := _joy_radius(size)
 			_joy_vec = (pos - _joy_center) / jr
 			# Floating stick: the base follows a finger that runs far past the ring.
-			if bool(Game.settings.get("dynamic_joystick", true)) and _joy_vec.length() > 1.6:
+			if bool(Game.settings.get("dynamic_joystick", false)) and _joy_vec.length() > 1.6:
 				_joy_center = pos - _joy_vec.normalized() * jr * 1.6
 				_joy_vec = (pos - _joy_center) / jr
 		"look":
@@ -483,7 +485,7 @@ func _on_up(index: int, canceled := false) -> void:
 
 func _in_joy_zone(pos: Vector2, vs: Vector2) -> bool:
 	var w: Dictionary = layout.joystick
-	if bool(Game.settings.get("dynamic_joystick", true)):
+	if bool(Game.settings.get("dynamic_joystick", false)):
 		return pos.x < vs.x * JOY_ZONE_X and pos.y > vs.y * 0.34
 	return pos.distance_to(HudLayout.center(w, vs)) < HudLayout.radius(w, vs) * 1.4
 
@@ -495,7 +497,7 @@ func _joy_radius(vs: Vector2) -> float:
 func _start_joystick(index: int, pos: Vector2, vs: Vector2) -> void:
 	var r := _joy_radius(vs)
 	_joy_touch = index
-	if bool(Game.settings.get("dynamic_joystick", true)):
+	if bool(Game.settings.get("dynamic_joystick", false)):
 		_joy_center = Vector2(clampf(pos.x, r + 6.0, maxf(vs.x * JOY_ZONE_X, r + 6.0)), clampf(pos.y, vs.y * 0.34 + r * 0.4, vs.y - r - 6.0))
 	else:
 		_joy_center = HudLayout.center(layout.joystick, vs)
@@ -700,7 +702,9 @@ func _draw() -> void:
 		_draw_scope(c, vs)
 	_draw_damage_dirs(c, u)
 	if alive:
-		if not scoped:
+		if player.ready_item != "":
+			_draw_item_aim(c, u)
+		elif not scoped:
 			_draw_crosshair(c, u)
 		_draw_heal(c, u)
 	_draw_kill_x(u)
@@ -708,7 +712,7 @@ func _draw() -> void:
 	if not match_over:
 		_draw_controls(vs)
 		_draw_weapon_panel(vs)
-		_draw_button("settings", vs)          # the gear sits on the weapon panel's top corner
+		_draw_button("settings", vs)          # the gear sits in the corner beside the weapon panel
 	_draw_hp_block(vs, u)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
@@ -717,6 +721,7 @@ func _draw() -> void:
 	_draw_prep(vs, u)
 	_draw_round_banner(vs, u)
 	_draw_kill_banner(vs, u)
+	_draw_spectating(vs, u)
 	_draw_center_text(vs, u)
 	_draw_tips(vs, u)
 	if Game.settings.show_fps:
@@ -764,9 +769,11 @@ func _draw_button(id: String, vs: Vector2) -> void:
 			"wall":
 				count = player.shields
 				en = player.shields > 0
+				act = player.ready_item == "wall"
 			"grenade":
 				count = player.grenades
 				en = player.grenades > 0
+				act = player.ready_item == "grenade"
 	elif editor_mode:
 		match id:
 			"medkit", "wall":
@@ -779,7 +786,9 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	var glyph := _glyph(id)
 	if id == "fire_r" and not editor_mode:
 		c = _fire_center(id, c, r, vs)
-		if player != null and Weapons.is_melee(player.weapon().def):
+		if player != null and player.ready_item != "":
+			glyph = _glyph(player.ready_item)   # a wall or grenade in hand: FIRE uses it
+		elif player != null and Weapons.is_melee(player.weapon().def):
 			glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
 	if id == "fire_r":
 		_draw_fire_halo(c, r, o, pressed)
@@ -872,9 +881,8 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 		status = "RELOAD"
 		st_col = Color(1.0, 0.33, 0.28, o)
 	HudDraw.text(self, status, Vector2(ax, main.position.y + s * 0.76), int(s * 0.23), st_col, 0, 2, "bold")
-	# (under the settings gear, which sits in the slot's top right corner like the reference)
-	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(main.end.x - main.size.x * 0.31, main.position.y + s * 0.53),
-		Vector2(main.size.x * 0.46, s * 0.56), Color(1, 1, 1, 0.97 * dim * o))
+	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(main.end.x - main.size.x * 0.3, main.position.y + s * 0.44),
+		Vector2(main.size.x * 0.5, s * 0.66), Color(1, 1, 1, 0.97 * dim * o))
 	var ul := Rect2(main.position.x + s * 0.12, main.end.y - s * 0.09, main.size.x - s * 0.24, maxf(2.0, s * 0.035))
 	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
 	draw_rect(Rect2(ul.position, Vector2(ul.size.x * (progress if reloading else 1.0), ul.size.y)),
@@ -913,6 +921,32 @@ func _infinity(c: Vector2, half_w: float, col: Color) -> void:
 func _spread_px() -> float:
 	var fov := player.camera.fov if player.camera else 68.0
 	return tan(deg_to_rad(player.current_spread())) / tan(deg_to_rad(fov) * 0.5) * size.y * 0.5
+
+
+## A wall or grenade in hand: a small centre dot instead of the crosshair; for the grenade a
+## dotted arc to where it would land and a ring there (the wall's preview stands in the world).
+func _draw_item_aim(c: Vector2, u: float) -> void:
+	draw_circle(c, maxf(0.0045 * u, 1.5), Color(1, 1, 1, 0.9))
+	if player.ready_item != "grenade":
+		return
+	var cam := player.camera
+	var arc := player.grenade_arc()
+	var dot := maxf(0.0055 * u, 1.8)
+	for i in range(2, arc.size() - 1, 2):
+		if not cam.is_position_behind(arc[i]):
+			draw_circle(cam.unproject_position(arc[i]), dot, Color(1, 1, 1, 0.45 + 0.5 * float(i) / arc.size()))
+	var land := arc[arc.size() - 1]
+	var nrm := player.arc_normal
+	var t1 := nrm.cross(Vector3.RIGHT if absf(nrm.x) < 0.9 else Vector3.FORWARD).normalized()
+	var t2 := nrm.cross(t1)
+	var ring := PackedVector2Array()
+	for k in 33:
+		var q := land + nrm * 0.04 + (t1 * cos(TAU * k / 32.0) + t2 * sin(TAU * k / 32.0)) * 0.9
+		if cam.is_position_behind(q):
+			return
+		ring.append(cam.unproject_position(q))
+	draw_polyline(ring, Color(1.0, 0.4, 0.3, 0.95), maxf(0.0045 * u, 1.5), true)
+	draw_circle(cam.unproject_position(land), dot * 1.3, Color(1.0, 0.4, 0.3, 0.95))
 
 
 func _draw_crosshair(c: Vector2, u: float) -> void:
@@ -1385,6 +1419,22 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 
 
 ## "ROUND n / AREA: name" on a band fading from blue (left) to orange (right).
+## Eliminated and following the killer's view: SPECTATING and their name at the bottom right
+## (the controls are hidden then; the kill feed keeps the bottom centre).
+func _draw_spectating(vs: Vector2, u: float) -> void:
+	var who := player.spectating_now() if player != null else null
+	if who == null:
+		return
+	var nm := who.display_name.to_upper()
+	var fs := int(0.03 * u)
+	var lfs := int(0.022 * u)
+	var w := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("SPECTATING", lfs, "bold")) + 0.12 * u
+	var c := Vector2(vs.x - w * 0.5 - 0.06 * u, vs.y * 0.8)
+	HudDraw.plate(self, Rect2(c.x - w * 0.5, c.y - 0.04 * u, w, 0.085 * u), 0.7)
+	HudDraw.text(self, "SPECTATING", Vector2(c.x, c.y - 0.015 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
+	HudDraw.text(self, nm, Vector2(c.x, c.y + 0.022 * u), fs, Color.WHITE, 1, 2, "bold")
+
+
 func _draw_round_banner(vs: Vector2, u: float) -> void:
 	var t := float(_round_banner.t)
 	if t <= 0.0:
@@ -1435,11 +1485,17 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var pop := 1.0 + 0.45 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
 	var c := Vector2(vs.x * 0.5, vs.y * 0.19)
 	var bs := 0.19 * u * pop
-	HudDraw.disk(self, c, bs * 0.42, Color(0.9, 0.2, 0.15, 0.18 * a * (1.0 - clampf(age / 0.6, 0.0, 1.0))))
-	HudDraw.icon(self, HudDraw.tex("badge_elim"), c, Vector2(bs, bs), Color(1, 1, 1, a))
+	var head := bool(_kill_banner.head)
+	HudDraw.disk(self, c, bs * 0.42, Color(0.9, 0.2, 0.15, (0.32 if head else 0.18) * a * (1.0 - clampf(age / 0.6, 0.0, 1.0))))
+	# A headshot kill gets its own look: a red badge with the head target on it and a red pulse.
+	if head:
+		HudDraw.ring(self, c, bs * (0.45 + 0.35 * clampf(age / 0.5, 0.0, 1.0)), Color(1.0, 0.25, 0.18, 0.7 * a * (1.0 - clampf(age / 0.5, 0.0, 1.0))), maxf(2.0, 0.008 * u))
+	HudDraw.icon(self, HudDraw.tex("badge_elim"), c, Vector2(bs, bs), Color(1.0, 0.62, 0.55, a) if head else Color(1, 1, 1, a))
+	if head:
+		HudDraw.disk(self, c, bs * 0.17, Color(0.55, 0.05, 0.03, 0.9 * a))
+		HudDraw.icon(self, HudDraw.tex("v_headshot"), c, Vector2(bs, bs) * 0.27, Color(1.0, 0.86, 0.8, a))
 	# One dark plate under the badge holds both lines (HEADSHOT / ELIMINATED, then the name),
 	# so they stay readable over a bright hall or the character's raised arms.
-	var head := bool(_kill_banner.head)
 	var label := "HEADSHOT" if head else "ELIMINATED"
 	var lfs := int(0.036 * u)
 	var nm := String(_kill_banner.name).to_upper()

@@ -49,6 +49,21 @@ log "screen ${W}x${H}"
 S=$(python3 -c "print($H/720.0)")
 VW=$(python3 -c "print($W/($H/720.0))")
 px() { python3 -c "print(int(round($1)))"; }
+# A fresh install first asks for a name: keep the offered one (OK) so START is free. The name
+# field has the focus, so the on-screen keyboard may be up: BACK closes only the keyboard then.
+if wait_mark "name prompt" 40; then
+  sleep 3
+  if adb shell dumpsys input_method 2>/dev/null | grep -q "mInputShown=true"; then
+    log "keyboard shown for the name field"
+    adb shell input keyevent KEYCODE_BACK
+    sleep 2
+  fi
+  shot 01b_name_prompt
+  read -r NX NY < <(ui_pos name_ok "$(px "($VW*0.5+235)*$S")" "$(px "200*$S")")
+  log "tap name OK at $NX,$NY"
+  adb shell input tap "$NX" "$NY"
+  sleep 3
+fi
 # START: bottom-right anchored, spans VW-342..VW-12 x 630..708 => centre (VW-177, 669).
 read -r SX SY < <(ui_pos start "$(px "($VW-177)*$S")" "$(px "669*$S")")
 log "tap START at $SX,$SY"

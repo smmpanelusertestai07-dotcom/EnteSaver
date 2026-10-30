@@ -602,21 +602,32 @@ func heal_progress() -> float:
 	return clampf(_heal_t / HEAL_TIME, 0.0, 1.0) if healing else 0.0
 
 
-func deploy_shield(toward := Vector3.ZERO) -> bool:
-	if shields <= 0 or not alive or hold_fire:
-		return false
+## Where a wall put down toward `toward` (flattened; default ahead) stands: [position, facing],
+## `dist` m ahead or nearer when something is in the way; empty without a direction.
+func shield_spot(toward := Vector3.ZERO, dist := 2.0) -> Array:
 	var fwd := -global_basis.z if toward == Vector3.ZERO else toward
 	fwd.y = 0.0
 	if fwd.length() < 0.1:
-		return false
+		return []
 	fwd = fwd.normalized()
-	var dist := 2.0
 	var res := trace(global_position + Vector3.UP * 1.0, fwd, dist + 0.6, LAYER_WORLD | LAYER_SHIELD)
 	if not res.is_empty():
-		dist = maxf(global_position.distance_to(res.position) - 0.7, 0.9)
+		var hit: Vector3 = res.position - global_position
+		hit.y = 0.0
+		dist = clampf(hit.length() - 0.7, 0.9, dist)
+	return [global_position + fwd * dist, fwd]
+
+
+func deploy_shield(toward := Vector3.ZERO, dist := 2.0) -> bool:
+	if shields <= 0 or not alive or hold_fire:
+		return false
+	var spot := shield_spot(toward, dist)
+	if spot.is_empty():
+		return false
+	var pos: Vector3 = spot[0]
+	var fwd: Vector3 = spot[1]
 	var wall := ShieldWall.new()
 	get_tree().current_scene.add_child(wall)
-	var pos := global_position + fwd * dist
 	wall.global_position = pos
 	wall.look_at(pos + fwd, Vector3.UP)
 	shields -= 1
@@ -640,6 +651,13 @@ func throw_grenade(target := Vector3.INF) -> bool:
 	return true
 
 
+## Where a grenade thrown along the aim now would leave the hand, and how fast: [position, velocity].
+func grenade_launch() -> Array:
+	var dir := aim_forward()
+	return [eye_position() + dir * 0.6 + global_basis.x * 0.25,
+		dir * 17.0 + Vector3.UP * 4.0 + Vector3(velocity.x, 0, velocity.z) * 0.5]
+
+
 func _release_grenade() -> void:
 	_throwing = false
 	if not alive or not is_inside_tree():
@@ -647,9 +665,9 @@ func _release_grenade() -> void:
 	var g := Grenade.new()
 	g.thrower = self
 	get_tree().current_scene.add_child(g)
-	var dir := aim_forward()
-	g.global_position = eye_position() + dir * 0.6 + global_basis.x * 0.25
-	g.linear_velocity = dir * 17.0 + Vector3.UP * 4.0 + Vector3(velocity.x, 0, velocity.z) * 0.5
+	var launch := grenade_launch()
+	g.global_position = launch[0]
+	g.linear_velocity = launch[1]
 	if _throw_target != Vector3.INF:
 		var to := _throw_target - g.global_position
 		var flat := Vector2(to.x, to.z).length()

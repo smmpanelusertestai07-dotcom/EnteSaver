@@ -72,7 +72,10 @@ var _col_tol := 0.0
 var _head_yaw := 0.0                  # aim yaw of the target's head (the column's top)
 var _anchor := ""                     # what firing holds since the last drag: "head", "body", "over"
 var victory_cam := false
+var spectating: Fighter               # eliminated: whose view the camera follows (the killer)
+var _spectate_wait := 0.0             # s left on the own fall before the camera goes to them
 var crosshair_on_target := false      # HUD: crosshair turns red
+var _red_target: Fighter              # whom it is red on (a shot then goes to them)
 var _track_dir := Vector3.ZERO        # last camera->target chest direction (for tracking)
 var _track_target: Fighter
 var _victory_yaw := INF
@@ -80,6 +83,10 @@ var _faded := false
 var _cam_y := CAM_HEIGHT
 var _fov := FOV_HIP
 var _scope_hold := false              # "hold fire to scope" for snipers: fire on release
+var ready_item := ""                  # "wall" or "grenade" in hand: FIRE puts it down / throws it
+var _item_held := false               # FIRE is down with an item in hand (it goes on the release)
+var _wall_ghost: MeshInstance3D       # where the wall in hand would stand
+var arc_normal := Vector3.UP          # the surface the last grenade_arc() ends on
 
 
 func _ready() -> void:
@@ -148,6 +155,24 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	victory_cam = false
 	_victory_yaw = INF
 	_track_target = null
+	spectating = null
+	put_away_item()
+
+
+## Whom the camera follows now (null: the own character): the killer, once the fall was shown.
+func spectating_now() -> Fighter:
+	if alive or spectating == null or not is_instance_valid(spectating) or not spectating.alive or _spectate_wait > 0.0:
+		return null
+	return spectating
+
+
+## Eliminated: after a moment on the fall the camera follows whoever made the kill, from behind
+## their shoulder, like the reference's spectating view (until the next round).
+func die(killer: Fighter, headshot := false) -> void:
+	put_away_item()
+	spectating = killer if killer != null and killer != self else null
+	_spectate_wait = 1.0
+	super(killer, headshot)
 
 
 ## The aim was set directly (not dragged): firing decides afresh what to hold.
@@ -266,9 +291,19 @@ func cancel_input() -> void:
 		_scope_hold = false
 		ads = false
 	firing = false
+	_item_held = false
 
 
 func set_firing(on: bool) -> void:
+	# A wall or grenade in hand: FIRE puts it down / throws it when it is let go (a hold aims it
+	# first, the fire button's drag still turns the view).
+	if ready_item != "" or _item_held:
+		if on and alive:
+			_item_held = true
+		elif not on and _item_held:
+			_item_held = false
+			_use_ready_item()
+		return
 	var was := firing
 	firing = on and alive
 	if firing and not was and scope_type() != "sniper":
@@ -298,7 +333,7 @@ func _fire_once() -> void:
 
 
 func toggle_ads() -> void:
-	if not alive or healing or Weapons.is_melee(weapon().def):
+	if not alive or healing or ready_item != "" or Weapons.is_melee(weapon().def):
 		return
 	ads = not ads
 	sprinting = false
@@ -324,27 +359,131 @@ func set_sprint(on: bool) -> void:
 
 
 func do_reload() -> void:
+	put_away_item()
 	start_reload()
 
 
 func select_weapon(i: int) -> void:
+	put_away_item()
 	switch_weapon(i)
 	ads = false
 
 
 func use_medkit() -> void:
+	put_away_item()
 	if healing:
 		cancel_heal()
 	else:
 		start_heal()
 
 
+## The wall and grenade buttons take the item in hand (like the reference mode: nothing is
+## thrown yet, a preview shows where it goes); FIRE then uses it, the same button again or a
+## weapon puts it away.
 func use_shield() -> void:
-	deploy_shield()
+	_take_item("wall")
 
 
 func use_grenade() -> void:
-	throw_grenade()
+	_take_item("grenade")
+
+
+func _take_item(item: String) -> void:
+	if ready_item == item:
+		put_away_item()
+		return
+	if not alive or hold_fire or _item_count(item) <= 0 or (item == "grenade" and _throwing):
+		return
+	if healing:
+		cancel_heal()
+	ready_item = item
+	_item_held = false
+	firing = false
+	_shot_wait = -1.0
+	_scope_hold = false
+	ads = false
+	sprinting = false
+	Audio.play("ui_select", -10.0)
+
+
+func put_away_item() -> void:
+	ready_item = ""
+	_item_held = false
+	if _wall_ghost:
+		_wall_ghost.visible = false
+
+
+func _item_count(item: String) -> int:
+	return shields if item == "wall" else grenades
+
+
+func _use_ready_item() -> void:
+	var item := ready_item
+	put_away_item()
+	if not alive:
+		return
+	match item:
+		"wall":
+			var f := aim_forward()
+			if deploy_shield(Vector3(f.x, 0.0, f.z), wall_distance()):
+				model.play_throw()          # the toss; the foam sets at once
+				Game.mark("player wall")
+		"grenade":
+			if throw_grenade():
+				Game.mark("player grenade")
+
+
+## How far ahead the wall in hand goes: nearer looking down, farther looking up.
+func wall_distance() -> float:
+	return clampf(2.2 + rad_to_deg(aim_pitch) * 0.05, 1.2, 3.4)
+
+
+## The path a grenade thrown now would fly until it first lands (for the HUD's arc); the last
+## point is where it lands.
+func grenade_arc() -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	var launch := grenade_launch()
+	var p: Vector3 = launch[0]
+	var v: Vector3 = launch[1]
+	var g := Vector3.DOWN * float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
+	var damp := float(ProjectSettings.get_setting("physics/3d/default_linear_damp", 0.1))
+	var dt := 1.0 / 30.0
+	var space := get_world_3d().direct_space_state
+	pts.append(p)
+	arc_normal = Vector3.UP
+	for i in 90:
+		v = (v + g * dt) * maxf(1.0 - damp * dt, 0.0)
+		var q := PhysicsRayQueryParameters3D.create(p, p + v * dt, LAYER_WORLD | LAYER_SHIELD)
+		var res := space.intersect_ray(q)
+		if not res.is_empty():
+			pts.append(res.position)
+			arc_normal = res.normal
+			break
+		p += v * dt
+		pts.append(p)
+	return pts
+
+
+func _update_item_preview() -> void:
+	if ready_item != "" and (not alive or hold_fire or _item_count(ready_item) <= 0):
+		put_away_item()
+	var want_ghost := ready_item == "wall"
+	if want_ghost and _wall_ghost == null:
+		_wall_ghost = MeshInstance3D.new()
+		_wall_ghost.mesh = ShieldWall.wall_mesh()
+		_wall_ghost.material_override = ShieldWall.ghost_material()
+		_wall_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_wall_ghost.layers = CharacterModel.LAYER_ACTORS
+		_wall_ghost.top_level = true
+		add_child(_wall_ghost)
+	if _wall_ghost == null:
+		return
+	var spot := shield_spot(aim_forward(), wall_distance()) if want_ghost else []
+	_wall_ghost.visible = not spot.is_empty()
+	if not spot.is_empty():
+		var pos: Vector3 = spot[0]
+		var fwd: Vector3 = spot[1]
+		_wall_ghost.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), pos)
 
 
 # ---------------------------------------------------------------- tick
@@ -408,7 +547,7 @@ func _try_fire() -> void:
 	_sync_aim_rig()
 	var ray := _shot_ray()
 	var start: Vector3 = ray[0]
-	var fwd: Vector3 = ray[1]
+	var fwd := _magnet_dir(start, ray[1])
 	if perform_shot(start, fwd):
 		Game.mark("player fired")
 		if arena and arena.has_method("net_shot"):
@@ -441,6 +580,20 @@ func _aim_angles_for(p: Vector3) -> Vector2:
 	return Vector2(atan2(-d.x, -d.z) - deg_to_rad(recoil_yaw), asin(clampf(d.y, -1.0, 1.0)) - deg_to_rad(recoil_pitch))
 
 
+## Point of the segment a..b closest to the line from o along dir.
+static func _closest_on_segment(o: Vector3, dir: Vector3, a: Vector3, b: Vector3) -> Vector3:
+	var seg := b - a
+	var w := a - o
+	var aa := seg.dot(seg)
+	var ab := seg.dot(dir)
+	var cc := dir.dot(dir)
+	var d := seg.dot(w)
+	var e := dir.dot(w)
+	var den := aa * cc - ab * ab
+	var t := clampf((ab * e - cc * d) / den, 0.0, 1.0) if absf(den) > 1e-6 else 0.0
+	return a + seg * t
+
+
 ## Angular distance (radians) between the crosshair ray and the target's body, a capsule from
 ## the feet to the top of the head with the body's half width. 0 = the crosshair is on them.
 func _body_miss_angle(f: Fighter) -> float:
@@ -450,16 +603,7 @@ func _body_miss_angle(f: Fighter) -> float:
 	# Head top to the feet (behind the body when prone).
 	var top := f.head_position() + f.model.head_up() * 0.12
 	var bottom := (f.model.bone_position("foot_l") + f.model.bone_position("foot_r")) * 0.5 + Vector3.UP * 0.08
-	var seg := top - bottom
-	var w := bottom - o
-	var a := seg.dot(seg)
-	var b := seg.dot(dir)
-	var c := dir.dot(dir)
-	var d := seg.dot(w)
-	var e := dir.dot(w)
-	var den := a * c - b * b
-	var t := clampf((b * e - c * d) / den, 0.0, 1.0) if absf(den) > 1e-6 else 0.0
-	var p := bottom + seg * t
+	var p := _closest_on_segment(o, dir, bottom, top)
 	var dist := o.distance_to(p)
 	var ang := dir.angle_to((p - o) / maxf(dist, 0.01))
 	var radius := atan(0.32 / maxf(dist, 0.5))
@@ -473,11 +617,27 @@ func _shot_ray() -> Array:
 	return [xf.origin + fwd * maxf((eye_position() - xf.origin).dot(fwd), 0.0), fwd]
 
 
-## True when that line meets f before any cover, within the gun's reach: the red crosshair.
+## True when that line meets f before any cover, within the gun's reach.
 func _crosshair_meets(f: Fighter) -> bool:
 	var ray := _shot_ray()
 	var res := trace(ray[0], ray[1], float(weapon().def.range) * 1.6)
 	return not res.is_empty() and owner_of(res.collider) == f
+
+
+## The reference's bullet magnetism: a shot fired while the crosshair is red goes into the torso
+## (within MAGNET_KEEP of its line, pelvis to neck, on the side the crosshair is); on the head it
+## goes where the crosshair is (a headshot needs the head). Spread and cover still apply; the
+## sniper scope gets none.
+const MAGNET_KEEP := 0.1
+func _magnet_dir(start: Vector3, fwd: Vector3) -> Vector3:
+	var f := _red_target
+	if f == null or not f.alive or not _assist_active() or is_scoped() or _zone_on(f) == "head":
+		return fwd
+	var a := _closest_on_segment(start, fwd, f.model.bone_position("pelvis"), f.model.bone_position("neck"))
+	var off := start + fwd * maxf((a - start).dot(fwd), 0.0) - a       # the crosshair's ray beside it
+	if off.length() <= MAGNET_KEEP:
+		return fwd
+	return (a + off.normalized() * MAGNET_KEEP - start).normalized()
 
 
 ## The camera turns with the aim in _process; physics (shots, the assist) first turns it to the
@@ -493,6 +653,7 @@ func _update_aim_assist(delta: float) -> void:
 	_sync_aim_rig()
 	assist_target = null
 	crosshair_on_target = false
+	_red_target = null
 	aim_zone = ""
 	_on_column = false
 	if arena == null or camera == null:
@@ -509,10 +670,12 @@ func _update_aim_assist(delta: float) -> void:
 		var dist := xf.origin.distance_to(chest)
 		var miss := _body_miss_angle(f)
 		var zone := _zone_on(f)
-		# The red crosshair: a shot (before spread) would hit them, at any range the gun reaches;
-		# the assist works only inside max_range.
-		if _crosshair_meets(f):
+		# The red crosshair: on them or just beside them (the on-target margin) in the gun's reach
+		# and in sight, at any range; a shot fired then goes to them (_magnet_dir). The assist works
+		# only inside max_range.
+		if zone != "" and dist <= float(weapon().def.range) * 1.6 and (can_see(chest) or can_see(f.head_position())):
 			crosshair_on_target = true
+			_red_target = f
 		if dist > max_range:
 			continue
 		var cone := deg_to_rad(float(ASSIST.cone_scope_deg if scoped else ASSIST.cone_deg))
@@ -605,6 +768,7 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if rig == null:
 		return
+	_update_item_preview()
 	var w := weapon()
 	var rec := 1.0 - exp(-(9.0 if w.since_shot > 0.08 else 3.5) * delta)
 	recoil_pitch = lerpf(recoil_pitch, 0.0, rec)
@@ -613,17 +777,29 @@ func _process(delta: float) -> void:
 	var target_y := eye_height() + 0.02 if alive else 0.6
 	if victory_cam:
 		target_y = 1.25
+	_spectate_wait = maxf(_spectate_wait - delta, 0.0)
+	var watch := spectating_now()
+	if watch:
+		target_y = watch.eye_height() + 0.02
 	_cam_y = lerpf(_cam_y, target_y, 1.0 - exp(-10.0 * delta))
-	rig.global_position = global_position + Vector3.UP * _cam_y
+	if watch:
+		var to := watch.global_position + Vector3.UP * _cam_y
+		rig.global_position = rig.global_position.lerp(to, 1.0 - exp(-8.0 * delta))
+	else:
+		rig.global_position = global_position + Vector3.UP * _cam_y
 	var sx := (randf() - 0.5) * shake * 0.6
 	var sy := (randf() - 0.5) * shake * 0.6
 	if victory_cam or not alive:
-		# Orbit to the front (victory) or look down at the body (eliminated).
+		# Orbit to the front (victory), look down at the body (eliminated), then follow the killer.
 		if victory_cam and _victory_yaw == INF:
 			_victory_yaw = _pick_victory_yaw()
 		var want_yaw := _victory_yaw if victory_cam else aim_yaw
 		var want_pitch := deg_to_rad(-8.0 if victory_cam else -38.0)
 		var k := 1.0 - exp(-2.5 * delta)
+		if watch:
+			want_yaw = watch.aim_yaw
+			want_pitch = clampf(watch.aim_pitch * 0.6, deg_to_rad(-25.0), deg_to_rad(15.0)) - deg_to_rad(6.0)
+			k = 1.0 - exp(-6.0 * delta)
 		yaw_node.rotation.y = lerp_angle(yaw_node.rotation.y, want_yaw, k)
 		pitch_node.rotation.x = lerpf(pitch_node.rotation.x, want_pitch, k)
 	else:
@@ -636,7 +812,7 @@ func _process(delta: float) -> void:
 	elif prone:
 		dist *= 0.9
 	if not alive:
-		dist = 4.5
+		dist = CAM_DIST if watch else 4.5
 	elif victory_cam:
 		dist = 3.2
 	spring.spring_length = lerpf(spring.spring_length, dist, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
