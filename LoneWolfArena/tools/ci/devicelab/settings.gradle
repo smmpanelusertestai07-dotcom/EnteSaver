@@ -1,0 +1,10 @@
+// Private reference probe on real phones (Firebase Test Lab), run only by hand from the
+// "devicelab" job of .github/workflows/lonewolf-arena.yml. Nothing here is part of the game.
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = "devicelab"
+include ":app"

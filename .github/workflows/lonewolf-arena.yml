@@ -24,6 +24,10 @@ on:
         description: "Probe: minutes of reading the screen and tapping through (0 = screenshots only)"
         type: string
         default: "0"
+      testlab_minutes:
+        description: "Probe on a real phone (Firebase Test Lab, secret GCP_TESTLAB_KEY) for this many minutes instead of the emulator (0 = emulator)"
+        type: string
+        default: "0"
 
 permissions:
   contents: read
@@ -157,7 +161,7 @@ jobs:
   # re-signed copy is noticed. The results are uploaded encrypted with the public key given at
   # dispatch and kept for a day, so the run publishes nothing of the probed app.
   reference:
-    if: github.event_name == 'workflow_dispatch' && inputs.reference_app != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.reference_app != '' && inputs.testlab_minutes == '0'
     runs-on: ubuntu-latest
     timeout-minutes: 170
     defaults:
@@ -278,3 +282,121 @@ jobs:
             ref.key
           if-no-files-found: ignore
           retention-days: 1
+
+  # The same private probe on a real phone (Firebase Test Lab, with GPU): the phone-side driver
+  # in LoneWolfArena/tools/ci/devicelab installs the app, reads the screen and taps through like
+  # reference_nav.py. The project's key comes from the GCP_TESTLAB_KEY secret; everything the run
+  # returns is encrypted like the emulator probe's, and the public log only says how it went.
+  devicelab:
+    if: github.event_name == 'workflow_dispatch' && inputs.reference_app != '' && inputs.testlab_minutes != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      APP_ID: ${{ inputs.reference_app }}
+      RESULTS_KEY: ${{ inputs.results_key }}
+      TL_MINUTES: ${{ inputs.testlab_minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Week of the year (the app is fetched again once a week)
+        id: week
+        run: echo "w=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the app from an earlier run
+        uses: actions/cache/restore@v4
+        with:
+          path: ref_app
+          key: ref-app-${{ inputs.reference_app }}-${{ steps.week.outputs.w }}
+
+      - name: Fetch the app
+        run: |
+          [[ "$APP_ID" =~ ^[A-Za-z0-9._]+$ ]]
+          [[ "$TL_MINUTES" =~ ^[0-9]{1,2}$ ]]
+          mkdir -p ref_app
+          if ! ls ref_app/*.apk > /dev/null 2>&1; then
+            curl -fsSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
+            chmod +x apkeep
+            ./apkeep -a "$APP_ID" -d apk-pure -o acknowledge_dangers=true ref_app > /dev/null
+          fi
+          cd ref_app
+          for f in *.xapk *.apks; do [ -f "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
+          ls -la ./*.apk
+
+      - name: Build the phone-side driver
+        working-directory: LoneWolfArena/tools/ci/devicelab
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gradle.zip" https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+          JAVA_HOME="$JAVA_HOME_17_X64" "$RUNNER_TEMP/gradle-8.14.3/bin/gradle" --no-daemon -q assembleDebug assembleDebugAndroidTest
+          ls -la app/build/outputs/apk/debug/*.apk app/build/outputs/apk/androidTest/debug/*.apk
+
+      - name: Run on a real phone (Firebase Test Lab)
+        env:
+          GCP_KEY: ${{ secrets.GCP_TESTLAB_KEY }}
+        run: |
+          mkdir -p tl-results
+          [ -n "$GCP_KEY" ] || { echo "no GCP_TESTLAB_KEY secret"; exit 1; }
+          printf '%s' "$GCP_KEY" > "$RUNNER_TEMP/gcp.json"
+          trap 'rm -f "$RUNNER_TEMP/gcp.json"' EXIT
+          L=tl-results/gcloud.txt
+          PROJECT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/gcp.json")"
+          gcloud auth activate-service-account --key-file "$RUNNER_TEMP/gcp.json" --quiet >> "$L" 2>&1
+          gcloud config set project "$PROJECT" --quiet >> "$L" 2>&1
+          gcloud services enable testing.googleapis.com toolresults.googleapis.com --quiet >> "$L" 2>&1 \
+            && echo "APIs on" || { echo "could not turn the Test Lab APIs on"; exit 1; }
+          # A physical phone that still runs 32-bit ARM apps; Samsung first, newest Android first.
+          gcloud firebase test android models list --filter="form=PHYSICAL" --format=json > tl-results/models.json 2>> "$L"
+          read -r MODEL VERSION < <(python3 - tl-results/models.json <<'PY'
+          import json, sys
+          ms = [m for m in json.load(open(sys.argv[1]))
+                if "armeabi-v7a" in m.get("supportedAbis", []) and "deprecated" not in " ".join(m.get("tags", []))]
+          ms.sort(key=lambda m: (m.get("manufacturer", "").lower() != "samsung", -max(int(v) for v in m["supportedVersionIds"])))
+          m = ms[0]
+          print(m["id"], max(m["supportedVersionIds"], key=int))
+          PY
+          )
+          echo "phone: $MODEL, Android API $VERSION"
+          FILES=""
+          for f in ref_app/*.apk; do FILES="$FILES,/sdcard/ffdrv/$(basename "$f")=$f"; done
+          D=LoneWolfArena/tools/ci/devicelab/app/build/outputs/apk
+          gcloud firebase test android run --type instrumentation \
+            --app "$D/debug/app-debug.apk" --test "$D/androidTest/debug/app-debug-androidTest.apk" \
+            --device "model=$MODEL,version=$VERSION,orientation=landscape" \
+            --other-files "${FILES#,}" \
+            --environment-variables "minutes=$TL_MINUTES,pkg=$APP_ID,apks=/sdcard/ffdrv" \
+            --directories-to-pull /sdcard/Android/data/org.lonewolf.devicelab/files \
+            --timeout "$((TL_MINUTES + 12))m" --results-dir "ffdrv-$GITHUB_RUN_ID" --quiet >> "$L" 2>&1 \
+            && echo "test run finished" || echo "test run ended with an error (details in the results)"
+          BUCKET="$(grep -oE 'test-lab-[a-z0-9-]+' "$L" | head -1)"
+          [ -n "$BUCKET" ] && gsutil -m -q cp -r "gs://$BUCKET/ffdrv-$GITHUB_RUN_ID" tl-results/ >> "$L" 2>&1 \
+            && echo "results downloaded: $(du -sh tl-results | cut -f1)" || echo "no results to download"
+
+      - name: Encrypt the results
+        if: always()
+        run: |
+          [ -n "$RESULTS_KEY" ] || { echo "no results key: nothing is uploaded"; exit 0; }
+          tar czf ref.tgz tl-results 2>/dev/null || tar czf ref.tgz --files-from /dev/null
+          printf '%s' "$RESULTS_KEY" | base64 -d > pub.pem
+          openssl rand -out k.bin 32
+          openssl enc -aes-256-cbc -pbkdf2 -salt -in ref.tgz -out ref.data -pass file:k.bin
+          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k.bin -out ref.key
+          rm -f k.bin ref.tgz
+          ls -la ref.data ref.key
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: devicelab-results
+          path: |
+            ref.data
+            ref.key
+          if-no-files-found: ignore
+          retention-days: 1
+

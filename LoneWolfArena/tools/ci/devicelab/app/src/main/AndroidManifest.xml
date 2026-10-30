@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app under test is only a host for the instrumentation in src/androidTest. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="DeviceLab" />
+</manifest>
