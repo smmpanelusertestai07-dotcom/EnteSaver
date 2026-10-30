@@ -59,6 +59,8 @@ func run(autotest: Node) -> int:
 	var round_now := 1
 	while true:
 		if host:
+			if round_now > 1:
+				await at.wait(1.5)     # the guest checks its reset 1 s into its round, which can start later
 			b.take_damage(9999.0, "head", p, p.global_position)
 		t = 0.0
 		while t < 30.0 and not arena.get("_result_shown") and not (int(arena.get("round_index")) > round_now and arena.get("phase") == 1):
