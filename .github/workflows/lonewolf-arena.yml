@@ -11,27 +11,17 @@ on:
       - "LoneWolfArena/**"
       - ".github/workflows/lonewolf-arena.yml"
   workflow_dispatch:
-    inputs:
-      reference_app:
-        description: "Private probe instead of the normal run: package of a reference app to look at on the emulator"
-        type: string
-        default: ""
-      results_key:
-        description: "Base64 of the RSA public key (PEM) the probe's results are encrypted with"
-        type: string
-        default: ""
 
 permissions:
   contents: read
 
 # A newer push to the same branch / PR supersedes the running check.
 concurrency:
-  group: lonewolf-arena-${{ github.ref }}-${{ inputs.reference_app || 'ci' }}
+  group: lonewolf-arena-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   android:
-    if: github.event_name != 'workflow_dispatch' || inputs.reference_app == ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
@@ -146,86 +136,3 @@ jobs:
             emulator-results
             LoneWolfArena/build/LoneWolfArena.apk
           retention-days: 14
-
-  # Manual runs only: a private look at a reference app on the emulator (screens and log, see
-  # LoneWolfArena/tools/ci/reference_probe.sh). The app comes from an official store that needs no
-  # account (Huawei AppGallery) through apkeep (EFF); the results are uploaded encrypted with the
-  # public key given at dispatch and kept for a day, so the run publishes nothing of the probed app.
-  reference:
-    if: github.event_name == 'workflow_dispatch' && inputs.reference_app != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    defaults:
-      run:
-        shell: bash
-    env:
-      APP_ID: ${{ inputs.reference_app }}
-      RESULTS_KEY: ${{ inputs.results_key }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
-          df -h /
-
-      - name: Fetch the app and show its signer
-        run: |
-          [[ "$APP_ID" =~ ^[A-Za-z0-9._]+$ ]]
-          # 0.16.0: the last release with the AppGallery source
-          curl -fsSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/download/0.16.0/apkeep-x86_64-unknown-linux-gnu
-          chmod +x apkeep
-          mkdir -p ref_app
-          ./apkeep -a "$APP_ID" -d huawei-app-gallery ref_app
-          cd ref_app
-          for f in *.xapk *.apks; do [ -f "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
-          ls -la . Android/obb/* 2>/dev/null | head -40
-          bt="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
-          base="$(ls ./*.apk | grep -v '/config\.' | head -1)"
-          "$bt/apksigner" verify --print-certs "$base" | grep -E "DN:|SHA-256" | tee signer.txt
-
-      - name: Enable KVM for the emulator
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Install, launch and record on the emulator (API 34, x86_64)
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        with:
-          api-level: 34
-          arch: x86_64
-          target: google_apis
-          profile: pixel_6
-          disk-size: 14G
-          ram-size: 6144M
-          force-avd-creation: true
-          disable-animations: true
-          emulator-boot-timeout: 600
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash LoneWolfArena/tools/ci/reference_probe.sh "$APP_ID" ref_app ref-results 12
-
-      - name: Encrypt the results
-        if: always()
-        run: |
-          [ -n "$RESULTS_KEY" ] || { echo "no results key: nothing is uploaded"; exit 0; }
-          tar czf ref.tgz ref-results ref_app/signer.txt 2>/dev/null || tar czf ref.tgz --files-from /dev/null
-          printf '%s' "$RESULTS_KEY" | base64 -d > pub.pem
-          openssl rand -out k.bin 32
-          openssl enc -aes-256-cbc -pbkdf2 -salt -in ref.tgz -out ref.data -pass file:k.bin
-          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k.bin -out ref.key
-          rm -f k.bin ref.tgz
-          ls -la ref.data ref.key
-
-      - uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: reference-results
-          path: |
-            ref.data
-            ref.key
-          if-no-files-found: ignore
-          retention-days: 1
