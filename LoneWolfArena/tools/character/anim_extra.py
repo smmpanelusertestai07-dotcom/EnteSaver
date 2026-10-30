@@ -3,7 +3,8 @@
 character's AnimationPlayer at runtime, track paths "Armature/Skeleton3D:<bone>").
 
 Actions (30 fps, in place, baked FK quaternions + pelvis location, same conventions as animate.py):
-  reload, pump, heal (loop), throw, prone_idle (loop), prone_fwd (loop), swap, hit_react
+  reload, pump, heal (loop), throw, prone_idle (loop), prone_fwd (loop), swap, hit_react,
+  fists_idle, fists_run_a, fists_run_b (static arm poses for the fists, see fists_pose)
 
 Run headless:
   blender -b --python tools/character/anim_extra.py -- [--only reload,pump] [--out X.glb] [--no-export]
@@ -783,6 +784,44 @@ def prone_fwd_pose(t):
     return pose
 
 
+# ============================================================================= fists (unarmed)
+# With the fists out the guns go on the back and the arms move like a runner's. Static arm poses;
+# the game filters them to the arm and finger bones (torso and legs come from the idle / run
+# cycles) and blends fists_run_a <-> fists_run_b with the stride, so the fists swing against the
+# legs (a: left fist forward, right fist back; b: the mirror), or fists_idle at rest.
+FIST = {"index": (80, 95, 55), "middle": (85, 95, 55), "ring": (88, 95, 55), "pinky": (90, 95, 55)}
+FIST_THUMB = (45, 35, 30)
+FWD, RIGHT, UP = Vector((0, -1, 0)), Vector((-1, 0, 0)), Vector((0, 0, 1))      # character frame
+
+
+def fist_arm(pose, s, swing, rest=False):
+    """Arm with a closed fist. swing +1: fist forward at the lower chest with the elbow bent about
+    90 degrees; -1: fist back beside the hip; rest: hanging relaxed beside the thigh."""
+    side = RIGHT if s == "r" else -RIGHT
+    S = pose.head("upperarm_" + s)
+    if rest:
+        wrist = S + FWD * 0.07 + side * 0.07 - UP * 0.5
+        pole = S - FWD * 0.15 + side * 0.25 - UP * 0.25
+    else:
+        u = (swing + 1.0) * 0.5                     # 0 = back, 1 = forward
+        wrist = S + FWD * lerp(-0.2, 0.26, u) + side * lerp(0.08, -0.06, u) - UP * lerp(0.42, 0.26, u)
+        pole = S - FWD * 0.35 + side * 0.15 - UP * 0.3
+    pose.two_bone("upperarm_" + s, "lowerarm_" + s, wrist, pole)
+    f = (wrist - pose.head("lowerarm_" + s)).normalized()
+    p = (-side - f * (-side).dot(f)).normalized()     # palm toward the body
+    pose.set_orient("hand_" + s, hand_matrix(s, wrist, f, p).to_3x3())
+    pose.fingers(s, FIST, thumb=FIST_THUMB)
+    pose.fk()
+
+
+def fists_pose(swing, rest=False):
+    pose = A.Pose()
+    idle_body(pose, 0.0)
+    fist_arm(pose, "l", swing, rest)
+    fist_arm(pose, "r", -swing, rest)
+    return pose
+
+
 # ============================================================================= registry / build
 ANIMS = [
     # name, frames (last == first for loops), loop, pose fn(t)
@@ -794,6 +833,9 @@ ANIMS = [
     ("hit_react", int(round(HIT_T * FPS)), False, hit_pose),
     ("prone_idle", int(round(PRONE_IDLE_T * FPS)), True, prone_idle_pose),
     ("prone_fwd", int(round(PRONE_FWD_T * FPS)), True, prone_fwd_pose),
+    ("fists_idle", 1, False, lambda t: fists_pose(0.0, rest=True)),
+    ("fists_run_a", 1, False, lambda t: fists_pose(1.0)),
+    ("fists_run_b", 1, False, lambda t: fists_pose(-1.0)),
 ]
 
 

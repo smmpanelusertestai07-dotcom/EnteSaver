@@ -15,21 +15,20 @@ extends Control
 
 signal pause_pressed
 
-const BUTTONS := ["fire_r", "fire_l", "scope", "jump", "crouch", "prone", "sprint", "reload", "medkit", "wall",
-	"grenade", "settings", "scoreboard", "freelook"]
+const BUTTONS := ["fire_r", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "settings"]
 const GLYPHS := {
-	"fire_r": "v_fire", "fire_l": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
-	"prone": "stance_prone", "sprint": "stance_sprint", "reload": "v_reload", "medkit": "v_medkit", "wall": "v_wall",
-	"grenade": "item_grenade", "settings": "v_settings", "scoreboard": "v_scoreboard", "freelook": "v_eye",
+	"fire_r": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
+	"prone": "stance_prone", "sprint": "stance_sprint", "medkit": "v_medkit", "wall": "v_wall",
+	"grenade": "item_grenade", "settings": "v_settings",
 }
 const GLYPH_FALLBACK := {"prone": "v_prone", "sprint": "v_sprint", "jump": "v_chevron"}
 const GLYPH_SCALE := {
-	"fire_r": 0.54, "fire_l": 0.56, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
-	"reload": 0.56, "medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "scoreboard": 0.5, "freelook": 0.56,
+	"fire_r": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
+	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
-const SHORT_LABELS := {"settings": "MENU", "scoreboard": "SCORES"}
+const SHORT_LABELS := {"settings": "MENU"}
 const DMG_LIFE := 0.95
 const DMG_MERGE := 0.32            # hits on the same target within this much GAME time add up into one number
 const FEED_LIFE := 6.0
@@ -374,9 +373,6 @@ func _button_visible(id: String) -> bool:
 	if editor_mode:
 		return true
 	match id:
-		"fire_l":
-			var lf := int(Game.settings.get("left_fire", 0))
-			return lf == 0 or (lf == 1 and player != null and player.ads)
 		"sprint":
 			return int(Game.settings.get("run_mode", 2)) != 1
 	return true
@@ -386,7 +382,7 @@ func _press(id: String, index: int) -> void:
 	_pressed[id] = 0.16
 	_touches[index] = {"kind": "ui", "id": id}
 	match id:
-		"fire_r", "fire_l":
+		"fire_r":
 			_touches[index] = {"kind": "fire", "id": id}
 			_held[id] = true
 			_cancel_auto_sprint()
@@ -404,8 +400,6 @@ func _press(id: String, index: int) -> void:
 			player.toggle_prone()
 		"sprint":
 			_toggle_auto_sprint()
-		"reload":
-			player.do_reload()
 		"medkit":
 			_cancel_auto_sprint()
 			player.use_medkit()
@@ -416,11 +410,6 @@ func _press(id: String, index: int) -> void:
 		"settings":
 			release_all()
 			pause_pressed.emit()
-		"scoreboard":
-			_toggle_scoreboard()
-		"freelook":
-			_touches[index] = {"kind": "free", "id": id}
-			player.start_free_look()
 		"weapons:main":
 			if player.current == 0:
 				player.do_reload()
@@ -445,8 +434,6 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 				_joy_vec = (pos - _joy_center) / jr
 		"look":
 			player.add_look(rel, false)
-		"free":
-			player.add_free_look(rel)
 		"fire":
 			_touches[index]["pos"] = pos
 			player.add_look(rel, true)
@@ -477,8 +464,6 @@ func _on_up(index: int, canceled := false) -> void:
 			_joy_vec = Vector2.ZERO
 			_joy_out_t = 0.0
 			_sprint_lock = false
-		"free":
-			player.end_free_look()
 		"fire":
 			_held.erase(String(t.id))
 			var still := false
@@ -711,7 +696,7 @@ func _draw() -> void:
 		_draw_scope(c, vs)
 	_draw_damage_dirs(c, u)
 	if alive:
-		if not scoped and not player.is_free_looking():
+		if not scoped:
 			_draw_crosshair(c, u)
 		_draw_heal(c, u)
 	_draw_kill_x(u)
@@ -756,7 +741,7 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	if player != null and not editor_mode:
 		var ws := player.weapon()
 		match id:
-			"fire_r", "fire_l":
+			"fire_r":
 				en = not player.hold_fire
 			"scope":
 				act = player.ads
@@ -767,9 +752,6 @@ func _draw_button(id: String, vs: Vector2) -> void:
 				act = player.stance == Fighter.Stance.PRONE
 			"sprint":
 				act = player.sprinting or _auto_sprint or _sprint_lock
-			"reload":
-				act = ws.reloading
-				en = ws.can_reload() or ws.reloading
 			"medkit":
 				count = player.medkits
 				act = player.healing
@@ -790,7 +772,7 @@ func _draw_button(id: String, vs: Vector2) -> void:
 		HudDraw.glyph_button(self, c, r, _glyph(id), o, pressed)
 		return
 	var glyph := _glyph(id)
-	if (id == "fire_r" or id == "fire_l") and not editor_mode:
+	if id == "fire_r" and not editor_mode:
 		c = _fire_center(id, c, r, vs)
 		if player != null and Weapons.is_melee(player.weapon().def):
 			glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
@@ -801,8 +783,6 @@ func _draw_button(id: String, vs: Vector2) -> void:
 		HudDraw.count_badge(self, c, r, count, o)
 	if id == "medkit" and act and player != null:
 		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.GOLD, 0.95 * o), 3.0, player.heal_progress())
-	if id == "reload" and act and player != null:
-		HudDraw.ring(self, c, r + 2.0, Color(1, 1, 1, 0.9 * o), 3.0, player.weapon().reload_progress())
 
 
 ## The main fire button's outer dotted ring (reference look), warm while firing.
@@ -878,7 +858,7 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	var mag_col := Color(1, 1, 1, 0.98 * dim * o) if ammo > 0 else Color(1.0, 0.36, 0.3, o)
 	var aw := HudDraw.text(self, str(ammo), Vector2(ax, ay), int(s * 0.56), mag_col, 0, 2, "number")
 	HudDraw.text(self, "/%d" % reserve, Vector2(ax + aw + s * 0.02, ay + s * 0.08), int(s * 0.3), Color(1, 1, 1, 0.85 * dim * o), 0, 2, "number")
-	var status := "QUICK RELOAD" if gun_sel else "TAP TO EQUIP"
+	var status := "RELOAD" if gun_sel else "TAP TO SWITCH"
 	var st_col := Color(1, 1, 1, 0.8 * dim * o)
 	if reloading:
 		status = "RELOADING"
@@ -893,9 +873,6 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
 	draw_rect(Rect2(ul.position, Vector2(ul.size.x * (progress if reloading else 1.0), ul.size.y)),
 		Color(HudDraw.YELLOW, o) if reloading else Color(1, 1, 1, 0.92 * dim * o))
-	# Fire mode next to the slot.
-	HudDraw.text(self, "AUTO" if bool(def.get("auto", false)) else "SINGLE", Vector2(main.position.x - s * 0.14, main.position.y + s * 0.26),
-		int(s * 0.27), Color(1, 1, 1, 0.92 * o), 2, 3, "bold")
 	# Small slots: the gun, an empty slot, fists.
 	for i in 3:
 		var r := slots[i]
@@ -948,11 +925,11 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 			"dot":
 				HudDraw.disk(self, c, 3.6 * sc, outline)
 				HudDraw.disk(self, c, 2.4 * sc, col)
-				ring_r = 9.0 * sc
+				ring_r = 0.015 * u * sc
 				if Weapons.is_melee(w.def):
-					HudDraw.ring(self, c, 9.0 * sc, Color(col, 0.35), 1.2)
+					HudDraw.ring(self, c, ring_r, Color(col, 0.5), 1.4)
 			"wide":
-				ring_r = clampf(maxf(0.055 * u, _spread_px() if dyn else 0.0), 0.05 * u, 0.14 * u) * sc
+				ring_r = clampf(maxf(0.027 * u, _spread_px() if dyn else 0.0), 0.025 * u, 0.08 * u) * sc
 				for k in (0 if w.reloading and Game.settings.get("reload_on_crosshair", true) else 4):
 					var a0 := -PI * 0.5 + PI * 0.5 * k + 0.32
 					draw_arc(c, ring_r, a0, a0 + PI * 0.5 - 0.64, 16, outline, 3.6, true)
@@ -960,8 +937,8 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 				HudDraw.disk(self, c, 2.8 * sc, outline)
 				HudDraw.disk(self, c, 1.8 * sc, col)
 			_:
-				# the ring shows the real spread (reference: ~0.05-0.07 h across, blooming a little)
-				ring_r = clampf(maxf(0.026 * u, _spread_px() if dyn else 0.0), 0.024 * u, 0.07 * u) * sc
+				# the ring shows the real spread (reference: ~0.04 h across, blooming a little)
+				ring_r = clampf(maxf(0.019 * u, _spread_px() if dyn else 0.0), 0.018 * u, 0.055 * u) * sc
 				if not (w.reloading and Game.settings.get("reload_on_crosshair", true)):
 					HudDraw.ring(self, c, ring_r, outline, 3.4)
 					HudDraw.ring(self, c, ring_r, col, 1.6)
@@ -1150,7 +1127,7 @@ func _draw_kill_x(u: float) -> void:
 func _bottom_limits(vs: Vector2, u: float) -> Vector2:
 	var lo := 0.0
 	var hi := vs.x
-	for id in ["medkit", "grenade", "crouch", "prone", "reload", "wall"]:
+	for id in ["medkit", "grenade", "crouch", "prone", "wall"]:
 		if not layout.has(id) or not _button_visible(id):
 			continue
 		var w: Dictionary = layout[id]

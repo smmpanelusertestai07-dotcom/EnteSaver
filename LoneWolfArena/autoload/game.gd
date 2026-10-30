@@ -29,7 +29,7 @@ const DEFAULT_SETTINGS := {
 ## custom HUD and sound): always these values, whatever an older settings file says.
 const FIXED_SETTINGS := {
 	"show_fps": false, "vibration": true, "damage_numbers": true, "hold_fire_scope": true,
-	"left_fire": 0, "reload_on_crosshair": true, "run_mode": 2, "dynamic_crosshair": true,
+	"reload_on_crosshair": true, "run_mode": 2, "dynamic_crosshair": true,
 	"crosshair_color": 0, "crosshair_size": 50,
 }
 

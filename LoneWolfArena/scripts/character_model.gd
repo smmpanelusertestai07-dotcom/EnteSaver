@@ -35,6 +35,7 @@ const LAYER_ACTORS := 4
 const UPPER_BONES := ["spine_01", "spine_02", "spine_03", "neck_01", "head", "clavicle_l", "clavicle_r",
 	"upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
 const ARM_ONLY_BONES := ["clavicle_l", "upperarm_l", "lowerarm_l", "hand_l"]
+const FIST_BONES := ["upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
 const BONE_CANDIDATES := {
 	"pelvis": ["pelvis", "Hips", "hips", "mixamorig:Hips", "root_pelvis"],
 	"spine1": ["spine_01", "spine", "Spine", "spine01", "mixamorig:Spine"],
@@ -82,6 +83,8 @@ var _crouch_amt := 0.0
 var _prone_amt := 0.0
 var _air := 0.0
 var _heal_amt := 0.0
+var _fists_amt := 0.0
+var _holster: Node3D           # the gun on the back while the fists are out
 var _healing := false
 var _aim_dir := Vector3.FORWARD
 var _kick := 0.0
@@ -346,6 +349,24 @@ func _build_tree() -> void:
 	root.connect_node("air_blend", 0, "prone_blend")
 	root.connect_node("air_blend", 1, "jump_seek")
 	var last := "air_blend"
+	# Fists out: the arms move like a runner's, swinging against the legs (fists_run_a <-> b with the
+	# stride, see _stride_phase), or hang relaxed at rest; the gun rides on the back.
+	if anim.has_animation("fists_run_a"):
+		var fb := AnimationNodeBlend2.new()
+		_filter(fb, FIST_BONES)
+		root.add_node("fists_a", _anim_node("fists_run_a"), Vector2(450, 700))
+		root.add_node("fists_b", _anim_node("fists_run_b"), Vector2(450, 800))
+		root.add_node("fists_rest", _anim_node("fists_idle"), Vector2(450, 900))
+		root.add_node("fists_swing", AnimationNodeBlend2.new(), Vector2(600, 750))
+		root.add_node("fists_move", AnimationNodeBlend2.new(), Vector2(700, 850))
+		root.add_node("fists_blend", fb, Vector2(750, 300))
+		root.connect_node("fists_swing", 0, "fists_a")
+		root.connect_node("fists_swing", 1, "fists_b")
+		root.connect_node("fists_move", 0, "fists_rest")
+		root.connect_node("fists_move", 1, "fists_swing")
+		root.connect_node("fists_blend", 0, last)
+		root.connect_node("fists_blend", 1, "fists_move")
+		last = "fists_blend"
 	# Healing loop on the upper body (blend amount follows the heal state).
 	if anim.has_animation("heal"):
 		var hb := AnimationNodeBlend2.new()
@@ -438,6 +459,12 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 2.6) if _speed > 0.08 else 1.0)
 		if anim.has_animation("heal"):
 			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
+		if anim.has_animation("fists_run_a"):
+			_fists_amt = move_toward(_fists_amt, (1.0 if weapon_id == "" else 0.0) * (1.0 - _prone_amt), delta * 6.0)
+			tree.set("parameters/fists_blend/blend_amount", _fists_amt)
+			tree.set("parameters/fists_move/blend_amount", clampf(_speed / 1.5, 0.0, 1.0))
+			tree.set("parameters/fists_swing/blend_amount", _stride_phase())
+		_place_holster()
 	elif fallback:
 		_animate_fallback(delta)
 	_kick = move_toward(_kick, 0.0, delta * 0.6)
@@ -449,6 +476,47 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
 	if weapon_node and weapon_id != "":
 		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
+
+
+## 0..1: which fist leads (0 = the left one). Read from the feet, so the arms swing against
+## whatever the legs do (forward, back, sideways, any speed).
+func _stride_phase() -> float:
+	if skeleton == null or not (bone_idx.has("foot_l") and bone_idx.has("foot_r")):
+		return 0.5
+	var d := (bone_position("foot_l") - bone_position("foot_r")).dot(-global_basis.z)
+	return clampf(0.5 + d / 0.5, 0.0, 1.0)
+
+
+## The gun of the round on the back while the fists are out (the reference look), diagonal
+## across it with the muzzle up over the left shoulder.
+func _set_holster(model_name: String) -> void:
+	if _holster:
+		_holster.queue_free()
+		_holster = null
+	var path := "res://assets/props/%s.glb" % model_name
+	if model_name == "" or fallback or not ResourceLoader.exists(path):
+		return
+	if not _weapon_scenes.has(path):
+		_weapon_scenes[path] = load(path)
+	_holster = Node3D.new()
+	_holster.name = "Holster"
+	_holster.top_level = true
+	add_child(_holster)
+	_holster.add_child((_weapon_scenes[path] as PackedScene).instantiate())
+	_set_layers(_holster)
+	for mi in _holster.find_children("*", "GeometryInstance3D", true, false):
+		(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+func _place_holster() -> void:
+	if _holster == null or skeleton == null:
+		return
+	_holster.visible = not _dead and weapon_id == "" and show_weapon
+	var fwd := -global_basis.z
+	var right := fwd.cross(Vector3.UP).normalized()
+	var z := -(Vector3.UP * 0.75 - right * 0.66).normalized()     # gun models point their muzzle along -z
+	var x := (-fwd).cross(z).normalized()                          # the gun's top faces away from the back
+	_holster.global_transform = Transform3D(Basis(x, z.cross(x), z), bone_position("spine3") - fwd * 0.2 - Vector3.UP * 0.05)
 
 
 func set_aim(pitch: float, aim_dir: Vector3) -> void:
@@ -622,6 +690,7 @@ func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 	if weapon_node:
 		weapon_node.queue_free()
 		weapon_node = null
+	_set_holster(weapon_id if model_name == "" else "")
 	weapon_id = model_name
 	# _hand_to_gun stays valid: every gun model's origin is its grip point.
 	if model_name == "":

@@ -9,11 +9,12 @@ extends RefCounted
 ## screen heights, so the 20:9 layout keeps its look from 16:9 to 22:9; on screens narrower than
 ## 16:9 (tablets) the whole HUD shrinks to fit. Editor overrides live in Game.hud_layout (saved
 ## JSON, tagged with "_v"; layouts from older versions are ignored).
-## v3: the weapon panel sits at the top like the reference (main slot y 0.05 .. 0.155, small
-## slots 0.166 .. 0.266) under a small corner gear; the scoreboard button moved left of the
-## panel; sprint and wall buttons 0.148 h.
+## v4: the reference's default layout, measured on a 20:9 recording: fire 0.26 h right of
+## centre, jump and crouch to its right, prone at the top, the wall button over the fire button,
+## medkit and sprint on the left, the weapon panel and its three slots 45 % larger; no left
+## fire, reload, scoreboard or free-look buttons (reload: tap the panel; scores: tap the bar).
 
-const VERSION := 3
+const VERSION := 4
 const REF_ASPECT := 20.0 / 9.0
 const MIN_ASPECT := 16.0 / 9.0
 const SIZE_MIN := 0.5            # editor size range relative to the default (50 .. 200 %)
@@ -25,31 +26,26 @@ const STRIP_H := 0.17            # zone status strip under the minimap, in minim
 const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button
 
 ## Hit-test order (first wins when two widgets overlap) and editor list.
-const ORDER := ["settings", "scoreboard", "weapons", "fire_r", "fire_l", "scope", "freelook", "jump", "crouch", "prone",
-	"sprint", "reload", "medkit", "wall", "grenade", "minimap", "joystick"]
+const ORDER := ["settings", "weapons", "fire_r", "scope", "wall", "jump", "crouch", "prone", "sprint",
+	"medkit", "grenade", "minimap", "joystick"]
 const DEFAULTS := {
-	"joystick": {"x": 0.177, "y": 0.79, "s": 0.25, "o": 0.8, "a": "l"},
-	"fire_r": {"x": 0.82, "y": 0.69, "s": 0.22, "o": 0.9, "a": "r"},
-	"fire_l": {"x": 0.075, "y": 0.5, "s": 0.13, "o": 0.85, "a": "l"},
-	"scope": {"x": 0.932, "y": 0.55, "s": 0.13, "o": 0.85, "a": "r"},
-	"freelook": {"x": 0.932, "y": 0.4, "s": 0.1, "o": 0.85, "a": "r"},
-	"jump": {"x": 0.932, "y": 0.725, "s": 0.115, "o": 0.85, "a": "r"},
-	"crouch": {"x": 0.932, "y": 0.925, "s": 0.11, "o": 0.85, "a": "r"},
-	"prone": {"x": 0.859, "y": 0.925, "s": 0.11, "o": 0.85, "a": "r"},
-	"sprint": {"x": 0.174, "y": 0.475, "s": 0.148, "o": 0.85, "a": "l"},
-	"reload": {"x": 0.735, "y": 0.8, "s": 0.1, "o": 0.85, "a": "r"},
-	"medkit": {"x": 0.28, "y": 0.925, "s": 0.11, "o": 0.85, "a": "l"},
-	"wall": {"x": 0.29, "y": 0.7, "s": 0.148, "o": 0.85, "a": "l"},
-	"grenade": {"x": 0.648, "y": 0.925, "s": 0.11, "o": 0.85, "a": "c"},
-	"settings": {"x": 0.952, "y": 0.027, "s": 0.046, "o": 0.9, "a": "r"},
-	"scoreboard": {"x": 0.785, "y": 0.216, "s": 0.062, "o": 0.85, "a": "r"},
-	"weapons": {"x": 0.891, "y": 0.158, "s": 0.105, "o": 0.95, "a": "r"},
-	"minimap": {"x": 0.1, "y": 0.155, "s": 0.26, "o": 0.95, "a": "l"},
+	"joystick": {"x": 0.18, "y": 0.66, "s": 0.23, "o": 0.8, "a": "l"},
+	"fire_r": {"x": 0.798, "y": 0.68, "s": 0.26, "o": 0.9, "a": "r"},
+	"scope": {"x": 0.835, "y": 0.4, "s": 0.104, "o": 0.85, "a": "r"},
+	"wall": {"x": 0.754, "y": 0.384, "s": 0.11, "o": 0.85, "a": "r"},
+	"jump": {"x": 0.906, "y": 0.519, "s": 0.166, "o": 0.85, "a": "r"},
+	"crouch": {"x": 0.922, "y": 0.834, "s": 0.166, "o": 0.85, "a": "r"},
+	"prone": {"x": 0.673, "y": 0.073, "s": 0.104, "o": 0.85, "a": "c"},
+	"sprint": {"x": 0.181, "y": 0.438, "s": 0.131, "o": 0.85, "a": "l"},
+	"medkit": {"x": 0.0375, "y": 0.678, "s": 0.104, "o": 0.85, "a": "l"},
+	"grenade": {"x": 0.678, "y": 0.912, "s": 0.13, "o": 0.85, "a": "c"},
+	"settings": {"x": 0.963, "y": 0.027, "s": 0.046, "o": 0.9, "a": "r"},
+	"weapons": {"x": 0.887, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
+	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
 }
 const LABELS := {
-	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP",
-	"crouch": "CROUCH", "prone": "PRONE", "sprint": "SPRINT", "reload": "RELOAD", "medkit": "MEDKIT",
-	"wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "scoreboard": "SCOREBOARD", "freelook": "FREE LOOK",
+	"joystick": "MOVE", "fire_r": "FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
+	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS",
 	"weapons": "WEAPONS", "minimap": "MAP",
 }
 

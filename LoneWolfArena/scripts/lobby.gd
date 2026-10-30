@@ -1205,12 +1205,11 @@ func _close_modal() -> void:
 const HOW_TO := [
 	["MOVE & LOOK", [
 		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
-		["v_eye", "LOOK", "Drag anywhere on the right side to turn the camera. Hold the eye and drag to look around (even at your own front)."],
+		["v_eye", "LOOK", "Drag anywhere on the right side to turn the camera."],
 		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
-		["v_crosshair", "LEFT FIRE", "A second fire button for your left thumb."],
 		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
 		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
-		["v_reload", "RELOAD", "Tap reload (or it reloads by itself when the magazine is empty)."],
+		["v_reload", "RELOAD", "Tap the weapon panel (or it reloads by itself when the magazine is empty)."],
 	]],
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],

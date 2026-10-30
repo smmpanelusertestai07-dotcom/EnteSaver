@@ -123,15 +123,14 @@ func _build_panel() -> void:
 		nudge.add_child(_arrow_button(d))
 
 
-## Keeps the settings panel in the gap between the minimap and the widgets at the top right
-## (centred when the screen is wide enough; on 16:9 it moves left so the scoreboard button and
-## its label stay visible).
+## Keeps the settings panel in the gap between the minimap and the weapon panel at the top right
+## (centred when the screen is wide enough).
 func _place_panel() -> void:
 	if _panel == null or layout.is_empty():
 		return
 	var vs := size
 	var lo := HudLayout.minimap_rect(layout.minimap, vs).end.x + 8.0
-	var hi := minf(HudLayout.hit_rect("scoreboard", layout.scoreboard, vs).position.x, HudLayout.weapon_main(layout.weapons, vs).position.x) - 8.0
+	var hi := HudLayout.weapon_main(layout.weapons, vs).position.x - 8.0
 	var w := maxf(_panel.size.x, _panel.custom_minimum_size.x)
 	_panel.position = Vector2(clampf(vs.x * 0.5 - w * 0.5, lo, maxf(hi - w, lo)), 66.0)
 
