@@ -4,12 +4,18 @@
 # the emulator and records screenshots and its log for private analysis. The job encrypts the
 # results with a public key given when it is started, so the run publishes nothing of the probed
 # app. Nothing here is part of the game.
-#   reference_probe.sh <package> <app_dir> <out_dir> [minutes]
+# With nav minutes > 0 it hands the screen to reference_nav.py (reads the screen, taps through,
+# plays a practice session, makes a video) instead of only taking pictures. state_dir keeps the
+# app's downloaded game data between runs (big files only, no account files), so a later run
+# continues without downloading it again.
+#   reference_probe.sh <package> <app_dir> <out_dir> [minutes] [nav_minutes] [state_dir]
 set -uo pipefail
 PKG="$1"
 APP_DIR="$2"
 OUT="$3"
 MINUTES="${4:-12}"
+NAV_MINUTES="${5:-0}"
+STATE="${6:-}"
 mkdir -p "$OUT"
 log() { echo "[probe] $*" | tee -a "$OUT/probe.txt"; }
 
@@ -42,13 +48,33 @@ if [ -z "$installed" ]; then
   log "not installed: $(adb shell pm list packages 2>&1 | tr -d '\r' | grep -i -m3 "${PKG##*.}" | tr '\n' ' ')"
   exit 0
 fi
+if [ -n "$STATE" ] && [ -d "$STATE/$PKG" ]; then
+  adb shell mkdir -p /sdcard/Android/data
+  timeout 1200 adb push "$STATE/$PKG" /sdcard/Android/data/ 2>&1 | tail -1 | tee -a "$OUT/probe.txt"
+  log "game data from the last run restored ($(du -sh "$STATE/$PKG" | cut -f1))"
+fi
 adb logcat -c
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 log "launched"
-for ((i = 0; i < MINUTES * 3; i++)); do
-  sleep 20
-  adb exec-out screencap -p > "$OUT/s$(printf %03d "$i").png" 2>/dev/null
-  log "t=$(((i + 1) * 20))s pid=$(adb shell pidof "$PKG" | tr -d '\r') $(adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus | tr -s ' ')"
-done
+if [ "$NAV_MINUTES" -gt 0 ]; then
+  python3 "$(dirname "$0")/reference_nav.py" "$OUT" "$NAV_MINUTES" "$PKG"
+  log "navigation done: $(grep -c "tap " "$OUT/nav.txt" 2>/dev/null) taps"
+else
+  for ((i = 0; i < MINUTES * 3; i++)); do
+    sleep 20
+    adb exec-out screencap -p > "$OUT/s$(printf %03d "$i").png" 2>/dev/null
+    log "t=$(((i + 1) * 20))s pid=$(adb shell pidof "$PKG" | tr -d '\r') $(adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus | tr -s ' ')"
+  done
+fi
 adb logcat -d > "$OUT/logcat.txt" 2>/dev/null
+if [ -n "$STATE" ]; then
+  # Keep the downloaded game data for the next run: big files only, nothing that looks like an
+  # account, login or settings file.
+  rm -rf "${STATE:?}/$PKG"
+  mkdir -p "$STATE"
+  timeout 1800 adb pull "/sdcard/Android/data/$PKG" "$STATE/" > /dev/null 2>&1
+  find "$STATE" -type f \( -size -100k -o -iname '*token*' -o -iname '*account*' -o -iname '*guest*' -o -iname '*session*' \
+    -o -iname '*login*' -o -iname '*pref*' -o -iname '*.db' -o -iname '*.xml' -o -iname '*.json' \) -delete 2>/dev/null
+  log "game data kept for the next run: $(du -sh "$STATE" 2>/dev/null | cut -f1)"
+fi
 exit 0

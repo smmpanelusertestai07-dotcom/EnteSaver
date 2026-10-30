@@ -20,6 +20,10 @@ on:
         description: "Base64 of the RSA public key (PEM) the probe's results are encrypted with"
         type: string
         default: ""
+      nav_minutes:
+        description: "Probe: minutes of reading the screen and tapping through (0 = screenshots only)"
+        type: string
+        default: "0"
 
 permissions:
   contents: read
@@ -155,13 +159,14 @@ jobs:
   reference:
     if: github.event_name == 'workflow_dispatch' && inputs.reference_app != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 170
     defaults:
       run:
         shell: bash
     env:
       APP_ID: ${{ inputs.reference_app }}
       RESULTS_KEY: ${{ inputs.results_key }}
+      NAV_MINUTES: ${{ inputs.nav_minutes }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -173,13 +178,35 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
           df -h /
 
+      - name: Week of the year (the app is fetched again once a week)
+        id: week
+        run: echo "w=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      # The app and its downloaded game data (no account files) carry over between runs.
+      - name: Restore the app from an earlier run
+        id: app_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ref_app
+          key: ref-app-${{ inputs.reference_app }}-${{ steps.week.outputs.w }}
+
+      - name: Restore the game data from an earlier run
+        uses: actions/cache/restore@v4
+        with:
+          path: ref_state
+          key: ref-state-${{ inputs.reference_app }}-${{ github.run_id }}
+          restore-keys: ref-state-${{ inputs.reference_app }}-
+
       - name: Fetch the app and show its signer
         run: |
           [[ "$APP_ID" =~ ^[A-Za-z0-9._]+$ ]]
-          curl -fsSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
-          chmod +x apkeep
+          [[ "$NAV_MINUTES" =~ ^[0-9]{1,3}$ ]]
           mkdir -p ref_app
-          ./apkeep -a "$APP_ID" -d apk-pure -o acknowledge_dangers=true ref_app
+          if ! ls ref_app/*.apk > /dev/null 2>&1; then
+            curl -fsSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
+            chmod +x apkeep
+            ./apkeep -a "$APP_ID" -d apk-pure -o acknowledge_dangers=true ref_app
+          fi
           cd ref_app
           for f in *.xapk *.apks; do [ -f "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
           ls -la
@@ -189,6 +216,17 @@ jobs:
           [ -f "$base" ] || base="$(ls ./*.apk | head -1)"
           { "$bt/apksigner" verify --print-certs "$base" || true; } | grep -E "DN:|SHA-256|SHA-1" | tee signer.txt
           du -sh . || true
+
+      - name: Save the app for later runs
+        if: steps.app_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ref_app
+          key: ref-app-${{ inputs.reference_app }}-${{ steps.week.outputs.w }}
+
+      - name: Screen reader for the navigation
+        if: inputs.nav_minutes != '0'
+        run: sudo apt-get install -y -qq tesseract-ocr > /dev/null && tesseract --version | head -1
 
       - name: Enable KVM for the emulator
         run: |
@@ -210,7 +248,14 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash LoneWolfArena/tools/ci/reference_probe.sh "$APP_ID" ref_app ref-results 12
+          script: bash LoneWolfArena/tools/ci/reference_probe.sh "$APP_ID" ref_app ref-results 12 "$NAV_MINUTES" ref_state
+
+      - name: Save the game data for later runs
+        if: always() && hashFiles('ref_state/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ref_state
+          key: ref-state-${{ inputs.reference_app }}-${{ github.run_id }}
 
       - name: Encrypt the results
         if: always()
