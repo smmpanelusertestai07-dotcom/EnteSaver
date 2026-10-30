@@ -33,8 +33,13 @@ if [ -d "$APP_DIR/Android/obb/$PKG" ]; then
     timeout 900 adb push "$f" "/sdcard/Android/obb/$PKG/" 2>&1 | tail -1 | tee -a "$OUT/probe.txt"
   done
 fi
-if ! adb shell pm list packages | tr -d '\r' | grep -qx "package:$PKG"; then
-  log "not installed"
+installed=""
+for t in 1 2 3 4 5 6; do
+  adb shell pm path "$PKG" 2>/dev/null | tr -d '\r' | grep -q "^package:" && { installed=1; break; }
+  sleep 5
+done
+if [ -z "$installed" ]; then
+  log "not installed: $(adb shell pm list packages 2>&1 | tr -d '\r' | grep -i -m3 "${PKG##*.}" | tr '\n' ' ')"
   exit 0
 fi
 adb logcat -c
