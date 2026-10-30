@@ -49,13 +49,13 @@ import java.util.regex.Pattern;
 @RunWith(AndroidJUnit4.class)
 public class Driver {
     private static final String TAG = "DeviceLab";
-    private static final String[] PLAN = {"guest", "agree", "accept", "confirm", "ok", "okay", "yes", "continue",
+    private static final String[] PLAN = {"guest", "go", "allow", "agree", "accept", "confirm", "ok", "okay", "yes", "continue",
             "next", "skip", "got it", "tap to start", "tap to begin", "touch to start", "download", "update", "later",
             "not now", "close", "claim", "collect", "training"};
     private static final String[] AVOID = {"facebook", "google", "vk", "twitter", "apple", "huawei", "line",
             "purchase", "buy", "top up", "topup", "recharge", "diamond", "pay", "ranked", "rank", "redeem", "delete",
             "logout", "log out", "exit", "quit", "bind", "invite", "friend", "squad", "duo", "team", "share",
-            "report", "store", "shop"};
+            "report", "store", "shop", "don't", "deny", "never"};
 
     private UiAutomation ua;
     private UiDevice dev;
@@ -94,6 +94,9 @@ public class Driver {
         log("device " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " sdk " + android.os.Build.VERSION.SDK_INT
                 + " abis " + String.join(",", android.os.Build.SUPPORTED_ABIS));
         install(pkg, apks);
+        // The app asks for "all files" access to keep a guest account: give it up front.
+        log("all-files access: " + sh("appops set " + pkg + " MANAGE_EXTERNAL_STORAGE allow").trim() + " "
+                + sh("appops get " + pkg + " MANAGE_EXTERNAL_STORAGE").trim());
         sh("monkey -p " + pkg + " -c android.intent.category.LAUNCHER 1");
         log("launched");
         TextRecognizer ocr = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
@@ -139,6 +142,12 @@ public class Driver {
                 } else {
                     play(step++);
                 }
+                continue;
+            }
+            if (all.contains("all files") || all.contains("manage all")) {
+                dev.pressBack();                    // the system's access page: already granted above
+                log("access page: back");
+                Thread.sleep(2000);
                 continue;
             }
             if (has(all, "exit") || has(all, "quit")) {
