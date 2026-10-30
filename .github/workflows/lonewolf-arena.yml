@@ -175,7 +175,8 @@ jobs:
       - name: Fetch the app and show its signer
         run: |
           [[ "$APP_ID" =~ ^[A-Za-z0-9._]+$ ]]
-          curl -sSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
+          # 0.16.0: the last release with the AppGallery source
+          curl -fsSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/download/0.16.0/apkeep-x86_64-unknown-linux-gnu
           chmod +x apkeep
           mkdir -p ref_app
           ./apkeep -a "$APP_ID" -d huawei-app-gallery ref_app
