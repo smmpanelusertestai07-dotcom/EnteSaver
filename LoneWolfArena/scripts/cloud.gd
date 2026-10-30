@@ -23,6 +23,8 @@ signal session_started(host: bool)
 signal session_ended(reason: String)
 signal event_received(kind: String, data: Array)
 signal state_received(state: PackedFloat32Array)
+signal friends_changed                 # a friend request came in or was answered
+signal room_changed                    # the hosted custom room got a player / a join attempt ended
 
 const ROOT := "lonewolfarena/v1"
 const BROKERS := ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"]
@@ -34,6 +36,8 @@ const PING_S := 20.0
 const MAX_MESSAGE := 4096
 const MAX_PEERS := 40
 const INBOX_RATE := 4.0        # inbox messages handled per second (each invite costs an RSA decrypt)
+const JOIN_TIMEOUT_MS := 15000 # a custom-room join attempt gives up after this
+const ROOM_RULES := {"rounds": 5, "ammo": false, "walls": false, "frags": false}
 
 var state_interval := 0.1      # seconds between state packets
 var my_id := ""                # hash of this phone's public key (set once the key exists)
@@ -43,6 +47,13 @@ var is_host := false
 var opponent := {}             # {"id", "name", "bundle"}
 var queue: Array = []
 var status := ""               # "preparing", "connecting", "online", "offline"
+var session_rules := {}        # the custom room's rules for this session ({} = a plain duel)
+var friend_requests := {}      # id -> {"name", "t"}: asked to be friends, not answered yet
+var room_code := ""            # custom room this phone hosts: 6 digits ("" = none)
+var room_pin := ""             # its password (digits)
+var room_rules := {}
+var room_guest := {}           # {"id", "name"}: who joined it with the right password
+var join_state := ""           # custom room this phone joins: "", "asking", "in", "wrong", "none"
 var _brokers: Array = BROKERS
 var _broker_i := 0
 var _ws: WebSocketPeer
@@ -70,6 +81,8 @@ var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", 
 var _last_heard := 0
 var _inbox_budget := 8.0
 var _crypto := Crypto.new()
+var _friend_asked := {}        # id -> ticks: friend requests this phone sent
+var _join := {}                # {"code", "key", "t", "ask_t"}: the custom-room join in progress
 
 
 func _ready() -> void:
@@ -88,6 +101,11 @@ func configured() -> bool:
 func start_lobby() -> void:
 	_want_lobby = true
 	if _key == null and _keygen == -1:
+		var saved := CryptoKey.new()
+		if FileAccess.file_exists(_key_path()) and saved.load(_key_path()) == OK:
+			_use_key(saved)
+			_connect()
+			return
 		status = "preparing"
 		_keygen = WorkerThreadPool.add_task(_make_key)
 	elif _key != null:
@@ -111,6 +129,24 @@ func stop_lobby() -> void:
 
 func _make_key() -> void:
 	_keygen_out.append(Crypto.new().generate_rsa(2048))     # appended once; read on the main thread
+
+
+## The phone keeps its key, so its id (and the friend code friends know it by) stays the same.
+## Local test runs share one data folder: each role keeps its own.
+static func _key_path() -> String:
+	var role := OS.get_environment("LW_LAN_ROLE") if not OS.has_feature("template") else ""
+	return "user://net_identity%s.key" % ("_" + role if role != "" else "")
+
+
+func _use_key(k: CryptoKey) -> void:
+	_key = k
+	_pk_pem = _key.save_to_string(true)
+	my_id = _pk_pem.sha256_text().left(32)
+
+
+## The short code a player is known by (the start of the id).
+static func friend_code(id: String) -> String:
+	return id.left(8).to_upper()
 
 
 func _connect() -> void:
@@ -140,9 +176,8 @@ func _process(delta: float) -> void:
 	if _keygen != -1 and not _keygen_out.is_empty():
 		WorkerThreadPool.wait_for_task_completion(_keygen)
 		_keygen = -1
-		_key = _keygen_out[0]
-		_pk_pem = _key.save_to_string(true)
-		my_id = _pk_pem.sha256_text().left(32)
+		_use_key(_keygen_out[0])
+		_key.save(_key_path())
 		_keygen_out.clear()
 		if _want_lobby:
 			_connect()
@@ -187,6 +222,15 @@ func _process(delta: float) -> void:
 		if _join_t <= 0.0:
 			_join_t = 1.0
 			_room_send({"k": "join"})
+	if not _join.is_empty() and not in_session:
+		_join.ask_t = float(_join.ask_t) - delta
+		if _join.ask_t <= 0.0 and join_state == "asking":
+			_join.ask_t = 2.0
+			_publish_json(ROOT + "/c/" + String(_join.code), {"t": "ask", "from": my_id, "name": String(Game.profile.name),
+				"bundle": String(Game.profile.bundle), "pk": _pk_pem, "mac": _room_tag(_join.key, "ask", my_id)})
+		if Time.get_ticks_msec() - int(_join.t) > JOIN_TIMEOUT_MS and join_state == "asking":
+			join_state = "none"
+			room_changed.emit()
 	if _want_lobby:
 		_announce_t -= delta
 		if _announce_t <= 0.0:
@@ -315,6 +359,8 @@ func _parse() -> void:
 						_announce_t = 0.0
 					if _room != "":
 						_subscribe(ROOT + "/r/" + _room)
+					if room_code != "":
+						_subscribe(ROOT + "/c/" + room_code)
 				else:
 					_ws.close()
 			0x30:                    # PUBLISH
@@ -340,6 +386,10 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 				_on_inbox(d)
 	elif _room != "" and topic == ROOT + "/r/" + _room:
 		_on_room(payload)
+	elif room_code != "" and topic == ROOT + "/c/" + room_code:
+		var a: Variant = JSON.parse_string(payload.get_string_from_utf8())
+		if a is Dictionary:
+			_on_room_ask(a)
 
 
 # ---------------------------------------------------------------- lobby and invites
@@ -381,6 +431,12 @@ func _on_inbox(d: Dictionary) -> void:
 			inv.bundle = String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
 			inv.t = Time.get_ticks_msec()
 			_incoming = inv
+			# The host of the custom room this phone asked to join starts the match: it knows the
+			# room's password, so it is accepted at once with the room's rules.
+			if join_state == "in" and typeof(d.get("rc")) == TYPE_STRING and _crypto.constant_time_compare(
+					_room_tag(_join.key, "inv", from).to_utf8_buffer(), String(d.rc).to_utf8_buffer()):
+				answer(true, rules_from(d.get("rules")))
+				return
 			invited.emit(String(_incoming.name))
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
@@ -394,6 +450,27 @@ func _on_inbox(d: Dictionary) -> void:
 		"acc":
 			if String(_outgoing.get("id", "")) == from and _tagged(d, _outgoing, "acc", from):
 				_last_heard = Time.get_ticks_msec()     # the room handshake follows
+		"frq":
+			# A friend request: its key proves the sender's id. Already friends: say yes again.
+			if typeof(d.get("pk")) != TYPE_STRING or from != String(d.pk).sha256_text().left(32):
+				return
+			var asker := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+			if Game.is_friend(from):
+				_publish_json(ROOT + "/u/" + from, {"t": "fra", "from": my_id, "name": String(Game.profile.name)})
+			elif friend_requests.size() < 20:
+				friend_requests[from] = {"name": asker if asker != "" else "PLAYER", "t": Time.get_ticks_msec()}
+				friends_changed.emit()
+		"fra":
+			if _friend_asked.has(from):
+				_friend_asked.erase(from)
+				var friend := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+				Game.add_friend(from, friend if friend != "" else "PLAYER")
+				friends_changed.emit()
+		"rin", "rno":
+			# The custom room's host: the password was right (wait for START) or wrong.
+			if join_state == "asking" and String(d.get("code", "")) == String(_join.get("code", "")):
+				join_state = "in" if String(d.t) == "rin" else "wrong"
+				room_changed.emit()
 
 
 ## Proof that the sender holds an invite's keys: an HMAC over what it says, the room and its id.
@@ -407,7 +484,7 @@ func _tagged(d: Dictionary, inv: Dictionary, what: String, sender: String) -> bo
 
 
 ## Challenges a listed player: its public key wraps a fresh room name and the room's keys.
-func invite(peer_id: String) -> bool:
+func invite(peer_id: String, extra := {}) -> bool:
 	if in_session or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
 		return false
 	var pub := CryptoKey.new()
@@ -421,9 +498,12 @@ func invite(peer_id: String) -> bool:
 	_outgoing = {"id": peer_id, "name": info.name, "bundle": info.bundle, "room": sec.slice(0, 16).hex_encode(),
 		"aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "t": Time.get_ticks_msec()}
 	is_host = true
+	session_rules = {}
 	_enter_room(_outgoing)
-	_publish_json(ROOT + "/u/" + peer_id, {"t": "inv", "from": my_id, "name": String(Game.profile.name),
-		"bundle": String(Game.profile.bundle), "sec": Marshalls.raw_to_base64(wrapped)})
+	var msg := {"t": "inv", "from": my_id, "name": String(Game.profile.name),
+		"bundle": String(Game.profile.bundle), "sec": Marshalls.raw_to_base64(wrapped)}
+	msg.merge(extra)
+	_publish_json(ROOT + "/u/" + peer_id, msg)
 	return true
 
 
@@ -445,7 +525,7 @@ func waiting_for() -> String:
 	return String(_outgoing.get("name", ""))
 
 
-func answer(accept: bool) -> void:
+func answer(accept: bool, rules := {}) -> void:
 	if _incoming.is_empty():
 		return
 	var inv := _incoming
@@ -454,6 +534,7 @@ func answer(accept: bool) -> void:
 		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
 	is_host = false
+	session_rules = rules
 	_enter_room(inv)
 	_publish_json(ROOT + "/u/" + String(inv.id), {"t": "acc", "from": my_id, "mac": _tag(inv, "acc", my_id)})
 
@@ -477,6 +558,129 @@ func _leave_room() -> void:
 	_aes = PackedByteArray()
 	_mac = PackedByteArray()
 	opponent = {}
+
+
+# ---------------------------------------------------------------- friends
+
+## Asks a listed player to be friends (they see the request in their friends list).
+func request_friend(peer_id: String) -> bool:
+	if not _connected or peer_id == my_id or not peers.has(peer_id):
+		return false
+	_friend_asked[peer_id] = Time.get_ticks_msec()
+	_publish_json(ROOT + "/u/" + peer_id, {"t": "frq", "from": my_id, "name": String(Game.profile.name), "pk": _pk_pem})
+	return true
+
+
+func friend_asked(peer_id: String) -> bool:
+	return _friend_asked.has(peer_id)
+
+
+func answer_friend(peer_id: String, accept: bool) -> void:
+	if not friend_requests.has(peer_id):
+		return
+	var req: Dictionary = friend_requests[peer_id]
+	friend_requests.erase(peer_id)
+	if accept:
+		Game.add_friend(peer_id, String(req.name))
+		_publish_json(ROOT + "/u/" + peer_id, {"t": "fra", "from": my_id, "name": String(Game.profile.name)})
+	friends_changed.emit()
+
+
+# ---------------------------------------------------------------- custom rooms
+
+## Opens a custom room: a random 6-digit number plus the host's numeric password. A player who
+## sends both is listed in the room; the host starts the match with the room's rules.
+func open_room(pin: String, rules: Dictionary, code := "") -> String:
+	close_room()
+	var r := _crypto.generate_random_bytes(4)
+	room_code = code if code.length() == 6 and code.is_valid_int() and not OS.has_feature("template") \
+		else "%06d" % (r.decode_u32(0) % 1000000)
+	room_pin = pin
+	room_rules = rules_from(rules)
+	room_guest = {}
+	if _connected:
+		_subscribe(ROOT + "/c/" + room_code)
+	room_changed.emit()
+	return room_code
+
+
+func close_room() -> void:
+	if room_code != "" and _connected:
+		_unsubscribe(ROOT + "/c/" + room_code)
+	room_code = ""
+	room_guest = {}
+
+
+## Starts the hosted room's match with the player who joined it.
+func start_room_match() -> bool:
+	if room_guest.is_empty():
+		return false
+	var key := _room_key(room_code, room_pin)
+	var ok := invite(String(room_guest.id), {"rc": _room_tag(key, "inv", my_id), "rules": room_rules})
+	if ok:
+		session_rules = room_rules
+	return ok
+
+
+## Asks to join a custom room with its number and password; join_state tells how it goes.
+func join_room(code: String, pin: String) -> void:
+	_join = {"code": code, "key": _room_key(code, pin), "t": Time.get_ticks_msec(), "ask_t": 0.0}
+	join_state = "asking"
+	room_changed.emit()
+
+
+func leave_join() -> void:
+	_join = {}
+	join_state = ""
+
+
+func _on_room_ask(d: Dictionary) -> void:
+	var from := String(d.get("from", "")).left(32)
+	if String(d.get("t", "")) != "ask" or from == "" or from == my_id or _inbox_budget < 1.0:
+		return
+	_inbox_budget -= 1.0
+	if typeof(d.get("pk")) != TYPE_STRING or String(d.pk).length() > 1200 or from != String(d.pk).sha256_text().left(32):
+		return
+	var right := typeof(d.get("mac")) == TYPE_STRING and _crypto.constant_time_compare(
+		_room_tag(_room_key(room_code, room_pin), "ask", from).to_utf8_buffer(), String(d.mac).to_utf8_buffer())
+	if not right:
+		_publish_json(ROOT + "/u/" + from, {"t": "rno", "from": my_id, "code": room_code})
+		return
+	if not room_guest.is_empty() and String(room_guest.id) != from:
+		return                       # the room is full (1 vs 1)
+	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
+	peers[from] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec()}
+	var fresh := room_guest.is_empty()
+	room_guest = {"id": from, "name": String(peers[from].name)}
+	_publish_json(ROOT + "/u/" + from, {"t": "rin", "from": my_id, "code": room_code})
+	if fresh:
+		room_changed.emit()
+
+
+## The room password's key (stretched a little: it is only a few digits).
+func _room_key(code: String, pin: String) -> PackedByteArray:
+	var k := ("lonewolfarena-room|%s|%s" % [code, pin]).sha256_buffer()
+	for i in 2000:
+		k = _crypto.hmac_digest(HashingContext.HASH_SHA256, k, code.to_utf8_buffer())
+	return k
+
+
+func _room_tag(key: PackedByteArray, what: String, sender: String) -> String:
+	return _crypto.hmac_digest(HashingContext.HASH_SHA256, key, (what + sender).to_utf8_buffer()).hex_encode()
+
+
+## A room's rules from untrusted data: known keys only, values in range.
+static func rules_from(v: Variant) -> Dictionary:
+	var out := ROOM_RULES.duplicate()
+	if v is Dictionary:
+		var d := v as Dictionary
+		var r: Variant = d.get("rounds", 5)
+		if typeof(r) == TYPE_INT or typeof(r) == TYPE_FLOAT:
+			out.rounds = clampi(int(r), 1, 7)
+		for k in ["ammo", "walls", "frags"]:
+			out[k] = d.get(k, false) == true
+	return out
 
 
 # ---------------------------------------------------------------- the room (end-to-end encrypted)

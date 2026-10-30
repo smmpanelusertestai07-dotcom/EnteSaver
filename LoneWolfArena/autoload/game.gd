@@ -50,7 +50,8 @@ const XP_PER_LEVEL := 500
 
 var settings: Dictionary = {}
 var profile: Dictionary = {"name": "ROOKIE", "bundle": "default", "matches": 0, "wins": 0, "kills": 0, "xp": 0,
-	"name_set": false}           # false until the player chose a name (also on installs from before the prompt)
+	"name_set": false,           # false until the player chose a name (also on installs from before the prompt)
+	"friends": {}}               # id -> {"name"}: players who accepted a friend request (online)
 var hud_layout: Dictionary = {}
 var last_result: Dictionary = {}
 
@@ -65,6 +66,9 @@ var practice := false
 ## the Cloud (internet) that connected them; both have the same interface.
 var online := false
 var session        # Lan or Cloud (untyped: the two share an interface, not a base class)
+## The custom room's rules the next online match is played with ({} = a plain duel); see
+## Cloud.ROOM_RULES.
+var room_rules := {}
 var lan: Lan
 var cloud: Cloud
 
@@ -204,6 +208,35 @@ func _sanitize_profile() -> void:
 	for k in ["matches", "wins", "kills", "xp"]:
 		profile[k] = clampi(int(profile[k]), 0, 1000000000)
 	profile.wins = mini(int(profile.wins), int(profile.matches))
+	var friends := {}
+	var saved: Variant = profile.get("friends")
+	if saved is Dictionary:
+		for id: Variant in saved:
+			var e: Variant = (saved as Dictionary)[id]
+			if typeof(id) == TYPE_STRING and String(id).length() == 32 and String(id).is_valid_hex_number() \
+					and e is Dictionary and friends.size() < MAX_FRIENDS:
+				friends[String(id)] = {"name": clean_name(String((e as Dictionary).get("name", "")))}
+	profile.friends = friends
+
+
+const MAX_FRIENDS := 50
+
+
+func is_friend(id: String) -> bool:
+	return (profile.friends as Dictionary).has(id)
+
+
+func add_friend(id: String, friend_name: String) -> void:
+	var f: Dictionary = profile.friends
+	if id.length() != 32 or not id.is_valid_hex_number() or (f.size() >= MAX_FRIENDS and not f.has(id)):
+		return
+	f[id] = {"name": clean_name(friend_name)}
+	save_profile()
+
+
+func remove_friend(id: String) -> void:
+	if (profile.friends as Dictionary).erase(id):
+		save_profile()
 
 
 ## A random player name (two short words and two digits, at most 14 characters).

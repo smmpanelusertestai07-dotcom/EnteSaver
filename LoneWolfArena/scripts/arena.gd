@@ -87,6 +87,8 @@ func _ready() -> void:
 	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
 		rounds_to_win = maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)     # tests: shorter matches
 	online = Game.online and Game.session != null and bool(Game.session.get("in_session"))
+	if online and not Game.room_rules.is_empty():
+		rounds_to_win = clampi(int(Game.room_rules.get("rounds", ROUNDS_TO_WIN)), 1, 7)
 	if Game.online and not online:
 		Game.online = false
 		Game.goto_lobby.call_deferred()        # the other phone left while this one was loading
@@ -401,7 +403,24 @@ func apply_graphics() -> void:
 
 ## The gun is picked every two rounds and the picker alternates (the reference mode's rule):
 ## rounds 1-2 you (online: the inviter), 3-4 the opponent, and so on. Both fighters get it.
+## A custom room's rules: unlimited ammo, walls or frags top this phone's player up (each phone
+## runs its own player; both got the same rules with the invite).
+func _apply_room_rules() -> void:
+	if not online or Game.room_rules.is_empty() or player == null:
+		return
+	var r: Dictionary = Game.room_rules
+	if bool(r.get("walls", false)) and player.shields < 9:
+		player.shields = 9
+	if bool(r.get("frags", false)) and player.grenades < 9:
+		player.grenades = 9
+	if bool(r.get("ammo", false)):
+		for w: WeaponState in player.weapons:
+			if not w.infinite() and w.reserve < 300:
+				w.reserve = 999
+
+
 func _start_prep() -> void:
+	_apply_room_rules()
 	phase = Phase.PREP
 	var pick_round := (round_index - 1) % 2 == 0
 	prep_left = PREP_TIME if pick_round else PREP_SHORT
@@ -482,6 +501,7 @@ func _start_fight() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_apply_room_rules()
 	if online and phase != Phase.END:
 		_net_t += delta
 		if _net_t >= float(Game.session.state_interval):

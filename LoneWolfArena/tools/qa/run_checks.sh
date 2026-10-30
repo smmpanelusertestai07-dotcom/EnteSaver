@@ -18,6 +18,7 @@
 #   tests/lan_check.gd     Wi-Fi 1 vs 1 with two copies of the game: find, challenge, accept,
 #                          play, a lethal hit and the result on both
 #   tests/cloud_check.gd   the same online over two rounds (end-to-end encrypted), through tests/mqtt_mock.gd
+#   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -62,6 +63,11 @@ if [ "${1:-}" != "quick" ]; then
     LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &
     h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/cloud_host.txt"
+  step room bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47811 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47811
+    LW_LAN_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd > "$0" 2>&1 &
+    h=$!; LW_LAN_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/room_host.txt"
 fi
 # A script error anywhere fails the run even when the check itself exited 0.
 if grep -l "SCRIPT ERROR" "$LOGS"/*.log >/dev/null 2>&1; then
