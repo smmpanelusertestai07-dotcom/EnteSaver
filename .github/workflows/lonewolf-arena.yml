@@ -178,7 +178,7 @@ jobs:
           curl -sSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
           chmod +x apkeep
           mkdir -p ref_app
-          ./apkeep -a "$APP_ID" ref_app
+          ./apkeep -a "$APP_ID" -d apk-pure ref_app
           cd ref_app
           for f in *.xapk *.apks; do [ -f "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
           ls -la . Android/obb/* 2>/dev/null | head -40
