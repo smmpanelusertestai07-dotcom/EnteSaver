@@ -366,18 +366,21 @@ jobs:
           )
           echo "phone: $MODEL, Android API $VERSION"
           FILES=""
-          for f in ref_app/*.apk; do FILES="$FILES,/sdcard/ffdrv/$(basename "$f")=$f"; done
+          # /data/local/tmp: newer Android lets the installer read files there, not on /sdcard
+          for f in ref_app/*.apk; do FILES="$FILES,/data/local/tmp/ffdrv/$(basename "$f")=$f"; done
           D=LoneWolfArena/tools/ci/devicelab/app/build/outputs/apk
           gcloud firebase test android run --type instrumentation \
             --app "$D/debug/app-debug.apk" --test "$D/androidTest/debug/app-debug-androidTest.apk" \
             --device "model=$MODEL,version=$VERSION,orientation=landscape" \
             --other-files "${FILES#,}" \
-            --environment-variables "minutes=$TL_MINUTES,pkg=$APP_ID,apks=/sdcard/ffdrv" \
+            --environment-variables "minutes=$TL_MINUTES,pkg=$APP_ID,apks=/data/local/tmp/ffdrv" \
             --directories-to-pull /sdcard/Android/data/org.lonewolf.devicelab/files \
             --timeout "$((TL_MINUTES + 12))m" --results-dir "ffdrv-$GITHUB_RUN_ID" --quiet >> "$L" 2>&1 \
             && echo "test run finished" || echo "test run ended with an error (details in the results)"
           BUCKET="$(grep -oE 'test-lab-[a-z0-9-]+' "$L" | head -1)"
-          [ -n "$BUCKET" ] && gsutil -m -q cp -r "gs://$BUCKET/ffdrv-$GITHUB_RUN_ID" tl-results/ >> "$L" 2>&1 \
+          mkdir -p "tl-results/ffdrv-$GITHUB_RUN_ID"
+          # (without the uploaded APKs: they are the app itself, not results)
+          [ -n "$BUCKET" ] && gsutil -m -q rsync -r -x '.*\.apk$' "gs://$BUCKET/ffdrv-$GITHUB_RUN_ID" "tl-results/ffdrv-$GITHUB_RUN_ID" >> "$L" 2>&1 \
             && echo "results downloaded: $(du -sh tl-results | cut -f1)" || echo "no results to download"
 
       - name: Encrypt the results

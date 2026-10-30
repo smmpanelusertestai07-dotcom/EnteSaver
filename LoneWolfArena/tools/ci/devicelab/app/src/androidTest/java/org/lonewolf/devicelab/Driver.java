@@ -27,6 +27,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -82,7 +83,7 @@ public class Driver {
         dev = UiDevice.getInstance(inst);
         Bundle args = InstrumentationRegistry.getArguments();
         String pkg = args.getString("pkg", "com.dts.freefireth");
-        String apks = args.getString("apks", "/sdcard/ffdrv");
+        String apks = args.getString("apks", "/data/local/tmp/ffdrv");
         double minutes = Double.parseDouble(args.getString("minutes", "20"));
         out = new File(inst.getTargetContext().getExternalFilesDir(null), "run");
         new File(out, "frames").mkdirs();
@@ -188,28 +189,65 @@ public class Driver {
         log.close();
     }
 
-    /** Installs every .apk in dir as one app (base + splits), like `adb install-multiple`. */
+    /** Installs every .apk in dir as one app (base + splits), like `adb install-multiple`: by path
+     *  first, then (if the system may not read the files there) streamed through the shell. */
     private void install(String pkg, String dir) throws Exception {
-        String created = sh("pm install-create -r -g");
-        Matcher m = Pattern.compile("\\[(\\d+)]").matcher(created);
-        if (!m.find()) {
-            log("install-create failed: " + created.trim());
-            return;
-        }
-        String session = m.group(1);
-        int n = 0;
-        for (String name : sh("ls " + dir).split("\\s+")) {
-            if (!name.endsWith(".apk")) {
-                continue;
+        for (boolean piped : new boolean[] {false, true}) {
+            String created = sh("pm install-create -r -g");
+            Matcher m = Pattern.compile("\\[(\\d+)]").matcher(created);
+            if (!m.find()) {
+                log("install-create failed: " + created.trim());
+                return;
             }
-            String path = dir + "/" + name;
-            String size = sh("stat -c %s " + path).trim();
-            log("write " + name + " (" + size + " bytes): "
-                    + sh("pm install-write -S " + size + " " + session + " " + name + " " + path).trim());
-            n++;
+            String session = m.group(1);
+            int n = 0;
+            for (String name : sh("ls " + dir).split("\\s+")) {
+                if (!name.endsWith(".apk")) {
+                    continue;
+                }
+                String path = dir + "/" + name;
+                String size = sh("stat -c %s " + path).trim();
+                String w = piped ? writePiped(session, name, path, size)
+                        : sh("pm install-write -S " + size + " " + session + " " + name + " " + path);
+                log((piped ? "stream " : "write ") + name + " (" + size + " bytes): " + w.trim());
+                n++;
+            }
+            String done = sh("pm install-commit " + session).trim();
+            log("install-commit (" + n + " apks" + (piped ? ", streamed" : "") + "): " + done);
+            if (done.contains("Success")) {
+                break;
+            }
         }
-        log("install-commit (" + n + " apks): " + sh("pm install-commit " + session).trim());
         log("installed: " + sh("pm path " + pkg).replace('\n', ' ').trim());
+    }
+
+    /** `pm install-write ... -` with the file's bytes copied from `cat` (both run as the shell). */
+    private String writePiped(String session, String name, String path, String size) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            ParcelFileDescriptor[] rw = ua.executeShellCommandRw("pm install-write -S " + size + " " + session + " " + name + " -");
+            try (ParcelFileDescriptor src = ua.executeShellCommand("cat " + path);
+                 InputStream in = new FileInputStream(src.getFileDescriptor());
+                 OutputStream to = new FileOutputStream(rw[1].getFileDescriptor())) {
+                byte[] buf = new byte[1 << 16];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    to.write(buf, 0, n);
+                }
+            }
+            rw[1].close();
+            try (InputStream res = new FileInputStream(rw[0].getFileDescriptor())) {
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = res.read(buf)) > 0) {
+                    sb.append(new String(buf, 0, n));
+                }
+            }
+            rw[0].close();
+        } catch (Exception e) {
+            sb.append("error: ").append(e);
+        }
+        return sb.toString();
     }
 
     /** The phrase to tap now: the first PLAN word on screen ("start" only beside "training"). */
