@@ -148,9 +148,9 @@ jobs:
           retention-days: 14
 
   # Manual runs only: a private look at a reference app on the emulator (screens and log, see
-  # LoneWolfArena/tools/ci/reference_probe.sh). The app comes from a public APK mirror through
-  # apkeep (EFF); the results are uploaded encrypted with the public key given at dispatch and kept
-  # for a day, so the run publishes nothing of the probed app.
+  # LoneWolfArena/tools/ci/reference_probe.sh). The app comes from an official store that needs no
+  # account (Huawei AppGallery) through apkeep (EFF); the results are uploaded encrypted with the
+  # public key given at dispatch and kept for a day, so the run publishes nothing of the probed app.
   reference:
     if: github.event_name == 'workflow_dispatch' && inputs.reference_app != ''
     runs-on: ubuntu-latest
@@ -178,7 +178,7 @@ jobs:
           curl -sSL --retry 3 -o apkeep https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
           chmod +x apkeep
           mkdir -p ref_app
-          ./apkeep -a "$APP_ID" -d apk-pure ref_app
+          ./apkeep -a "$APP_ID" -d huawei-app-gallery ref_app
           cd ref_app
           for f in *.xapk *.apks; do [ -f "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
           ls -la . Android/obb/* 2>/dev/null | head -40
