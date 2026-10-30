@@ -182,9 +182,11 @@ jobs:
           ./apkeep -a "$APP_ID" -d apk-pure -o acknowledge_dangers=true ref_app
           cd ref_app
           for f in *.xapk *.apks; do [ -f "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
-          ls -la . Android/obb/* 2>/dev/null | head -40
+          ls -la
+          ls -laR Android/obb 2>/dev/null | head -20 || true
           bt="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
-          base="$(ls ./*.apk | grep -v '/config\.' | head -1)"
+          base="$APP_ID.apk"
+          [ -f "$base" ] || base="$(ls ./*.apk | head -1)"
           { "$bt/apksigner" verify --print-certs "$base" || true; } | grep -E "DN:|SHA-256|SHA-1" | tee signer.txt
           du -sh . || true
 
@@ -194,10 +196,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Install, launch and record on the emulator (API 34, x86_64)
+      # API 30: its image still translates 32-bit ARM apps (newer ones only 64-bit)
+      - name: Install, launch and record on the emulator (API 30, x86_64)
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 34
+          api-level: 30
           arch: x86_64
           target: google_apis
           profile: pixel_6
