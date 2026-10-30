@@ -56,12 +56,13 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Crouch | right, below 0.922, 0.834 | 0.166 | crouching-figure silhouette |
 | Prone | top, right of the score bar 0.673, 0.073 | 0.104 | lying-figure silhouette |
 | Grenade | bottom 0.678, 0.912 | 0.13 | grenade silhouette + count |
-| Settings / pause | top-right corner 0.952, 0.027 | 0.046 (touch radius >= 0.036 h) | small gear on a soft dark disk |
-| Scoreboard | left of the weapon panel 0.785, 0.216 | 0.062 | list glyph (the score bar opens it too) |
+| Settings / pause | top-right corner 0.963, 0.027, in the weapon panel's main slot corner | 0.046 (touch radius >= 0.036 h) | small gear on a soft dark disk, drawn over the panel and winning a touch there; the gun silhouette sits under it |
+| Scoreboard | (no button) | - | a tap on the score bar opens it |
 - Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
-- Crosshair: WHITE by default, a ring + centre dot (a 4-arc ring for shotguns, a dot for the
-  sniper and fists) that spreads with movement/firing; turns RED when on an enemy; red-dot reticle when
-  aiming (ADS), full scope for the sniper.
+- Crosshair: WHITE by default, a thin circle + small centre dot (fixed with four short outer ticks
+  for shotguns, a dot for the sniper, a small circle for the fists); the rifles' circle widens with
+  movement/firing; turns RED only when a shot would hit (the crosshair's ray meets the enemy before
+  cover); red-dot reticle when aiming (ADS), full scope for the sniper.
 - Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; hits on the
   same target within 0.32 s add up into one number, separate numbers line up side by side.
 - Hit marker: white X; headshot: orange X + head icon; kill: big red X on the enemy and the
@@ -83,7 +84,7 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
 | Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
 | Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; strength 0.9 x the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); on target the look slows to 0.4 and follows 100 % of the target's motion; an upward drag from the chest takes fixed shares of the screen at any distance: 4 % to the head band (+-0.2 m), the head band 26 % (the stop), a 0.25 m lip 8 %, then free (x strength); a mostly upward drag keeps 35 % of its sideways part; firing pulls sideways onto the body and, once a drag stops (net drag over 3 ticks < 0.4 % of the screen, so jitter does not count), holds what the drag chose (head, from the lip too; body; or nothing over the head) against the recoil; bloom counts a quarter on target; the first shot waits up to 0.15 s for a drag that starts with the press (0.15 s more while a slight overshoot is pulled back), first bullet after a pause at half spread (values: player.gd ASSIST) |
-| Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; drag sweep from the chest: body, then >= 15 % of the screen on the head, then over the head; while firing: a jittering thumb and a 2 % flick stay on the body, 15 %, 30 % and slanted (22 % up, 12 % sideways) flicks end on the head, 50 % goes over; first bullet: a 12 % flick with the press = head, no drag = body; on-target % with assist > without; red crosshair only on the body |
+| Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; drag sweep from the chest: body, then >= 15 % of the screen on the head, then over the head; while firing: a jittering thumb and a 2 % flick stay on the body, 15 %, 30 % and slanted (22 % up, 12 % sideways) flicks end on the head, 50 % goes over; first bullet: a 12 % flick with the press = head (its line passing < 0.07 m beside the head's middle), no drag = body; on-target % with assist > without; red crosshair only on the body |
 
 ## 5. Screens
 - Loading (boot, the main scene): full-bleed key art of our own character in a container yard
@@ -100,8 +101,9 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 - Result: mode/map text top-left, our medal with gold "VICTORY" / grey "DEFEAT" / white "DRAW" /
   red "INVALID", round score plates, stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY,
   TIME, HP LEFT), honour tag, XP bar, PLAY AGAIN / LOBBY.
-- Crosshair: small like the reference: rifle ring 0.019 h (grows with the spread up to 0.055 h),
-  shotgun ring 0.027 h (to 0.08 h), fists a dot in a 0.015 h ring; red on an enemy.
+- Crosshair sizes (radius, the reference's M1887 circle is ~0.07 h across): rifle ring 0.028 h (grows
+  with the spread up to 0.06 h), shotgun ring 0.035 h fixed, fists a dot in a 0.0175 h ring; lines
+  ~1.4 px with a soft shadow.
 - Settings (only what the reference mode offers): BASIC (graphics LOW .. EXTREME, 30/60/90 FPS),
   CONTROLS (dynamic joystick, custom HUD), SENSITIVITY (general, red dot, sniper scope,
   fire-button drag), SOUND; per-tab RESET. Everything else is fixed at its best value.

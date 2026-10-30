@@ -4,7 +4,8 @@ character's AnimationPlayer at runtime, track paths "Armature/Skeleton3D:<bone>"
 
 Actions (30 fps, in place, baked FK quaternions + pelvis location, same conventions as animate.py):
   reload, pump, heal (loop), throw, prone_idle (loop), prone_fwd (loop), swap, hit_react,
-  fists_idle, fists_run_a, fists_run_b (static arm poses for the fists, see fists_pose)
+  fists_idle, fists_run_a, fists_run_b (static arm poses for the fists, see fists_pose),
+  runx_fwd, runx_back, runx_left, runx_right (long-stride run cycles, loops)
 
 Run headless:
   blender -b --python tools/character/anim_extra.py -- [--only reload,pump] [--out X.glb] [--no-export]
@@ -822,6 +823,27 @@ def fists_pose(swing, rest=False):
     return pose
 
 
+# ============================================================================= long-stride run cycles
+# The reference's run: about 1.7 strides a second with long steps (~1.5 m), a high heel kick and a
+# forward lean, at the game's run speed. The base run_* cycles (0.7 s, 2 m/s) played 2.5x faster
+# at 5 m/s looked like a choppy jog. One cycle length for every direction keeps the blend in step;
+# the game plays these instead of run_* (runx_* in character_model.gd).
+RUNX_T = 0.6
+RUNX_SPEED = 5.0
+_RUNX = dict(T=RUNX_T, speed=RUNX_SPEED, stance=0.25, bob=0.045, drop=0.10)
+RUNX = {
+    "runx_fwd": dict(AN.RUN_FWD, **_RUNX, lift=0.34, lift_skew=0.65, lean=13.0, front_bias=0.05,
+                     strike_pitch=14.0, toeoff_pitch=-42.0, swing_pitch=-22.0),
+    "runx_back": dict(AN.RUN_BACK, **dict(_RUNX, stance=0.27, bob=0.035, drop=0.08), lift=0.22),
+    "runx_left": dict(AN.RUN_LEFT, **dict(_RUNX, stance=0.27, bob=0.035, drop=0.09), lift=0.24),
+    "runx_right": dict(AN.RUN_RIGHT, **dict(_RUNX, stance=0.27, bob=0.035, drop=0.09), lift=0.24),
+}
+
+
+def runx_pose(name):
+    return lambda t: AN.locomotion_pose(t, RUNX[name])
+
+
 # ============================================================================= registry / build
 ANIMS = [
     # name, frames (last == first for loops), loop, pose fn(t)
@@ -836,7 +858,7 @@ ANIMS = [
     ("fists_idle", 1, False, lambda t: fists_pose(0.0, rest=True)),
     ("fists_run_a", 1, False, lambda t: fists_pose(1.0)),
     ("fists_run_b", 1, False, lambda t: fists_pose(-1.0)),
-]
+] + [(n, int(round(RUNX_T * FPS)), True, runx_pose(n)) for n in RUNX]
 
 
 def sample(fn, nframes):

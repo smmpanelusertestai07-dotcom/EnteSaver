@@ -26,7 +26,7 @@ const ASSIST := {
 	"bubble_deg": 1.2,          # angular margin around the body that still counts as "on target"
 	"track_deg": 3.0,           # tracking keeps following while the crosshair is this close to the body
 	"friction": 0.4,            # look sensitivity multiplier on the body (lower = stickier)
-	"head_band": 0.2,           # m around the head centre that counts as the head for the aim
+	"head_band": HEAD_RADIUS,   # m around the head centre that counts as the head: its hit zone
 	"lip": 0.25,                # m over the head band that still slows a drag and pulls back to the head
 	"neck_drag": 0.04,          # screen heights of drag from the chest up to the head band
 	"head_drag": 0.26,          # screen heights of drag the head band takes up: the head "stop"
@@ -42,7 +42,7 @@ const ASSIST := {
 }
 const DRAG_SHOT_WINDOW := 0.15   # s the first shot may wait for a drag that starts with the press
 const DRAG_SHOT_START := 0.04    # no drag by then (or the drag paused): it fires
-const DRAG_SHOT_SETTLE := 0.15   # more s it waits while a drag that ran just over the head is pulled back
+const DRAG_SHOT_SETTLE := 0.15   # more s it waits while a drag that ended high on the head or just over it is pulled in
 
 var rig: Node3D
 var yaw_node: Node3D
@@ -65,7 +65,11 @@ var _on_column := false               # crosshair level with the target (the dra
 var _chest_p := 0.0                   # aim pitch of the chest, the head band's bottom and top and
 var _head_lo := 0.0                   # the lip's top (the drag regions' edges)
 var _head_hi := 0.0
+var _head_in := 0.0                   # top of the head's inner half (a drag from over it settles there)
 var _lip_hi := 0.0
+var _col_yaw := 0.0                   # aim yaw of the target's column and the half width counted on it
+var _col_tol := 0.0
+var _head_yaw := 0.0                  # aim yaw of the target's head (the column's top)
 var _anchor := ""                     # what firing holds since the last drag: "head", "body", "over"
 var victory_cam := false
 var crosshair_on_target := false      # HUD: crosshair turns red
@@ -168,17 +172,36 @@ func add_look(rel: Vector2, from_fire_button := false) -> void:
 	var fx := 1.0
 	if aim_zone != "" and _assist_active():
 		fx = lerpf(1.0, float(ASSIST.friction), _assist_strength())
+	var upward := assist_target != null and _assist_active() and rel.y < 0.0 and absf(rel.x) < absf(rel.y) * 2.0
 	# A mostly upward drag on the target (a drag shot is never quite straight) keeps to its column.
-	if _on_column and assist_target != null and _assist_active() and rel.y < 0.0 and absf(rel.x) < absf(rel.y) * 1.5:
+	if upward and _on_column:
 		fx *= float(ASSIST.drag_side)
 	aim_yaw -= deg_to_rad(rel.x * deg_per_px * fx)
+	# ... and one that starts beside it slides onto it: by the time the drag has covered the
+	# neck share of the screen the crosshair is on the column, so the head stop catches it.
+	var per := float(ASSIST.neck_drag) * deg_to_rad(deg_per_px * vh)
+	var share := clampf(deg_to_rad(-rel.y * deg_per_px) / maxf(per, 1e-5), 0.0, 1.0) * clampf(_assist_strength(), 0.0, 1.0)
+	if upward and not _on_column:
+		aim_yaw += wrapf(_col_yaw - aim_yaw, -PI, PI) * share
+		_on_column = absf(wrapf(_col_yaw - aim_yaw, -PI, PI)) <= _col_tol
 	var dy := -deg_to_rad(rel.y * deg_per_px)
 	if _on_column and assist_target != null and _assist_active():
 		aim_pitch = _slowed_pitch(aim_pitch, dy, deg_to_rad(deg_per_px * vh))
 	else:
 		aim_pitch += dy
 	aim_pitch = clampf(aim_pitch, deg_to_rad(PITCH_MIN), deg_to_rad(PITCH_MAX))
+	# On the column the drag follows the body up to the head, which an aiming stance holds off to
+	# one side of the chest (straight up from the chest would graze the side of the head).
+	if upward and _on_column:
+		aim_yaw += wrapf(_column_yaw(aim_pitch) - aim_yaw, -PI, PI) * share
 	_v_drag += rel.y / maxf(vh, 1.0)
+
+
+## Aim yaw of the target's column at pitch p: the chest's up to the chest, turning to the head's
+## over the neck.
+func _column_yaw(p: float) -> float:
+	var t := clampf((p - _chest_p) / maxf(_head_lo - _chest_p, 1e-4), 0.0, 1.0)
+	return _col_yaw + wrapf(_head_yaw - _col_yaw, -PI, PI) * t
 
 
 ## Moves the pitch by dy (radians, + = up) through the target's regions. per_screen is the raw
@@ -345,8 +368,10 @@ func _think(delta: float) -> void:
 	if firing and _shot_wait >= 0.0:
 		# The first shot leaves when the drag that began with the press stops (or never came).
 		_shot_wait += delta
-		var settling := _on_column and assist_target != null and aim_pitch > _head_hi and aim_pitch <= _lip_hi \
+		var settling := _on_column and assist_target != null and aim_pitch > _head_in and aim_pitch <= _lip_hi \
 			and _shot_wait < DRAG_SHOT_WINDOW + DRAG_SHOT_SETTLE
+		# just beside a target: the pull puts the crosshair on it first (at most DRAG_SHOT_WINDOW)
+		settling = settling or (assist_target != null and aim_zone == "" and not _on_column and _shot_wait < DRAG_SHOT_WINDOW)
 		if (_shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_move >= 0.03)) and not settling:
 			_shot_wait = -1.0
 			_try_fire()
@@ -381,10 +406,9 @@ func _try_fire() -> void:
 		start_reload()
 		return
 	_sync_aim_rig()
-	var xf := camera.global_transform
-	var fwd := -xf.basis.z
-	var head := eye_position()
-	var start := xf.origin + fwd * maxf((head - xf.origin).dot(fwd), 0.0)
+	var ray := _shot_ray()
+	var start: Vector3 = ray[0]
+	var fwd: Vector3 = ray[1]
 	if perform_shot(start, fwd):
 		Game.mark("player fired")
 		if arena and arena.has_method("net_shot"):
@@ -442,6 +466,20 @@ func _body_miss_angle(f: Fighter) -> float:
 	return maxf(ang - radius, 0.0)
 
 
+## The line a shot leaves along before spread: the crosshair's ray from level with the eyes.
+func _shot_ray() -> Array:
+	var xf := camera.global_transform
+	var fwd := -xf.basis.z
+	return [xf.origin + fwd * maxf((eye_position() - xf.origin).dot(fwd), 0.0), fwd]
+
+
+## True when that line meets f before any cover, within the gun's reach: the red crosshair.
+func _crosshair_meets(f: Fighter) -> bool:
+	var ray := _shot_ray()
+	var res := trace(ray[0], ray[1], float(weapon().def.range) * 1.6)
+	return not res.is_empty() and owner_of(res.collider) == f
+
+
 ## The camera turns with the aim in _process; physics (shots, the assist) first turns it to the
 ## aim of this very moment, so a drag that ended since the last frame still counts.
 func _sync_aim_rig() -> void:
@@ -471,8 +509,9 @@ func _update_aim_assist(delta: float) -> void:
 		var dist := xf.origin.distance_to(chest)
 		var miss := _body_miss_angle(f)
 		var zone := _zone_on(f)
-		# The red crosshair works at any range the gun reaches; assist only inside max_range.
-		if zone != "" and dist <= float(weapon().def.range) * 1.6 and (can_see(chest) or can_see(f.head_position())):
+		# The red crosshair: a shot (before spread) would hit them, at any range the gun reaches;
+		# the assist works only inside max_range.
+		if _crosshair_meets(f):
 			crosshair_on_target = true
 		if dist > max_range:
 			continue
@@ -501,9 +540,13 @@ func _update_aim_assist(delta: float) -> void:
 	_chest_p = chest_aim.y
 	_head_lo = _aim_angles_for(head - Vector3.UP * band).y
 	_head_hi = _aim_angles_for(head + Vector3.UP * band).y
+	_head_in = _aim_angles_for(head + Vector3.UP * band * 0.5).y
 	_lip_hi = _aim_angles_for(head + Vector3.UP * (band + float(ASSIST.lip))).y
 	var d := xf.origin.distance_to(head)
-	_on_column = absf(wrapf(chest_aim.x - aim_yaw, -PI, PI)) <= atan(0.35 / maxf(d, 0.5)) + deg_to_rad(float(ASSIST.bubble_deg) + 1.5)
+	_col_yaw = chest_aim.x
+	_head_yaw = _aim_angles_for(head).x
+	_col_tol = atan(0.35 / maxf(d, 0.5)) + deg_to_rad(float(ASSIST.bubble_deg) + 1.5)
+	_on_column = absf(wrapf(_col_yaw - aim_yaw, -PI, PI)) <= _col_tol
 	var on_body := best_miss <= deg_to_rad(float(ASSIST.track_deg))
 	# Tracking: follow the target's angular motion while on (or right next to) them.
 	var chest_dir := (assist_target.chest_position() - xf.origin).normalized()

@@ -161,61 +161,94 @@ func set_loadout(weapon_id: String) -> void:
 
 # ---------------------------------------------------------------- hitboxes
 
+## Hit zones that follow the skeleton: a sphere on the head and capsules along the bones
+## (torso, shoulders, hips, arms with the hands, legs with the feet), so a shot that lands on any
+## visible part of the body counts (spheres left gaps at the shoulders, hips, knees and limbs).
+## Entry: zone, end A, end B ("" = a sphere at A), radius, extension past B (m).
+const HEAD_RADIUS := 0.15            # the head's hit zone, a sphere (the aim's head band too)
+const HITBOX_DEFS := {
+	"head": ["head", "head", "", HEAD_RADIUS, 0.0],
+	"neck": ["body", "neck", "head", 0.075, 0.0],
+	"chest": ["body", "spine2", "spine3", 0.18, 0.0],
+	"belly": ["body", "spine1", "pelvis", 0.165, 0.0],
+	"shoulders": ["body", "upperarm_l", "upperarm_r", 0.085, 0.0],
+	"hips": ["body", "thigh_l", "thigh_r", 0.12, 0.0],
+	"upperarm_l": ["limb", "upperarm_l", "lowerarm_l", 0.062, 0.0],
+	"upperarm_r": ["limb", "upperarm_r", "lowerarm_r", 0.062, 0.0],
+	"forearm_l": ["limb", "lowerarm_l", "hand_l", 0.052, 0.09],
+	"forearm_r": ["limb", "lowerarm_r", "hand_r", 0.052, 0.09],
+	"thigh_l": ["limb", "thigh_l", "calf_l", 0.088, 0.0],
+	"thigh_r": ["limb", "thigh_r", "calf_r", 0.088, 0.0],
+	"calf_l": ["limb", "calf_l", "foot_l", 0.066, 0.0],
+	"calf_r": ["limb", "calf_r", "foot_r", 0.066, 0.0],
+	"foot_l": ["limb", "foot_l", "ball_l", 0.055, 0.06],
+	"foot_r": ["limb", "foot_r", "ball_r", 0.055, 0.06],
+}
+
+
 func _build_hitboxes() -> void:
-	# zone, anchor roles (midpoint), radius
-	var defs := [
-		["head", "head", ["head"], 0.16],
-		["neck", "body", ["neck", "head"], 0.1],          # closes the gap between the head and the chest
-		["chest", "body", ["spine2", "spine3"], 0.21],
-		["belly", "body", ["spine1", "pelvis"], 0.2],
-		["thigh_l", "limb", ["thigh_l", "calf_l"], 0.11],
-		["thigh_r", "limb", ["thigh_r", "calf_r"], 0.11],
-		["calf_l", "limb", ["calf_l", "foot_l"], 0.09],
-		["calf_r", "limb", ["calf_r", "foot_r"], 0.09],
-		["arm_l", "limb", ["upperarm_l", "lowerarm_l"], 0.08],
-		["arm_r", "limb", ["upperarm_r", "lowerarm_r"], 0.08],
-	]
-	for d in defs:
+	for key: String in HITBOX_DEFS:
+		var d: Array = HITBOX_DEFS[key]
 		var area := Area3D.new()
-		area.name = "HB_" + d[0]
+		area.name = "HB_" + key
 		area.collision_layer = LAYER_HITBOX
 		area.collision_mask = 0
 		area.monitoring = false
 		area.monitorable = true
 		area.top_level = true
 		var cs := CollisionShape3D.new()
-		var sph := SphereShape3D.new()
-		sph.radius = d[3]
-		cs.shape = sph
+		if String(d[2]) == "":
+			var sph := SphereShape3D.new()
+			sph.radius = d[3]
+			cs.shape = sph
+		else:
+			# bone lengths are constant: the capsule is sized once from the current pose
+			var cap := CapsuleShape3D.new()
+			cap.radius = d[3]
+			var length := model.bone_position(String(d[1])).distance_to(model.bone_position(String(d[2]))) + float(d[4])
+			cap.height = length + 2.0 * float(d[3])
+			cs.shape = cap
 		area.add_child(cs)
 		area.set_meta("fighter", self)
-		area.set_meta("zone", d[1])
+		area.set_meta("zone", d[0])
 		add_child(area)
 		hitboxes.append(area)
-		_boxes[d[0]] = [area, d[2]]
+		_boxes[key] = area
 	_update_hitboxes()
 
 
 func _update_hitboxes() -> void:
-	for key in _boxes:
-		var entry: Array = _boxes[key]
-		var area: Area3D = entry[0]
-		var roles: Array = entry[1]
-		var p := Vector3.ZERO
-		for r in roles:
-			p += model.bone_position(r)
-		p /= roles.size()
-		if key == "head":
-			p += model.head_up() * 0.07
-		area.global_position = p
+	for key: String in _boxes:
+		var d: Array = HITBOX_DEFS[key]
+		var area: Area3D = _boxes[key]
+		var a := model.bone_position(String(d[1]))
+		if String(d[2]) == "":
+			area.global_position = a + (model.head_up() * 0.07 if key == "head" else Vector3.ZERO)
+			continue
+		var b := model.bone_position(String(d[2]))
+		var axis := b - a
+		var length := axis.length()
+		if length < 0.001:
+			area.global_position = a
+			continue
+		axis /= length
+		b += axis * float(d[4])
+		# capsules run along local Y
+		var side := axis.cross(Vector3.FORWARD if absf(axis.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
+		area.global_transform = Transform3D(Basis(side, axis, side.cross(axis)), (a + b) * 0.5)
+
+
+## The fighter a hit zone belongs to (null for anything else).
+static func owner_of(o: Object) -> Fighter:
+	return o.get_meta("fighter") as Fighter if o is Area3D and o.has_meta("fighter") else null
 
 
 func head_position() -> Vector3:
-	return (_boxes["head"][0] as Area3D).global_position
+	return (_boxes["head"] as Area3D).global_position
 
 
 func chest_position() -> Vector3:
-	return (_boxes["chest"][0] as Area3D).global_position
+	return (_boxes["chest"] as Area3D).global_position
 
 
 func eye_height() -> float:
@@ -381,11 +414,11 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 		sprinting = false
 	if Weapons.is_melee(w.def):
 		return _melee(w, base_dir)
+	var spread := current_spread()      # before this shot's own bloom: a first shot goes true
 	w.on_fire()
 	stats.shots += 1
 	last_shot_time = _now()
 	var d := w.def
-	var spread := current_spread()
 	var muzzle := model.muzzle_position()
 	var total := 0.0
 	var any_head := false
@@ -402,8 +435,11 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 			var to_end := end_pos - muzzle
 			var md := to_end.length()
 			if md > 0.3:
+				# Cover between the gun and that point stops the shot; the target's own other hit
+				# zones don't (the gun sits lower than the crosshair: a head on the crosshair is hit).
 				var res2 := trace(muzzle, to_end / md, md - 0.12)
-				if not res2.is_empty() and res2.collider != res.collider:
+				if not res2.is_empty() and res2.collider != res.collider \
+						and (owner_of(res2.collider) == null or owner_of(res2.collider) != owner_of(res.collider)):
 					res = res2
 					end_pos = res2.position
 		if i == 0 or i % 3 == 0:
@@ -767,7 +803,7 @@ func _footsteps(delta: float) -> void:
 		_step_timer = 0.0
 		return
 	_step_timer += delta * (hs / RUN_SPEED)
-	var interval := 0.34 if stance == Stance.STAND else 0.5
+	var interval := 0.3 if stance == Stance.STAND else 0.5      # half a run cycle (runx_*) at RUN_SPEED
 	if _step_timer >= interval:
 		_step_timer = 0.0
 		var quiet := stance != Stance.STAND or hs < WALK_SPEED + 0.3

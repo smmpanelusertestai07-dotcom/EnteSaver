@@ -459,7 +459,7 @@ func _run_perf() -> void:
 ##  1. start 3 deg off the chest, hold FIRE: the pull must bring the crosshair onto the body;
 ##  2. a drag from the chest: tiny stays on the body, a normal (also slanted) one stops on the
 ##     head, a huge one goes over it; a resting thumb's jitter keeps the body; the first bullet
-##     follows the drag;
+##     follows the drag (through the head's middle);
 ##  3. the bot strafes: with assist the crosshair stays on target more often than without;
 ##  4. crosshair_on_target (red crosshair) is true on the body, false 8 deg away.
 ## Prints AIM lines and exits 1 if a check fails.
@@ -506,7 +506,8 @@ func _run_aim() -> void:
 	var acquired := -1.0
 	for i in 60:
 		await get_tree().physics_frame
-		if p.crosshair_on_target and acquired < 0.0:
+		# (a tick's state shows from the next tick on: tick 0 still shows the aim before the offset)
+		if i > 0 and p.crosshair_on_target and acquired < 0.0:
 			acquired = i / 60.0
 	p.set_firing(false)
 	_log("AIM pull: on target after %.2fs (want < 0.6s)" % acquired)
@@ -571,8 +572,10 @@ func _run_aim() -> void:
 		if zone != String(c[3]):
 			fails += 1
 	_log("AIM thumbs: %s (want jitter, tiny = body; normal, long, slanted = head; huge = over)" % ", ".join(got))
-	# 2c. the first bullet goes where the drag that began with the press stopped
+	# 2c. the first bullet goes where the drag that began with the press stopped, through the
+	#     head's middle (an aiming stance holds the head off to one side of the chest)
 	var first := {}
+	var side_off := [1.0]          # (an array: the hook below writes to it)
 	for trial in ["drag", "still"]:
 		await _wait(0.5)
 		for k in 3:   # the camera sits on the shoulder: re-aim once it has moved
@@ -589,7 +592,15 @@ func _run_aim() -> void:
 		var on_hit := func(_t: Fighter, _amount: float, head_hit: bool, pos: Vector3, _killed: bool) -> void:
 			if landed.is_empty():
 				landed.append("%s %+.2f m from the head centre" % ["head" if head_hit else "body", pos.y - b.head_position().y])
+		var on_fired := func(_w: WeaponState) -> void:
+			if trial == "drag" and side_off[0] >= 1.0:
+				var ray: Array = p.call("_shot_ray")
+				var o: Vector3 = ray[0]
+				var dv: Vector3 = ray[1]
+				var hc := b.head_position()
+				side_off[0] = absf((o + dv * (hc - o).dot(dv) - hc).dot(dv.cross(Vector3.UP).normalized()))
 		p.hit_landed.connect(on_hit)
+		p.fired.connect(on_fired)
 		p.set_firing(true)
 		if trial == "drag":
 			for i in 4:                 # a quick 12 % flick with the press
@@ -603,10 +614,12 @@ func _run_aim() -> void:
 			("miss" if int(p.stats.shots) > shots0 else "no shot"))
 		p.set_firing(false)
 		p.hit_landed.disconnect(on_hit)
+		p.fired.disconnect(on_fired)
 		if not landed.is_empty():
 			_log("AIM first bullet (%s) landed: %s" % [trial, landed[0]])
-	_log("AIM first bullet: with a drag=%s, no drag=%s (want head, body)" % [first.drag, first.still])
-	if first.drag != "head" or first.still != "body":
+	_log("AIM first bullet: with a drag=%s, no drag=%s (want head, body); the drag's shot passes %.3f m beside the head centre (want < 0.07)" % [
+		first.drag, first.still, side_off[0]])
+	if first.drag != "head" or first.still != "body" or side_off[0] >= 0.07:
 		fails += 1
 	b.endless_hp = false
 	b.invulnerable = true

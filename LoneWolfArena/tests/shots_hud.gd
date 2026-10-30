@@ -5,7 +5,8 @@ extends Node
 ## the bot in view (red crosshair), firing (damage numbers that stack into one, hit marker),
 ## separate damage numbers in a row (never on top of each other), red-dot ADS, reload ring,
 ## fists, the lever shotgun's own silhouette, sniper scope, sprint (stick past the ring and the
-## button), the settings gear, scoreboard (clear of the weapon panel), healing, low HP with
+## button), the settings gear (over the weapon panel's corner), scoreboard (tap on the score bar,
+## clear of the weapon panel), healing, low HP with
 ## damage arcs, the elimination (red X, badge, kill feed) and the HUD editor (select + drag).
 ## Returns 0, or 1 if a check failed.
 
@@ -32,8 +33,8 @@ func run(at: Node) -> int:
 	_check(hud.panels.pick_open, "pick panel open in prep", at)
 	_check(HudDraw.weapon_tex(Weapons.DEFS.lever) != HudDraw.weapon_tex(Weapons.DEFS.sg), "lever and pump shotguns have different silhouettes", at)
 	var main0 := HudLayout.weapon_main(hud.layout.weapons, vs)
-	_check(absf(main0.position.y / vs.y - 0.05) < 0.012 and absf(main0.end.y / vs.y - 0.155) < 0.012,
-		"weapon panel main slot at y 0.05 .. 0.155 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
+	_check(absf(main0.position.y / vs.y - 0.003) < 0.012 and absf(main0.end.y / vs.y - 0.155) < 0.012,
+		"weapon panel main slot at y 0.003 .. 0.155 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
 	await _tap(at, hud.panels.card_rect(1).get_center())
 	await at.wait(0.3)
 	await at.shot("hud_02_pick_smg")
@@ -177,8 +178,8 @@ func run(at: Node) -> int:
 	at.get_tree().paused = false
 	hud.reload_layout()
 	await at.wait(0.3)
-	# Scoreboard (button), then close it.
-	await _tap(at, HudLayout.center(hud.layout.scoreboard, vs))
+	# Scoreboard (a tap on the score bar), then close it.
+	await _tap(at, hud.score_rect().get_center())
 	await at.wait(0.5)
 	await at.shot("hud_12_scoreboard")
 	_check(hud.panels.board_open, "scoreboard opens", at)

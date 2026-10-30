@@ -335,7 +335,7 @@ func _on_down(index: int, pos: Vector2) -> void:
 	var id := _widget_at(pos, vs)
 	if id != "":
 		_press(id, index)
-		if String(_touches[index].kind) == "fire":
+		if _touches.has(index) and String(_touches[index].kind) == "fire":     # (settings releases all)
 			_touches[index]["start"] = pos
 			_touches[index]["pos"] = pos
 		return
@@ -347,6 +347,10 @@ func _on_down(index: int, pos: Vector2) -> void:
 
 ## Topmost control under the finger ("" = none). Overlapping buttons: the closest centre wins.
 func _widget_at(pos: Vector2, vs: Vector2) -> String:
+	# The settings gear is drawn over the weapon panel's corner, so it wins a touch there.
+	var gear: Dictionary = layout.settings
+	if pos.distance_to(HudLayout.center(gear, vs)) <= HudLayout.touch_radius(gear, vs) * 1.15:
+		return "settings"
 	var best := ""
 	var best_d := INF
 	for id: String in HudLayout.ORDER:
@@ -704,6 +708,7 @@ func _draw() -> void:
 	if not match_over:
 		_draw_controls(vs)
 		_draw_weapon_panel(vs)
+		_draw_button("settings", vs)          # the gear sits on the weapon panel's top corner
 	_draw_hp_block(vs, u)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
@@ -725,7 +730,7 @@ func _draw() -> void:
 func _draw_controls(vs: Vector2) -> void:
 	_draw_joystick(vs)
 	for id: String in BUTTONS:
-		if _button_visible(id):
+		if _button_visible(id) and id != "settings":
 			_draw_button(id, vs)
 
 
@@ -867,8 +872,9 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 		status = "RELOAD"
 		st_col = Color(1.0, 0.33, 0.28, o)
 	HudDraw.text(self, status, Vector2(ax, main.position.y + s * 0.76), int(s * 0.23), st_col, 0, 2, "bold")
-	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(main.end.x - main.size.x * 0.3, main.position.y + s * 0.44),
-		Vector2(main.size.x * 0.5, s * 0.66), Color(1, 1, 1, 0.97 * dim * o))
+	# (under the settings gear, which sits in the slot's top right corner like the reference)
+	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(main.end.x - main.size.x * 0.31, main.position.y + s * 0.53),
+		Vector2(main.size.x * 0.46, s * 0.56), Color(1, 1, 1, 0.97 * dim * o))
 	var ul := Rect2(main.position.x + s * 0.12, main.end.y - s * 0.09, main.size.x - s * 0.24, maxf(2.0, s * 0.035))
 	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
 	draw_rect(Rect2(ul.position, Vector2(ul.size.x * (progress if reloading else 1.0), ul.size.y)),
@@ -917,35 +923,45 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 	var sc := lerpf(0.75, 1.35, float(Game.settings.crosshair_size) / 100.0)
 	var dyn := bool(Game.settings.dynamic_crosshair)
 	var outline := Color(0, 0, 0, 0.45)
+	var shade := Color(0, 0, 0, 0.3)          # soft shadow under the thin lines
+	var ring_col := Color(col, col.a * 0.92)
 	var ring_r := 0.0
+	var reload_ring := w.reloading and bool(Game.settings.get("reload_on_crosshair", true))
 	if player.ads and player.scope_type() == "reddot":
 		ring_r = _draw_red_dot(c, u, sc, on or hit)
 	else:
+		# The reference's crosshairs: a thin circle about 7 % of the screen high with a small dot
+		# (the shotgun's is fixed with four short ticks outside it, the rifles' widen with the
+		# spray), a small circle for the fists.
 		match String(w.def.get("crosshair", "ring")):
 			"dot":
-				HudDraw.disk(self, c, 3.6 * sc, outline)
-				HudDraw.disk(self, c, 2.4 * sc, col)
-				ring_r = 0.015 * u * sc
-				if Weapons.is_melee(w.def):
-					HudDraw.ring(self, c, ring_r, Color(col, 0.5), 1.4)
-			"wide":
-				ring_r = clampf(maxf(0.027 * u, _spread_px() if dyn else 0.0), 0.025 * u, 0.08 * u) * sc
-				for k in (0 if w.reloading and Game.settings.get("reload_on_crosshair", true) else 4):
-					var a0 := -PI * 0.5 + PI * 0.5 * k + 0.32
-					draw_arc(c, ring_r, a0, a0 + PI * 0.5 - 0.64, 16, outline, 3.6, true)
-					draw_arc(c, ring_r, a0, a0 + PI * 0.5 - 0.64, 16, col, 1.8, true)
 				HudDraw.disk(self, c, 2.8 * sc, outline)
-				HudDraw.disk(self, c, 1.8 * sc, col)
+				HudDraw.disk(self, c, 1.9 * sc, col)
+				ring_r = 0.0175 * u * sc
+				if Weapons.is_melee(w.def):
+					HudDraw.ring(self, c, ring_r, shade, 2.8)
+					HudDraw.ring(self, c, ring_r, ring_col, 1.3)
+			"wide":
+				ring_r = 0.035 * u * sc
+				if not reload_ring:
+					HudDraw.ring(self, c, ring_r, shade, 3.0)
+					HudDraw.ring(self, c, ring_r, ring_col, 1.4)
+					for k in 4:
+						var d := Vector2.UP.rotated(k * PI * 0.5)
+						draw_line(c + d * (ring_r + 2.0), c + d * (ring_r + 2.0 + 0.009 * u * sc), shade, 3.0, true)
+						draw_line(c + d * (ring_r + 2.0), c + d * (ring_r + 2.0 + 0.009 * u * sc), ring_col, 1.4, true)
+				HudDraw.disk(self, c, 2.6 * sc, outline)
+				HudDraw.disk(self, c, 1.7 * sc, col)
 			_:
-				# the ring shows the real spread (reference: ~0.04 h across, blooming a little)
-				ring_r = clampf(maxf(0.019 * u, _spread_px() if dyn else 0.0), 0.018 * u, 0.055 * u) * sc
-				if not (w.reloading and Game.settings.get("reload_on_crosshair", true)):
-					HudDraw.ring(self, c, ring_r, outline, 3.4)
-					HudDraw.ring(self, c, ring_r, col, 1.6)
-				HudDraw.disk(self, c, 3.0 * sc, outline)
-				HudDraw.disk(self, c, 2.0 * sc, col)
+				# widens with the real spread (moving, jumping, a long spray)
+				ring_r = clampf(maxf(0.028 * u, _spread_px() if dyn else 0.0), 0.026 * u, 0.06 * u) * sc
+				if not reload_ring:
+					HudDraw.ring(self, c, ring_r, shade, 3.0)
+					HudDraw.ring(self, c, ring_r, ring_col, 1.4)
+				HudDraw.disk(self, c, 2.6 * sc, outline)
+				HudDraw.disk(self, c, 1.7 * sc, col)
 	# Reload progress on the crosshair (setting), with a small magazine mark at the upper right.
-	if w.reloading and bool(Game.settings.get("reload_on_crosshair", true)):
+	if reload_ring:
 		var rr := maxf(ring_r, 0.03 * u)
 		HudDraw.ring(self, c, rr, Color(0, 0, 0, 0.4), 4.4)
 		HudDraw.ring(self, c, rr, Color(1, 1, 1, 0.25), 2.4)

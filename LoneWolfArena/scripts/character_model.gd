@@ -17,9 +17,11 @@ const BUNDLE_INFO := [
 	{"id": "royal", "name": "ROYAL GOLD", "rarity": "legendary", "desc": "White and gold. Pure flex."},
 ]
 const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "crouch_idle", "crouch_fwd", "lobby_idle",
-	"victory", "heal", "prone_idle", "prone_fwd"]
+	"victory", "heal", "prone_idle", "prone_fwd", "runx_fwd", "runx_back", "runx_left", "runx_right"]
 ## Speeds (m/s) at which the in-place cycles were authored; playback is scaled to the real speed.
+## The long-stride runx_* cycles (anims_extra) replace the base run_* jog when present.
 const RUN_AUTHORED := 2.0
+const RUNX_AUTHORED := 5.0
 const CROUCH_AUTHORED := 1.0
 const PRONE_AUTHORED := 0.30
 ## Minimum time between two hit flinches, so automatic fire does not lock the upper body.
@@ -55,6 +57,8 @@ const BONE_CANDIDATES := {
 	"thigh_r": ["thigh_r", "thigh.R", "RightUpLeg", "mixamorig:RightUpLeg"],
 	"calf_r": ["calf_r", "shin.R", "RightLeg", "mixamorig:RightLeg"],
 	"foot_r": ["foot_r", "foot.R", "RightFoot", "mixamorig:RightFoot"],
+	"ball_l": ["ball_l", "toe.L", "LeftToeBase", "mixamorig:LeftToeBase"],
+	"ball_r": ["ball_r", "toe.R", "RightToeBase", "mixamorig:RightToeBase"],
 }
 
 static var _manifest: Dictionary = {}
@@ -79,6 +83,7 @@ var show_weapon := true
 
 var _loco := Vector2.ZERO
 var _speed := 0.0
+var _run_authored := RUN_AUTHORED      # speed the run cycles in the blend were authored at
 var _crouch_amt := 0.0
 var _prone_amt := 0.0
 var _air := 0.0
@@ -313,11 +318,13 @@ func _build_tree() -> void:
 	tree.anim_player = tree.get_path_to(anim)
 	var root := AnimationNodeBlendTree.new()
 	var loco := AnimationNodeBlendSpace2D.new()
+	var run := "runx" if anim.has_animation("runx_fwd") else "run"
+	_run_authored = RUNX_AUTHORED if run == "runx" else RUN_AUTHORED
 	loco.add_blend_point(_anim_node("idle"), Vector2.ZERO, -1, &"idle")
-	loco.add_blend_point(_anim_node("run_fwd"), Vector2(0, 1), -1, &"fwd")
-	loco.add_blend_point(_anim_node("run_back"), Vector2(0, -1), -1, &"back")
-	loco.add_blend_point(_anim_node("run_left"), Vector2(-1, 0), -1, &"left")
-	loco.add_blend_point(_anim_node("run_right"), Vector2(1, 0), -1, &"right")
+	loco.add_blend_point(_anim_node(run + "_fwd"), Vector2(0, 1), -1, &"fwd")
+	loco.add_blend_point(_anim_node(run + "_back"), Vector2(0, -1), -1, &"back")
+	loco.add_blend_point(_anim_node(run + "_left"), Vector2(-1, 0), -1, &"left")
+	loco.add_blend_point(_anim_node(run + "_right"), Vector2(1, 0), -1, &"right")
 	var crouch := AnimationNodeBlendSpace2D.new()
 	crouch.add_blend_point(_anim_node("crouch_idle"), Vector2.ZERO, -1, &"idle")
 	var k := 0
@@ -454,7 +461,9 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 		tree.set("parameters/crouch_blend/blend_amount", _crouch_amt)
 		tree.set("parameters/prone_blend/blend_amount", _prone_amt)
 		tree.set("parameters/air_blend/blend_amount", _air)
-		tree.set("parameters/loco_ts/scale", clampf(_speed / RUN_AUTHORED, 1.0, 3.2) if _speed > 0.3 else 1.0)
+		# (the long strides also slow down for a walk, the short jog only speeds up)
+		var run_scale := clampf(_speed / _run_authored, 0.6, 1.6) if _run_authored > RUN_AUTHORED else clampf(_speed / RUN_AUTHORED, 1.0, 3.2)
+		tree.set("parameters/loco_ts/scale", run_scale if _speed > 0.3 else 1.0)
 		tree.set("parameters/crouch_ts/scale", clampf(_speed / CROUCH_AUTHORED, 1.0, 2.4) if _speed > 0.2 else 1.0)
 		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 2.6) if _speed > 0.08 else 1.0)
 		if anim.has_animation("heal"):
@@ -484,7 +493,7 @@ func _stride_phase() -> float:
 	if skeleton == null or not (bone_idx.has("foot_l") and bone_idx.has("foot_r")):
 		return 0.5
 	var d := (bone_position("foot_l") - bone_position("foot_r")).dot(-global_basis.z)
-	return clampf(0.5 + d / 0.5, 0.0, 1.0)
+	return clampf(0.5 + d / 1.1, 0.0, 1.0)       # the long run stride spreads the feet up to ~0.55 m
 
 
 ## The gun of the round on the back while the fists are out (the reference look), diagonal
