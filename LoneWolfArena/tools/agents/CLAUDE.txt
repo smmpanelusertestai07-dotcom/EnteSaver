@@ -39,6 +39,10 @@ tools/qa/capture.sh /tmp/shots 1560x720 screens           # screenshot walkthrou
 python3 tools/qa/compare.py /tmp/shots_old /tmp/shots /tmp/cmp   # screen-by-screen diff
 tools/build_apk.sh                                        # signed release APK (see script header)
 ```
+Release key: the owner keeps the backup of ~/.lonewolf (release.keystore, release.pass,
+save_secret, sent to them privately on 2026-10-30). In a fresh environment ask them for it and put
+it back before building a release; never make a new key (updates would stop installing over the
+game already on phones).
 
 ## No documents in the repository
 The repository carries source and what builds and checks it, nothing else: Ente Saver's own

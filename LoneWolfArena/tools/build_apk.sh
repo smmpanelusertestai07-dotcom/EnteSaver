@@ -3,9 +3,11 @@
 #
 #   tools/build_apk.sh [preset] [out.apk]        preset defaults to "Android"
 #
-# Signing key: LW_KEYSTORE / LW_KEY_ALIAS / LW_KEY_PASS. When LW_KEYSTORE is not set, a key in
-# ~/.lonewolf/release.keystore is used (created on first run with a random password stored next
-# to it, both outside the repository). Never commit keystores or passwords.
+# Signing key: LW_KEYSTORE / LW_KEY_ALIAS / LW_KEY_PASS. When LW_KEYSTORE is not set, the key in
+# ~/.lonewolf/release.keystore is used (password in release.pass next to it, both outside the
+# repository); the owner keeps a backup of the three files to restore in a new environment. A new
+# key is only made with LW_NEW_KEY=1 (updates signed with it no longer install over the game
+# already on phones). Never commit keystores or passwords.
 # The certificate's SHA-256 goes into the game, which refuses to count matches when it runs
 # from an APK signed with another key. Stores that re-sign the APKs they deliver (Google Play
 # App Signing) use their own key: list its SHA-256 (from the store's console) in
@@ -28,6 +30,13 @@ if [ -z "${LW_KEYSTORE:-}" ]; then
   chmod 700 "$HOME/.lonewolf"
   LW_KEYSTORE="$HOME/.lonewolf/release.keystore"
   LW_KEY_ALIAS="lonewolf"
+  if [ ! -f "$LW_KEYSTORE" ] && [ "${LW_NEW_KEY:-0}" != "1" ]; then
+    # Every update has to be signed with the same key or it will not install over the game
+    # already on the phones: a fresh environment restores the owner's backup instead.
+    echo "No release key in $HOME/.lonewolf. Restore the owner's backup there (release.keystore,"
+    echo "release.pass, save_secret; chmod 600). Only for a brand-new game: LW_NEW_KEY=1 $0"
+    exit 1
+  fi
   if [ ! -f "$LW_KEYSTORE" ]; then
     head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$HOME/.lonewolf/release.pass"
     chmod 600 "$HOME/.lonewolf/release.pass"
