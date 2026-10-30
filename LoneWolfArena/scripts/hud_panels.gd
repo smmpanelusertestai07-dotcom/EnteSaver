@@ -2,17 +2,19 @@ class_name HudPanels
 extends Control
 ## Overlay panels of the in-match HUD, drawn above everything else:
 ##  - the pre-round weapon pick: near-black panel with corner brackets, "SELECT WEAPON FOR
-##    ROUND n", a "| WEAPON" label, a 4-column grid of gun cards (silhouette, name, class; the
-##    choice gets a yellow outline and a tick), a countdown and a yellow SELECT button. It calls
-##    on_pick exactly once: SELECT or the close X confirm the current choice, so does the timer;
+##    ROUND n", a "| WEAPON" label, a 6-column grid of gun cards (silhouette, name, class; the
+##    choice gets a yellow outline and a tick), the choice's bars, magazine and attachments, a
+##    countdown and a yellow SELECT button. It calls on_pick exactly once: SELECT or the close X
+##    confirm the current choice, so does the timer;
 ##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs. It stays
 ##    between the widgets listed in `avoid` (the HUD passes the minimap and the weapon panel),
 ##    so on 16:9 it gets narrower and its header and columns shrink to fit instead of covering them.
 ## The HUD sends taps here first (tap() returns true when a panel used the tap).
 
-const CLASS_NAMES := {"AR": "ASSAULT RIFLE", "SMG": "SUBMACHINE GUN", "SG": "SHOTGUN", "PISTOL": "HAND CANNON",
-	"SNIPER": "SNIPER RIFLE", "MELEE": "MELEE"}
-const COLS := 4
+const CLASS_NAMES := {"AR": "ASSAULT RIFLE", "SMG": "SUBMACHINE GUN", "SG": "SHOTGUN", "PISTOL": "PISTOL",
+	"DMR": "MARKSMAN RIFLE", "SNIPER": "SNIPER RIFLE", "MELEE": "MELEE"}
+const BAR_LABELS := {"DAMAGE": "DMG", "RATE": "RATE", "RANGE": "RANGE", "ACCURACY": "ACC", "SPEED": "SPEED"}
+const COLS := 6
 
 var arena: Node
 var pick_open := false
@@ -244,14 +246,16 @@ func _draw_pick() -> void:
 	# "| WEAPON" label.
 	var ly := r.position.y + 0.11 * u
 	draw_rect(Rect2(Vector2(r.position.x + 0.025 * u, ly - 0.014 * u), Vector2(0.007 * u, 0.028 * u)), Color(HudDraw.YELLOW, a))
-	HudDraw.text(self, "WEAPON", Vector2(r.position.x + 0.045 * u, ly), int(0.03 * u), Color(1, 1, 1, a), 0, 0, "bold")
+	var lw := HudDraw.text(self, "WEAPON", Vector2(r.position.x + 0.045 * u, ly), int(0.03 * u), Color(1, 1, 1, a), 0, 0, "bold")
+	HudDraw.text_parts(self, [["BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)], ["SELECTED WEAPON", HudDraw.YELLOW]],
+		Vector2(r.position.x + 0.07 * u + lw, ly), int(0.021 * u), 0, 0, "semi", a)
 	for i in pick_options.size():
 		_draw_card(i, a, u)
-	# Footer: rule text, countdown, SELECT.
+	# Footer: the choice's numbers, countdown, SELECT.
 	var sr := select_rect()
 	var fy := sr.get_center().y
-	HudDraw.text_parts(self, [["BOTH FIGHTERS USE THE ", Color(1, 1, 1, 0.85)], ["SELECTED WEAPON", HudDraw.YELLOW]],
-		Vector2(r.position.x + 0.03 * u, fy), int(0.027 * u), 0, 0, "semi", a)
+	var fx := r.position.x + 0.03 * u
+	_draw_details(Vector2(fx, fy), sr.position.x - 0.11 * u - fx, a, u)
 	var cc := Vector2(sr.position.x - 0.06 * u, fy)
 	var cr := 0.03 * u
 	HudDraw.disk(self, cc, cr, Color(0, 0, 0, 0.5 * a))
@@ -279,12 +283,12 @@ func _draw_card(i: int, a: float, u: float) -> void:
 	HudDraw.vband(self, Rect2(r.position, Vector2(r.size.x, 0.075 * u)), Color(1, 1, 1, 0.06 * a), Color(1, 1, 1, 0.0))
 	HudDraw.corner_brackets(self, r.grow(-3), 0.02 * u, Color(1, 1, 1, (0.5 if sel else 0.28) * a), 1.5)
 	var tc := Color(1, 1, 1, (1.0 if sel else 0.82) * a)
-	HudDraw.text(self, String(def.name), r.position + Vector2(0.016 * u, 0.03 * u), int(0.03 * u), tc, 0, 0, "bold")
-	HudDraw.text(self, String(CLASS_NAMES.get(String(def["class"]), String(def["class"]))), r.position + Vector2(0.016 * u, 0.062 * u),
-		int(0.021 * u), Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
-	var mag := int(def.mag)
-	if mag > 0:
-		HudDraw.text(self, "MAG %d" % mag, Vector2(r.end.x - 0.016 * u, r.position.y + 0.062 * u), int(0.021 * u), Color(0.72, 0.76, 0.82, a), 2, 0, "semi")
+	var room := r.size.x - 0.032 * u - (0.04 * u if sel else 0.0)     # the tick sits top right
+	HudDraw.text(self, String(def.name), r.position + Vector2(0.016 * u, 0.03 * u), _fit(String(def.name), 0.03 * u, room, "bold"),
+		tc, 0, 0, "bold")
+	var cls := String(CLASS_NAMES.get(String(def["class"]), String(def["class"])))
+	HudDraw.text(self, cls, r.position + Vector2(0.016 * u, 0.062 * u), _fit(cls, 0.021 * u, r.size.x - 0.032 * u, "semi"),
+		Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
 	var gun_box := Vector2(r.size.x * 0.8, r.size.y * 0.46)
 	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(r.get_center().x, r.position.y + r.size.y * 0.66), gun_box,
 		Color(1, 1, 1, (0.97 if sel else 0.62) * a))
@@ -293,6 +297,37 @@ func _draw_card(i: int, a: float, u: float) -> void:
 		var tcen := Vector2(r.end.x - 0.024 * u, r.position.y + 0.024 * u)
 		HudDraw.disk(self, tcen, 0.017 * u, Color(HudDraw.YELLOW, a))
 		HudDraw.icon(self, HudDraw.tex("v_tick"), tcen, Vector2(0.022, 0.022) * u, Color(0.1, 0.07, 0.02, a))
+
+
+## Font size for `t`: `px` px, smaller when the text would be wider than `room`.
+func _fit(t: String, px: float, room: float, kind: String) -> int:
+	var w := HudDraw.text_width(t, int(px), kind)
+	return maxi(9, int(px * minf(1.0, room / maxf(w, 1.0))))
+
+
+## The chosen gun under the grid: five bars (damage, rate, range, accuracy, speed), then its
+## magazine, reload time and attachments.
+func _draw_details(at: Vector2, width: float, a: float, u: float) -> void:
+	var def: Dictionary = Weapons.DEFS.get(pick_choice, Weapons.DEFS[Weapons.DEFAULT_PICK])
+	var values := Weapons.bars(def)
+	var gw := width / values.size()
+	var fs := int(0.019 * u)
+	var y := at.y - 0.02 * u
+	var bh := maxf(0.01 * u, 3.0)
+	var i := 0
+	for key: String in values:
+		var x := at.x + gw * i
+		HudDraw.text(self, String(BAR_LABELS.get(key, key)), Vector2(x, y), fs, Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
+		var bx := x + 0.075 * u
+		var bw := maxf(gw - 0.09 * u, 0.02 * u)
+		draw_rect(Rect2(bx, y - bh * 0.5, bw, bh), Color(1, 1, 1, 0.14 * a))
+		draw_rect(Rect2(bx, y - bh * 0.5, bw * float(values[key]), bh), Color(HudDraw.YELLOW, 0.95 * a))
+		i += 1
+	var parts := ["MAG %d" % int(def.mag), "RELOAD %.1f S" % float(def.reload)] if int(def.mag) > 0 else []
+	var att: Array = def.get("attach", [])
+	parts.append(" + ".join(PackedStringArray(att)) if not att.is_empty() else "NO ATTACHMENTS")
+	var info := "   ·   ".join(PackedStringArray(parts))
+	HudDraw.text(self, info, Vector2(at.x, at.y + 0.022 * u), _fit(info, 0.021 * u, width, "semi"), Color(1, 1, 1, 0.85 * a), 0, 0, "semi")
 
 
 func _draw_board() -> void:

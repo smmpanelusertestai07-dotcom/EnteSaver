@@ -164,6 +164,7 @@ func set_loadout(weapon_id: String) -> void:
 ## Hit zones that follow the skeleton: a sphere on the head and capsules along the bones
 ## (torso, shoulders, hips, arms with the hands, legs with the feet), so a shot that lands on any
 ## visible part of the body counts (spheres left gaps at the shoulders, hips, knees and limbs).
+## Zones: "head", "body" (the arms too) and "limb" (legs and feet, less damage).
 ## Entry: zone, end A, end B ("" = a sphere at A), radius, extension past B (m).
 const HEAD_RADIUS := 0.15            # the head's hit zone, a sphere (the aim's head band too)
 const HITBOX_DEFS := {
@@ -173,10 +174,10 @@ const HITBOX_DEFS := {
 	"belly": ["body", "spine1", "pelvis", 0.165, 0.0],
 	"shoulders": ["body", "upperarm_l", "upperarm_r", 0.085, 0.0],
 	"hips": ["body", "thigh_l", "thigh_r", 0.12, 0.0],
-	"upperarm_l": ["limb", "upperarm_l", "lowerarm_l", 0.062, 0.0],
-	"upperarm_r": ["limb", "upperarm_r", "lowerarm_r", 0.062, 0.0],
-	"forearm_l": ["limb", "lowerarm_l", "hand_l", 0.052, 0.09],
-	"forearm_r": ["limb", "lowerarm_r", "hand_r", 0.052, 0.09],
+	"upperarm_l": ["body", "upperarm_l", "lowerarm_l", 0.062, 0.0],
+	"upperarm_r": ["body", "upperarm_r", "lowerarm_r", 0.062, 0.0],
+	"forearm_l": ["body", "lowerarm_l", "hand_l", 0.052, 0.09],
+	"forearm_r": ["body", "lowerarm_r", "hand_r", 0.052, 0.09],
 	"thigh_l": ["limb", "thigh_l", "calf_l", 0.088, 0.0],
 	"thigh_r": ["limb", "thigh_r", "calf_r", 0.088, 0.0],
 	"calf_l": ["limb", "calf_l", "foot_l", 0.066, 0.0],
@@ -452,7 +453,7 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 			var target: Fighter = col.get_meta("fighter")
 			var zone: String = col.get_meta("zone")
 			var dist := ray_origin.distance_to(end_pos)
-			var dmg := Weapons.damage_at(d, float(d.damage), dist) * Weapons.zone_mult(d, zone, dist)
+			var dmg := Weapons.damage_at(d, float(d.damage), dist) * Weapons.zone_mult(d, zone, dist) * Weapons.pen_mult(d, zone)
 			var dealt := target.take_damage(dmg, zone, self, global_position)
 			Effects.hit_spark(self, end_pos, -dir, zone == "head")
 			if dealt > 0.0:
@@ -471,10 +472,11 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	_after_shot(w, hit_target, total, any_head, last_pos, killed)
 	model.on_fire()
 	Effects.muzzle_flash(self, muzzle, aim_forward(), int(d.pellets) > 1)
+	var pitch := float(d.get("pitch", 1.0))
 	if is_player:
-		Audio.play(String(d.sound), -1.0, rng.randf_range(0.96, 1.04))
+		Audio.play(String(d.sound), -1.0, pitch * rng.randf_range(0.96, 1.04))
 	else:
-		Audio.play_at(String(d.sound), muzzle, 2.0, rng.randf_range(0.95, 1.05), 120.0)
+		Audio.play_at(String(d.sound), muzzle, 2.0, pitch * rng.randf_range(0.95, 1.05), 120.0)
 	if arena and arena.has_method("on_gunshot"):
 		arena.on_gunshot(self)
 	return true
@@ -508,7 +510,7 @@ func _melee(w: WeaponState, base_dir: Vector3) -> bool:
 		var zone: String = (res.collider as Area3D).get_meta("zone")
 		head = zone == "head"
 		pos = res.position
-		total = hit_target.take_damage(float(w.def.damage) * Weapons.zone_mult(w.def, zone), zone, self, global_position)
+		total = hit_target.take_damage(float(w.def.damage) * Weapons.zone_mult(w.def, zone) * Weapons.pen_mult(w.def, zone), zone, self, global_position)
 		killed = not hit_target.alive
 		Effects.hit_spark(self, pos, -base_dir, head)
 	if total <= 0.0:
@@ -825,7 +827,10 @@ func _footsteps(delta: float) -> void:
 	if _step_timer >= interval:
 		_step_timer = 0.0
 		var quiet := stance != Stance.STAND or hs < WALK_SPEED + 0.3
-		var vol := -12.0 if is_player else (-3.0 if not quiet else -14.0)
-		Audio.play_at("footstep_%d" % (rng.randi() % 4 + 1), global_position, vol, rng.randf_range(0.9, 1.1), 40.0)
+		# Someone else's run is loud and carries (it gives them away); a walk or a crouch only
+		# close by. Your own steps stay soft.
+		var vol := -12.0 if is_player else (1.0 if not quiet else -11.0)
+		var reach := 40.0 if is_player else (48.0 if not quiet else 16.0)
+		Audio.play_at("footstep_%d" % (rng.randi() % 4 + 1), global_position, vol, rng.randf_range(0.9, 1.1), reach)
 		if arena and arena.has_method("on_footstep") and not quiet:
 			arena.on_footstep(self)

@@ -29,7 +29,7 @@ const PROPS := ["container", "container_40", "container_open", "crate", "wall_ba
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_pistol", "weapon_sniper", "medkit", "grenade", "shield_wall"]
 const TIPS := [
 	"Hold FIRE and drag to keep aiming while you shoot.",
-	"Headshots hit up to 5.5x harder. Aim for the head.",
+	"Headshots hit 2 to 4 times harder, legs take less. Aim for the head.",
 	"A medkit heals 75 HP over 4 seconds. Firing cancels it.",
 	"Tap the wall or frag button to take it in hand, then FIRE to put it down or throw it.",
 	"Put up a shield wall, then heal behind it.",
@@ -37,7 +37,7 @@ const TIPS := [
 	"Pick your gun in the 10-second prep. Both of you use it.",
 	"The safe zone starts closing after 25 seconds. Stay inside.",
 	"Crouch or go prone to make yourself a smaller target.",
-	"A frag does up to 150 damage after a 3-second fuse. A vest halves it.",
+	"A frag does up to 150 damage after a 3-second fuse. A vest stops a third of it.",
 ]
 const GOLD := Color(0.94, 0.745, 0.24)
 

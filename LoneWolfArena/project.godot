@@ -3,7 +3,7 @@ config_version=5
 
 [application]
 
-config/name="Lone Wolf Arena"
+config/name="Wolf Arena"
 config/description="Offline 1v1 third-person arena shooter."
 config/version="1.0.0"
 run/main_scene="res://scenes/loading.tscn"

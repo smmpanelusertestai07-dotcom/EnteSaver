@@ -93,6 +93,7 @@ var _holster: Node3D           # the gun on the back while the fists are out
 var _healing := false
 var _aim_dir := Vector3.FORWARD
 var _kick := 0.0
+var _punch_left := true                 # the last jab was with the left hand (the next one is the right)
 var _dead := false
 var _phase := 0.0
 var _fb := {}
@@ -385,13 +386,14 @@ func _build_tree() -> void:
 		last = "heal_blend"
 	# One-shot upper-body actions (later ones override earlier ones while they play); reload and
 	# swap are time-scaled to the weapon's reload / equip time.
-	for action in ["reload", "throw", "pump", "swap", "hit_react"]:
+	for action in ["reload", "throw", "pump", "swap", "punch_r", "punch_l", "hit_react"]:
 		var a_name := String(action)
 		if not anim.has_animation(a_name):
 			continue
 		var os := AnimationNodeOneShot.new()
-		os.fadein_time = 0.05 if a_name == "hit_react" else 0.12
-		os.fadeout_time = 0.12 if a_name == "hit_react" else 0.18
+		var quick := a_name == "hit_react" or a_name.begins_with("punch")
+		os.fadein_time = 0.04 if quick else 0.12
+		os.fadeout_time = 0.12 if quick else 0.18
 		_filter(os, ARM_ONLY_BONES if a_name == "pump" else UPPER_BONES)
 		root.add_node(a_name, _anim_node(a_name), Vector2(750, 600))
 		root.add_node(a_name + "_ts", AnimationNodeTimeScale.new(), Vector2(850, 600))
@@ -403,7 +405,7 @@ func _build_tree() -> void:
 	root.connect_node("output", 0, last)
 	tree.tree_root = root
 	tree.active = true
-	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "hit_react_ts"]:
+	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "punch_r_ts", "punch_l_ts", "hit_react_ts"]:
 		if anim.has_animation(ts.trim_suffix("_ts")) or ts in ["loco_ts", "crouch_ts", "prone_ts"]:
 			tree.set("parameters/%s/scale" % ts, 1.0)
 
@@ -544,8 +546,13 @@ func on_fire() -> void:
 		tree.set("parameters/pump_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 
 
+## A jab, the right and left hand in turn (from a guard before the chin).
 func on_punch() -> void:
 	_kick = minf(_kick + 0.08, 0.14)
+	_punch_left = not _punch_left
+	var clip := "punch_l" if _punch_left else "punch_r"
+	if tree and tree.active and anim.has_animation(clip):
+		tree.set("parameters/%s_shot/request" % clip, AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 
 
 func on_jump() -> void:

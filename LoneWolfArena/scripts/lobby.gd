@@ -1210,7 +1210,7 @@ func _close_modal() -> void:
 const HOW_TO := [
 	["MOVE & LOOK", [
 		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
-		["v_eye", "LOOK", "Drag anywhere on the right side to turn the camera."],
+		["v_eye", "LOOK  ·  FREE LOOK", "Drag on the right side to turn the camera. Hold the eye and drag to look all around, even at your own face."],
 		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
 		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
 		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
@@ -1219,11 +1219,11 @@ const HOW_TO := [
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
 		["v_wall", "SHIELD WALL  x2", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
-		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest halves it), 3 s fuse."],
+		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest stops a third), 3 s fuse."],
 	]],
 	["THE MATCH", [
 		["v_player", "FIRST TO 5 ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win 5 rounds to win the match."],
-		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use; the pick takes turns."],
+		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use (12 guns, fixed attachments); the pick takes turns."],
 		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
 	]],
 ]

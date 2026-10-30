@@ -2,8 +2,8 @@ class_name HudMinimap
 extends Control
 ## The HUD's square minimap, north up: a window of the arena's top-down render
 ## (arena.minimap_texture over arena.map_rect) that follows the player, the player arrow with its
-## view cone, the enemy as a red dot while revealed (shots / footsteps) or in sight, and the white
-## safe-zone circle. It clips its drawing to its own rect; until the render exists (first frames)
+## view cone, the enemy as a red dot while revealed (shots / footsteps) or in sight, the red
+## footprints of their running steps, and the white safe-zone circle. It clips its drawing to its own rect; until the render exists (first frames)
 ## a dark floor plan from arena.obstacles stands in. The HUD places it from its layout.
 
 const VIEW_M := 28.0                       # metres shown edge to edge
@@ -74,6 +74,13 @@ func _draw() -> void:
 		var zp := (Vector2(zc.x, zc.z) - origin) * k
 		draw_arc(zp, zr * k, 0.0, TAU, 72, Color(0.35, 0.6, 1.0, 0.35 * o), 4.0, true)
 		draw_arc(zp, zr * k, 0.0, TAU, 72, Color(1, 1, 1, 0.92 * o), 1.6, true)
+	# Enemy footsteps: red footprints that fade out.
+	for st: Dictionary in hud.steps:
+		var d: Vector2 = st.dir
+		var fp := (Vector2(st.p) - origin) * k + Vector2(-d.y, d.x) * float(st.side) * 2.6
+		draw_set_transform(fp, atan2(-d.x, d.y), Vector2(0.6, 1.0))
+		draw_circle(Vector2.ZERO, 4.4, Color(1.0, 0.3, 0.22, 0.85 * o * clampf(float(st.t) / 0.8, 0.0, 1.0)), true, -1.0, true)
+	draw_set_transform(Vector2.ZERO)
 	# Enemy: red dot while revealed or in sight.
 	var reveal: Dictionary = hud._reveal
 	var seen: Dictionary = hud.seen

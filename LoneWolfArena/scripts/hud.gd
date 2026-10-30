@@ -15,16 +15,16 @@ extends Control
 
 signal pause_pressed
 
-const BUTTONS := ["fire_r", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "settings"]
+const BUTTONS := ["fire_r", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook", "settings"]
 const GLYPHS := {
 	"fire_r": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
 	"prone": "stance_prone", "sprint": "stance_sprint", "medkit": "v_medkit", "wall": "v_wall",
-	"grenade": "item_grenade", "settings": "v_settings",
+	"grenade": "item_grenade", "settings": "v_settings", "freelook": "v_eye",
 }
 const GLYPH_FALLBACK := {"prone": "v_prone", "sprint": "v_sprint", "jump": "v_chevron"}
 const GLYPH_SCALE := {
 	"fire_r": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
-	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56,
+	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
@@ -77,6 +77,8 @@ var _center := {"text": "", "sub": "", "t": 0.0, "dur": 1.0, "col": Color.WHITE,
 var _round_banner := {"t": 0.0, "round": 1, "area": ""}
 var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
+var steps: Array[Dictionary] = []     # enemy footprints for the minimap: {p (x, z), dir, side, t}
+const STEP_SHOW := 2.2                # s a footprint stays on the minimap
 var _vis_t := 0.0
 var _hp_lag := Fighter.MAX_HP
 var _hp_last := Fighter.MAX_HP
@@ -175,6 +177,17 @@ func kill_banner(victim_name: String, headshot: bool) -> void:
 
 func reveal(f: Fighter, seconds := 2.5) -> void:
 	_reveal[f] = maxf(float(_reveal.get(f, 0.0)), seconds)
+
+
+## Someone ran: a footprint where the step landed (left and right in turn), shown on the
+## minimap for a moment like the reference mode's footstep marks.
+func footstep(f: Fighter) -> void:
+	var v := Vector2(f.velocity.x, f.velocity.z)
+	var side := -1 if steps.is_empty() or int(steps[-1].side) > 0 else 1
+	steps.append({"p": Vector2(f.global_position.x, f.global_position.z), "dir": v.normalized() if v.length() > 0.1 else Vector2.UP,
+		"side": side, "t": STEP_SHOW})
+	if steps.size() > 14:
+		steps.pop_front()
 
 
 func release_all() -> void:
@@ -413,6 +426,9 @@ func _press(id: String, index: int) -> void:
 			player.use_shield()
 		"grenade":
 			player.use_grenade()
+		"freelook":
+			_touches[index] = {"kind": "free", "id": id}
+			player.start_free_look()
 		"settings":
 			release_all()
 			pause_pressed.emit()
@@ -440,6 +456,8 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 				_joy_vec = (pos - _joy_center) / jr
 		"look":
 			player.add_look(rel, false)
+		"free":
+			player.add_free_look(rel)
 		"fire":
 			_touches[index]["pos"] = pos
 			player.add_look(rel, true)
@@ -470,6 +488,8 @@ func _on_up(index: int, canceled := false) -> void:
 			_joy_vec = Vector2.ZERO
 			_joy_out_t = 0.0
 			_sprint_lock = false
+		"free":
+			player.end_free_look()
 		"fire":
 			_held.erase(String(t.id))
 			var still := false
@@ -592,6 +612,9 @@ func _process(delta: float) -> void:
 		_reveal[f] -= delta
 		if _reveal[f] <= 0.0:
 			_reveal.erase(f)
+	for st in steps:
+		st.t = float(st.t) - delta
+	steps = steps.filter(func(st: Dictionary) -> bool: return float(st.t) > 0.0)
 	_vis_t -= real
 	if _vis_t <= 0.0:
 		_vis_t = 0.1
@@ -704,7 +727,7 @@ func _draw() -> void:
 	if alive:
 		if player.ready_item != "":
 			_draw_item_aim(c, u)
-		elif not scoped:
+		elif not scoped and not player.is_free_looking():
 			_draw_crosshair(c, u)
 		_draw_heal(c, u)
 	_draw_kill_x(u)

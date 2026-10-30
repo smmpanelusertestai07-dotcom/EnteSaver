@@ -5,6 +5,7 @@ character's AnimationPlayer at runtime, track paths "Armature/Skeleton3D:<bone>"
 Actions (30 fps, in place, baked FK quaternions + pelvis location, same conventions as animate.py):
   reload, pump, heal (loop), throw, prone_idle (loop), prone_fwd (loop), swap, hit_react,
   fists_idle, fists_run_a, fists_run_b (static arm poses for the fists, see fists_pose),
+  punch_r, punch_l (a jab with either hand from a high guard, see punch_pose),
   runx_fwd, runx_back, runx_left, runx_right (long-stride run cycles, loops)
 
 Run headless:
@@ -823,6 +824,45 @@ def fists_pose(swing, rest=False):
     return pose
 
 
+PUNCH_T = 13 / FPS
+PUNCH_HIT = 3 / FPS                 # the fist at full reach (the game lands the hit on the input)
+
+
+def punch_pose(s):
+    """Boxing jab with the `s` hand: both fists come up to a guard before the chin, the torso turns
+    into the punch while the fist shoots out to full reach at PUNCH_HIT (palm turning down), holds
+    a moment and comes back to the guard."""
+    kt = [0.0, PUNCH_HIT * 0.5, PUNCH_HIT, PUNCH_HIT + 0.06, 0.3, PUNCH_T]
+    st = [True, False, True, False, False, True]
+    sgn = 1.0 if s == "r" else -1.0
+
+    def fn(t):
+        def K(vals):
+            return spline([(a, b, c) for a, b, c in zip(kt, vals, st)], t)
+        reach = K([0.0, 0.45, 1.0, 0.92, 0.2, 0.0])
+        twist = sgn * K([0.0, 6.0, 16.0, 15.0, 4.0, 0.0])          # + brings the right shoulder forward
+        pose = A.Pose()
+        idle_body(pose, 0.0, spine_add=[rot(Z, twist / 3.0)] * 3, pelvis_rot_add=rot(Z, twist * 0.35),
+                  neck_add=rot(Z, -twist * 0.3), head_add=rot(Z, -twist * 0.45))      # eyes stay on the target
+        for a in ("l", "r"):
+            side = RIGHT if a == "r" else -RIGHT
+            S = pose.head("upperarm_" + a)
+            guard = S + FWD * 0.2 - side * 0.1 + UP * 0.06
+            hit = S + FWD * 0.5 - side * 0.09 + UP * 0.03
+            k = reach if a == s else 0.0
+            wrist = guard.lerp(hit, k)
+            pole = S - FWD * 0.1 + side * 0.35 - UP * 0.3          # elbow out and down
+            pose.two_bone("upperarm_" + a, "lowerarm_" + a, wrist, pole)
+            f = (wrist - pose.head("lowerarm_" + a)).normalized()
+            palm = (-side).lerp(-UP, k)                            # inward at the guard, down at full reach
+            p = (palm - f * palm.dot(f)).normalized()
+            pose.set_orient("hand_" + a, hand_matrix(a, wrist, f, p).to_3x3())
+            pose.fingers(a, FIST, thumb=FIST_THUMB)
+        pose.fk()
+        return pose
+    return fn
+
+
 # ============================================================================= long-stride run cycles
 # The reference's run: about 1.7 strides a second with long steps (~1.5 m), a high heel kick and a
 # forward lean, at the game's run speed. The base run_* cycles (0.7 s, 2 m/s) played 2.5x faster
@@ -858,6 +898,8 @@ ANIMS = [
     ("fists_idle", 1, False, lambda t: fists_pose(0.0, rest=True)),
     ("fists_run_a", 1, False, lambda t: fists_pose(1.0)),
     ("fists_run_b", 1, False, lambda t: fists_pose(-1.0)),
+    ("punch_r", int(round(PUNCH_T * FPS)), False, punch_pose("r")),
+    ("punch_l", int(round(PUNCH_T * FPS)), False, punch_pose("l")),
 ] + [(n, int(round(RUNX_T * FPS)), True, runx_pose(n)) for n in RUNX]
 
 

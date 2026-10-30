@@ -366,6 +366,8 @@ func _range_band() -> Vector2:
 			return Vector2(4.0, 12.0)
 		"PISTOL":
 			return Vector2(7.0, 18.0)
+		"DMR":
+			return Vector2(12.0, 26.0)
 		"SNIPER":
 			return Vector2(16.0, 32.0)
 		"MELEE":

@@ -56,7 +56,7 @@ func _lowest_toe(m: CharacterModel, clip: String) -> float:
 
 func _check_clips_and_toes() -> void:
 	var m1 := _model()
-	for clip in ["reload", "pump", "heal", "throw", "swap", "hit_react", "prone_idle", "prone_fwd"]:
+	for clip in ["reload", "pump", "heal", "throw", "swap", "hit_react", "prone_idle", "prone_fwd", "punch_r", "punch_l"]:
 		_expect(m1.anim.has_animation(clip), "clip merged: " + clip)
 	var toe1 := _lowest_toe(m1, "run_fwd")
 	var m2 := _model()      # second character: must not flip the shared clips back

@@ -713,6 +713,7 @@ func on_footstep(f: Fighter) -> void:
 			(other as Bot).hear(f.global_position, 0.35)
 	if f != player and hud:
 		hud.reveal(f, 1.0)
+		hud.footstep(f)
 
 
 func shake_camera(pos: Vector3, amount: float) -> void:

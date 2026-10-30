@@ -35,33 +35,45 @@ func _ready() -> void:
 
 func _test_damage() -> void:
 	var ar: Dictionary = Weapons.DEFS.ar
-	_near(Weapons.damage_at(ar, 32.0, 10.0), 32.0, "AR no falloff inside falloff_start")
-	_near(Weapons.damage_at(ar, 32.0, 80.0), 18.0, "AR min damage at max range")
-	_check(Weapons.damage_at(ar, 32.0, 50.0) < 32.0 and Weapons.damage_at(ar, 32.0, 50.0) > 18.0, "AR falloff in between")
-	_near(Weapons.zone_mult(ar, "head"), 4.0, "AR head multiplier")
-	_near(Weapons.zone_mult(ar, "limb"), 1.0, "limbs count as body")
+	_near(Weapons.damage_at(ar, 40.0, 10.0), 40.0, "AR no falloff inside falloff_start")
+	_near(Weapons.damage_at(ar, 40.0, 80.0), 24.0, "AR min damage at max range")
+	_check(Weapons.damage_at(ar, 40.0, 50.0) < 40.0 and Weapons.damage_at(ar, 40.0, 50.0) > 24.0, "AR falloff in between")
+	_near(Weapons.zone_mult(ar, "head"), 2.6, "AR head multiplier")
+	_near(Weapons.zone_mult(ar, "limb"), 0.75, "legs take less")
 	_near(Weapons.zone_mult(ar, "body"), 1.0, "body multiplier")
 	var smg: Dictionary = Weapons.DEFS.smg
-	_check(Weapons.zone_mult(smg, "head", 30.0) < Weapons.zone_mult(smg, "head", 5.0), "SMG headshot bonus decays with range")
-	_near(Weapons.after_armor(100.0, "body", 0.5, 0.45), 50.0, "vest Lv2 halves body damage")
-	_near(Weapons.after_armor(100.0, "head", 0.5, 0.45), 55.0, "helmet Lv2 takes 45%")
-	_near(Weapons.after_armor(10.0, "zone", 0.5, 0.45), 10.0, "zone ignores armor")
-	# Time-to-kill sanity through Lv2 armour (200 HP).
-	var per_hit := Weapons.after_armor(32.0, "body", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
-	var hits := ceili(200.0 / per_hit)
-	_check(hits >= 11 and hits <= 14, "AR body hits to kill 11..14 (got %d)" % hits)
-	var ar_head := Weapons.after_armor(32.0 * Weapons.zone_mult(ar, "head"), "head", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
-	_check(ceili(200.0 / ar_head) == 3, "AR: 3 headshots kill")
-	var p: Dictionary = Weapons.DEFS.pistol
-	var p_head := Weapons.after_armor(90.0 * Weapons.zone_mult(p, "head"), "head", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
-	_check(p_head >= 200.0, "hand cannon headshot is a one-tap through a Lv2 helmet")
-	var sg: Dictionary = Weapons.DEFS.sg
-	var sg_full := Weapons.after_armor(float(sg.damage) * int(sg.pellets), "body", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
-	_check(sg_full > 66.0 and sg_full < 100.0, "shotgun point blank body = 3-shot kill")
-	var sn: Dictionary = Weapons.DEFS.sniper
-	_check(Weapons.after_armor(150.0 * Weapons.zone_mult(sn, "head"), "head", 0.5, 0.45) >= 200.0, "sniper headshot kills")
+	_check(Weapons.zone_mult(smg, "head", 25.0) < Weapons.zone_mult(smg, "head", 5.0), "SMG headshot bonus decays with range")
+	_near(Weapons.after_armor(100.0, "body", 0.35, 0.35), 65.0, "a Lv2 vest stops 35%")
+	_near(Weapons.after_armor(10.0, "zone", 0.35, 0.35), 10.0, "zone ignores armor")
+	_near(Weapons.pen_mult(ar, "body"), 1.0, "no penetration: no change")
+	var groza: Dictionary = Weapons.DEFS.groza
+	_near(Weapons.after_armor(100.0 * Weapons.pen_mult(groza, "body"), "body", Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION),
+		100.0 * (1.0 - Weapons.VEST_REDUCTION * 0.75), "25% penetration: the vest stops 3/4 of its share")
+	_near(Weapons.pen_mult(groza, "zone"), 1.0, "penetration does nothing outside armour")
+	# Hits to kill through Lv2 armour (200 HP), like the reference roster.
+	_check(_hits("ar", "body") >= 7 and _hits("ar", "body") <= 9, "M4A1: 7..9 body shots kill (%d)" % _hits("ar", "body"))
+	_check(_hits("ar", "head") == 3, "M4A1: 3 headshots kill (%d)" % _hits("ar", "head"))
+	_check(_hits("ak", "body") < _hits("ar", "body"), "AK47 hits harder than the M4A1")
+	_check(_hits("smg", "body") >= 9 and _hits("smg", "body") <= 11, "MP40: 9..11 body shots (%d)" % _hits("smg", "body"))
+	_check(_hits("pistol", "head") == 1, "hand cannon headshot is a one-tap through a Lv2 helmet")
+	_check(_hits("lever", "body") == 2, "M1887: two shells to the body")
+	_check(_hits("sg", "body") == 3, "M1014: three shells to the body")
+	_check(_hits("kar98k", "head") == 1 and _hits("sniper", "head") == 1, "bolt rifles one-tap the head")
+	_check(_hits("sniper", "body") == 2, "the heavy sniper's penetration: two body shots")
+	_check(_hits("ar", "limb") > _hits("ar", "body"), "leg shots need more hits")
 	for id in Weapons.PICKABLE:
 		_check(Weapons.DEFS.has(id), "pickable weapon %s exists" % id)
+		var def: Dictionary = Weapons.DEFS.get(id, {})
+		_check(def.get("attach") is Array, "%s lists its attachments" % id)
+		for v in Weapons.bars(def).values():
+			_check(float(v) > 0.0 and float(v) <= 1.0, "%s bars inside 0..1" % id)
+
+
+## Hits of `id` (all pellets, no falloff) that take 200 HP through Lv2 armour on `zone`.
+func _hits(id: String, zone: String) -> int:
+	var d: Dictionary = Weapons.DEFS[id]
+	var raw := float(d.damage) * int(d.pellets) * Weapons.zone_mult(d, zone) * Weapons.pen_mult(d, zone)
+	return ceili(200.0 / Weapons.after_armor(raw, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION) - 0.0001)
 
 
 func _test_spread() -> void:

@@ -107,6 +107,6 @@ func remote_shot(origin: Vector3, dir: Vector3) -> void:
 	if not res.is_empty() and not (res.collider is Area3D):
 		Effects.impact(self, end_pos, res.get("normal", Vector3.UP))
 	Effects.muzzle_flash(self, muzzle, aim_forward(), int(d.pellets) > 1)
-	Audio.play_at(String(d.sound), muzzle, 2.0, rng.randf_range(0.95, 1.05), 120.0)
+	Audio.play_at(String(d.sound), muzzle, 2.0, float(d.get("pitch", 1.0)) * rng.randf_range(0.95, 1.05), 120.0)
 	if arena and arena.has_method("on_gunshot"):
 		arena.on_gunshot(self)

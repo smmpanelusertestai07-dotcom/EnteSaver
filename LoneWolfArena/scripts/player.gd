@@ -72,6 +72,8 @@ var _col_tol := 0.0
 var _head_yaw := 0.0                  # aim yaw of the target's head (the column's top)
 var _anchor := ""                     # what firing holds since the last drag: "head", "body", "over"
 var victory_cam := false
+var free_look := false                # eye button held: the camera turns around you, the aim stays
+var _free := Vector2.ZERO             # the free look's camera yaw / pitch offset (radians)
 var spectating: Fighter               # eliminated: whose view the camera follows (the killer)
 var _spectate_wait := 0.0             # s left on the own fall before the camera goes to them
 var crosshair_on_target := false      # HUD: crosshair turns red
@@ -154,6 +156,8 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	shake = 0.0
 	victory_cam = false
 	_victory_yaw = INF
+	free_look = false
+	_free = Vector2.ZERO
 	_track_target = null
 	spectating = null
 	put_away_item()
@@ -181,7 +185,30 @@ func forget_aim_hold() -> void:
 
 
 func _assist_active() -> bool:
-	return assist_on
+	return assist_on and not is_free_looking()
+
+
+## Free look (the eye button): while it is held a drag turns the camera all the way around the
+## character (its face too) without turning the character or the aim.
+func start_free_look() -> void:
+	free_look = alive and not firing
+
+
+func add_free_look(rel: Vector2) -> void:
+	if not free_look:
+		return
+	var deg_per_px := 130.0 / maxf(get_viewport().get_visible_rect().size.y, 1.0) * _sensitivity()
+	_free.x -= deg_to_rad(rel.x * deg_per_px)
+	_free.y = clampf(_free.y - deg_to_rad(rel.y * deg_per_px), deg_to_rad(-55.0), deg_to_rad(35.0))
+
+
+## Letting go eases the camera back behind the shoulder.
+func end_free_look() -> void:
+	free_look = false
+
+
+func is_free_looking() -> bool:
+	return free_look or _free.length() > 0.02
 
 
 func add_look(rel: Vector2, from_fire_button := false) -> void:
@@ -306,7 +333,7 @@ func set_firing(on: bool) -> void:
 		return
 	var was := firing
 	firing = on and alive
-	if firing and not was and scope_type() != "sniper":
+	if firing and not was and scope_type() != "sniper" and not Weapons.is_melee(weapon().def):
 		_shot_wait = 0.0
 	elif not firing and was and _shot_wait >= 0.0:
 		_shot_wait = -1.0
@@ -315,6 +342,8 @@ func set_firing(on: bool) -> void:
 		cancel_heal()
 	if firing:
 		sprinting = false
+		free_look = false        # shots go where you aim: the camera snaps back first
+		_free = Vector2.ZERO
 	# Snipers: holding FIRE scopes in, releasing shoots (setting "hold fire to scope").
 	if scope_type() == "sniper" and Game.settings.hold_fire_scope:
 		if firing and not was and not ads:
@@ -645,8 +674,8 @@ func _magnet_dir(start: Vector3, fwd: Vector3) -> Vector3:
 func _sync_aim_rig() -> void:
 	if yaw_node == null or victory_cam or not alive:
 		return
-	yaw_node.rotation.y = aim_yaw + deg_to_rad(recoil_yaw)
-	pitch_node.rotation.x = aim_pitch + deg_to_rad(recoil_pitch)
+	yaw_node.rotation.y = aim_yaw + _free.x + deg_to_rad(recoil_yaw)
+	pitch_node.rotation.x = clampf(aim_pitch + _free.y, deg_to_rad(PITCH_MIN), deg_to_rad(PITCH_MAX)) + deg_to_rad(recoil_pitch)
 
 
 func _update_aim_assist(delta: float) -> void:
@@ -803,8 +832,10 @@ func _process(delta: float) -> void:
 		yaw_node.rotation.y = lerp_angle(yaw_node.rotation.y, want_yaw, k)
 		pitch_node.rotation.x = lerpf(pitch_node.rotation.x, want_pitch, k)
 	else:
-		yaw_node.rotation.y = aim_yaw + deg_to_rad(recoil_yaw + sx)
-		pitch_node.rotation.x = aim_pitch + deg_to_rad(recoil_pitch + sy)
+		if not free_look:
+			_free = Vector2(wrapf(_free.x, -PI, PI), _free.y).lerp(Vector2.ZERO, 1.0 - exp(-12.0 * delta))
+		yaw_node.rotation.y = aim_yaw + _free.x + deg_to_rad(recoil_yaw + sx)
+		pitch_node.rotation.x = clampf(aim_pitch + _free.y, deg_to_rad(PITCH_MIN), deg_to_rad(PITCH_MAX)) + deg_to_rad(recoil_pitch + sy)
 	var scoped := is_scoped()
 	var dist := ADS_DIST if ads else CAM_DIST
 	if scoped:
