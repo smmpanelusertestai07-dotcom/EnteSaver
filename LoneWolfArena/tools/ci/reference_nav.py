@@ -63,8 +63,14 @@ def screenshot(i):
 
 
 def read_words(path):
-    """Phrases on the screen: [(text, x, y, w, h)] from tesseract's word boxes, joined per line."""
-    tsv = sh(["tesseract", path, "stdout", "--psm", "11", "-l", "eng", "tsv"], 90).decode("utf-8", "ignore")
+    """Phrases on the screen: [(text, x, y, w, h)] from tesseract's word boxes, joined per line.
+    One thread only: the emulator draws without a GPU and needs the rest of the machine."""
+    try:
+        tsv = subprocess.run(["nice", "-n", "19", "tesseract", path, "stdout", "--psm", "11", "-l", "eng", "tsv"],
+                             capture_output=True, timeout=90, env=dict(os.environ, OMP_THREAD_LIMIT="1")).stdout
+    except Exception:
+        tsv = b""
+    tsv = tsv.decode("utf-8", "ignore")
     lines = {}
     for row in tsv.splitlines()[1:]:
         c = row.split("\t")
@@ -168,12 +174,29 @@ def main():
     named = False
     k = 0
     i = 0
+    last = b""
+    adb("shell", "svc", "power", "stayon", "true")
+    adb("shell", "settings", "put", "system", "screen_off_timeout", "2147483647")
     while time.time() - T0 < MINUTES * 60:
+        if i % 40 == 0:     # the app's recent log and window, in case the run is stopped early
+            with open(os.path.join(OUT, "logcat_tail.txt"), "wb") as f:
+                f.write(adb("logcat", "-d", "-t", "3000", timeout=60))
+            log("window: " + adb("shell", "dumpsys", "window").decode("utf-8", "ignore").split("mCurrentFocus")[-1][:120].replace("\n", " "))
         path = screenshot(i)
         i += 1
         if path is None:
             time.sleep(3)
             continue
+        with open(path, "rb") as f:
+            png = f.read()
+        if png == last or len(png) < 20000:
+            # the same picture again, or a plain black one (still loading): nothing new to read
+            os.remove(path) if png == last else None
+            log("same screen" if png == last else "black screen")
+            since = time.time() if len(png) < 20000 else since
+            time.sleep(4)
+            continue
+        last = png
         phrases = read_words(path)
         log("seen: " + json.dumps([p[0] for p in sorted(phrases, key=lambda p: -p[3] * p[4])[:14]]))
         if state == "play":
@@ -223,9 +246,9 @@ def main():
             else:
                 time.sleep(2)
             continue
-        if time.time() - since > 150:
+        if time.time() - since > 240:
             adb("shell", "input", "keyevent", "4")      # stuck on something with no words: back
-            log("nothing to tap for 150 s: back")
+            log("nothing to tap for 240 s: back")
             since = time.time()
         time.sleep(2)
     make_video()
