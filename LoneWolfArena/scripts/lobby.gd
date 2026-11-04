@@ -1,3 +1,4 @@
+class_name Lobby
 extends Node3D
 ## Lobby: our character large on a lit hexagonal podium in a container yard at sunset (cheap
 ## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
@@ -8,6 +9,11 @@ extends Node3D
 ## BUNDLES opens the wardrobe (vault-like: rarity tabs, item cards with rarity glow and bar,
 ## preview on the podium, EQUIP / BACK). START shows the match loading overlay
 ## (Loading.start_match) and then enters the arena.
+## This file has the 3D stage, the top bar, the menus, the mode card, START, the settings panel
+## and input. Three parts have their own files: helpers the lobby makes, which build under `ui`
+## and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, HOW TO PLAY,
+## the name editor, the quit dialog), LobbyFriends (`friends`: PLAY WITH FRIENDS, custom rooms,
+## the net signals) and LobbyWardrobe (`wardrobe_ui`: BUNDLES).
 ## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton,
 ## Bundle_<id>, EquipButton.
 
@@ -24,27 +30,29 @@ const CAM_FOV := 38.0
 const HERO_X := 0.41
 const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
-const RARITY_ORDER := ["legendary", "epic", "rare", "common"]
-const CARD_SIZE := Vector2(168, 222)
 const SKYLINE := "res://assets/ui/lobby_skyline.png"
 
 var model: CharacterModel
 var camera: Camera3D
 var ui: CanvasLayer
 var start_btn: Button
-var _net_kind := "online"
-var _net_list: VBoxContainer
-var _net_status: Label
-var _net_sig := ""
-var _net_note := ""
-var _net_refresh_t := 0.0
-var _friend_query := ""                # FRIENDS tab search (an ID or a name)
-var _room_rules := Cloud.ROOM_RULES.duplicate()     # the next custom room's rules
-var _room_pin_draft := ""              # the password typed before a rule button rebuilt the tab
-var _room_join_code := ""              # the room this phone asked to join (for its status line)
-var wardrobe: Control
+## The lobby's parts in their own files (see above).
+var dialogs := LobbyDialogs.new(self)
+var friends := LobbyFriends.new(self)
+var wardrobe_ui := LobbyWardrobe.new(self)
+## The open popup, the wardrobe layer while it is open and the outfit it previews: the parts keep
+## them, the screenshot tours read them here.
+var _modal: Control:
+	get:
+		return dialogs.modal
+var wardrobe: Control:
+	get:
+		return wardrobe_ui.layer
+@warning_ignore("unused_private_class_variable")
+var _preview_bundle: String:
+	get:
+		return wardrobe_ui.preview_bundle
 var _main_ui: Control
-var _preview_bundle := ""
 var _drag_index := -1
 var _idle_t := 0.0
 var _name_label: Label
@@ -63,14 +71,6 @@ const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISA
 
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
-var _modal: Control
-var _ward_grid: GridContainer
-var _ward_filter := "all"
-var _ward_info_name: Label
-var _ward_info_rarity: Label
-var _ward_info_desc: Label
-var _ward_equip: Button
-var _ward_tabs := {}
 
 
 func _ready() -> void:
@@ -85,11 +85,8 @@ func _ready() -> void:
 	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	Game.settings_changed.connect(_apply_quality)
-	_connect_net(Game.lan_service())
-	_connect_net(Game.cloud_service())
-	# Online presence starts with the lobby, so friends and other players see this phone online
-	# as soon as the game is open (the same-Wi-Fi mode is gone: no LAN discovery any more).
-	Game.cloud_service().start_lobby()
+	# The net services' signals; online presence starts with the lobby.
+	friends.on_lobby_ready()
 
 
 ## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
@@ -106,17 +103,7 @@ func _mark_start() -> void:
 
 
 func _exit_tree() -> void:
-	for svc: Node in [Game.lan, Game.cloud]:
-		if svc:
-			_disconnect_net(svc)
-			svc.cancel_invite()
-	if Game.lan:
-		Game.lan.stop_discovery()
-	if Game.cloud:
-		if not Game.cloud.in_session:
-			Game.cloud.close_room()
-			Game.cloud.leave_join()
-		# presence stays on through a match: friends keep seeing this phone online
+	friends.on_lobby_exit()
 	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
 	var vp := get_viewport()
 	if vp:
@@ -982,470 +969,6 @@ func _start() -> void:
 	Loading.start_match(self)
 
 
-# ---------------------------------------------------------------- play with friends (Lan / Cloud)
-
-## Two ways to find a friend: ONLINE (internet, no account: a free public relay carries
-## end-to-end encrypted messages, see Cloud) and SAME WI-FI (no server at all, see Lan). Players
-## show up by name; CHALLENGE sends a request, the other phone accepts or declines. The ONLINE
-## list connects only once this tab is opened.
-func _open_friends(kind := "online") -> void:
-	_net_kind = kind
-	var svc: Node = _net_service()
-	if kind != "wifi":
-		Game.cloud_service().start_lobby()
-	var v := _open_modal("PLAY WITH FRIENDS", 980.0)
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 10)
-	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"]]:
-		var b := UI.button(String(t[1]), 19, "primary" if t[0] == kind else "dark", Vector2(205, 48))
-		b.name = "Tab_" + String(t[0])
-		var tk := String(t[0])
-		b.pressed.connect(func() -> void:
-			if tk != _net_kind:
-				_open_friends(tk))
-		tabs.add_child(b)
-	v.add_child(tabs)
-	var notes := {
-		"online": "Play anyone online from anywhere. No sign-up: players who have this screen open show up by name.",
-		"friends": "Add players as friends with their ID. Friends who are online can be challenged to a 1 vs 1 duel.",
-		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
-		"wifi": "Same Wi-Fi or one phone's hotspot: nearby players show up by name.",
-	}
-	var info := UI.label(String(notes[kind]), 17, UI.TEXT_DIM, "semi")
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(info)
-	_net_status = UI.label("", 20, UI.ACCENT, "bold")
-	v.add_child(_net_status)
-	if kind == "friends":
-		_build_friends_tab(v)
-	elif kind == "room":
-		_build_room_tab(v)
-	_net_list = VBoxContainer.new()
-	_net_list.name = "NetList"
-	_net_list.add_theme_constant_override("separation", 8)
-	_net_list.custom_minimum_size = Vector2(0, 170 if kind in ["online", "wifi"] else 0)
-	v.add_child(_net_list)
-	_net_sig = "-"
-	_net_note = ""
-	if svc:
-		_refresh_friends()
-
-
-## FRIENDS tab head: this phone's ID and a search box (an ID or a name among the players online).
-func _build_friends_tab(v: VBoxContainer) -> void:
-	var cloud := Game.cloud_service()
-	var me := HBoxContainer.new()
-	me.add_theme_constant_override("separation", 12)
-	var code := Cloud.friend_code(cloud.my_id) if cloud.my_id != "" else "--------"
-	var my_id := UI.label("YOUR ID:  %s" % code, 24, UI.TEXT, "heavy")
-	my_id.name = "MyId"
-	my_id.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	me.add_child(my_id)
-	var copy := UI.button("COPY", 18, "light", Vector2(120, 46))
-	copy.pressed.connect(func() -> void:
-		DisplayServer.clipboard_set(Cloud.friend_code(Game.cloud_service().my_id))
-		_net_note = "ID COPIED"
-		_net_sig = "-")
-	me.add_child(copy)
-	v.add_child(me)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	var le := _text_field("FRIEND'S ID OR NAME", 14, false)
-	le.name = "FriendSearch"
-	le.text = _friend_query
-	row.add_child(le)
-	var go := UI.button("SEARCH", 19, "primary", Vector2(160, 54))
-	var search := func() -> void:
-		_friend_query = Game.clean_name(le.text)
-		_net_sig = "-"
-		_refresh_friends()
-	go.pressed.connect(search)
-	le.text_submitted.connect(func(_t: String) -> void: search.call())
-	row.add_child(go)
-	v.add_child(row)
-
-
-## CUSTOM ROOM tab: create one (password, rules) or join one (ID + password); once in a room it
-## shows the room's ID, password and players, and the host's START.
-func _build_room_tab(v: VBoxContainer) -> void:
-	var cloud := Game.cloud_service()
-	if cloud.room_code != "":
-		var head := UI.label("ROOM ID  %s     PASSWORD  %s" % [cloud.room_code, cloud.room_pin], 30, UI.TEXT, "heavy")
-		head.name = "RoomHead"
-		v.add_child(head)
-		v.add_child(UI.label(_rules_text(cloud.room_rules), 18, UI.TEXT_DIM, "semi"))
-		var slots := HBoxContainer.new()
-		slots.add_theme_constant_override("separation", 14)
-		var guest := String(cloud.room_guest.get("name", ""))
-		for t: Array in [[String(Game.profile.name) + "  (HOST)", UI.ACCENT], [guest if guest != "" else "WAITING FOR A PLAYER...", UI.TEXT if guest != "" else UI.TEXT_DIM]]:
-			var slot := UI.label(String(t[0]), 22, t[1], "bold")
-			slot.custom_minimum_size = Vector2(420, 54)
-			slot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			slot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			slot.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.45), 8, 1, Color(1, 1, 1, 0.2), 12.0, ["br"]))
-			slots.add_child(slot)
-		v.add_child(slots)
-		var row := HBoxContainer.new()
-		row.alignment = BoxContainer.ALIGNMENT_END
-		row.add_theme_constant_override("separation", 12)
-		var close := UI.button("CLOSE ROOM", 19, "light", Vector2(200, 52))
-		close.pressed.connect(func() -> void:
-			Game.cloud_service().close_room()
-			_open_friends("room"))
-		var start := UI.button("START", 22, "primary", Vector2(200, 52))
-		start.name = "RoomStart"
-		start.disabled = guest == ""
-		start.pressed.connect(func() -> void:
-			start.disabled = true
-			UI.set_caption(start, "STARTING")
-			if not Game.cloud_service().start_room_match():
-				_net_note = "COULD NOT START, TRY AGAIN"
-				start.disabled = false)
-		row.add_child(close)
-		row.add_child(start)
-		v.add_child(row)
-		return
-	if cloud.join_state != "":
-		var msg := {"asking": "JOINING ROOM %s...", "in": "IN ROOM %s: WAITING FOR THE HOST TO START",
-			"wrong": "WRONG PASSWORD FOR ROOM %s", "none": "NO ROOM %s FOUND (OR ITS HOST LEFT)"}
-		var st := UI.label(String(msg.get(cloud.join_state, "%s")) % String(_room_join_code), 24, UI.TEXT, "heavy")
-		st.name = "JoinState"
-		v.add_child(st)
-		var back := UI.button("LEAVE" if cloud.join_state in ["asking", "in"] else "BACK", 19, "light", Vector2(200, 52))
-		back.pressed.connect(func() -> void:
-			Game.cloud_service().leave_join()
-			_open_friends("room"))
-		v.add_child(back)
-		return
-	# Create: password (digits), rules.
-	var create := HBoxContainer.new()
-	create.add_theme_constant_override("separation", 10)
-	create.add_child(UI.label("NEW ROOM  ·  PASSWORD", 20, UI.TEXT, "bold"))
-	var pin := _text_field("4-6 DIGITS", 6, true)
-	pin.name = "RoomPin"
-	pin.text = "%04d" % randi_range(0, 9999)
-	pin.custom_minimum_size = Vector2(170, 54)
-	pin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	create.add_child(pin)
-	var mode := UI.label("1 VS 1", 20, UI.ACCENT, "heavy")
-	create.add_child(mode)
-	v.add_child(create)
-	var rules := HBoxContainer.new()
-	rules.add_theme_constant_override("separation", 8)
-	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-		var key := String(k[0])
-		var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 46))
-		tb.name = "Rule_" + key
-		tb.pressed.connect(func() -> void:
-			_room_rules[key] = not bool(_room_rules[key])
-			_room_pin_draft = pin.text
-			_open_friends("room"))
-		rules.add_child(tb)
-	var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 46))
-	rounds.name = "Rule_rounds"
-	rounds.pressed.connect(func() -> void:
-		var steps := [1, 3, 5, 7]
-		_room_rules.rounds = steps[(steps.find(int(_room_rules.rounds)) + 1) % steps.size()]
-		_room_pin_draft = pin.text
-		_open_friends("room"))
-	rules.add_child(rounds)
-	v.add_child(rules)
-	if _room_pin_draft != "":
-		pin.text = _room_pin_draft
-	var make := UI.button("CREATE ROOM", 20, "primary", Vector2(230, 52))
-	make.name = "RoomCreate"
-	make.pressed.connect(func() -> void:
-		var p := pin.text
-		if p.length() < 4:
-			_net_note = "THE PASSWORD NEEDS 4 TO 6 DIGITS"
-			_net_sig = "-"
-			return
-		_room_pin_draft = ""
-		Game.cloud_service().open_room(p, _room_rules)
-		_open_friends("room"))
-	v.add_child(make)
-	v.add_child(UI.label("2 VS 2 and 4 VS 4 rooms (8 slots) need team matches, which are not in this version yet.", 15, UI.TEXT_DIM, "semi"))
-	# Join: room ID + password.
-	var join := HBoxContainer.new()
-	join.add_theme_constant_override("separation", 10)
-	join.add_child(UI.label("JOIN A ROOM", 20, UI.TEXT, "bold"))
-	var code := _text_field("ROOM ID", 6, true)
-	code.name = "JoinCode"
-	join.add_child(code)
-	var jpin := _text_field("PASSWORD", 6, true)
-	jpin.name = "JoinPin"
-	join.add_child(jpin)
-	var go := UI.button("JOIN", 20, "primary", Vector2(150, 54))
-	go.name = "RoomJoin"
-	go.pressed.connect(func() -> void:
-		if code.text.length() != 6 or jpin.text.length() < 4:
-			_net_note = "ENTER THE 6-DIGIT ROOM ID AND ITS PASSWORD"
-			_net_sig = "-"
-			return
-		_room_join_code = code.text
-		Game.cloud_service().join_room(code.text, jpin.text)
-		_open_friends("room"))
-	join.add_child(go)
-	v.add_child(join)
-
-
-func _rules_text(r: Dictionary) -> String:
-	var parts := ["1 VS 1", "FIRST TO %d" % int(r.get("rounds", 5))]
-	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-		if bool(r.get(String(k[0]), false)):
-			parts.append(String(k[1]))
-	return "   ·   ".join(PackedStringArray(parts))
-
-
-## A text box in the lobby's style; digits_only keeps only 0-9 and opens the number keyboard.
-func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEdit:
-	var le := LineEdit.new()
-	le.placeholder_text = placeholder
-	le.max_length = max_len
-	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	le.custom_minimum_size = Vector2(150, 54)
-	le.virtual_keyboard_enabled = true
-	le.virtual_keyboard_show_on_focus = true
-	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER if digits_only else LineEdit.KEYBOARD_TYPE_DEFAULT
-	le.add_theme_font_override("font", UI.font("bold"))
-	le.add_theme_font_size_override("font_size", 24)
-	le.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.25), 14.0, ["br"]))
-	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
-	le.add_theme_color_override("font_color", UI.TEXT)
-	le.add_theme_color_override("caret_color", UI.ACCENT)
-	if digits_only:
-		le.text_changed.connect(func(t: String) -> void:
-			var d := ""
-			for ch in t:
-				if ch >= "0" and ch <= "9":
-					d += ch
-			if d != t:
-				le.text = d
-				le.caret_column = d.length())
-	return le
-
-
-func _net_service() -> Node:
-	return (Game.lan_service() as Node) if _net_kind == "wifi" else (Game.cloud_service() as Node)
-
-
-func _refresh_friends() -> void:
-	if _net_list == null or not is_instance_valid(_net_list):
-		return
-	var svc: Node = _net_service()
-	var waiting := String(svc.waiting_for())
-	var peers: Dictionary = svc.peers
-	var cloud := svc as Cloud
-	if _net_kind != "wifi" and String(svc.status) != "online":
-		match String(svc.status):
-			"preparing":
-				_net_status.text = "GETTING READY..."
-			"connecting":
-				_net_status.text = "CONNECTING..."
-			_:
-				_net_status.text = "NO INTERNET: RETRYING..."
-	elif _net_kind == "wifi" and String(svc.local_address()) == "":
-		_net_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
-	elif waiting != "":
-		_net_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
-	elif _net_note != "":
-		_net_status.text = _net_note
-	elif _net_kind == "friends":
-		_net_status.text = "%d FRIEND REQUEST%s" % [cloud.friend_requests.size(), "" if cloud.friend_requests.size() == 1 else "S"] \
-			if not cloud.friend_requests.is_empty() else "FRIENDS"
-	elif _net_kind == "room":
-		_net_status.text = "ROOM OPEN: SHARE ITS ID AND PASSWORD" if cloud.room_code != "" else ""
-	elif peers.is_empty():
-		_net_status.text = "LOOKING FOR PLAYERS ONLINE..." if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
-	else:
-		_net_status.text = "PLAYERS ONLINE" if _net_kind == "online" else "PLAYERS NEARBY"
-	if _net_kind == "room":
-		return
-	if _net_kind == "friends" and _modal and cloud.my_id != "":
-		var my := _modal.find_child("MyId", true, false) as Label
-		if my:
-			my.text = "YOUR ID:  %s" % Cloud.friend_code(cloud.my_id)     # the key may be made after the tab opened
-	var sig := waiting + "|" + _net_kind + "|" + _friend_query
-	for id in peers:
-		sig += "|%s:%s" % [id, peers[id].name]
-	if cloud:
-		sig += "|f%d|r%s" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys()))]
-		for id in peers:
-			sig += ",a" if cloud.friend_asked(String(id)) else ""
-	if sig == _net_sig:
-		return
-	_net_sig = sig
-	for c in _net_list.get_children():
-		c.queue_free()
-	if _net_kind == "friends":
-		_fill_friends(cloud, waiting)
-		return
-	for id: String in peers:
-		_net_list.add_child(_player_row(svc, id, String(peers[id].name), waiting))
-
-
-## One player in a list: name and code, ADD (online, not yet a friend) and CHALLENGE.
-func _player_row(svc: Node, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
-	var label := "%s  #%s" % [who, Cloud.friend_code(id) if svc is Cloud else id.left(4).to_upper()]
-	var name_l := UI.label(label + online_tag, 24, UI.TEXT, "heavy")
-	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(name_l)
-	var cloud := svc as Cloud
-	if cloud and not Game.is_friend(id) and cloud.peers.has(id):
-		var asked := cloud.friend_asked(id)
-		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 52))
-		add.disabled = asked
-		add.pressed.connect(func() -> void:
-			if not Game.cloud_service().request_friend(id):
-				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
-			_net_sig = "-"
-			_refresh_friends())
-		row.add_child(add)
-	if svc.peers.has(id):
-		var b := UI.button("CANCEL" if waiting != "" else "DUEL 1 VS 1", 19, "light" if waiting != "" else "primary", Vector2(210, 52))
-		b.pressed.connect(func() -> void:
-			var sv: Node = _net_service()
-			_net_note = ""
-			if String(sv.waiting_for()) != "":
-				sv.cancel_invite()
-			elif not bool(sv.invite(id)):
-				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
-			_net_sig = "-"
-			_refresh_friends())
-		row.add_child(b)
-	return row
-
-
-## FRIENDS tab body: requests to answer, the search's matches among players online, the friends.
-func _fill_friends(cloud: Cloud, waiting: String) -> void:
-	for id: String in cloud.friend_requests:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
-		var t := UI.label("%s  #%s  wants to be friends" % [String(cloud.friend_requests[id].name), Cloud.friend_code(id)], 22, UI.ACCENT, "bold")
-		t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(t)
-		for a: Array in [["DECLINE", false, "light"], ["ACCEPT", true, "primary"]]:
-			var yes := bool(a[1])
-			var b := UI.button(String(a[0]), 18, String(a[2]), Vector2(150, 50))
-			b.name = "Friend" + String(a[0]).capitalize()
-			b.pressed.connect(func() -> void:
-				Game.cloud_service().answer_friend(id, yes)
-				_net_sig = "-"
-				_refresh_friends())
-			row.add_child(b)
-		_net_list.add_child(row)
-	if _friend_query != "":
-		var found := 0
-		for id: String in cloud.peers:
-			var who := String(cloud.peers[id].name)
-			if Cloud.friend_code(id).begins_with(_friend_query) or who.contains(_friend_query):
-				_net_list.add_child(_player_row(cloud, id, who, waiting, "  ·  ONLINE"))
-				found += 1
-		if found == 0:
-			_net_list.add_child(UI.label("NOBODY ONLINE MATCHES \"%s\" (THEY NEED THIS SCREEN OPEN)" % _friend_query, 18, UI.TEXT_DIM, "semi"))
-	var friends: Dictionary = Game.profile.friends
-	if friends.is_empty():
-		_net_list.add_child(UI.label("NO FRIENDS YET: SEARCH A PLAYER'S ID OR NAME, OR TAP ADD FRIEND IN THE ONLINE TAB.", 18, UI.TEXT_DIM, "semi"))
-	for id: String in friends:
-		var on := cloud.peers.has(id)
-		var who := String(friends[id].name) if String(friends[id].name) != "" else "PLAYER"
-		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else "  ·  OFFLINE")
-		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 52))
-		rm.pressed.connect(func() -> void:
-			Game.remove_friend(id)
-			_net_sig = "-"
-			_refresh_friends())
-		row.add_child(rm)
-		_net_list.add_child(row)
-
-
-func _on_net_invited(who: String, svc: Node) -> void:
-	_net_list = null
-	var v := _open_modal("CHALLENGE", 640.0)
-	var t := UI.label("%s wants a 1 vs 1 (%s)" % [who, "online" if svc is Cloud else "Wi-Fi"], 26, UI.TEXT, "heavy")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(t)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 12)
-	var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
-	no.pressed.connect(func() -> void:
-		svc.answer(false)
-		_close_modal())
-	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
-	yes.name = "AcceptButton"
-	yes.pressed.connect(func() -> void:
-		yes.disabled = true
-		UI.set_caption(yes, "CONNECTING")
-		svc.answer(true))
-	row.add_child(no)
-	row.add_child(yes)
-	v.add_child(row)
-
-
-func _on_net_invite_cancelled(_svc: Node) -> void:
-	if _modal and is_instance_valid(_modal) and _modal.find_child("AcceptButton", true, false):
-		_close_modal()
-
-
-func _on_net_answered(accepted: bool, who: String, _svc: Node) -> void:
-	if not accepted:
-		_net_note = "%s DECLINED (OR DID NOT ANSWER)" % who
-		_net_sig = "-"
-
-
-## The custom room changed (a player joined, a join attempt ended): redraw the room tab.
-func _on_room_changed() -> void:
-	if _net_kind == "room" and _modal and is_instance_valid(_modal) and _net_list and is_instance_valid(_net_list):
-		_open_friends("room")
-
-
-func _on_net_session(_host: bool, svc: Node) -> void:
-	if start_btn.disabled:
-		return
-	Game.practice = false
-	Game.online = true
-	Game.session = svc
-	var rules: Variant = svc.get("session_rules")
-	Game.room_rules = (rules as Dictionary).duplicate() if rules is Dictionary else {}
-	if svc is Cloud:
-		(svc as Cloud).close_room()
-		(svc as Cloud).leave_join()
-	_close_modal()
-	start_btn.disabled = true
-	UI.set_caption(start_btn, "MATCHING")
-	Loading.start_match(self)
-
-
-func _on_net_ended(reason: String, _svc: Node) -> void:
-	Game.online = false
-	_net_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
-	_net_sig = "-"
-
-
-func _connect_net(svc: Node) -> void:
-	if svc is Cloud:
-		(svc as Cloud).room_changed.connect(_on_room_changed)
-		(svc as Cloud).friends_changed.connect(func() -> void: _net_sig = "-")
-	svc.invited.connect(_on_net_invited.bind(svc))
-	svc.invite_cancelled.connect(_on_net_invite_cancelled.bind(svc))
-	svc.invite_answered.connect(_on_net_answered.bind(svc))
-	svc.session_started.connect(_on_net_session.bind(svc))
-	svc.session_ended.connect(_on_net_ended.bind(svc))
-
-
-func _disconnect_net(svc: Node) -> void:
-	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended", "room_changed", "friends_changed"]:
-		if not svc.has_signal(sig):
-			continue
-		for c: Dictionary in svc.get_signal_connection_list(sig):
-			if (c.callable as Callable).get_object() == self:
-				svc.disconnect(sig, c.callable)
-
-
 ## Practice against a training dummy that never goes down (no zone, no clock, nothing recorded).
 func _start_practice() -> void:
 	if start_btn.disabled:
@@ -1469,459 +992,29 @@ func _find_settings() -> SettingsPanel:
 	return null
 
 
-# ---------------------------------------------------------------- modals (how to play, name)
-
-## A popup in the reference look: the light header strip (dark caps title, hazard line, X on a
-## dark tile), then the near-black body with a yellow corner mark. Returns the body column.
-## top: the frame sits at the top of the screen, clear of the on-screen keyboard (text entry).
-func _open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
-	_close_modal()
-	_modal = Control.new()
-	_modal.name = "Modal"
-	UI.full_rect(_modal)
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	ui.add_child(_modal)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.72)
-	UI.full_rect(shade)
-	_modal.add_child(shade)
-	var frame := VBoxContainer.new()
-	frame.add_theme_constant_override("separation", 0)
-	frame.anchor_left = 0.5
-	frame.anchor_right = 0.5
-	frame.anchor_top = 0.0 if top else 0.5
-	frame.anchor_bottom = 0.0 if top else 0.5
-	frame.offset_left = -width * 0.5
-	frame.offset_right = width * 0.5
-	frame.offset_top = 18.0 if top else 0.0
-	frame.grow_vertical = Control.GROW_DIRECTION_END if top else Control.GROW_DIRECTION_BOTH
-	_modal.add_child(frame)
-	var head := UI.popup_header(title, 26, 54.0)
-	(head.get_node("Close") as Button).pressed.connect(_close_modal)
-	frame.add_child(head)
-	var panel := UI.popup_body()
-	frame.add_child(panel)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 12)
-	panel.add_child(v)
-	_modal.modulate.a = 0.0
-	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.15)
-	return v
-
-
-func _close_modal() -> void:
-	if _modal:
-		_modal.queue_free()
-		_modal = null
-		DisplayServer.virtual_keyboard_hide()     # a text field in it may have opened the keyboard
-
-
-const HOW_TO := [
-	["MOVE & LOOK", [
-		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
-		["v_eye", "LOOK  ·  FREE LOOK", "Drag on the right side to turn the camera. Hold the eye and drag to look all around, even at your own face."],
-		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
-		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
-		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
-		["v_reload", "RELOAD", "Tap the weapon panel (or it reloads by itself when the magazine is empty)."],
-	]],
-	["ITEMS", [
-		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
-		["v_wall", "SHIELD WALL  x2", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
-		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest stops a third), 3 s fuse."],
-	]],
-	["THE MATCH", [
-		["v_player", "FIRST TO 5 ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win 5 rounds to win the match."],
-		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use (12 guns, fixed attachments); the pick takes turns."],
-		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
-	]],
-]
-
+# ---------------------------------------------------------------- the parts in their own files
 
 func _how_to_play() -> void:
-	var v := _open_modal("HOW TO PLAY", 1040.0)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 470)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	v.add_child(scroll)
-	var cols := HBoxContainer.new()
-	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cols.add_theme_constant_override("separation", 24)
-	scroll.add_child(cols)
-	var left := VBoxContainer.new()
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 6)
-	var right := VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 6)
-	cols.add_child(left)
-	cols.add_child(right)
-	for gi in HOW_TO.size():
-		var g: Array = HOW_TO[gi]
-		var col := left if gi == 0 else right
-		if gi > 1:
-			col.add_child(UI.spacer(6))
-		col.add_child(UI.section(String(g[0]), 18))
-		for it in g[1]:
-			col.add_child(_howto_item(String(it[0]), String(it[1]), String(it[2])))
+	dialogs.how_to_play()
 
 
-func _howto_item(icon_name: String, title: String, text: String) -> Control:
-	var p := PanelContainer.new()
-	var st := UI.chamfer(Color(1, 1, 1, 0.045), 6, 0, Color.TRANSPARENT, 10.0, ["br"])
-	st.content_margin_top = 5
-	st.content_margin_bottom = 5
-	p.add_theme_stylebox_override("panel", st)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 12)
-	var ic := PanelContainer.new()
-	var ics := UI.box(Color(0, 0, 0, 0.45), 21, 1, Color(1, 1, 1, 0.18), 0.0)
-	ics.set_content_margin_all(7)
-	ic.add_theme_stylebox_override("panel", ics)
-	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ic.add_child(UI.icon(icon_name, 28, UI.TEXT))
-	h.add_child(ic)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", -3)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(UI.label(title, 17, UI.ACCENT, "bold"))
-	var t := UI.label(text, 15, UI.TEXT, "semi")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	t.custom_minimum_size = Vector2(380, 0)
-	v.add_child(t)
-	h.add_child(v)
-	p.add_child(h)
-	return p
-
-
-## The name editor. first: asked once at start (new installs and ones from before this prompt):
-## type a name or roll a random one; closing it keeps the current name.
 func _edit_name(first := false) -> void:
-	var v := _open_modal("CHOOSE YOUR NAME" if first else "PLAYER NAME", 640.0, true)
-	v.add_child(UI.label("Type a name or tap RANDOM. Up to 14 letters or digits; shown in matches.", 16, UI.TEXT_DIM, "semi"))
-	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 10)
-	var le := LineEdit.new()
-	le.name = "NameEdit"
-	le.text = String(Game.profile.name)
-	le.max_length = 14
-	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	le.custom_minimum_size = Vector2(0, 54)
-	le.virtual_keyboard_enabled = true
-	le.virtual_keyboard_show_on_focus = true
-	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
-	le.select_all_on_focus = first
-	le.add_theme_font_override("font", UI.font("bold"))
-	le.add_theme_font_size_override("font_size", 26)
-	le.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.25), 14.0, ["br"]))
-	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
-	le.add_theme_color_override("font_color", UI.TEXT)
-	le.add_theme_color_override("caret_color", UI.ACCENT)
-	line.add_child(le)
-	var dice := UI.button("RANDOM", 20, "light", Vector2(150, 54))
-	dice.name = "NameRandom"
-	dice.pressed.connect(func() -> void:
-		le.text = Game.random_name()
-		le.caret_column = le.text.length()
-		Audio.play("ui_click", -4.0))
-	line.add_child(dice)
-	v.add_child(line)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 12)
-	var cancel := UI.button("KEEP" if first else "CANCEL", 20, "light", Vector2(170, 52))
-	var keep := func() -> void:
-		if first:
-			Game.profile.name_set = true
-			Game.save_profile()
-		_close_modal()
-	cancel.pressed.connect(keep)
-	var ok := UI.button("OK", 22, "primary", Vector2(170, 52))
-	ok.name = "NameOk"
-	var apply := func() -> void:
-		var n := Game.clean_name(le.text)
-		if n != "":
-			Game.profile.name = n
-			_name_label.text = n
-			_plate_label.text = n
-		Game.profile.name_set = true
-		Game.save_profile()
-		_close_modal()
-	ok.pressed.connect(apply)
-	le.text_submitted.connect(func(_t: String) -> void: apply.call())
-	row.add_child(cancel)
-	row.add_child(ok)
-	v.add_child(row)
-	if first:
-		var x := _modal.find_child("Close", true, false) as Button
-		if x:
-			x.pressed.connect(keep)
-		get_tree().process_frame.connect(func() -> void:
-			if is_instance_valid(ok) and ok.is_inside_tree():
-				Game.mark("name prompt")
-				Game.mark_ui("name_ok", ok, ok.size / 2.0), CONNECT_ONE_SHOT | CONNECT_DEFERRED)
-	# Focus once the dialog is up: the keyboard then opens under it, with the field in view.
-	get_tree().create_timer(0.2).timeout.connect(func() -> void:
-		if is_instance_valid(le) and le.is_inside_tree():
-			le.grab_focus()
-			le.caret_column = le.text.length())
+	dialogs.edit_name(first)
 
 
-# ---------------------------------------------------------------- wardrobe
+func _open_friends(kind := "online") -> void:
+	friends.open(kind)
+
 
 func _open_wardrobe() -> void:
-	if wardrobe:
-		return
-	_close_modal()
-	_preview_bundle = String(Game.profile.bundle)
-	wardrobe = Control.new()
-	wardrobe.name = "Wardrobe"
-	UI.full_rect(wardrobe)
-	wardrobe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(wardrobe)
-	_main_ui.visible = false
-	var view := _ward_view()
-	_move_camera(view[0], view[1])
-	var shade := UI.gradient_rect([[0.0, Color(0.03, 0.03, 0.04, 0.94)], [0.5, Color(0.03, 0.03, 0.04, 0.88)], [0.66, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
-	UI.full_rect(shade)
-	wardrobe.add_child(shade)
-	# Header.
-	var head := HBoxContainer.new()
-	head.position = Vector2(26, 16)
-	head.add_theme_constant_override("separation", 16)
-	wardrobe.add_child(head)
-	head.add_child(UI.section("BUNDLES", 30))
-	var note := UI.label("ALL OUTFITS UNLOCKED  ·  OFFLINE", 15, UI.TEXT_DIM, "bold")
-	note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	note.custom_minimum_size = Vector2(0, 36)
-	head.add_child(note)
-	# Rarity tabs (left).
-	var tabs := VBoxContainer.new()
-	tabs.position = Vector2(0, 76)
-	tabs.add_theme_constant_override("separation", 4)
-	wardrobe.add_child(tabs)
-	_ward_tabs.clear()
-	for f in ["all", "legendary", "epic", "rare", "common"]:
-		var tb := _ward_tab(f)
-		tabs.add_child(tb)
-		_ward_tabs[f] = tb
-	# Item grid with the item info strip under it.
-	var col := VBoxContainer.new()
-	col.anchor_bottom = 1.0
-	col.offset_left = 196
-	col.offset_right = 196 + 3 * CARD_SIZE.x + 2 * 10
-	col.offset_top = 74
-	col.offset_bottom = -16
-	col.add_theme_constant_override("separation", 10)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wardrobe.add_child(col)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	col.add_child(scroll)
-	_ward_grid = GridContainer.new()
-	_ward_grid.columns = 3
-	_ward_grid.add_theme_constant_override("h_separation", 10)
-	_ward_grid.add_theme_constant_override("v_separation", 10)
-	scroll.add_child(_ward_grid)
-	var info := VBoxContainer.new()
-	info.add_theme_constant_override("separation", 0)
-	col.add_child(info)
-	var ih := PanelContainer.new()
-	ih.add_theme_stylebox_override("panel", UI.chamfer(Color(0.05, 0.42, 0.48, 0.95), 8, 0, Color.TRANSPARENT, 14.0, ["tl"]))
-	var ihh := HBoxContainer.new()
-	ihh.add_theme_constant_override("separation", 12)
-	ihh.add_child(UI.icon("v_wardrobe", 24, UI.TEXT))
-	_ward_info_name = UI.label("", 24, UI.TEXT, "bold")
-	_ward_info_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ihh.add_child(_ward_info_name)
-	_ward_info_rarity = UI.label("", 16, UI.TEXT, "heavy")
-	_ward_info_rarity.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	ihh.add_child(_ward_info_rarity)
-	ih.add_child(ihh)
-	info.add_child(ih)
-	var ib := PanelContainer.new()
-	ib.add_theme_stylebox_override("panel", UI.chamfer(Color(0.06, 0.06, 0.07, 0.9), 8, 0, Color.TRANSPARENT, 14.0, ["br"]))
-	_ward_info_desc = UI.label("", 17, UI.TEXT, "semi")
-	_ward_info_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ib.add_child(_ward_info_desc)
-	info.add_child(ib)
-	# EQUIP / BACK under the preview.
-	var row := HBoxContainer.new()
-	row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	row.offset_left = -460
-	row.offset_right = -20
-	row.offset_top = -80
-	row.offset_bottom = -14
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 14)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wardrobe.add_child(row)
-	var back := UI.button("BACK", 26, "light", Vector2(170, 64))
-	back.name = "BackButton"
-	back.pressed.connect(func() -> void:
-		model.apply_bundle(String(Game.profile.bundle))
-		_update_bundle_label(String(Game.profile.bundle))
-		_close_wardrobe())
-	row.add_child(back)
-	_ward_equip = UI.hero_button("EQUIP", 38, Vector2(240, 64))
-	_ward_equip.name = "EquipButton"
-	_ward_equip.pressed.connect(func() -> void:
-		Game.profile.bundle = _preview_bundle
-		Game.save_profile()
-		_update_bundle_label(_preview_bundle)
-		_close_wardrobe())
-	row.add_child(_ward_equip)
-	_fill_wardrobe()
-	wardrobe.modulate.a = 0.0
-	wardrobe.create_tween().tween_property(wardrobe, "modulate:a", 1.0, 0.2)
-
-
-func _ward_tab(f: String) -> Button:
-	var b := Button.new()
-	b.name = "Tab_" + f
-	b.toggle_mode = true
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(190, 52)
-	b.text = f.to_upper()
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.button_pressed = f == _ward_filter
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 22)
-	var normal := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
-	var hover := UI.box(Color(1, 1, 1, 0.06), 0, 0, Color.TRANSPARENT, 0.0)
-	var on := UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 0.0, ["br"])
-	for st in [normal, hover, on]:
-		st.content_margin_left = 30
-	b.add_theme_stylebox_override("normal", normal)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT if f == "all" else UI.RARITY_COLORS.get(f, UI.TEXT))
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	b.draw.connect(func() -> void:
-		if b.button_pressed:
-			UI.draw_tab_selected(b, b.size))
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		_ward_filter = f
-		for k in _ward_tabs:
-			(_ward_tabs[k] as Button).set_pressed_no_signal(k == f)
-			(_ward_tabs[k] as Button).queue_redraw()
-		_fill_wardrobe())
-	return b
-
-
-func _fill_wardrobe() -> void:
-	for c in _ward_grid.get_children():
-		_ward_grid.remove_child(c)
-		c.queue_free()
-	var group := ButtonGroup.new()
-	var list := []
-	for r in RARITY_ORDER:
-		for b in CharacterModel.BUNDLE_INFO:
-			if b.rarity == r and (_ward_filter == "all" or _ward_filter == r):
-				list.append(b)
-	# The info box and the podium follow the first card when the previewed one is filtered out.
-	if not list.is_empty() and not list.any(func(b: Dictionary) -> bool: return String(b.id) == _preview_bundle):
-		_preview_bundle = String(list[0].id)
-		model.apply_bundle(_preview_bundle)
-		_update_bundle_label(_preview_bundle)
-	for b in list:
-		_ward_grid.add_child(_bundle_card(b, group))
-	_update_ward_info()
-
-
-func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
-	var id := String(b.id)
-	var rc: Color = UI.RARITY_COLORS[b.rarity]
-	var card := Button.new()
-	card.name = "Bundle_" + id
-	card.toggle_mode = true
-	card.button_group = group
-	card.button_pressed = id == _preview_bundle
-	card.focus_mode = Control.FOCUS_NONE
-	card.custom_minimum_size = CARD_SIZE
-	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
-		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-	var portrait := UI.texture("bundle_%s.png" % id)
-	var glow := UI.radial_glow(Color(rc, 0.62))
-	var floor_glow := UI.radial_glow(Color(rc.lightened(0.15), 0.5))
-	card.draw.connect(func() -> void:
-		var s := card.size
-		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.075, 0.072, 0.07, 0.97))
-		# rarity glow: a smooth radial gradient behind the outfit, inside the card, plus a
-		# brighter pool at the feet
-		card.draw_texture_rect(glow, Rect2(0, 0, s.x, s.y - 46), false)
-		card.draw_texture_rect(floor_glow, Rect2(s.x * 0.12, s.y * 0.62, s.x * 0.76, s.y * 0.2), false)
-		card.draw_rect(Rect2(0, 0, s.x, s.y * 0.5), Color(1, 1, 1, 0.02))
-		if portrait:
-			var ph := s.y - 58
-			var pw := ph * 0.75
-			card.draw_texture_rect(portrait, Rect2((s.x - pw) * 0.5, 8, pw, ph), false)
-		# name strip + rarity bar
-		card.draw_rect(Rect2(0, s.y - 52, s.x, 48), Color(0, 0, 0, 0.6))
-		card.draw_rect(Rect2(0, s.y - 5, s.x, 5), rc)
-		# equipped: yellow outline + tick; previewed: white outline
-		var equipped := id == String(Game.profile.bundle)
-		if equipped:
-			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), UI.ACCENT, false, 3.0)
-			UI.draw_tick_corner(card, Vector2(s.x, s.y - 5), 34.0)
-		if card.button_pressed and not equipped:
-			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), Color(1, 1, 1, 0.95), false, 3.0)
-		elif card.is_hovered() and not equipped:
-			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.5), false, 2.0)
-		elif not equipped:
-			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0))
-	var nm := UI.ellipsis(UI.label(String(b.name), 18, UI.TEXT, "bold"))
-	nm.position = Vector2(9, CARD_SIZE.y - 50)
-	nm.size = Vector2(CARD_SIZE.x - 18, 24)
-	card.add_child(nm)
-	var rl := UI.label(String(b.rarity).to_upper(), 14, rc, "bold")
-	rl.position = Vector2(9, CARD_SIZE.y - 28)
-	card.add_child(rl)
-	card.mouse_entered.connect(card.queue_redraw)
-	card.mouse_exited.connect(card.queue_redraw)
-	card.toggled.connect(func(_on: bool) -> void: card.queue_redraw())
-	card.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		_preview_bundle = id
-		model.apply_bundle(id)
-		_update_bundle_label(id)
-		_update_ward_info()
-		for other in _ward_grid.get_children():
-			(other as Control).queue_redraw())
-	return card
-
-
-func _update_ward_info() -> void:
-	if _ward_info_name == null:
-		return
-	var info := CharacterModel.bundle_info(_preview_bundle)
-	_ward_info_name.text = String(info.name)
-	_ward_info_rarity.text = String(info.rarity).to_upper()
-	_ward_info_rarity.add_theme_color_override("font_color", UI.RARITY_COLORS[info.rarity].lightened(0.25))
-	var equipped := _preview_bundle == String(Game.profile.bundle)
-	_ward_info_desc.text = String(info.desc) + ("   EQUIPPED" if equipped else "")
-	if _ward_equip:
-		UI.set_caption(_ward_equip, "EQUIPPED" if equipped else "EQUIP")
+	wardrobe_ui.open()
 
 
 func _close_wardrobe() -> void:
-	if wardrobe:
-		wardrobe.queue_free()
-		wardrobe = null
-		_ward_grid = null
-		_ward_info_name = null
-		_ward_equip = null
-	_main_ui.visible = true
-	var view := _main_view()
-	_move_camera(view[0], view[1])
+	wardrobe_ui.close()
 
 
+## Moves the camera to a view (the wardrobe's or the main one) over the next 0.45 s.
 func _move_camera(pos: Vector3, look: Vector3) -> void:
 	# start from where the camera looks now (also mid-transition)
 	_cam_from_pos = camera.position
@@ -1965,11 +1058,7 @@ func _in_drag_zone(p: Vector2) -> bool:
 func _process(delta: float) -> void:
 	_time += delta
 	_idle_t += delta
-	if _net_list and is_instance_valid(_net_list):
-		_net_refresh_t -= delta
-		if _net_refresh_t <= 0.0:
-			_net_refresh_t = 0.4
-			_refresh_friends()
+	friends.process(delta)
 	if _cam_t < 1.0:
 		_cam_t = minf(1.0, _cam_t + delta / 0.45)
 		var k := 1.0 - pow(1.0 - _cam_t, 3.0)
@@ -1984,8 +1073,7 @@ func _process(delta: float) -> void:
 		start_btn.scale = Vector2(s, s)
 	if start_btn:
 		start_btn.queue_redraw()
-	if _ward_equip:
-		_ward_equip.queue_redraw()
+	wardrobe_ui.process()
 	if _name_plate and _main_ui.visible and camera:
 		var feet := Vector3(model.global_position.x, PODIUM_TOP, 0.55)
 		if not camera.is_position_behind(feet):
@@ -2003,85 +1091,10 @@ func _notification(what: int) -> void:
 	if _find_settings():
 		return                      # the panel closes itself
 	if _modal:
-		_close_modal()
+		dialogs.close_modal()
 	elif wardrobe:
 		model.apply_bundle(String(Game.profile.bundle))
 		_update_bundle_label(String(Game.profile.bundle))
 		_close_wardrobe()
 	else:
-		_confirm_quit()
-
-
-## "Quit the game?" as a system dialog: a full-width dark band with the emblem, the question,
-## CANCEL (grey) and QUIT (yellow). Back or CANCEL closes it.
-func _confirm_quit() -> void:
-	_close_modal()
-	_modal = Control.new()
-	_modal.name = "QuitDialog"
-	UI.full_rect(_modal)
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	ui.add_child(_modal)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.62)
-	UI.full_rect(shade)
-	_modal.add_child(shade)
-	var band := Control.new()
-	band.anchor_right = 1.0
-	band.anchor_top = 0.30
-	band.anchor_bottom = 0.70
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	band.draw.connect(func() -> void: UI.draw_dialog_band(band, band.size))
-	_modal.add_child(band)
-	var em := UI.texture("emblem.png")
-	if em:
-		var t := TextureRect.new()
-		t.texture = em
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		t.anchor_left = 0.16
-		t.anchor_right = 0.16
-		t.anchor_top = 0.5
-		t.anchor_bottom = 0.5
-		t.offset_left = -84
-		t.offset_right = 84
-		t.offset_top = -84
-		t.offset_bottom = 84
-		t.modulate = Color(1, 1, 1, 0.9)
-		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		band.add_child(t)
-	var v := VBoxContainer.new()
-	v.anchor_left = 0.3
-	v.anchor_right = 0.95
-	v.anchor_top = 0.0
-	v.anchor_bottom = 1.0
-	v.offset_top = 34
-	v.offset_bottom = -26
-	v.add_theme_constant_override("separation", 8)
-	band.add_child(v)
-	v.add_child(UI.label("QUIT THE GAME?", 38, UI.TEXT, "bold"))
-	var bar := ColorRect.new()
-	bar.color = UI.ACCENT
-	bar.custom_minimum_size = Vector2(64, 4)
-	bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(bar)
-	v.add_child(UI.spacer(2))
-	v.add_child(UI.label("Your name, outfits, settings and progress stay saved on this phone.", 19, Color(1, 1, 1, 0.86), "semi"))
-	var fill := UI.spacer(0)
-	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(fill)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 14)
-	v.add_child(row)
-	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 52))
-	cancel.name = "QuitCancel"
-	cancel.pressed.connect(_close_modal)
-	row.add_child(cancel)
-	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 52))
-	quit.name = "QuitConfirm"
-	quit.pressed.connect(func() -> void: get_tree().quit())
-	row.add_child(quit)
-	_modal.modulate.a = 0.0
-	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.12)
+		dialogs.confirm_quit()
