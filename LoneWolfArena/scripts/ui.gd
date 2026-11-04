@@ -18,12 +18,6 @@ const LIGHT := Color(0.851, 0.847, 0.839)         # secondary buttons (#D9D8D6)
 const TEXT := Color(0.97, 0.97, 0.96)
 const TEXT_DIM := Color(0.64, 0.64, 0.66)
 const BAD := Color(0.95, 0.30, 0.24)
-const RARITY_COLORS := {
-	"common": Color(0.62, 0.63, 0.65),
-	"rare": Color(0.20, 0.58, 1.0),
-	"epic": Color(0.66, 0.30, 1.0),
-	"legendary": Color(1.0, 0.74, 0.18),
-}
 const FONT_FILES := {
 	"bold": "res://assets/fonts/ui_bold",
 	"semi": "res://assets/fonts/ui_semibold",

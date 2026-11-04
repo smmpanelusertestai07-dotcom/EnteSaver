@@ -2,20 +2,20 @@ class_name Lobby
 extends Node3D
 ## Lobby: our character large on a lit hexagonal podium in a container yard at sunset (cheap
 ## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
-## UI in the battle-royale lobby layout (original art): player card (avatar, name + EDIT, level,
-## XP line) and an offline coin strip top-left, logo + glyph buttons top-right, a text menu on
-## the left (PRACTICE, PLAY WITH FRIENDS, BUNDLES, CUSTOM HUD, SETTINGS, HOW TO PLAY), the mode card
-## "LONE WOLF / CARGO CAGE" with difficulty chips, match stats and the big START bottom-right.
-## BUNDLES opens the wardrobe (vault-like: rarity tabs, item cards with rarity glow and bar,
-## preview on the podium, EQUIP / BACK). START shows the match loading overlay
-## (Loading.start_match) and then enters the arena.
+## UI in the battle-royale lobby layout (original art, nothing to buy: no currency, no store):
+## player card (avatar, name + EDIT, level, XP line) top-left, logo + glyph buttons top-right, a
+## text menu on the left (PRACTICE, ONLINE 1 VS 1, WARDROBE, CUSTOM HUD, SETTINGS, HOW TO PLAY),
+## the mode card "LONE WOLF / CARGO CAGE" with difficulty chips, match stats and the big START
+## bottom-right. WARDROBE opens the outfit picker (every outfit free: item cards, preview on the
+## podium, EQUIP / BACK). START shows the match loading overlay (Loading.start_match) and then
+## enters the arena.
 ## This file has the 3D stage, the top bar, the menus, the mode card, START, the settings panel
 ## and input. Three parts have their own files: helpers the lobby makes, which build under `ui`
 ## and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, HOW TO PLAY,
-## the name editor, the quit dialog), LobbyFriends (`friends`: PLAY WITH FRIENDS, custom rooms,
-## the net signals) and LobbyWardrobe (`wardrobe_ui`: BUNDLES).
-## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton,
-## Bundle_<id>, EquipButton.
+## the name editor, the quit dialog), LobbyFriends (`friends`: ONLINE 1 VS 1, custom rooms,
+## the net signals) and LobbyWardrobe (`wardrobe_ui`: WARDROBE).
+## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton
+## (WARDROBE), Bundle_<id>, EquipButton.
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -517,7 +517,6 @@ func _build_ui() -> void:
 	UI.full_rect(left)
 	root.add_child(left)
 	_build_top_bar(root)
-	_build_feature_card(root)
 	_build_left_menu(root)
 	_build_right_column(root)
 	_build_bottom_left(root)
@@ -596,41 +595,6 @@ func _build_top_bar(root: Control) -> void:
 		xp.draw_rect(Rect2(Vector2.ZERO, xp.size), Color(1, 1, 1, 0.15))
 		xp.draw_rect(Rect2(Vector2.ZERO, Vector2(xp.size.x * Game.level_progress(), xp.size.y)), UI.ACCENT))
 	card.add_child(xp)
-	# Coin strip with a slanted end (offline, cosmetic).
-	var strip := Control.new()
-	strip.position = Vector2(292, 0)
-	strip.size = Vector2(330, 46)
-	strip.draw.connect(func() -> void:
-		var s := strip.size
-		strip.draw_colored_polygon(PackedVector2Array([Vector2(14, 0), Vector2(s.x, 0), Vector2(s.x - 22, s.y), Vector2(0, s.y)]), Color(0.16, 0.18, 0.22, 0.72))
-		strip.draw_line(Vector2(s.x, 0), Vector2(s.x - 22, s.y), Color(1, 1, 1, 0.25), 1.5, true))
-	root.add_child(strip)
-	var sh := HBoxContainer.new()
-	sh.position = Vector2(26, 5)
-	sh.add_theme_constant_override("separation", 8)
-	strip.add_child(sh)
-	sh.add_child(UI.icon("v_coin", 30, Color(1.0, 0.82, 0.25)))
-	var coins := UI.label(_fmt_thousands(_coins()), 26, UI.TEXT, "number")
-	coins.name = "Coins"
-	sh.add_child(coins)
-	sh.add_child(UI.spacer(0))
-	var div := ColorRect.new()
-	div.color = Color(1, 1, 1, 0.18)
-	div.custom_minimum_size = Vector2(1, 28)
-	div.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	sh.add_child(div)
-	sh.add_child(UI.icon("v_trophy", 26, UI.TEXT))
-	var wins := UI.label("%d WINS" % int(Game.profile.wins), 20, UI.TEXT, "bold")
-	wins.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	wins.custom_minimum_size = Vector2(0, 34)
-	sh.add_child(wins)
-	var off := PanelContainer.new()
-	off.add_theme_stylebox_override("panel", UI.chamfer(Color(UI.ACCENT, 0.18), 4, 1, Color(UI.ACCENT, 0.6), 6.0, ["br"]))
-	off.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	off.add_child(UI.label("OFFLINE", 13, UI.ACCENT, "bold"))
-	sh.add_child(off)
-	# A long-time player's numbers widen the row: the slanted strip grows with it.
-	strip.size.x = maxf(330.0, sh.position.x + sh.get_combined_minimum_size().x + 34.0)
 	# Logo wordmark centred at about 0.75 W (the reference's place), glyph buttons top-right.
 	var lg := UI.texture("logo.png")
 	if lg:
@@ -690,67 +654,24 @@ func _pencil_button() -> Button:
 	return b
 
 
-func _coins() -> int:
-	return 500 + int(Game.profile.wins) * 120 + int(Game.profile.kills) * 15 + int(Game.profile.matches) * 25
-
-
-func _fmt_thousands(n: int) -> String:
-	var s := str(n)
-	var out := ""
-	while s.length() > 3:
-		out = "," + s.substr(s.length() - 3) + out
-		s = s.substr(0, s.length() - 3)
-	return s + out
-
-
-## Featured card above the menu: the duel art with the mode pitch (opens HOW TO PLAY).
-func _build_feature_card(root: Control) -> void:
-	var tex := UI.texture("mode_lonewolf.jpg")
-	var b := Button.new()
-	b.name = "FeatureCard"
-	b.position = Vector2(10, 76)
-	b.size = Vector2(300, 132)
-	b.focus_mode = Control.FOCUS_NONE
-	for st in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
-		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-	b.draw.connect(func() -> void:
-		var r := Rect2(Vector2.ZERO, b.size)
-		if tex:
-			b.draw_texture_rect_region(tex, r, Rect2(40, 40, 560, 246))
-		b.draw_rect(Rect2(0, r.size.y - 50, r.size.x, 50), Color(0, 0, 0, 0.55))
-		b.draw_rect(r, Color(1, 1, 1, 0.25) if not b.is_hovered() else UI.ACCENT, false, 2.0))
-	b.pressed.connect(_how_to_play)
-	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
-	root.add_child(b)
-	var t1 := UI.shadowed(UI.label("1V1 DUEL", 26, UI.TEXT, "italic"))
-	t1.position = Vector2(12, 80)
-	b.add_child(t1)
-	var t2 := UI.label("BEAT THE BOT IN CARGO CAGE", 14, UI.ACCENT, "bold")
-	t2.position = Vector2(14, 108)
-	b.add_child(t2)
-	var tag := PanelContainer.new()
-	tag.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 5, 0, Color.TRANSPARENT, 6.0, ["br"]))
-	tag.add_child(UI.label("NEW MAP", 13, UI.INK, "heavy"))
-	tag.position = Vector2(8, 8)
-	b.add_child(tag)
-
-
+## The text menu, centred on the left edge between the player card and the outfit line.
 func _build_left_menu(root: Control) -> void:
 	var menu := VBoxContainer.new()
 	menu.name = "Menu"
-	menu.position = Vector2(0, 236)
 	menu.add_theme_constant_override("separation", 6)
 	root.add_child(menu)
 	var items := [
 		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
 		["ONLINE 1 VS 1", "v_player", "FriendsButton", _open_friends],
-		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
+		["WARDROBE", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
 		["HOW TO PLAY", "v_info", "HowToPlayButton", _how_to_play],
 	]
 	for it in items:
 		menu.add_child(_menu_row(String(it[0]), String(it[1]), String(it[2]), it[3]))
+	menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT, Control.PRESET_MODE_MINSIZE)
+	menu.grow_vertical = Control.GROW_DIRECTION_BOTH
 
 
 func _menu_row(text: String, icon_name: String, node_name: String, action: Callable) -> Button:
@@ -921,7 +842,6 @@ func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
 
 
 func _build_bottom_left(root: Control) -> void:
-	var info := CharacterModel.bundle_info(String(Game.profile.bundle))
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	box.offset_left = 22
@@ -932,7 +852,8 @@ func _build_bottom_left(root: Control) -> void:
 	root.add_child(box)
 	var cap := UI.label("OUTFIT", 13, UI.TEXT_DIM, "bold")
 	box.add_child(cap)
-	_bundle_label = UI.shadowed(UI.label("", 22, UI.RARITY_COLORS[info.rarity], "bold"))
+	_bundle_label = UI.shadowed(UI.label("", 22, UI.TEXT, "bold"))
+	_bundle_label.name = "OutfitName"
 	box.add_child(_bundle_label)
 	_update_bundle_label(String(Game.profile.bundle))
 	var ver := UI.label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 13, Color(1, 1, 1, 0.45), "semi")
@@ -953,10 +874,11 @@ func _build_name_plate(root: Control) -> void:
 	root.add_child(_name_plate)
 
 
+## The outfit line bottom-left: the outfit's name in its own colour.
 func _update_bundle_label(id: String) -> void:
 	var info := CharacterModel.bundle_info(id)
-	_bundle_label.text = "%s  ·  %s" % [info.name, String(info.rarity).to_upper()]
-	_bundle_label.add_theme_color_override("font_color", UI.RARITY_COLORS[info.rarity])
+	_bundle_label.text = String(info.name)
+	_bundle_label.add_theme_color_override("font_color", LobbyWardrobe.outfit_color(String(info.id)))
 
 
 func _start() -> void:

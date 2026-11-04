@@ -166,8 +166,6 @@ ICONS["trophy"] = svg(path("M34 14 H94 V44 C94 66 80 80 64 80 C48 80 34 66 34 44
                       + '<rect x="56" y="78" width="16" height="18" fill="%s"/><rect x="38" y="96" width="52" height="16" rx="4" fill="%s"/>' % (W, W))
 # Crosshair glyph (settings preview).
 ICONS["crosshair"] = svg(dot(64, 64, 7) + line(64, 14, 64, 44, 8) + line(64, 84, 64, 114, 8) + line(14, 64, 44, 64, 8) + line(84, 64, 114, 64, 8))
-# Coin (offline reward currency).
-ICONS["coin"] = svg(dot(64, 64, 52) + ring(64, 64, 38, 6).replace(W, "#000") + path("M64 40 L76 64 L64 88 L52 64 Z").replace(W, "#000"))
 # Star (XP / level).
 star = [(64 + (52 if k % 2 == 0 else 22) * math.cos(math.radians(-90 + k * 36)),
          66 + (52 if k % 2 == 0 else 22) * math.sin(math.radians(-90 + k * 36))) for k in range(10)]

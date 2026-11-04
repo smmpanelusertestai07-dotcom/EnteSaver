@@ -165,7 +165,7 @@ func _build_boot() -> void:
 		t.position = Vector2(48, 36)
 		add_child(t)
 	_build_bar("LOADING GAME FILES")
-	var ver := UI.label("v%s  ·  OFFLINE" % ProjectSettings.get_setting("application/config/version", "1.0"), 15, Color(1, 1, 1, 0.55), "semi")
+	var ver := UI.label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 15, Color(1, 1, 1, 0.55), "semi")
 	ver.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	ver.offset_left = -260
 	ver.offset_right = -22

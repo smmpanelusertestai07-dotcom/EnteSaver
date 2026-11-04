@@ -120,10 +120,11 @@ listed here. If a part needs something new from the core, add it in its own file
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, menus, mode card, START, settings,
   input) makes three helpers that build under its `ui` and reach it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
-  open popup; HOW TO PLAY, the name editor, the quit dialog), `friends` (`LobbyFriends`: PLAY
-  WITH FRIENDS, custom rooms, the net services' signals) and `wardrobe_ui` (`LobbyWardrobe`:
-  BUNDLES). Tours read `model`, `ui`, `start_btn`, `_modal`, `wardrobe` and `_preview_bundle`
-  from the lobby and call its `_open_wardrobe()`, `_close_wardrobe()` and `_open_settings()`.
+  open popup; HOW TO PLAY, the name editor, the quit dialog), `friends` (`LobbyFriends`: the
+  ONLINE 1 VS 1 window `open(kind)`, custom rooms, the online service's signals) and
+  `wardrobe_ui` (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`).
+  Tours read `model`, `ui`, `start_btn`, `_modal`, `wardrobe` and `_preview_bundle` from the
+  lobby and call its `_open_wardrobe()`, `_close_wardrobe()` and `_open_settings()`.
 - Modes: `Game.mode` is "training" (TRAINING GROUND, vs bots, the default) or "lonewolf" (LONE
   WOLF, online 1 vs 1), kept as the setting "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`.
 - Saves: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older

@@ -4,7 +4,7 @@ extends Node
 ## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
 ## captions bright, drag to turn the character, START position report), name edit (pencil tap,
 ## long name ends in "..."), the player card, how to play, the
-## wardrobe (card tap, rarity tab), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
+## wardrobe (card tap, every outfit listed), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
 ## sensitivity presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
 ## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
 ## shortcut), results screens (win, defeat, draw, invalid) with the opponent's row in an empty
@@ -86,6 +86,8 @@ func run(at: Node) -> int:
 		return _fails
 	var marks: Dictionary = Game.get("_marks")
 	_check(marks.has("ui start"), "lobby reports the START position")
+	_check(lobby.find_child("Coins", true, false) == null and lobby.find_child("FeatureCard", true, false) == null
+		and _find_label(lobby, "OFFLINE") == null, "no coin strip, OFFLINE chip or featured card in the lobby")
 	var howto := lobby.find_child("HowToPlayButton", true, false) as Control
 	var lum := await _caption_lum(howto)
 	_check(lum >= 230.0, "menu captions are drawn bright, not under their plate (HOW TO PLAY max lum %.0f)" % lum)
@@ -135,8 +137,11 @@ func run(at: Node) -> int:
 		await _tap(modal.find_child("Close", true, false) as Control)
 		await _settle(0.3)
 	_check(lobby.get("_modal") == null, "the popup X closes HOW TO PLAY")
-	# Wardrobe: open with a tap, pick a card by tapping it, filter by rarity, back closes it.
-	await _tap(lobby.find_child("BundlesButton", true, false) as Control)
+	# Wardrobe: open with a tap (the menu row reads WARDROBE), every outfit listed (no rarity
+	# tabs), pick a card by tapping it, back closes it.
+	var ward_row := lobby.find_child("BundlesButton", true, false) as Button
+	_check(ward_row != null and ward_row.text == "WARDROBE", "the menu row says WARDROBE")
+	await _tap(ward_row)
 	await at.wait(1.2)
 	var royal := lobby.find_child("Bundle_royal", true, false) as Control
 	_check(royal != null, "wardrobe lists Bundle_royal")
@@ -144,12 +149,14 @@ func run(at: Node) -> int:
 		await _tap(royal)
 		await at.wait(0.6)
 	_check(String(lobby.get("_preview_bundle")) == "royal", "tapping a bundle card previews it")
+	var listed := 0
+	for b: Dictionary in CharacterModel.BUNDLE_INFO:
+		if lobby.find_child("Bundle_" + String(b.id), true, false) != null:
+			listed += 1
+	_check(listed == CharacterModel.BUNDLE_INFO.size() and lobby.find_child("Tab_epic", true, false) == null,
+		"the wardrobe lists all %d outfits, with no rarity tabs" % CharacterModel.BUNDLE_INFO.size())
 	await _settle(0.5)
 	await at.shot("m05_wardrobe")
-	await _tap(lobby.find_child("Tab_epic", true, false) as Control)
-	await _settle(0.5)
-	await at.shot("m06_wardrobe_epic")
-	_check(lobby.find_child("Bundle_royal", true, false) == null and lobby.find_child("Bundle_neon", true, false) != null, "EPIC tab filters the cards")
 	_back()
 	await _settle(0.8)
 	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
@@ -363,6 +370,14 @@ func _find_text(root: Node, text: String) -> Button:
 	for b in root.find_children("*", "Button", true, false):
 		if (b as Button).text == text and (b as Button).is_visible_in_tree():
 			return b
+	return null
+
+
+## A visible label showing exactly `text` under `root`, or null.
+func _find_label(root: Node, text: String) -> Label:
+	for l in root.find_children("*", "Label", true, false):
+		if (l as Label).text == text and (l as Label).is_visible_in_tree():
+			return l
 	return null
 
 

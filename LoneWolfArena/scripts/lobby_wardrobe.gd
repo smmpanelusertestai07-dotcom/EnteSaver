@@ -1,14 +1,22 @@
 class_name LobbyWardrobe
 extends RefCounted
-## BUNDLES in the lobby: the wardrobe over the 3D stage (vault-like: rarity tabs, item cards with
-## rarity glow and bar, the info strip, EQUIP / BACK) while the camera moves so the character
-## stands on the right, wearing the outfit the selected card shows. The lobby makes it
-## (Lobby.wardrobe_ui) and opens it from BUNDLES; back closes it there too.
-## Node names used by the screenshot walkthrough: Wardrobe, Tab_<filter>, Bundle_<id>,
-## EquipButton, BackButton.
+## WARDROBE in the lobby: the outfit picker over the 3D stage (item cards with the outfit's
+## portrait and its own colour, the info strip, EQUIP / BACK) while the camera moves so the
+## character stands on the right, wearing the outfit the selected card shows. Every outfit is
+## free and unlocked: no prices, no ranks. The lobby makes it (Lobby.wardrobe_ui) and opens it
+## from WARDROBE (node BundlesButton); back closes it there too.
+## Node names used by the screenshot walkthrough: Wardrobe, Bundle_<id>, EquipButton, BackButton.
 
-const RARITY_ORDER := ["legendary", "epic", "rare", "common"]
 const CARD_SIZE := Vector2(168, 222)
+## Each outfit's own accent (card glow and bar, its name in the lobby): a colour that goes with
+## the clothes, not a rank.
+const OUTFIT_COLORS := {
+	"default": Color(0.80, 0.82, 0.86),     # ROOKIE: white tee, light grey
+	"desert": Color(0.88, 0.67, 0.38),      # DESERT FOX: sand
+	"neon": Color(0.22, 0.86, 0.96),        # NEON STRIKER: its cyan edge
+	"shadow": Color(0.92, 0.33, 0.30),      # SHADOW OPS: red night light
+	"royal": Color(1.0, 0.74, 0.18),        # ROYAL GOLD: gold
+}
 
 var lobby: Lobby
 ## The wardrobe layer (node "Wardrobe") while it is open, else null.
@@ -16,16 +24,19 @@ var layer: Control
 ## The outfit on the podium while the wardrobe is open (the selected card's).
 var preview_bundle := ""
 var _ward_grid: GridContainer
-var _ward_filter := "all"
 var _ward_info_name: Label
-var _ward_info_rarity: Label
+var _ward_info_state: Label
 var _ward_info_desc: Label
 var _ward_equip: Button
-var _ward_tabs := {}
 
 
 func _init(owner_lobby: Lobby) -> void:
 	lobby = owner_lobby
+
+
+## An outfit's accent colour (OUTFIT_COLORS; plain text colour for an unknown id).
+static func outfit_color(id: String) -> Color:
+	return OUTFIT_COLORS.get(id, UI.TEXT)
 
 
 func open() -> void:
@@ -49,26 +60,16 @@ func open() -> void:
 	head.position = Vector2(26, 16)
 	head.add_theme_constant_override("separation", 16)
 	layer.add_child(head)
-	head.add_child(UI.section("BUNDLES", 30))
-	var note := UI.label("ALL OUTFITS UNLOCKED  ·  OFFLINE", 15, UI.TEXT_DIM, "bold")
+	head.add_child(UI.section("WARDROBE", 30))
+	var note := UI.label("EVERY OUTFIT IS FREE AND UNLOCKED", 15, UI.TEXT_DIM, "bold")
 	note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	note.custom_minimum_size = Vector2(0, 36)
 	head.add_child(note)
-	# Rarity tabs (left).
-	var tabs := VBoxContainer.new()
-	tabs.position = Vector2(0, 76)
-	tabs.add_theme_constant_override("separation", 4)
-	layer.add_child(tabs)
-	_ward_tabs.clear()
-	for f in ["all", "legendary", "epic", "rare", "common"]:
-		var tb := _ward_tab(f)
-		tabs.add_child(tb)
-		_ward_tabs[f] = tb
 	# Item grid with the item info strip under it.
 	var col := VBoxContainer.new()
 	col.anchor_bottom = 1.0
-	col.offset_left = 196
-	col.offset_right = 196 + 3 * CARD_SIZE.x + 2 * 10
+	col.offset_left = 26
+	col.offset_right = 26 + 3 * CARD_SIZE.x + 2 * 10
 	col.offset_top = 74
 	col.offset_bottom = -16
 	col.add_theme_constant_override("separation", 10)
@@ -94,9 +95,9 @@ func open() -> void:
 	_ward_info_name = UI.label("", 24, UI.TEXT, "bold")
 	_ward_info_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ihh.add_child(_ward_info_name)
-	_ward_info_rarity = UI.label("", 16, UI.TEXT, "heavy")
-	_ward_info_rarity.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	ihh.add_child(_ward_info_rarity)
+	_ward_info_state = UI.label("", 16, UI.ACCENT, "heavy")
+	_ward_info_state.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	ihh.add_child(_ward_info_state)
 	ih.add_child(ihh)
 	info.add_child(ih)
 	var ib := PanelContainer.new()
@@ -136,67 +137,20 @@ func open() -> void:
 	layer.create_tween().tween_property(layer, "modulate:a", 1.0, 0.2)
 
 
-func _ward_tab(f: String) -> Button:
-	var b := Button.new()
-	b.name = "Tab_" + f
-	b.toggle_mode = true
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(190, 52)
-	b.text = f.to_upper()
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.button_pressed = f == _ward_filter
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 22)
-	var normal := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
-	var hover := UI.box(Color(1, 1, 1, 0.06), 0, 0, Color.TRANSPARENT, 0.0)
-	var on := UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 0.0, ["br"])
-	for st in [normal, hover, on]:
-		st.content_margin_left = 30
-	b.add_theme_stylebox_override("normal", normal)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT if f == "all" else UI.RARITY_COLORS.get(f, UI.TEXT))
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	b.draw.connect(func() -> void:
-		if b.button_pressed:
-			UI.draw_tab_selected(b, b.size))
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		_ward_filter = f
-		for k in _ward_tabs:
-			(_ward_tabs[k] as Button).set_pressed_no_signal(k == f)
-			(_ward_tabs[k] as Button).queue_redraw()
-		_fill_wardrobe())
-	return b
-
-
+## Every outfit, in the game's order (the starter first).
 func _fill_wardrobe() -> void:
 	for c in _ward_grid.get_children():
 		_ward_grid.remove_child(c)
 		c.queue_free()
 	var group := ButtonGroup.new()
-	var list := []
-	for r in RARITY_ORDER:
-		for b in CharacterModel.BUNDLE_INFO:
-			if b.rarity == r and (_ward_filter == "all" or _ward_filter == r):
-				list.append(b)
-	# The info box and the podium follow the first card when the previewed one is filtered out.
-	if not list.is_empty() and not list.any(func(b: Dictionary) -> bool: return String(b.id) == preview_bundle):
-		preview_bundle = String(list[0].id)
-		lobby.model.apply_bundle(preview_bundle)
-		lobby._update_bundle_label(preview_bundle)
-	for b in list:
+	for b: Dictionary in CharacterModel.BUNDLE_INFO:
 		_ward_grid.add_child(_bundle_card(b, group))
 	_update_ward_info()
 
 
 func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 	var id := String(b.id)
-	var rc: Color = UI.RARITY_COLORS[b.rarity]
+	var rc := outfit_color(id)
 	var card := Button.new()
 	card.name = "Bundle_" + id
 	card.toggle_mode = true
@@ -212,8 +166,8 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 	card.draw.connect(func() -> void:
 		var s := card.size
 		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.075, 0.072, 0.07, 0.97))
-		# rarity glow: a smooth radial gradient behind the outfit, inside the card, plus a
-		# brighter pool at the feet
+		# the outfit's colour as a glow: a smooth radial gradient behind it, inside the card,
+		# plus a brighter pool at the feet
 		card.draw_texture_rect(glow, Rect2(0, 0, s.x, s.y - 46), false)
 		card.draw_texture_rect(floor_glow, Rect2(s.x * 0.12, s.y * 0.62, s.x * 0.76, s.y * 0.2), false)
 		card.draw_rect(Rect2(0, 0, s.x, s.y * 0.5), Color(1, 1, 1, 0.02))
@@ -221,7 +175,7 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 			var ph := s.y - 58
 			var pw := ph * 0.75
 			card.draw_texture_rect(portrait, Rect2((s.x - pw) * 0.5, 8, pw, ph), false)
-		# name strip + rarity bar
+		# name strip + the outfit's colour bar
 		card.draw_rect(Rect2(0, s.y - 52, s.x, 48), Color(0, 0, 0, 0.6))
 		card.draw_rect(Rect2(0, s.y - 5, s.x, 5), rc)
 		# equipped: yellow outline + tick; previewed: white outline
@@ -236,12 +190,10 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 		elif not equipped:
 			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0))
 	var nm := UI.ellipsis(UI.label(String(b.name), 18, UI.TEXT, "bold"))
-	nm.position = Vector2(9, CARD_SIZE.y - 50)
-	nm.size = Vector2(CARD_SIZE.x - 18, 24)
+	nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	nm.position = Vector2(9, CARD_SIZE.y - 52)
+	nm.size = Vector2(CARD_SIZE.x - 18, 47)
 	card.add_child(nm)
-	var rl := UI.label(String(b.rarity).to_upper(), 14, rc, "bold")
-	rl.position = Vector2(9, CARD_SIZE.y - 28)
-	card.add_child(rl)
 	card.mouse_entered.connect(card.queue_redraw)
 	card.mouse_exited.connect(card.queue_redraw)
 	card.toggled.connect(func(_on: bool) -> void: card.queue_redraw())
@@ -261,10 +213,9 @@ func _update_ward_info() -> void:
 		return
 	var info := CharacterModel.bundle_info(preview_bundle)
 	_ward_info_name.text = String(info.name)
-	_ward_info_rarity.text = String(info.rarity).to_upper()
-	_ward_info_rarity.add_theme_color_override("font_color", UI.RARITY_COLORS[info.rarity].lightened(0.25))
 	var equipped := preview_bundle == String(Game.profile.bundle)
-	_ward_info_desc.text = String(info.desc) + ("   EQUIPPED" if equipped else "")
+	_ward_info_state.text = "EQUIPPED" if equipped else ""
+	_ward_info_desc.text = String(info.desc)
 	if _ward_equip:
 		UI.set_caption(_ward_equip, "EQUIPPED" if equipped else "EQUIP")
 
