@@ -482,9 +482,17 @@ func _process_boot(delta: float) -> void:
 			_status.text = "LOADING GAME FILES" if progress < 0.6 else "PREPARING THE ARENA"
 	elif not _leaving and not hold_for_test and not IntroSting.playing(self):
 		_leaving = true
+		# Fade to the login screen's own near-black (it fades in from it), not to transparent:
+		# a transparent boot screen would show the project's light-blue clear colour for a moment.
+		var fade := ColorRect.new()
+		fade.name = "FadeOut"
+		fade.color = Color(0.02, 0.02, 0.03, 0.0)
+		fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		UI.full_rect(fade)
+		add_child(fade)
 		var tw := create_tween()
 		tw.tween_interval(0.15)
-		tw.tween_property(self, "modulate:a", 0.0, 0.25)
+		tw.tween_property(fade, "color:a", 1.0, 0.25)
 		tw.tween_callback(Game.goto_login)
 
 
