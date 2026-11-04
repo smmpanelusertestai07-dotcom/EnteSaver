@@ -1,12 +1,13 @@
 class_name LobbyDialogs
 extends RefCounted
 ## The lobby's popups: the popup frame they share (open_modal / close_modal, one at a time, in
-## `modal`), SELECT MODE, HOW TO PLAY, the player name editor with the first-start name prompt,
-## and the "Quit the game?" dialog. The lobby makes it (Lobby.dialogs) and its parts open popups
-## through it; everything is built under the lobby's UI layer.
+## `modal`; back() is the header X and Android back: a popup's own way back, else close), SELECT
+## MODE, HOW TO PLAY, the player name editor with the first-start name prompt, a confirmation
+## (confirm()) and the "Quit the game?" dialog. The lobby makes it (Lobby.dialogs) and its parts
+## open popups through it; everything is built under the lobby's UI layer.
 ## Node names: Modal (or QuitDialog), Close, Mode_<training|lonewolf>, NameEdit, NameRandom,
-## NameOk, QuitCancel, QuitConfirm. Markers: "name prompt" and "ui name_ok" (the emulator test
-## taps OK there).
+## NameOk, ConfirmCancel, ConfirmOk, QuitCancel, QuitConfirm. Markers: "name prompt" and
+## "ui name_ok" (the emulator test taps OK there).
 
 ## SELECT MODE: what each mode's card says under its name ({rounds}: Game.ROUNDS_TO_WIN).
 const MODE_INFO := {
@@ -76,8 +77,8 @@ func open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
 	frame.offset_top = 18.0 if top else 0.0
 	frame.grow_vertical = Control.GROW_DIRECTION_END if top else Control.GROW_DIRECTION_BOTH
 	modal.add_child(frame)
-	var head := UI.popup_header(title, 26, 54.0)
-	(head.get_node("Close") as Button).pressed.connect(close_modal)
+	var head := UI.popup_header(title, 26, 56.0)
+	(head.get_node("Close") as Button).pressed.connect(back)
 	frame.add_child(head)
 	var panel := UI.popup_body()
 	frame.add_child(panel)
@@ -94,6 +95,45 @@ func close_modal() -> void:
 		modal.queue_free()
 		modal = null
 		DisplayServer.virtual_keyboard_hide()     # a text field in it may have opened the keyboard
+
+
+## The popup's X and Android back: its own way back when it set one (meta "on_back", a Callable:
+## a player card goes back to the list it came from, a confirmation to what asked), else close.
+func back() -> void:
+	if modal == null:
+		return
+	var to: Variant = modal.get_meta("on_back") if modal.has_meta("on_back") else null
+	if to is Callable and (to as Callable).is_valid():
+		(to as Callable).call()
+	else:
+		close_modal()
+
+
+## A yes / no question in a popup: CANCEL (and X, back) calls on_cancel, else just closes; the
+## OK button (yellow, or red when `danger`) calls on_ok after closing.
+func confirm(title: String, text: String, ok_text: String, on_ok: Callable, on_cancel := Callable(), danger := false) -> void:
+	var v := open_modal(title, 680.0)
+	var t := UI.label(text, 20, UI.TEXT, "semi")
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(600, 0)
+	v.add_child(t)
+	v.add_child(UI.spacer(4))
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 12)
+	v.add_child(row)
+	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 56))
+	cancel.name = "ConfirmCancel"
+	row.add_child(cancel)
+	var ok := UI.button(ok_text, 22, "danger" if danger else "primary", Vector2(210, 56))
+	ok.name = "ConfirmOk"
+	row.add_child(ok)
+	if on_cancel.is_valid():
+		modal.set_meta("on_back", on_cancel)
+	cancel.pressed.connect(back)
+	ok.pressed.connect(func() -> void:
+		close_modal()
+		on_ok.call())
 
 
 # ---------------------------------------------------------------- select mode

@@ -38,8 +38,11 @@ func _ready() -> void:
 	_test_modes()
 	_test_profile_keys()
 	_test_profile_migration()
+	_test_career()
+	_test_history()
 	_test_honour()
 	_test_signed_cards()
+	_test_card_v2()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -861,7 +864,7 @@ func _test_profile_keys() -> void:
 
 
 ## Saved profiles through the real load path (signature, migration, merge, sanitising): from
-## version 1, from version 2, and an edited one.
+## version 1, from version 2 (before HISTORY), version 3, and an edited one.
 func _test_profile_migration() -> void:
 	var saved_profile := Game.profile.duplicate(true)
 	var friend_id := "friend".sha256_text().left(32)
@@ -881,7 +884,7 @@ func _test_profile_migration() -> void:
 	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
 	Game._apply_saved_profile(_as_saved({"name": "ROOKIE", "matches": 1, "name_set": false}))
 	_check(Game.profile.guest_ok == false and Game.profile.modes.training.matches == 1, "an old profile without a chosen name still gets the guest login")
-	# A version 2 profile loads back exactly: every new key kept, nothing migrated again.
+	# A version 2 profile (from before HISTORY) keeps every key and starts with an empty HISTORY.
 	var v2: Dictionary = Game.DEFAULT_PROFILE.duplicate(true)
 	v2.merge({"name": "NEW ONE", "name_set": true, "guest_ok": false, "created": 1780000000, "avatar": "royal", "signature": "GG",
 		"matches": 9, "wins": 4, "kills": 11, "xp": 900, "deaths": 7, "headshots": 3, "damage": 1800, "shots": 120, "hits": 40,
@@ -890,9 +893,28 @@ func _test_profile_migration() -> void:
 		"recent": [{"id": "r".sha256_text().left(32), "name": "RIVAL", "t": 1780000100}], "blocked": ["b".sha256_text().left(32)],
 		"friend_in": {"i".sha256_text().left(32): {"name": "ASKER", "t": 1780000200}},
 		"friend_out": {"o".sha256_text().left(32): {"name": "ASKED", "t": 1780000300}}, "friends": {friend_id: {"name": "BUDDY"}}}, true)
+	v2.profile_version = 2
+	v2.erase("history")
+	var v3: Dictionary = v2.duplicate(true)
+	v3.profile_version = 3
+	v3.history = []
+	_check(Game.PROFILE_VERSION == 3 and Game.DEFAULT_PROFILE.history == [], "version 3: a new profile has an empty HISTORY")
 	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
 	ok = Game._apply_saved_profile(_as_saved(v2))
-	_check(ok and Game.profile == v2, "a version 2 profile loads back exactly (every new key kept, no second migration)")
+	_check(ok and Game.profile == v3, "a version 2 profile keeps every key and gets an empty HISTORY")
+	var odd: Dictionary = v2.duplicate(true)
+	odd.history = [{"result": "won", "mode": "training", "enemy": "BOT REX", "id": "", "score": 5, "enemy_score": 0, "kills": 5,
+		"damage": 900, "headshots": 2, "t": 1780000400}]
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	ok = Game._apply_saved_profile(_as_saved(odd))
+	_check(ok and (Game.profile.history as Array).is_empty(), "the migration to version 3 starts HISTORY empty, whatever the old save holds")
+	# A version 3 profile loads back exactly, its HISTORY included.
+	v3.history = odd.history.duplicate(true)
+	v3.history.append({"result": "draw", "mode": "lonewolf", "enemy": "RIVAL", "id": "r".sha256_text().left(32), "score": 4,
+		"enemy_score": 4, "kills": 4, "damage": 912, "headshots": 1, "t": 1780000300})
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	ok = Game._apply_saved_profile(_as_saved(v3))
+	_check(ok and Game.profile == v3, "a version 3 profile loads back exactly (HISTORY kept, no second migration)")
 	# An edited save is still rejected: only the name is kept, and the edit is flagged.
 	var flags_before := Guard.flags.size()
 	var edited := _as_saved(v2)
@@ -903,6 +925,117 @@ func _test_profile_migration() -> void:
 		and Game.profile.modes.lonewolf.matches == 0 and Guard.flags.has("save"), "an edited profile is rejected, only its name is kept")
 	Guard.flags.resize(flags_before)
 	Game.profile = saved_profile
+
+
+## PROFILE's CAREER numbers (LobbyProfile.career_stats): counts, rates and averages, and "-" (no
+## division by zero) while there is nothing to divide by; junk values count as 0.
+func _test_career() -> void:
+	var z := _career(Game.DEFAULT_PROFILE)
+	_check(z.size() == 14 and z.matches == "0" and z.wins == "0" and z.kills == "0" and z.deaths == "0" and z.headshots == "0"
+		and z.damage == "0" and z.rounds_won == "0" and z.rounds_lost == "0" and z.time_played == "0M", "CAREER of a new player: every count is 0")
+	_check(z.win_rate == "-" and z.kd == "-" and z.headshot_rate == "-" and z.accuracy == "-" and z.avg_damage == "-",
+		"CAREER of a new player: no rate or average without data (%s)" % str(z))
+	var p: Dictionary = Game.DEFAULT_PROFILE.duplicate(true)
+	p.merge({"matches": 48, "wins": 29, "kills": 151, "deaths": 97, "headshots": 63, "hits": 702, "shots": 1880, "damage": 61234,
+		"time_played": 30250, "rounds_won": 178, "rounds_lost": 131}, true)
+	var n := _career(p)
+	_check(n.matches == "48" and n.win_rate == "60.4%" and n.kd == "1.56" and n.headshot_rate == "9.0%" and n.accuracy == "37.3%",
+		"CAREER rates: wins per match, kills per death, headshots per hit, hits per shot (%s)" % str(n))
+	_check(n.damage == "61,234" and n.avg_damage == "1,276" and n.time_played == "8H 24M" and n.rounds_won == "178" and n.rounds_lost == "131",
+		"CAREER totals and the average damage per match (%s, %s, %s)" % [n.damage, n.avg_damage, n.time_played])
+	p.merge({"matches": 3, "wins": 0, "kills": 5, "deaths": 0, "shots": 0, "hits": 0, "headshots": 0, "damage": 0}, true)
+	n = _career(p)
+	_check(n.kd == "5.00" and n.accuracy == "-" and n.headshot_rate == "-" and n.win_rate == "0.0%" and n.avg_damage == "0",
+		"CAREER with zeros on one side: K/D before the first death, no shots, no wins (%s)" % str(n))
+	n = _career({"matches": "lots", "wins": -4, "kills": null, "hits": 9, "shots": 3, "time_played": [1]})
+	_check(n.matches == "0" and n.wins == "0" and n.win_rate == "-" and n.kills == "0" and n.accuracy == "100.0%" and n.time_played == "0M",
+		"CAREER reads junk as 0 and keeps a rate within 100 %% (%s)" % str(n))
+	p.modes = {"training": {"matches": 6, "wins": 3, "kills": 8}}
+	_check(LobbyProfile.mode_stats(p, "training") == {"matches": 6, "wins": 3, "kills": 8}
+		and LobbyProfile.mode_stats(p, "lonewolf") == {"matches": 0, "wins": 0, "kills": 0}
+		and LobbyProfile.mode_stats({"modes": 7}, "training") == {"matches": 0, "wins": 0, "kills": 0}, "CAREER's row per mode, 0 when missing")
+	_check(LobbyProfile.play_time(59) == "0M" and LobbyProfile.play_time(3600) == "1H 00M" and LobbyProfile.play_time(-5) == "0M"
+		and LobbyProfile.thousands(1234567) == "1,234,567" and LobbyProfile.thousands(999) == "999" and LobbyProfile.thousands(1000) == "1,000",
+		"time played and thousands separators")
+	var now := 1790000000
+	_check(LobbyProfile.time_ago(0, now) == "" and LobbyProfile.time_ago(now - 30, now) == "JUST NOW"
+		and LobbyProfile.time_ago(now - 300, now) == "5 MIN AGO" and LobbyProfile.time_ago(now - 7200, now) == "2 H AGO"
+		and LobbyProfile.time_ago(now - 86400, now) == "1 DAY AGO" and LobbyProfile.time_ago(now - 3 * 86400, now) == "3 DAYS AGO"
+		and LobbyProfile.time_ago(now + 500, now) == "JUST NOW", "how long ago a match was")
+	_check(LobbyProfile.since_text(1780000000, now).begins_with("PLAYING SINCE ") and LobbyProfile.since_text(1780000000, now).ends_with(" 2026")
+		and LobbyProfile.since_text(0, now) == LobbyProfile.since_text(now, now), "PLAYING SINCE: the first save's date (today before it)")
+
+
+## career_stats as {key: shown value}.
+func _career(p: Dictionary) -> Dictionary:
+	var out := {}
+	for s: Array in LobbyProfile.career_stats(p):
+		out[s[0]] = s[2]
+	return out
+
+
+## HISTORY: Game.record_match adds the match (newest first, Game.MAX_HISTORY at most) and the
+## CAREER numbers; saved entries are checked like every saved key; the signature covers them.
+func _test_history() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var saved_result: Dictionary = Game.last_result
+	var at := Game.autotest
+	Game.autotest = "unit"          # nothing is written to user://
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var rival := "rival".sha256_text().left(32)
+	Game.record_match({"won": true, "kills": 5, "damage": 1176, "headshots": 3, "xp": 330, "mode_id": "training", "enemy": "BOT VIPER",
+		"score_player": 5, "score_bot": 2, "time": 412.5, "shots": 60, "hits": 28, "deaths": 2, "enemy_id": ""})
+	Game.record_match({"won": false, "draw": true, "kills": 4, "damage": 912, "headshots": 1, "xp": 150, "mode_id": "lonewolf",
+		"enemy": "night fox!", "score_player": 4, "score_bot": 4, "time": 380.0, "shots": 50, "hits": 20, "deaths": 4, "enemy_id": rival})
+	var h: Array = Game.profile.history
+	_check(h.size() == 2 and h[0].result == "draw" and h[0].mode == "lonewolf" and h[0].enemy == "NIGHT FOX" and h[0].id == rival
+		and h[0].score == 4 and h[0].enemy_score == 4 and h[0].kills == 4 and h[0].damage == 912 and h[0].headshots == 1
+		and h[1].result == "won" and h[1].mode == "training" and h[1].enemy == "BOT VIPER" and h[1].id == "" and h[1].score == 5
+		and h[1].enemy_score == 2, "HISTORY keeps each match, newest first (%s)" % str(h))
+	_check((h[0] as Dictionary).size() == 10 and int(h[0].t) > 1600000000, "a HISTORY entry: the ten keys, the time it ended")
+	var p := Game.profile
+	_check(p.deaths == 6 and p.headshots == 4 and p.damage == 2088 and p.shots == 110 and p.hits == 48 and p.rounds_won == 9
+		and p.rounds_lost == 6 and p.time_played == 792 and p.wins == 1 and p.kills == 9, "record_match counts the CAREER numbers")
+	_check(p.recent.size() == 1 and p.recent[0].id == rival and p.recent[0].name == "NIGHT FOX", "an online opponent becomes a recent player")
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	Game.record_match({"won": false, "kills": 0, "mode_id": "training", "enemy": "BOT KAI", "shots": 5, "hits": 9, "headshots": 30})
+	p = Game.profile
+	_check(p.shots == 5 and p.hits == 5 and p.headshots == 5, "hits never above shots, headshots never above hits")
+	for i in 25:
+		Game.record_match({"won": i % 2 == 0, "kills": i % 3, "mode_id": "training", "enemy": "BOT %d" % i, "score_player": 1})
+	h = Game.profile.history
+	_check(h.size() == Game.MAX_HISTORY and h[0].enemy == "BOT 24" and h[19].enemy == "BOT 5" and h[0].result == "won"
+		and h[1].result == "lost", "HISTORY keeps the last %d matches, newest first" % Game.MAX_HISTORY)
+	# Saved entries are checked one by one: wrong ones are dropped, values clamped, names cleaned.
+	var good := {"result": "lost", "mode": "lonewolf", "enemy": "RIVAL", "id": rival, "score": 2, "enemy_score": 5, "kills": 2,
+		"damage": 537, "headshots": 1, "t": 1780000000}
+	var saved := ["not a match", {"result": "champion"}, {"mode": "training"}, 42, good,
+		{"result": "won", "mode": "royale", "enemy": "  [b]x[/b]  ", "id": "zz", "score": -3, "enemy_score": 500, "kills": 2.7,
+			"damage": "a lot", "headshots": 1e9, "t": -5, "extra": "dropped"},
+		{"result": "draw", "enemy": 42}]
+	for i in 30:
+		saved.append(good.duplicate())
+	Game.profile.history = saved
+	Game._sanitize_profile()
+	h = Game.profile.history
+	_check(h.size() == Game.MAX_HISTORY and h[0] == good, "saved HISTORY: unknown results dropped, %d entries at most" % Game.MAX_HISTORY)
+	_check(h[1] == {"result": "won", "mode": "training", "enemy": "BXB", "id": "", "score": 0, "enemy_score": 99, "kills": 2, "damage": 0,
+		"headshots": 9999, "t": 0}, "saved HISTORY: a bad mode, name, id or number is repaired (%s)" % str(h[1]))
+	_check(h[2] == {"result": "draw", "mode": "training", "enemy": "PLAYER", "id": "", "score": 0, "enemy_score": 0, "kills": 0, "damage": 0,
+		"headshots": 0, "t": 0}, "saved HISTORY: missing values are filled in")
+	Game.profile.history = "nothing"
+	Game._sanitize_profile()
+	_check(Game.profile.history == [], "saved HISTORY that is not a list is emptied")
+	# The signature covers HISTORY.
+	Game.profile.history = [good.duplicate()]
+	var parsed := _as_saved(Game.profile)
+	_check(Guard.verify_dict(parsed).ok, "a profile with HISTORY verifies after a JSON round trip")
+	var edited: Dictionary = parsed.duplicate(true)
+	edited.history[0].kills = 40
+	_check(not Guard.verify_dict(edited).ok, "the signature covers HISTORY")
+	Game.profile = saved_profile
+	Game.last_result = saved_result
+	Game.autotest = at
 
 
 ## A profile as profile.json holds it: signed, then through JSON (numbers come back as floats).
@@ -940,3 +1073,120 @@ func _test_signed_cards() -> void:
 	var rsig := Marshalls.raw_to_base64(Crypto.new().sign(HashingContext.HASH_SHA256, req.sha256_buffer(), key))
 	_check(Cloud.verify_signed(pk, req, rsig) and not Cloud.verify_signed(pk, Cloud.waiting_text("fra", id, "0123456789abcdef0123456789abcdef", 1793800000), rsig),
 		"a friend request's signature does not pass as an answer")
+
+
+## Player card v2 (Cloud.card_json): the public part of the profile (Cloud.my_card: name, outfit,
+## picture, banner, level, signature) signed as a whole ("sig2"), still listed by builds from
+## before (its "sig" signs the v1 text). On arrival (Cloud._check_card) a changed field fails,
+## a card from an older build (no "v") is still listed, and every field is checked.
+func _test_card_v2() -> void:
+	var key := Crypto.new().generate_rsa(2048)
+	var pk := key.save_to_string(true)
+	var id := pk.sha256_text().left(32)
+	var now := int(Time.get_unix_time_from_system())
+	var c := {"name": "SWIFTWOLF42", "bundle": "neon", "avatar": "royal", "banner": "hive", "level": 12, "signature": "ONE MORE ROUND"}
+	var card: Dictionary = JSON.parse_string(Cloud.card_json(c, id, pk, now, key))
+	var keys := card.keys()
+	keys.sort()
+	_check(keys == ["avatar", "banner", "bundle", "id", "level", "name", "pk", "sig", "sig2", "signature", "t", "ts", "v"],
+		"a v2 card carries the shown fields, the id, key, time and signatures, nothing else (%s)" % str(keys))
+	var mine := Cloud.my_card().keys()
+	mine.sort()
+	_check(mine == ["avatar", "banner", "bundle", "level", "name", "signature"], "my_card() is the whole public part of the profile")
+	_check(int(card.v) == 2 and Cloud.verify_signed(pk, Cloud.card2_text(id, "SWIFTWOLF42", "neon", "royal", "hive", 12, "ONE MORE ROUND", now),
+		String(card.sig2)), "sig2 signs every field of a v2 card")
+	_check(Cloud.verify_signed(pk, Cloud.card_text(id, "SWIFTWOLF42", "neon", now), String(card.sig)),
+		"a v2 card's sig still signs the v1 text, so older builds keep listing the player")
+	var cl := Cloud.new()
+	cl._check_card(JSON.stringify(card).to_utf8_buffer())
+	var e: Dictionary = cl.directory.get(id, {})
+	_check(e.get("v") == 2 and e.get("name") == "SWIFTWOLF42" and e.get("bundle") == "neon" and e.get("avatar") == "royal"
+		and e.get("banner") == "hive" and e.get("level") == 12 and e.get("signature") == "ONE MORE ROUND" and e.get("ts") == now,
+		"a v2 card is listed with every field (%s)" % str(e))
+	# A changed field (anyone can publish to a public relay) fails the signature.
+	for k: String in ["name", "bundle", "avatar", "banner", "level", "signature", "ts"]:
+		var t := card.duplicate()
+		t[k] = {"name": "FAKENAME", "bundle": "royal", "avatar": "shadow", "banner": "scope", "level": 99, "signature": "SEND ME GOLD",
+			"ts": now - 5}[k]
+		_check(not _card_listed(cl, t, id), "a v2 card with a changed %s is rejected" % k)
+	var swapped := card.duplicate()
+	swapped.sig2 = card.sig
+	var no_sig2 := card.duplicate()
+	no_sig2.erase("sig2")
+	var other_key := card.duplicate()
+	other_key.pk = Crypto.new().generate_rsa(2048).save_to_string(true)
+	_check(not _card_listed(cl, swapped, id) and not _card_listed(cl, no_sig2, id) and not _card_listed(cl, other_key, id),
+		"a v2 card needs its own sig2 from the key its id comes from")
+	# A card from a build before v2 (no "v"): listed, the v2 fields at their defaults.
+	var v1 := {"t": "card", "id": id, "name": "OLDTIMER", "bundle": "desert", "pk": pk, "ts": now,
+		"sig": Cloud._sign_with(key, Cloud.card_text(id, "OLDTIMER", "desert", now))}
+	_check(_card_listed(cl, v1, id) and cl.directory[id] == {"name": "OLDTIMER", "bundle": "desert", "pk": pk, "ts": now, "v": 1,
+		"avatar": "emblem", "banner": "default", "level": 0, "signature": ""}, "a v1 card is still listed, with the default picture and banner")
+	var v1_bad := v1.duplicate()
+	v1_bad.name = "FAKENAME"
+	_check(not _card_listed(cl, v1_bad, id), "a v1 card with a changed name is still rejected")
+	# Stripped to v1, a v2 card shows only what its owner signed for v1, with the defaults.
+	var stripped := card.duplicate()
+	for k: String in ["v", "avatar", "banner", "level", "signature", "sig2"]:
+		stripped.erase(k)
+	_check(_card_listed(cl, stripped, id) and cl.directory[id].avatar == "emblem" and cl.directory[id].signature == ""
+		and cl.directory[id].name == "SWIFTWOLF42", "a v2 card stripped to v1 shows only its owner's v1 fields")
+	var explicit_v1 := card.duplicate()
+	explicit_v1.v = 1
+	_check(not _card_listed(cl, explicit_v1, id), "a card that says v 1 is not one (v1 cards carry no v)")
+	# Field checks: properly signed values this build cannot show are mapped, malformed ones reject
+	# the whole card.
+	var shown := {"avatar": ["dragon", "emblem"], "banner": ["nope", "default"], "level": [5000, Cloud.CARD_LEVEL_MAX], "signature": ["gg, wp!", "GG WP"]}
+	for k: String in shown:
+		var bad := c.duplicate()
+		bad[k] = shown[k][0]
+		var bc: Dictionary = JSON.parse_string(Cloud.card_json(bad, id, pk, now, key))
+		_check(_card_listed(cl, bc, id) and cl.directory[id][k] == shown[k][1],
+			"a signed card's %s %s shows as %s" % [k, str(shown[k][0]), str(shown[k][1])])
+	var zero := c.duplicate()
+	zero.level = 0
+	_check(_card_listed(cl, JSON.parse_string(Cloud.card_json(zero, id, pk, now, key)), id) and cl.directory[id].level == 1,
+		"a level under 1 shows as 1")
+	# [field, value, signed]: a signed value can only be stopped by the field check; the others
+	# cannot even be signed as they are and go into the JSON after signing.
+	var rejected := {"a negative level": ["level", -1, true], "a level that is not whole": ["level", 2.5, false],
+		"a level as text": ["level", "12", false], "an avatar that is not text": ["avatar", 42, false],
+		"a banner that is not text": ["banner", ["hive"], false], "no signature": ["signature", null, false],
+		"a signature over the field limit": ["signature", "X".repeat(Cloud.CARD_FIELD_MAX + 1), true],
+		"a | in the signature": ["signature", "GG|WP", true], "a | in the banner": ["banner", "hive|x", true],
+		"a | in the name": ["name", "SWIFT|WOLF", true]}
+	for what: String in rejected:
+		var r: Array = rejected[what]
+		var bad := c.duplicate()
+		if r[2]:
+			bad[r[0]] = r[1]
+		var bc: Dictionary = JSON.parse_string(Cloud.card_json(bad, id, pk, now, key))
+		if not r[2]:
+			if r[1] == null:
+				bc.erase(r[0])
+			else:
+				bc[r[0]] = r[1]
+		_check(not _card_listed(cl, bc, id), "a card with %s is rejected" % what)
+	var big := card.duplicate()
+	big.padding = "X".repeat(Cloud.MAX_MESSAGE)
+	_check(not _card_listed(cl, big, id), "a card over %d bytes is rejected" % Cloud.MAX_MESSAGE)
+	# What the card shows in one string (card_key): a change of any field publishes it again.
+	var saved_profile := Game.profile.duplicate(true)
+	var k0 := Cloud.card_key(Cloud.my_card())
+	var changed := 0
+	for change: Array in [["name", "NEWNAME"], ["bundle", "royal"], ["avatar", "shadow"], ["banner", "scope"], ["signature", "HELLO"],
+			["xp", 5000]]:
+		Game.profile = saved_profile.duplicate(true)
+		Game.profile[change[0]] = change[1]
+		if Cloud.card_key(Cloud.my_card()) != k0:
+			changed += 1
+	_check(changed == 6, "a new name, outfit, picture, banner, signature or level changes the card (%d of 6)" % changed)
+	Game.profile = saved_profile
+	cl.free()
+
+
+## Hands a card to a fresh directory (Cloud._check_card) and tells whether it was listed.
+func _card_listed(cl: Cloud, card: Dictionary, id: String) -> bool:
+	cl.directory.clear()
+	cl._check_card(JSON.stringify(card).to_utf8_buffer())
+	return cl.directory.has(id)

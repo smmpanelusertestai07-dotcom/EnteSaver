@@ -120,7 +120,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
   damage, headshots, accuracy, time, xp, enemy, mode (the name shown), mode_id ("training" |
   "lonewolf", the profile counts the match there), map, weapon, score_player, score_bot,
-  hp_left, difficulty (the bot's level, or "ONLINE"), taken. Hides the arena's `hud` while
+  hp_left, difficulty (the bot's level, or "ONLINE"), taken; shots, hits, deaths and enemy_id (the
+  online opponent's player id, else "") go to the profile only (`Game.record_match`). Hides the arena's `hud` while
   shown; the opponent's orange row
   (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match
   overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`); Android back = LOBBY (ignored while
@@ -144,17 +145,37 @@ listed here. If a part needs something new from the core, add it in its own file
   Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`.
 - Aim settings on `Player`: `sight_of(def)` ("sniper", "2x", "reddot", "none"), `sens_key(def,
   aiming)` (the sensitivity setting a view turns with), `assist_allowed(aim_precision, aiming)`.
-- Lobby Android back closes the top layer (popup, settings, wardrobe), then shows a quit
-  dialog (`QuitDialog`, `QuitCancel`, `QuitConfirm`); it is ignored during the START overlay.
+- Lobby Android back closes the top layer (popup: `dialogs.back()`, the popup's own way back;
+  settings, PROFILE, wardrobe), then shows a quit dialog (`QuitDialog`, `QuitCancel`,
+  `QuitConfirm`); it is ignored during the START overlay.
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, menus, mode card, START, settings,
-  input) makes three helpers that build under its `ui` and reach it through their `lobby`:
+  input) makes four helpers that build under its `ui` and reach it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
-  open popup; SELECT MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog),
-  `friends` (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind)`, custom rooms, the online
-  service's signals) and `wardrobe_ui` (`LobbyWardrobe`: WARDROBE, every outfit free;
-  `LobbyWardrobe.outfit_color(id)`). Tours read `model`, `ui`, `start_btn`, `mode_card`,
-  `_modal`, `wardrobe` and `_preview_bundle` from the lobby and call its `_open_wardrobe()`,
-  `_close_wardrobe()` and `_open_settings()`.
+  open popup, `back()` (its X and Android back: the popup's meta "on_back" Callable, else close),
+  `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`); SELECT
+  MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog), `friends`
+  (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind)` with its list in `NetScroll`, custom
+  rooms, the online service's signals; `challenge(id)`, `add_friend(id)`), `wardrobe_ui`
+  (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`) and
+  `profile_ui` (`LobbyProfile`, below). Tours read `model`, `ui`, `start_btn`, `mode_card`,
+  `_modal`, `wardrobe`, `_preview_bundle` and `profile_ui` from the lobby and call its
+  `_open_wardrobe()`, `_close_wardrobe()`, `_open_profile()` and `_open_settings()`;
+  `refresh_player_card()` redraws the player card top-left (name, profile picture).
+- PROFILE (`LobbyProfile`, scripts/lobby_profile.gd): `PlayerCard` opens it (`open(tab)`,
+  `close()`, `layer` = the Control `Profile`; `ProfileClose` or back closes it). Tabs
+  `ProfileTab_<career|history|namecard|blocked>`: CAREER (`career_stats(profile)`: rates and
+  averages "-" without data; `Career_<key>`, `CareerMode_<mode>`), HISTORY (`HistoryRow_<n>`,
+  `HistoryEmpty`), NAME CARD (`Banner_<id>`, `Avatar_<id>`, saved at once), BLOCKED
+  (`Unblock_<code>` asks first, `BlockedEmpty`). The name card (`NameCard`): `CardAvatar`,
+  `CardName` + `CardEditName`, `CardLevel` + `CardXp`, `CardId` + `CardCopy` (the whole id to the
+  clipboard), `CardSignature` + `CardEditSignature` (`SignatureEdit`, `SignatureOk`), `CardOutfit`,
+  `CardSince`.
+- The player card: `profile_ui.open_player(id, back_to)` (a `Modal`, `PlayerCardPopup`), opened by
+  `Player_<code>` (`LobbyProfile.player_button`) in the ONLINE window's lists and in BLOCKED: their
+  `Cloud.directory` card, `PlayerStatus` (online now / last seen), `PlayerId` + `PlayerCopy`,
+  `PlayerDuel` (online only, `LobbyFriends.challenge`), `PlayerFriend` (ADD FRIEND / REQUEST SENT /
+  REMOVE FRIEND), `PlayerBlock` (BLOCK / UNBLOCK: `Game.block` / `Game.unblock`); both ask first.
+  X and back reopen the ONLINE tab `back_to` ("" just closes).
 - Modes (both 1 vs 1 on CARGO CAGE): `Game.mode` is "training" (TRAINING GROUND, vs a bot or the
   target dummy, the default) or "lonewolf" (LONE WOLF, online 1 vs 1), kept as the setting
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
@@ -168,7 +189,17 @@ listed here. If a part needs something new from the core, add it in its own file
 - Saves: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
   files are migrated by settings_version), the profile keys `Game.DEFAULT_PROFILE` (signed as a
   whole; older profiles are migrated by profile_version). Crosshair: `Game.crosshair_color()`,
-  `Game.crosshair_scale()`.
+  `Game.crosshair_scale()`. Profile version 3 adds "history" (`Game.MAX_HISTORY` = 20 entries,
+  newest first: {result won|lost|draw, mode, enemy, id, score, enemy_score, kills, damage,
+  headshots, t}), added by `Game.record_match` and checked entry by entry on load; a version 2
+  profile starts it empty.
+- Public player card v2 (cloud.gd, retained on ROOT/p/<id>): {"t": "card", "v": 2, id, name,
+  bundle, avatar, banner, level, signature, pk, ts, sig, sig2}; sig2 signs
+  "card2|id|name|bundle|avatar|banner|level|signature|ts" (`Cloud.card2_text`), sig the v1 text
+  "card|id|name|bundle|ts" (older builds list it; cards without "v" are v1 and still accepted).
+  `Cloud.my_card()` is everything public; `_check_card` checks every field (types, size, no "|",
+  avatar / banner known else the default, level 1..CARD_LEVEL_MAX, `Game.clean_text` signature).
+  The Privacy Notice (`Login.privacy_sections`) lists these fields.
 - No credits screen: `Licences.publish()` prints the licence notices the shipped parts need
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
@@ -190,5 +221,6 @@ listed here. If a part needs something new from the core, add it in its own file
   NameHint, Avatar_<id>, Banner_<id>, NameCard, PlayerId, GuestBadge, ConfirmButton, Welcome.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
   `StartButton`, `ModeCard`, `Mode_<mode>`, `Diff_<chip>`, `SettingsButton`, `BundlesButton`
-  (WARDROBE), `Bundle_<id>`, `EquipButton`, `PlayerCard` (opens the name editor), `PlayerName`,
+  (WARDROBE), `Bundle_<id>`, `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`
+  the name editor), `PlayerName`,
   `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.

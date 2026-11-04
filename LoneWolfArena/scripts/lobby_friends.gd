@@ -5,13 +5,17 @@ extends RefCounted
 ## custom room's changes and the session that starts an online match. The lobby makes it
 ## (Lobby.friends) and calls on_lobby_ready() from its _ready, on_lobby_exit() from its _exit_tree
 ## and process() every frame; popups open through Lobby.dialogs.
+## A tap on a player's name in a list (ONLINE, ALL PLAYERS, the FRIENDS tab's friends and search
+## results) opens their player card (LobbyProfile.open_player); blocked players are left out of
+## every list (Game.block).
 ## Node names: Tab_<online|friends|room>, NetList, MyId, FriendSearch, FriendAccept,
 ## FriendDecline, RoomHead, RoomStart, RoomPin, Rule_<key>, RoomCreate, JoinCode, JoinPin,
-## RoomJoin, JoinState, AcceptButton.
+## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card).
 
 var lobby: Lobby
 var _net_kind := "online"
 var _net_list: VBoxContainer
+var _net_scroll: ScrollContainer       # the list scrolls once it would push the window off the screen
 var _net_status: Label
 var _net_sig := ""
 var _net_note := ""
@@ -78,7 +82,7 @@ func open(kind := "online") -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 10)
 	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"]]:
-		var b := UI.button(String(t[1]), 19, "primary" if t[0] == kind else "dark", Vector2(205, 48))
+		var b := UI.button(String(t[1]), 19, "primary" if t[0] == kind else "dark", Vector2(205, 56))
 		b.name = "Tab_" + String(t[0])
 		var tk := String(t[0])
 		b.pressed.connect(func() -> void:
@@ -100,11 +104,18 @@ func open(kind := "online") -> void:
 		_build_friends_tab(v)
 	elif kind == "room":
 		_build_room_tab(v)
+	_net_scroll = ScrollContainer.new()
+	_net_scroll.name = "NetScroll"
+	_net_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	UI.style_scroll(_net_scroll)
+	v.add_child(_net_scroll)
 	_net_list = VBoxContainer.new()
 	_net_list.name = "NetList"
+	_net_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_net_list.add_theme_constant_override("separation", 8)
 	_net_list.custom_minimum_size = Vector2(0, 170 if kind == "online" else 0)
-	v.add_child(_net_list)
+	_net_scroll.add_child(_net_list)
+	_net_list.minimum_size_changed.connect(_fit_list, CONNECT_DEFERRED)
 	_net_sig = "-"
 	_net_note = ""
 	_refresh_friends()
@@ -120,7 +131,7 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	my_id.name = "MyId"
 	my_id.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	me.add_child(my_id)
-	var copy := UI.button("COPY", 18, "light", Vector2(120, 46))
+	var copy := UI.button("COPY", 18, "light", Vector2(120, 56))
 	copy.pressed.connect(func() -> void:
 		DisplayServer.clipboard_set(Cloud.friend_code(Game.cloud_service().my_id))
 		_net_note = "ID COPIED"
@@ -133,7 +144,7 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	le.name = "FriendSearch"
 	le.text = _friend_query
 	row.add_child(le)
-	var go := UI.button("SEARCH", 19, "primary", Vector2(160, 54))
+	var go := UI.button("SEARCH", 19, "primary", Vector2(160, 56))
 	var search := func() -> void:
 		_friend_query = Game.clean_name(le.text)
 		_net_sig = "-"
@@ -167,11 +178,11 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		var row := HBoxContainer.new()
 		row.alignment = BoxContainer.ALIGNMENT_END
 		row.add_theme_constant_override("separation", 12)
-		var close := UI.button("CLOSE ROOM", 19, "light", Vector2(200, 52))
+		var close := UI.button("CLOSE ROOM", 19, "light", Vector2(200, 56))
 		close.pressed.connect(func() -> void:
 			Game.cloud_service().close_room()
 			open("room"))
-		var start := UI.button("START", 22, "primary", Vector2(200, 52))
+		var start := UI.button("START", 22, "primary", Vector2(200, 56))
 		start.name = "RoomStart"
 		start.disabled = guest == ""
 		start.pressed.connect(func() -> void:
@@ -190,7 +201,7 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		var st := UI.label(String(msg.get(cloud.join_state, "%s")) % String(_room_join_code), 24, UI.TEXT, "heavy")
 		st.name = "JoinState"
 		v.add_child(st)
-		var back := UI.button("LEAVE" if cloud.join_state in ["asking", "in"] else "BACK", 19, "light", Vector2(200, 52))
+		var back := UI.button("LEAVE" if cloud.join_state in ["asking", "in"] else "BACK", 19, "light", Vector2(200, 56))
 		back.pressed.connect(func() -> void:
 			Game.cloud_service().leave_join()
 			open("room"))
@@ -203,7 +214,7 @@ func _build_room_tab(v: VBoxContainer) -> void:
 	var pin := _text_field("4-6 DIGITS", 6, true)
 	pin.name = "RoomPin"
 	pin.text = "%04d" % randi_range(0, 9999)
-	pin.custom_minimum_size = Vector2(170, 54)
+	pin.custom_minimum_size = Vector2(170, 56)
 	pin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	create.add_child(pin)
 	var mode := UI.label("1 VS 1", 20, UI.ACCENT, "heavy")
@@ -213,14 +224,14 @@ func _build_room_tab(v: VBoxContainer) -> void:
 	rules.add_theme_constant_override("separation", 8)
 	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
 		var key := String(k[0])
-		var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 46))
+		var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 56))
 		tb.name = "Rule_" + key
 		tb.pressed.connect(func() -> void:
 			_room_rules[key] = not bool(_room_rules[key])
 			_room_pin_draft = pin.text
 			open("room"))
 		rules.add_child(tb)
-	var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 46))
+	var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 56))
 	rounds.name = "Rule_rounds"
 	rounds.pressed.connect(func() -> void:
 		var steps := [1, 3, 5, 7]
@@ -231,7 +242,7 @@ func _build_room_tab(v: VBoxContainer) -> void:
 	v.add_child(rules)
 	if _room_pin_draft != "":
 		pin.text = _room_pin_draft
-	var make := UI.button("CREATE ROOM", 20, "primary", Vector2(230, 52))
+	var make := UI.button("CREATE ROOM", 20, "primary", Vector2(230, 56))
 	make.name = "RoomCreate"
 	make.pressed.connect(func() -> void:
 		var p := pin.text
@@ -253,7 +264,7 @@ func _build_room_tab(v: VBoxContainer) -> void:
 	var jpin := _text_field("PASSWORD", 6, true)
 	jpin.name = "JoinPin"
 	join.add_child(jpin)
-	var go := UI.button("JOIN", 20, "primary", Vector2(150, 54))
+	var go := UI.button("JOIN", 20, "primary", Vector2(150, 56))
 	go.name = "RoomJoin"
 	go.pressed.connect(func() -> void:
 		if code.text.length() != 6 or jpin.text.length() < 4:
@@ -281,7 +292,7 @@ func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEd
 	le.placeholder_text = placeholder
 	le.max_length = max_len
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	le.custom_minimum_size = Vector2(150, 54)
+	le.custom_minimum_size = Vector2(150, 56)
 	le.virtual_keyboard_enabled = true
 	le.virtual_keyboard_show_on_focus = true
 	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER if digits_only else LineEdit.KEYBOARD_TYPE_DEFAULT
@@ -339,20 +350,22 @@ func _refresh_friends() -> void:
 	var sig := waiting + "|" + _net_kind + "|" + _friend_query
 	for id in peers:
 		sig += "|%s:%s" % [id, peers[id].name]
-	sig += "|f%d|r%s|o%d|d%d" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
-		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size()]
+	sig += "|f%d|r%s|o%d|d%d|b%d" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
+		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size(), (Game.profile.blocked as Array).size()]
 	for id in peers:
 		sig += ",a" if cloud.friend_asked(String(id)) else ""
 	if sig == _net_sig:
 		return
 	_net_sig = sig
 	for c in _net_list.get_children():
+		_net_list.remove_child(c)
 		c.queue_free()
 	if _net_kind == "friends":
 		_fill_friends(cloud, waiting)
 		return
 	for id: String in peers:
-		_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
+		if not Game.is_blocked(id):
+			_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
 	if _net_kind == "online":
 		var offline := _offline_players(cloud, "")
 		if not offline.is_empty():
@@ -363,18 +376,37 @@ func _refresh_friends() -> void:
 			_net_list.add_child(_player_row(cloud, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
 
 
+## The list's height: all of it while the window fits the screen, else as much as fits, scrolling
+## (ALL PLAYERS can list dozens of players).
+func _fit_list() -> void:
+	if _net_scroll == null or not is_instance_valid(_net_scroll) or not _net_scroll.is_inside_tree():
+		return
+	var frame := _net_scroll.get_parent().get_parent().get_parent() as Control     # the popup's column (open_modal)
+	if frame == null:
+		return
+	var rest := frame.get_combined_minimum_size().y - _net_scroll.custom_minimum_size.y
+	var room := maxf(lobby.get_viewport().get_visible_rect().size.y - 32.0 - rest, 140.0)
+	_net_scroll.custom_minimum_size.y = minf(_net_list.get_combined_minimum_size().y, room)
+
+
 ## Players with a card who are not online right now (search: an ID start or part of the name),
-## most recently seen first.
+## most recently seen first; blocked players are left out.
 func _offline_players(cloud: Cloud, query: String) -> Array:
 	var out := []
 	for id: String in cloud.directory:
-		if cloud.peers.has(id):
+		if cloud.peers.has(id) or Game.is_blocked(id):
 			continue
-		if query != "" and not (Cloud.friend_code(id).begins_with(query) or String(cloud.directory[id].name).contains(query)):
+		if query != "" and not (_id_matches(id, query) or String(cloud.directory[id].name).contains(query)):
 			continue
 		out.append(id)
 	out.sort_custom(func(a: String, b: String) -> bool: return int(cloud.directory[a].ts) > int(cloud.directory[b].ts))
 	return out.slice(0, MAX_ALL_PLAYERS)
+
+
+## A search matches an ID by its start: the 8-character code or the start of the full ID that the
+## profile's COPY puts on the clipboard (the search box keeps its first 14 characters).
+static func _id_matches(id: String, query: String) -> bool:
+	return id.to_upper().begins_with(query)
 
 
 ## "LAST SEEN 5 MIN AGO" from a card's unix time.
@@ -389,37 +421,52 @@ static func _ago(ts: int) -> String:
 	return "LAST SEEN %d DAY%s AGO" % [s / 86400, "" if s / 86400 == 1 else "S"]
 
 
-## One player in a list: name and code, ADD FRIEND (not a friend yet) and DUEL 1 VS 1 (online now).
+## One player in a list: the name and code (a tap opens the player card), ADD FRIEND (not a friend
+## yet) and DUEL 1 VS 1 (online now).
 func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
-	var name_l := UI.label("%s  #%s%s" % [who, Cloud.friend_code(id), online_tag], 24, UI.TEXT, "heavy")
-	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(name_l)
+	row.add_child(_who_button(id, "%s  #%s%s" % [who, Cloud.friend_code(id), online_tag]))
 	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
-		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 52))
+		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 56))
 		add.disabled = asked
-		add.pressed.connect(func() -> void:
-			if not Game.cloud_service().request_friend(id):
-				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
-			_net_sig = "-"
-			_refresh_friends())
+		add.pressed.connect(add_friend.bind(id))
 		row.add_child(add)
 	if cloud.peers.has(id):
-		var b := UI.button("CANCEL" if waiting != "" else "DUEL 1 VS 1", 19, "light" if waiting != "" else "primary", Vector2(210, 52))
-		b.pressed.connect(func() -> void:
-			var sv := Game.cloud_service()
-			_net_note = ""
-			if sv.waiting_for() != "":
-				sv.cancel_invite()
-			elif not sv.invite(id):
-				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
-			_net_sig = "-"
-			_refresh_friends())
+		var b := UI.button("CANCEL" if waiting != "" else "DUEL 1 VS 1", 19, "light" if waiting != "" else "primary", Vector2(210, 56))
+		b.pressed.connect(challenge.bind(id))
 		row.add_child(b)
 	return row
+
+
+## A list row's name (LobbyProfile.player_button): a tap opens the player's card, which goes back
+## to this tab when it closes.
+func _who_button(id: String, text: String) -> Button:
+	var b := LobbyProfile.player_button(id, text)
+	b.pressed.connect(func() -> void: lobby.profile_ui.open_player(id, _net_kind))
+	return b
+
+
+## DUEL 1 VS 1 (a list row or a player card): challenges the player, or cancels the challenge
+## that is waiting for an answer.
+func challenge(id: String) -> void:
+	var sv := Game.cloud_service()
+	_net_note = ""
+	if sv.waiting_for() != "":
+		sv.cancel_invite()
+	elif not sv.invite(id):
+		_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
+	_net_sig = "-"
+	_refresh_friends()
+
+
+## ADD FRIEND (a list row or a player card): sends the request, online or not.
+func add_friend(id: String) -> void:
+	if not Game.cloud_service().request_friend(id):
+		_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
+	_net_sig = "-"
+	_refresh_friends()
 
 
 ## FRIENDS tab body: requests to answer, the search's matches among players online, the friends.
@@ -432,7 +479,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		row.add_child(t)
 		for a: Array in [["DECLINE", false, "light"], ["ACCEPT", true, "primary"]]:
 			var yes := bool(a[1])
-			var b := UI.button(String(a[0]), 18, String(a[2]), Vector2(150, 50))
+			var b := UI.button(String(a[0]), 18, String(a[2]), Vector2(150, 56))
 			b.name = "Friend" + String(a[0]).capitalize()
 			b.pressed.connect(func() -> void:
 				Game.cloud_service().answer_friend(id, yes)
@@ -444,7 +491,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var found := 0
 		for id: String in cloud.peers:
 			var who := String(cloud.peers[id].name)
-			if Cloud.friend_code(id).begins_with(_friend_query) or who.contains(_friend_query):
+			if not Game.is_blocked(id) and (_id_matches(id, _friend_query) or who.contains(_friend_query)):
 				_net_list.add_child(_player_row(cloud, id, who, waiting, "  ·  ONLINE"))
 				found += 1
 		for id: String in _offline_players(cloud, _friend_query):
@@ -456,11 +503,13 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 	if friends.is_empty():
 		_net_list.add_child(UI.label("NO FRIENDS YET: SEARCH A PLAYER'S ID OR NAME, OR TAP ADD FRIEND IN THE ONLINE TAB.", 18, UI.TEXT_DIM, "semi"))
 	for id: String in friends:
+		if Game.is_blocked(id):
+			continue
 		var on := cloud.peers.has(id)
 		var who := String(friends[id].name) if String(friends[id].name) != "" else "PLAYER"
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen)
-		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 52))
+		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 56))
 		rm.pressed.connect(func() -> void:
 			Game.remove_friend(id)
 			_net_sig = "-"
@@ -483,11 +532,11 @@ func _on_net_invited(who: String) -> void:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 12)
-	var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
+	var no := UI.button("DECLINE", 20, "light", Vector2(190, 56))
 	no.pressed.connect(func() -> void:
 		Game.cloud_service().answer(false)
 		lobby.dialogs.close_modal())
-	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
+	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 56))
 	yes.name = "AcceptButton"
 	yes.pressed.connect(func() -> void:
 		yes.disabled = true
@@ -528,11 +577,11 @@ func _on_friends_changed() -> void:
 		var row := HBoxContainer.new()
 		row.alignment = BoxContainer.ALIGNMENT_END
 		row.add_theme_constant_override("separation", 12)
-		var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
+		var no := UI.button("DECLINE", 20, "light", Vector2(190, 56))
 		no.pressed.connect(func() -> void:
 			Game.cloud_service().answer_friend(id, false)
 			lobby.dialogs.close_modal())
-		var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
+		var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 56))
 		yes.name = "AcceptFriendButton"
 		yes.pressed.connect(func() -> void:
 			Game.cloud_service().answer_friend(id, true)

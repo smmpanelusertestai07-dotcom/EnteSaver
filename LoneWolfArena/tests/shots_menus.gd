@@ -4,7 +4,7 @@ extends Node
 ## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
 ## captions bright, drag to turn the character, START position report), the modes (mode card,
 ## SELECT MODE, LONE WOLF's START opens the ONLINE window, the DUMMY chip), name edit (pencil tap,
-## long name ends in "..."), the player card, how to play (MODES on top), the
+## long name ends in "..."), the player card (opens PROFILE), how to play (MODES on top), the
 ## wardrobe (card tap, every outfit listed), every settings tab (tab taps, HIGH graphics, EXTREME's
 ## question, the FAST / STANDARD sensitivity presets, RESET's question), credits, the quit dialog, the match card of an online match, START ->
 ## match loading overlay (TRAINING GROUND) -> arena, the pause menu
@@ -123,15 +123,15 @@ func run(at: Node) -> int:
 		_check(String(Game.profile.name) == "SHADOWHUNTER99" and nl and nl.size.x <= 170.0,
 			"a 14-character name is saved and fits the card (%.0f px)" % (nl.size.x if nl else -1.0))
 		await at.shot("m03b_long_name")
-	# The whole player card opens the editor too; back closes it.
+	# The whole player card opens PROFILE (tests/shots_profile.gd tours it); back closes it.
 	var card := lobby.find_child("PlayerCard", true, false) as Control
 	if card:
 		await _tap_at(card.get_global_rect().position + Vector2(34, 31))
 		await _settle(0.3)
-	_check(lobby.find_child("NameEdit", true, false) != null, "tapping the player card opens the name editor")
+	_check(lobby.find_child("Profile", true, false) != null, "tapping the player card opens PROFILE")
 	_back()
 	await _settle(0.3)
-	_check(lobby.get("_modal") == null, "back closes the name editor")
+	_check(lobby.find_child("Profile", true, false) == null and lobby.get("_modal") == null, "back closes PROFILE")
 	# How to play from its menu row; the header X closes it.
 	await _tap(howto)
 	await _settle(0.6)

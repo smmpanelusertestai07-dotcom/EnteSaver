@@ -3,7 +3,8 @@ extends Node3D
 ## Lobby: our character large on a lit hexagonal podium in a container yard at sunset (cheap
 ## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
 ## UI in the battle-royale lobby layout (original art, nothing to buy: no currency, no store):
-## player card (avatar, name + EDIT, level, XP line) top-left, logo + glyph buttons top-right, a
+## player card (profile picture, name + EDIT, level, XP line: a tap opens PROFILE) top-left, logo +
+## glyph buttons top-right, a
 ## text menu on the left (ONLINE 1 VS 1, WARDROBE, CUSTOM HUD, SETTINGS, HOW TO PLAY) and, bottom
 ## right, match stats, the opponent chips (TRAINING GROUND: EASY / NORMAL / HARD bot or the
 ## DUMMY), the mode card (TRAINING GROUND or LONE WOLF on CARGO CAGE; a tap opens SELECT MODE)
@@ -12,10 +13,11 @@ extends Node3D
 ## starts when a challenge is accepted). WARDROBE opens the outfit picker (every outfit free:
 ## item cards, preview on the podium, EQUIP / BACK).
 ## This file has the 3D stage, the top bar, the menus, the mode card, START, the settings panel
-## and input. Three parts have their own files: helpers the lobby makes, which build under `ui`
+## and input. Four parts have their own files: helpers the lobby makes, which build under `ui`
 ## and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, SELECT MODE,
 ## HOW TO PLAY, the name editor, the quit dialog), LobbyFriends (`friends`: ONLINE 1 VS 1, custom
-## rooms, the net signals) and LobbyWardrobe (`wardrobe_ui`: WARDROBE).
+## rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE) and LobbyProfile
+## (`profile_ui`: PROFILE and another player's card).
 ## Node names used by the screenshot walkthrough: StartButton, ModeCard, Diff_<EASY|NORMAL|HARD|
 ## DUMMY>, SettingsButton, BundlesButton (WARDROBE), Bundle_<id>, EquipButton.
 
@@ -54,6 +56,7 @@ var _stats_row: HBoxContainer
 var dialogs := LobbyDialogs.new(self)
 var friends := LobbyFriends.new(self)
 var wardrobe_ui := LobbyWardrobe.new(self)
+var profile_ui := LobbyProfile.new(self)
 ## The open popup, the wardrobe layer while it is open and the outfit it previews: the parts keep
 ## them, the screenshot tours read them here.
 var _modal: Control:
@@ -70,6 +73,7 @@ var _main_ui: Control
 var _drag_index := -1
 var _idle_t := 0.0
 var _name_label: Label
+var _avatar_view: Control
 var _bundle_label: Label
 var _name_plate: Control
 var _plate_label: Label
@@ -552,8 +556,9 @@ func _build_ui() -> void:
 
 
 func _build_top_bar(root: Control) -> void:
-	# Player card: avatar with level badge, name + EDIT, level and a thin XP line. The whole card
-	# is a button that opens the name editor (a big touch target); the pencil does the same.
+	# Player card: profile picture with level badge, name + EDIT, level and a thin XP line. The
+	# whole card is a button that opens PROFILE (a big touch target); the pencil opens the name
+	# editor.
 	var card := Button.new()
 	card.name = "PlayerCard"
 	card.position = Vector2(0, 0)
@@ -571,7 +576,7 @@ func _build_top_bar(root: Control) -> void:
 	card.button_up.connect(card.queue_redraw)
 	card.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
-		_edit_name())
+		_open_profile())
 	root.add_child(card)
 	var av := Panel.new()
 	av.position = Vector2(8, 5)
@@ -579,17 +584,16 @@ func _build_top_bar(root: Control) -> void:
 	av.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	av.add_theme_stylebox_override("panel", UI.box(Color(0.1, 0.1, 0.12), 0, 2, UI.ACCENT, 0.0))
 	card.add_child(av)
-	var em := UI.texture("emblem.png")
-	if em:
-		var t := TextureRect.new()
-		t.texture = em
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		t.position = Vector2(3, 3)
-		t.size = Vector2(46, 46)
-		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		av.add_child(t)
+	# the profile picture PROFILE's NAME CARD picks (the emblem by default)
+	_avatar_view = Control.new()
+	_avatar_view.name = "PlayerAvatar"
+	_avatar_view.position = Vector2(3, 3)
+	_avatar_view.size = Vector2(46, 46)
+	_avatar_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_avatar_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_avatar_view.draw.connect(func() -> void:
+		LobbyProfile.draw_avatar(_avatar_view, String(Game.profile.avatar), Rect2(Vector2.ZERO, _avatar_view.size)))
+	av.add_child(_avatar_view)
 	var lvb := PanelContainer.new()
 	lvb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lvb.add_theme_stylebox_override("panel", UI.box(UI.ACCENT, 0, 0, Color.TRANSPARENT, 3.0))
@@ -966,6 +970,14 @@ func _build_name_plate(root: Control) -> void:
 	root.add_child(_name_plate)
 
 
+## The player card top-left follows the profile (PROFILE picks the picture, the editor the name).
+func refresh_player_card() -> void:
+	_name_label.text = String(Game.profile.name)
+	_plate_label.text = String(Game.profile.name)
+	if _avatar_view:
+		_avatar_view.queue_redraw()
+
+
 ## The outfit line bottom-left: the outfit's name in its own colour.
 func _update_bundle_label(id: String) -> void:
 	var info := CharacterModel.bundle_info(id)
@@ -1024,6 +1036,10 @@ func _open_wardrobe() -> void:
 	wardrobe_ui.open()
 
 
+func _open_profile() -> void:
+	profile_ui.open()
+
+
 func _close_wardrobe() -> void:
 	wardrobe_ui.close()
 
@@ -1041,7 +1057,7 @@ func _move_camera(pos: Vector3, look: Vector3) -> void:
 # ---------------------------------------------------------------- input / anim
 
 func _modal_open() -> bool:
-	return _modal != null or _find_settings() != null
+	return _modal != null or _find_settings() != null or profile_ui.layer != null
 
 
 func _input(event: InputEvent) -> void:
@@ -1088,6 +1104,7 @@ func _process(delta: float) -> void:
 	if start_btn:
 		start_btn.queue_redraw()
 	wardrobe_ui.process()
+	profile_ui.process(delta)
 	if _name_plate and _main_ui.visible and camera:
 		var feet := Vector3(model.global_position.x, PODIUM_TOP, 0.55)
 		if not camera.is_position_behind(feet):
@@ -1095,8 +1112,9 @@ func _process(delta: float) -> void:
 			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5, 0)).round()
 
 
-## Android back: closes the top-most layer (settings, credits, a popup, the wardrobe); with
-## nothing open it asks before quitting; while START's match loading runs it does nothing.
+## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the
+## wardrobe); with nothing open it asks before quitting; while START's match loading runs it does
+## nothing.
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_GO_BACK_REQUEST:
 		return
@@ -1105,7 +1123,9 @@ func _notification(what: int) -> void:
 	if _find_settings():
 		return                      # the panel closes itself
 	if _modal:
-		dialogs.close_modal()
+		dialogs.back()
+	elif profile_ui.layer:
+		profile_ui.close()
 	elif wardrobe:
 		model.apply_bundle(String(Game.profile.bundle))
 		_update_bundle_label(String(Game.profile.bundle))
