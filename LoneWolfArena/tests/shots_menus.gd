@@ -2,13 +2,15 @@ extends Node
 ## Menus screenshot tour (everything outside the match), with real-input checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_menus.gd
 ## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
-## captions bright, drag to turn the character, START position report), name edit (pencil tap,
-## long name ends in "..."), the player card, how to play, the
+## captions bright, drag to turn the character, START position report), the modes (mode card,
+## SELECT MODE, LONE WOLF's START opens the ONLINE window, the DUMMY chip), name edit (pencil tap,
+## long name ends in "..."), the player card, how to play (MODES on top), the
 ## wardrobe (card tap, every outfit listed), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
-## sensitivity presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
+## sensitivity presets), credits, the quit dialog, the match card of an online match, START ->
+## match loading overlay (TRAINING GROUND) -> arena, the pause menu
 ## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
-## shortcut), results screens (win, defeat, draw, invalid) with the opponent's row in an empty
-## scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
+## shortcut), results screens (win, defeat, draw, invalid, online) with the opponent's row in an
+## empty scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
 ## Android back is sent the way the engine delivers it (_back(): the node, then its children
 ## by index, children added during the walk included), so a menu opened by a back request also
 ## receives that same request. Returns the number of failed checks.
@@ -25,6 +27,8 @@ func run(at: Node) -> int:
 	var saved_bundle := String(Game.profile.bundle)
 	var saved_name := String(Game.profile.name)
 	Game.settings.difficulty = 1
+	Game.mode = "training"
+	Game.practice = false
 	# The autotest boot goes straight to the lobby; wait for it, then look at the boot screen.
 	await _wait_scene("Lobby", 30.0)
 	Loading.hold_for_test = true
@@ -104,6 +108,7 @@ func run(at: Node) -> int:
 	at.touch(1, p0 + Vector2(180, 0) * fx.get_scale(), false)
 	await at.wait(0.1)
 	_check(absf(model.rotation.y - yaw0) > 0.3, "dragging on the character turns it (%.2f rad)" % (model.rotation.y - yaw0))
+	await _tour_modes(lobby)
 	# Name edit from the pencil; a long name ends in "..." inside the player card.
 	await _tap(lobby.find_child("EditName", true, false) as Control)
 	await _settle(0.5)
@@ -133,6 +138,10 @@ func run(at: Node) -> int:
 	await at.shot("m04_how_to_play")
 	var modal := lobby.get("_modal") as Node
 	_check(modal != null, "HOW TO PLAY opens")
+	var modes_row := modal.find_child("HowToModes", true, false) if modal else null
+	_check(modes_row != null and modes_row.get_child_count() == Game.MODE_NAMES.size() and _find_label(modal, "TRAINING GROUND") != null
+		and _find_label(modal, "LONE WOLF") != null and _find_label(modal, "FIRST TO %d ROUNDS" % Game.ROUNDS_TO_WIN) != null,
+		"HOW TO PLAY explains both modes and first to %d" % Game.ROUNDS_TO_WIN)
 	if modal:
 		await _tap(modal.find_child("Close", true, false) as Control)
 		await _settle(0.3)
@@ -213,10 +222,20 @@ func run(at: Node) -> int:
 	_back()
 	await _settle(0.3)
 	_check(lobby.get("_modal") == null, "a second back closes the quit dialog")
-	# START -> match loading overlay (back is ignored there) -> arena.
-	await _tap(lobby.get("start_btn") as Control, 0.05)
+	# The match card of an online match; the lobby comes back without a session.
+	var next_lobby := await _tour_online_card(lobby)
+	if next_lobby:
+		lobby = next_lobby
+	# START (TRAINING GROUND, the bot) -> match loading overlay (back is ignored there) -> arena.
+	var start := lobby.get("start_btn") as Button
+	await _tap(start, 0.05)
 	await _settle(0.25)
 	await at.shot("m13_match_loading")
+	_check(start.disabled and (start.get_node("Caption") as Label).text == "LOADING", "START says LOADING (not MATCHING) for a bot match")
+	var ov := _find_overlay()
+	_check(ov != null and _label_text(ov, "MatchMode") == "TRAINING GROUND"
+		and _texts(ov).contains("FIRST TO %d|1 VS BOT|BOT: NORMAL" % Game.rounds_to_win()),
+		"the match card: TRAINING GROUND, FIRST TO n, 1 VS BOT, BOT: NORMAL")
 	_back()
 	await _settle(0.1)
 	_check(lobby.find_child("QuitDialog", true, false) == null, "back during the match loading does nothing")
@@ -231,6 +250,8 @@ func run(at: Node) -> int:
 		_check(pm != null and get_tree().paused, "back in a match opens the pause menu and keeps it open")
 		var hud := arena.get("hud") as CanvasItem
 		_check(hud != null and not hud.visible, "the match HUD is hidden under the pause menu")
+		_check(pm != null and _find_label(pm, "TRAINING GROUND") != null and _find_label(pm, "LONE WOLF") == null
+			and _texts(pm).contains("FIRST TO %d" % int(arena.get("rounds_to_win"))), "the pause menu names the match's mode and format")
 		await at.shot("m14_pause")
 		if pm:
 			await _tap(pm.find_child("Settings", true, false) as Control)
@@ -267,12 +288,16 @@ func run(at: Node) -> int:
 		_check(not get_tree().paused, "RESUME unpauses")
 	# Results in an empty scene (the key art stands in for the arena behind; a stub scoreboard
 	# gives the opponent's row).
-	for r in [_sample("victory"), _sample("defeat"), _sample("draw"), _sample("invalid")]:
+	for r in [_sample("victory"), _sample("defeat"), _sample("draw"), _sample("invalid"), _sample("online")]:
 		var rs := await _results_scene(r)
 		await _settle(2.8)
 		await at.shot("m16_results_%s" % String(r.kind))
 		_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
 		_check(rs.find_child("EnemyRow", true, false) != null, "the opponent's row comes from the scoreboard (%s)" % r.kind)
+		_check(_find_label(rs, String(r.mode)) != null, "the results name the mode %s (%s)" % [r.mode, r.kind])
+		if String(r.kind) == "online":
+			_check(_find_label(rs.find_child("EnemyRow", true, false), "ONLINE") != null and not _texts(rs).contains("BOT"),
+				"an online opponent is ONLINE, never a BOT level")
 	# LOBBY tap, back on results, PLAY AGAIN tap.
 	var rs2 := await _results_scene(_sample("defeat"))
 	await _settle(0.6)
@@ -300,6 +325,7 @@ func run(at: Node) -> int:
 	_check(ResultsScreen.honour({"headshots": 0, "hp_left": 0, "taken": 200}) == "FIGHTER", "honour FIGHTER")
 	Game.settings = saved_settings
 	Game.save_settings()
+	Game.practice = false
 	Game.profile.bundle = saved_bundle
 	Game.profile.name = saved_name
 	Game.save_profile()
@@ -307,14 +333,134 @@ func run(at: Node) -> int:
 	return _fails
 
 
+## The two modes in the lobby: the mode card shows TRAINING GROUND (the default) with the bot
+## chips and the DUMMY; SELECT MODE offers both; LONE WOLF hides the chips and its START opens the
+## ONLINE window instead of a match; back to TRAINING GROUND at the end.
+func _tour_modes(lobby: Node) -> void:
+	var card := lobby.find_child("ModeCard", true, false) as Control
+	var chips := lobby.find_child("Difficulty", true, false) as Control
+	_check(lobby.find_child("PracticeButton", true, false) == null, "no separate PRACTICE row: the dummy is a TRAINING GROUND choice")
+	_check(card != null and _label_text(card, "ModeName") == "TRAINING GROUND" and _find_label(card, "CARGO CAGE") != null,
+		"the mode card shows TRAINING GROUND on CARGO CAGE")
+	_check(_label_text(card, "ModeFormat") == "1 VS BOT  ·  FIRST TO %d" % Game.rounds_to_win(),
+		"the mode card says 1 VS BOT and the real round count (%s)" % _label_text(card, "ModeFormat"))
+	_check(chips != null and chips.visible and lobby.find_child("Diff_DUMMY", true, false) != null
+		and (lobby.find_child("Diff_NORMAL", true, false) as Button).button_pressed, "TRAINING GROUND shows the bot chips and the DUMMY")
+	# The DUMMY chip: the target dummy instead of a bot (the card says so), NORMAL brings the bot back.
+	await _tap(lobby.find_child("Diff_DUMMY", true, false) as Control)
+	await _settle(0.3)
+	_check(Game.practice and _label_text(card, "ModeFormat") == "TARGET DUMMY", "DUMMY picks the target dummy")
+	await _at.shot("m02e_lobby_dummy")
+	await _tap(lobby.find_child("Diff_NORMAL", true, false) as Control)
+	await _settle(0.3)
+	_check(not Game.practice and int(Game.settings.difficulty) == 1, "NORMAL picks the bot again")
+	# SELECT MODE from the mode card.
+	await _tap(card)
+	await _settle(0.6)
+	var popup := lobby.get("_modal") as Control
+	_check(popup != null and popup.find_child("Mode_training", true, false) != null and popup.find_child("Mode_lonewolf", true, false) != null,
+		"the mode card opens SELECT MODE with both modes")
+	await _at.shot("m02b_select_mode")
+	if popup:
+		await _tap(popup.find_child("Mode_lonewolf", true, false) as Control)
+		await _settle(0.5)
+	_check(Game.mode == "lonewolf" and lobby.get("_modal") == null and Game.settings.mode == "lonewolf", "picking LONE WOLF keeps it and closes the popup")
+	_check(_label_text(card, "ModeName") == "LONE WOLF" and _label_text(card, "ModeFormat") == "1 VS 1 ONLINE" and not chips.visible,
+		"the LONE WOLF card says 1 VS 1 ONLINE and hides the bot chips")
+	await _at.shot("m02c_lobby_lone_wolf")
+	# LONE WOLF's START opens the ONLINE window (no match loads by itself).
+	var start := lobby.get("start_btn") as Button
+	await _tap(start)
+	await _settle(0.6)
+	var online := lobby.get("_modal") as Control
+	_check(online != null and online.find_child("Tab_online", true, false) != null and not start.disabled,
+		"LONE WOLF's START opens the ONLINE window")
+	_check(_find_overlay() == null, "LONE WOLF's START loads no match")
+	await _at.shot("m02d_lone_wolf_start")
+	if online:
+		await _tap(online.find_child("Close", true, false) as Control)
+		await _settle(0.4)
+	# And back to TRAINING GROUND.
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	if popup:
+		await _tap(popup.find_child("Mode_training", true, false) as Control)
+		await _settle(0.5)
+	_check(Game.mode == "training" and chips.visible and _label_text(card, "ModeName") == "TRAINING GROUND", "TRAINING GROUND is picked again")
+
+
+## The match card of an online match (LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent's name;
+## never "1 VS BOT"): the overlay over the lobby as a challenge starts it. With no real session
+## the arena hands back to a new lobby at once, which is returned.
+func _tour_online_card(lobby: Node) -> Node:
+	var cloud := Game.cloud_service()
+	var saved_opponent: Dictionary = cloud.opponent
+	cloud.opponent = {"id": "", "name": "SHADOWHUNTER77", "bundle": "neon"}
+	Game.online = true
+	Game.session = cloud
+	(lobby.get("start_btn") as Button).disabled = true
+	Loading.start_match(lobby)
+	await _settle(0.25)
+	await _at.shot("m13b_match_loading_online")
+	var ov := _find_overlay()
+	var texts := _texts(ov) if ov else ""
+	_check(ov != null and _label_text(ov, "MatchMode") == "LONE WOLF" and texts.contains("1 VS 1 ONLINE")
+		and texts.contains("VS SHADOWHUNTER77") and texts.contains("FIRST TO %d" % Game.rounds_to_win(true))
+		and not texts.contains("BOT"), "the online match card: LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent")
+	var t := 0.0
+	var next: Node = null
+	while t < 30.0:
+		await _at.wait(0.2)
+		t += 0.2
+		var s := get_tree().current_scene
+		if s and s != lobby and s.name == "Lobby":
+			next = s
+			break
+	_check(next != null and not Game.online, "without a session the arena hands back to the lobby")
+	cloud.opponent = saved_opponent
+	await _settle(1.0)
+	return next
+
+
+## The Loading overlay in the tree (the match card), or null.
+func _find_overlay() -> Loading:
+	for n in get_tree().root.find_children("*", "Control", true, false):
+		if n is Loading and not n.is_queued_for_deletion():
+			return n
+	return null
+
+
+## The text of the Label named `label_name` under `root` ("" when there is none).
+func _label_text(root: Node, label_name: String) -> String:
+	var l := root.find_child(label_name, true, false) as Label if root else null
+	return l.text if l else ""
+
+
+## Every label text under `root`, joined with "|".
+func _texts(root: Node) -> String:
+	var out := PackedStringArray()
+	for l in root.find_children("*", "Label", true, false):
+		out.append((l as Label).text)
+	return "|".join(out)
+
+
+## A result as the arena builds it: TRAINING GROUND against BOT VIPER (victory, defeat, draw,
+## invalid), or an online LONE WOLF win against another player ("online").
 func _sample(kind: String) -> Dictionary:
-	var r := {"kind": kind, "won": kind == "victory", "draw": kind == "draw", "invalid": kind == "invalid",
-		"kills": 1 if kind == "victory" else 0, "damage": 200 if kind == "victory" else 137, "headshots": 3 if kind == "victory" else 1,
-		"accuracy": 46.7, "time": 74.0, "xp": 0 if kind == "invalid" else (330 if kind == "victory" else 74),
-		"enemy": "VIPER", "mode": "LONE WOLF", "map": "CARGO CAGE", "weapon": "AR-7 RIFLE",
-		"score_player": 1 if kind == "victory" else 0, "score_bot": 1 if kind == "defeat" else 0,
-		"hp_left": 112 if kind == "victory" else (0 if kind == "defeat" else 84), "difficulty": "NORMAL",
-		"taken": 88 if kind == "victory" else 200}
+	var online := kind == "online"
+	var won := kind == "victory" or online
+	# [your rounds, theirs, your kills (one per round won), damage, headshots, HP left, XP]
+	var n: Array = {"victory": [5, 2, 5, 1176, 3, 112, 330], "defeat": [2, 5, 2, 537, 1, 0, 74],
+		"draw": [4, 4, 4, 912, 1, 84, 150], "invalid": [1, 0, 1, 200, 1, 84, 0],
+		"online": [5, 3, 5, 1214, 3, 96, 330]}[kind]
+	var r := {"kind": kind, "won": won, "draw": kind == "draw", "invalid": kind == "invalid",
+		"kills": int(n[2]), "damage": int(n[3]), "headshots": int(n[4]),
+		"accuracy": 46.7, "time": 412.0, "xp": int(n[6]),
+		"enemy": "SHADOWHUNTER77" if online else "BOT VIPER", "mode": Game.mode_name("lonewolf" if online else "training"),
+		"mode_id": "lonewolf" if online else "training", "map": "CARGO CAGE", "weapon": String(Weapons.DEFS[Weapons.DEFAULT_PICK].name),
+		"score_player": int(n[0]), "score_bot": int(n[1]), "hp_left": int(n[5]), "difficulty": "ONLINE" if online else "NORMAL",
+		"taken": 88 if won else 200}
 	return r
 
 
@@ -329,15 +475,17 @@ func _results_scene(r: Dictionary) -> ResultsScreen:
 	root.name = "ResultsTest"
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# the opponent's numbers match the outcome: beaten, winner, or level on HP at the time-out
-	var e: Dictionary = {"victory": {"hp": 0, "kills": 0, "damage": 88, "headshots": 0},
-		"defeat": {"hp": 64, "kills": 1, "damage": 200, "headshots": 2},
-		"draw": {"hp": 84, "kills": 0, "damage": 116, "headshots": 1},
-		"invalid": {"hp": 140, "kills": 0, "damage": 60, "headshots": 0}}[String(r.kind)]
+	var e: Dictionary = {"victory": {"hp": 0, "kills": 2, "damage": 488, "headshots": 0},
+		"defeat": {"hp": 64, "kills": 5, "damage": 1000, "headshots": 2},
+		"draw": {"hp": 84, "kills": 4, "damage": 916, "headshots": 1},
+		"invalid": {"hp": 140, "kills": 0, "damage": 60, "headshots": 0},
+		"online": {"hp": 0, "kills": 3, "damage": 652, "headshots": 1}}[String(r.kind)]
+	var gun := String(r.weapon)
 	root.set("rows", [
 		{"name": "ROOKIE", "me": true, "alive": int(r.hp_left) > 0, "hp": int(r.hp_left), "kills": int(r.kills), "damage": int(r.damage),
-			"headshots": int(r.headshots), "accuracy": 47, "rounds": int(r.score_player), "weapon": "AR-7 RIFLE"},
-		{"name": "VIPER", "me": false, "alive": int(e.hp) > 0, "hp": int(e.hp), "kills": int(e.kills), "damage": int(e.damage),
-			"headshots": int(e.headshots), "accuracy": 31, "rounds": int(r.score_bot), "weapon": "AR-7 RIFLE"},
+			"headshots": int(r.headshots), "accuracy": 47, "rounds": int(r.score_player), "weapon": gun},
+		{"name": String(r.enemy), "me": false, "alive": int(e.hp) > 0, "hp": int(e.hp), "kills": int(e.kills), "damage": int(e.damage),
+			"headshots": int(e.headshots), "accuracy": 31, "rounds": int(r.score_bot), "weapon": gun},
 	])
 	var tex := UI.texture("keyart_clean.jpg")
 	if tex:

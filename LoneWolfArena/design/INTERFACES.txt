@@ -7,8 +7,13 @@ listed here. If a part needs something new from the core, add it in its own file
 ## Arena (scripts/arena.gd) -> read by HUD / menus
 - `phase` (Phase.PREP=0, FIGHT=1, END=2 (match over), BREAK=3 (between rounds)), `prep_left` (s),
   `time_left` (s), `elapsed` (s, this round), `match_time` (s), `round_index`, `rounds_to_win`
-  (5; LW_ROUNDS_TO_WIN in test builds), `score` {"player": int, "bot": int}, `picked_weapon` (id),
+  (`Game.rounds_to_win(online)`: 5, a custom room's own 1-7 online, LW_ROUNDS_TO_WIN in test
+  builds), `score` {"player": int, "bot": int}, `picked_weapon` (id),
   `pick_note` (prep line: who picks the gun, or which it is)
+- the match's mode: `mode` ("training" | "lonewolf", a key of `Game.MODE_NAMES`), `mode_name`
+  (what the HUD, scoreboard, pause menu and results show: TRAINING GROUND against the bot or the
+  target dummy, LONE WOLF online), `practice` (the target dummy: endless HP, no zone, the clock
+  counts up, nothing recorded), `online` (the opponent is another phone)
 - zone: `zone_state` ("stationary" | "shrinking" | "closed"), `zone_next()` (s until it
   changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text or "")
 - `fighters` (Array[Fighter]), `player`, `bot`, `map_name` ("CARGO CAGE"), `map_rect` (Rect2,
@@ -98,11 +103,17 @@ listed here. If a part needs something new from the core, add it in its own file
   then calls `Game.goto_lobby()` (after `TIMEOUT_S` at the latest; loads still running then are
   handed to the `LoadingCache` node, a `Loading.Cache`, which collects them as they finish).
   Automated runs skip it; `Loading.hold_for_test = true` keeps it up for a screenshot tour.
-- `Loading.start_match(host)`: match-loading overlay (CanvasLayer 100, mode + map card) that
-  loads the arena on a thread, then `Game.goto_arena()`. Used by START and PLAY AGAIN.
+- `Loading.start_match(host)`: match-loading overlay (CanvasLayer 100, mode + map card
+  `MatchCard`: `MatchMode`, `MatchChips`; the texts come from the static
+  `Loading.match_info(online, opponent, dummy, difficulty, rounds)`: TRAINING GROUND "FIRST TO
+  n / 1 VS BOT / BOT: <level>" or "TARGET DUMMY", LONE WOLF "FIRST TO n / 1 VS 1 ONLINE / VS
+  <name>") that loads the arena on a thread, then `Game.goto_arena()`. Used by START, an online
+  challenge and PLAY AGAIN.
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
-  damage, headshots, accuracy, time, xp, enemy, mode, map, weapon, score_player, score_bot,
-  hp_left, difficulty, taken. Hides the arena's `hud` while shown; the opponent's orange row
+  damage, headshots, accuracy, time, xp, enemy, mode (the name shown), mode_id ("training" |
+  "lonewolf", the profile counts the match there), map, weapon, score_player, score_bot,
+  hp_left, difficulty (the bot's level, or "ONLINE"), taken. Hides the arena's `hud` while
+  shown; the opponent's orange row
   (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match
   overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`); Android back = LOBBY (ignored while
   PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag.
@@ -120,13 +131,22 @@ listed here. If a part needs something new from the core, add it in its own file
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, menus, mode card, START, settings,
   input) makes three helpers that build under its `ui` and reach it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
-  open popup; HOW TO PLAY, the name editor, the quit dialog), `friends` (`LobbyFriends`: the
-  ONLINE 1 VS 1 window `open(kind)`, custom rooms, the online service's signals) and
-  `wardrobe_ui` (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`).
-  Tours read `model`, `ui`, `start_btn`, `_modal`, `wardrobe` and `_preview_bundle` from the
-  lobby and call its `_open_wardrobe()`, `_close_wardrobe()` and `_open_settings()`.
-- Modes: `Game.mode` is "training" (TRAINING GROUND, vs bots, the default) or "lonewolf" (LONE
-  WOLF, online 1 vs 1), kept as the setting "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`.
+  open popup; SELECT MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog),
+  `friends` (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind)`, custom rooms, the online
+  service's signals) and `wardrobe_ui` (`LobbyWardrobe`: WARDROBE, every outfit free;
+  `LobbyWardrobe.outfit_color(id)`). Tours read `model`, `ui`, `start_btn`, `mode_card`,
+  `_modal`, `wardrobe` and `_preview_bundle` from the lobby and call its `_open_wardrobe()`,
+  `_close_wardrobe()` and `_open_settings()`.
+- Modes (both 1 vs 1 on CARGO CAGE): `Game.mode` is "training" (TRAINING GROUND, vs a bot or the
+  target dummy, the default) or "lonewolf" (LONE WOLF, online 1 vs 1), kept as the setting
+  "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
+  `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
+  `ModeFormat`) opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`);
+  the opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) show in TRAINING GROUND
+  only, DUMMY sets `Game.practice` (session only, an online match ignores it). START: TRAINING
+  GROUND -> `Loading.start_match` (caption LOADING); LONE WOLF -> `friends.open("online")`.
+  `Game.count_match(mode)` and `Game.record_match(result)` count the totals and
+  `profile.modes[mode]` (matches, wins, kills); the target dummy counts nowhere.
 - Saves: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
   files are migrated by settings_version), the profile keys `Game.DEFAULT_PROFILE` (signed as a
   whole; older profiles are migrated by profile_version). Crosshair: `Game.crosshair_color()`,
@@ -137,6 +157,6 @@ listed here. If a part needs something new from the core, add it in its own file
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
   `Game.goto_login()` is the lobby until the guest login scene exists.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
-  `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`,
-  `PlayerCard` (opens the name editor), `PlayerName`, `Logo`, `Modal`, `PlayAgain`, `Lobby`,
-  `Close`, `SaveButton`.
+  `StartButton`, `ModeCard`, `Mode_<mode>`, `Diff_<chip>`, `SettingsButton`, `BundlesButton`
+  (WARDROBE), `Bundle_<id>`, `EquipButton`, `PlayerCard` (opens the name editor), `PlayerName`,
+  `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.

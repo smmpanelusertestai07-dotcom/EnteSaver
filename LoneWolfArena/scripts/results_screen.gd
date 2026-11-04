@@ -1,8 +1,10 @@
 class_name ResultsScreen
 extends Control
-## End-of-round results over the (still rendering) arena. setup(result) gets the dictionary
+## End-of-match results over the (still rendering) arena. setup(result) gets the dictionary
 ## built by arena.gd: won, draw, invalid, kills, damage, headshots, accuracy, time, xp, enemy,
-## mode, map, weapon, score_player, score_bot, hp_left, difficulty, taken.
+## mode (the name shown: TRAINING GROUND / LONE WOLF), mode_id ("training" / "lonewolf"), map,
+## weapon, score_player, score_bot, hp_left, difficulty (the bot's level, or ONLINE against a
+## player), taken.
 ## Layout (reference result screens, original art): mode + map top-left; a medal emblem with
 ## the big title (gold VICTORY / grey DEFEAT / white DRAW / red INVALID) top centre; the round
 ## score; a stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY, TIME, HP LEFT) with your
@@ -126,7 +128,7 @@ func _build() -> void:
 	head.position = Vector2(40, 24)
 	head.add_theme_constant_override("separation", -6)
 	add_child(head)
-	head.add_child(UI.shadowed(UI.label(String(r.get("mode", "LONE WOLF")).to_upper(), 36, UI.TEXT, "heavy")))
+	head.add_child(UI.shadowed(UI.label(String(r.get("mode", Game.mode_name(String(r.get("mode_id", ""))))).to_upper(), 36, UI.TEXT, "heavy")))
 	head.add_child(UI.shadowed(UI.label(String(r.get("map", "CARGO CAGE")).to_upper(), 28, Color(0.72, 0.72, 0.74), "heavy")))
 	var sub := UI.label("VS %s  ·  %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper(),
 		String(r.get("weapon", "")).to_upper()], 16, UI.TEXT_DIM, "bold")
@@ -253,8 +255,10 @@ func _build_table() -> void:
 	], true))
 	if not _enemy.is_empty():
 		var e := _enemy
+		# Under the opponent's name: ONLINE for another player, else BOT and its level.
+		var online := String(r.get("mode_id", "")) == "lonewolf"
 		table.add_child(_stat_row("EnemyRow", String(e.get("name", r.get("enemy", "BOT"))).to_upper(),
-			"BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
+			"ONLINE" if online else "BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
 			[float(e.get("kills", 0)), "%d"], [float(e.get("damage", 0)), "%d"], [float(e.get("headshots", 0)), "%d"],
 			[float(e.get("accuracy", 0)), "%d%%"], [t, "time"], [float(e.get("hp", 0)), "%d"],
 		], false))

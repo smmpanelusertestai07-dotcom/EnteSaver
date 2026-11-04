@@ -326,7 +326,75 @@ func _test_modes() -> void:
 	Game.mode = "royale"
 	_check(Game.mode == "training" and Game.mode_name() == "TRAINING GROUND", "an unknown mode sets TRAINING GROUND")
 	_check(Game.mode_name("lonewolf") == "LONE WOLF" and Game.mode_name("nope") == "TRAINING GROUND", "a given mode's name")
+	for m: String in Game.MODE_NAMES:
+		Game.mode = m
+		_check(Game.mode == m and Game.mode_name() == Game.MODE_NAMES[m] and Game.mode_name(m) == Game.MODE_NAMES[m]
+			and Game.mode_name().length() > 0, "mode_name() covers %s" % m)
+		_check((Game.DEFAULT_PROFILE.modes as Dictionary).has(m), "the profile keeps numbers for %s" % m)
 	Game.settings = saved
+	_test_rounds_to_win()
+	_test_mode_counters()
+	_test_match_card()
+
+
+## "FIRST TO n": 5, a custom room's own number online (1-7), LW_ROUNDS_TO_WIN in test runs.
+func _test_rounds_to_win() -> void:
+	var saved: Dictionary = Game.room_rules
+	var env := OS.get_environment("LW_ROUNDS_TO_WIN")
+	var base := maxi(int(env), 1) if env != "" else Game.ROUNDS_TO_WIN
+	Game.room_rules = {}
+	_check(Game.ROUNDS_TO_WIN == 5 and Game.rounds_to_win() == base and Game.rounds_to_win(true) == base,
+		"a plain match is first to %d" % base)
+	Game.room_rules = {"rounds": 3}
+	_check(Game.rounds_to_win(true) == 3 and Game.rounds_to_win(false) == base, "a custom room's rounds count online only")
+	Game.room_rules = {"rounds": 99}
+	_check(Game.rounds_to_win(true) == 7, "a room plays first to 7 at most")
+	Game.room_rules = {"rounds": -2}
+	_check(Game.rounds_to_win(true) == 1, "a room plays first to 1 at least")
+	Game.room_rules = saved
+
+
+## count_match / record_match count the totals and the match's own mode (profile.modes).
+func _test_mode_counters() -> void:
+	var saved_profile: Dictionary = Game.profile.duplicate(true)
+	var saved_result: Dictionary = Game.last_result
+	var at := Game.autotest
+	Game.autotest = "unit"          # nothing is written to user://
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	Game.count_match("training")
+	Game.record_match({"won": true, "kills": 3, "xp": 200, "mode_id": "training", "mode": "TRAINING GROUND"})
+	Game.count_match("lonewolf")
+	Game.record_match({"won": false, "kills": 1, "xp": 60, "mode_id": "lonewolf", "mode": "LONE WOLF"})
+	Game.count_match("lonewolf")
+	Game.record_match({"won": true, "kills": 2, "xp": 300, "mode_id": "lonewolf"})
+	var p := Game.profile
+	_check(int(p.matches) == 3 and int(p.wins) == 2 and int(p.kills) == 6 and int(p.xp) == 560, "the totals count every mode")
+	_check(p.modes.training == {"matches": 1, "wins": 1, "kills": 3}, "TRAINING GROUND counts its own match, win and kills")
+	_check(p.modes.lonewolf == {"matches": 2, "wins": 1, "kills": 3}, "LONE WOLF counts its own matches, win and kills")
+	Game.count_match("royale")
+	Game.record_match({"won": true, "kills": 1, "xp": 10, "mode_id": "royale"})
+	_check(p.modes.training == {"matches": 2, "wins": 2, "kills": 4} and int(p.matches) == 4, "an unknown mode counts as TRAINING GROUND")
+	Game._sanitize_profile()
+	_check(Game.profile.modes.lonewolf == {"matches": 2, "wins": 1, "kills": 3}, "the per-mode numbers survive the save check")
+	Game.profile = saved_profile
+	Game.last_result = saved_result
+	Game.autotest = at
+
+
+## The match loading card: TRAINING GROUND (bot or dummy) or LONE WOLF online, FIRST TO n, and an
+## online match never reads as a bot match.
+func _test_match_card() -> void:
+	var bot := Loading.match_info(false, "", false, 1, 5)
+	_check(bot.mode == "TRAINING GROUND" and bot.chips == ["FIRST TO 5", "1 VS BOT", "BOT: NORMAL"], "bot match card: %s" % str(bot.chips))
+	var hard := Loading.match_info(false, "", false, 2, 1)
+	_check(hard.chips == ["FIRST TO 1", "1 VS BOT", "BOT: HARD"], "the card shows the real round count and level")
+	var dummy := Loading.match_info(false, "", true, 1, 5)
+	_check(dummy.mode == "TRAINING GROUND" and "TARGET DUMMY" in dummy.chips and not "1 VS BOT" in dummy.chips, "target dummy card")
+	var online := Loading.match_info(true, "VIPER", false, 1, 3)
+	_check(online.mode == "LONE WOLF" and online.chips == ["FIRST TO 3", "1 VS 1 ONLINE", "VS VIPER"], "online card: %s" % str(online.chips))
+	var online_dummy := Loading.match_info(true, "VIPER", true, 2, 5)
+	var words := " ".join(PackedStringArray(online_dummy.chips))
+	_check(online_dummy.mode == "LONE WOLF" and not "BOT" in words and not "DUMMY" in words, "an online match never shows a bot or the dummy")
 
 
 ## The profile keys of version 2 (guest login, profile page, numbers per mode, friend requests,

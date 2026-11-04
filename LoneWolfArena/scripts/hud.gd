@@ -1374,7 +1374,7 @@ func _draw_zone_strip(vs: Vector2) -> void:
 	HudDraw.icon(self, HudDraw.tex("v_zone"), Vector2(r.position.x + h * 0.55, r.get_center().y), Vector2(h, h) * 0.62, Color(1, 1, 1, 0.9 * o))
 	var parts := [["SAFE ZONE  ", Color(0.72, 0.76, 0.82)], [state, Color(1, 0.4, 0.35) if closed else Color.WHITE]]
 	if arena != null and not editor_mode and bool(arena.get("practice")):
-		parts = [["PRACTICE", HudDraw.YELLOW], ["  NO ZONE", Color.WHITE]]
+		parts = [["TRAINING", HudDraw.YELLOW], ["  NO ZONE", Color.WHITE]]
 		closed = true
 	if not closed:
 		var s := ceili(maxf(left, 0.0))

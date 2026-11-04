@@ -1,6 +1,7 @@
 extends Node
-## Tamper protection for an offline game. Nothing here talks to a server (the game has no
-## network permission). It makes the usual mobile cheats fail or get noticed:
+## Tamper protection, all on the phone: nothing here talks to a server or sends anything (the
+## game's only network use is the online 1 vs 1 through public relays, scripts/cloud.gd). It
+## makes the usual mobile cheats fail or get noticed:
 ## - memory scanners that search for and freeze values (HP, ammo, items): those values live
 ##   XOR-masked with a checksum in SecureNum, so they can't be found and edits are detected;
 ## - speed hacks: the game clock is compared with the wall clock;

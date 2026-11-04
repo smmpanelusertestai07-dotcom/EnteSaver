@@ -1,12 +1,24 @@
 class_name LobbyDialogs
 extends RefCounted
 ## The lobby's popups: the popup frame they share (open_modal / close_modal, one at a time, in
-## `modal`), HOW TO PLAY, the player name editor with the first-start name prompt, and the "Quit
-## the game?" dialog. The lobby makes it (Lobby.dialogs) and its parts open popups through it;
-## everything is built under the lobby's UI layer.
-## Node names: Modal (or QuitDialog), Close, NameEdit, NameRandom, NameOk, QuitCancel,
-## QuitConfirm. Markers: "name prompt" and "ui name_ok" (the emulator test taps OK there).
+## `modal`), SELECT MODE, HOW TO PLAY, the player name editor with the first-start name prompt,
+## and the "Quit the game?" dialog. The lobby makes it (Lobby.dialogs) and its parts open popups
+## through it; everything is built under the lobby's UI layer.
+## Node names: Modal (or QuitDialog), Close, Mode_<training|lonewolf>, NameEdit, NameRandom,
+## NameOk, QuitCancel, QuitConfirm. Markers: "name prompt" and "ui name_ok" (the emulator test
+## taps OK there).
 
+## SELECT MODE: what each mode's card says under its name ({rounds}: Game.ROUNDS_TO_WIN).
+const MODE_INFO := {
+	"training": {"tag": "VS BOT", "lines": ["1 VS BOT: EASY, NORMAL OR HARD", "OR THE TARGET DUMMY, TO PRACTISE YOUR AIM"]},
+	"lonewolf": {"tag": "ONLINE", "lines": ["1 VS 1 AGAINST ANOTHER PLAYER", "PLAYERS ONLINE, FRIENDS OR A CUSTOM ROOM"]},
+}
+## HOW TO PLAY. Texts may hold {rounds} (Game.ROUNDS_TO_WIN). MODES spans the width on top, the
+## other groups fill two columns under it.
+const HOW_TO_MODES := ["MODES", [
+	["v_crosshair", "TRAINING GROUND", "1 vs a bot (EASY, NORMAL or HARD), first to {rounds} rounds on CARGO CAGE. Or the TARGET DUMMY: it never goes down, no zone, no clock, nothing counted."],
+	["v_player", "LONE WOLF", "1 vs 1 online against another player, first to {rounds}. START opens the ONLINE list: duel a player online, a friend or a CUSTOM ROOM."],
+]]
 const HOW_TO := [
 	["MOVE & LOOK", [
 		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
@@ -22,7 +34,7 @@ const HOW_TO := [
 		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest stops a third), 3 s fuse."],
 	]],
 	["THE MATCH", [
-		["v_player", "FIRST TO 5 ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win 5 rounds to win the match."],
+		["v_player", "FIRST TO {rounds} ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win {rounds} rounds to win the match."],
 		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use (12 guns, fixed attachments); the pick takes turns."],
 		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
 	]],
@@ -84,18 +96,111 @@ func close_modal() -> void:
 		DisplayServer.virtual_keyboard_hide()     # a text field in it may have opened the keyboard
 
 
+# ---------------------------------------------------------------- select mode
+
+## SELECT MODE (the lobby's mode card opens it): the two modes as cards (art, name, map, what
+## START plays, this player's numbers in it). A tap picks one, which START then plays (kept as
+## the setting "mode"), and closes the popup.
+func select_mode() -> void:
+	var v := open_modal("SELECT MODE", 980.0)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 20)
+	v.add_child(row)
+	for m: String in Game.MODE_NAMES:
+		row.add_child(_mode_choice(m))
+	v.add_child(UI.label("Both are played 1 vs 1 on CARGO CAGE, first to %d rounds; the gun is picked every 2 rounds." % Game.ROUNDS_TO_WIN,
+		16, UI.TEXT_DIM, "semi"))
+
+
+## One mode's card in SELECT MODE (node Mode_<m>): yellow outline and tick on the current mode.
+func _mode_choice(m: String) -> Button:
+	var info: Dictionary = MODE_INFO.get(m, MODE_INFO[Game.DEFAULT_MODE])
+	var card := Button.new()
+	card.name = "Mode_" + m
+	card.focus_mode = Control.FOCUS_NONE
+	card.custom_minimum_size = Vector2(440, 340)
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var art_h := 186.0
+	card.draw.connect(func() -> void:
+		var s := card.size
+		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.1, 0.095, 0.09, 0.97))
+		Lobby.draw_mode_art(card, m, Rect2(0, 0, s.x, art_h))
+		card.draw_rect(Rect2(0, art_h - 3, s.x, 3), Color(UI.AMBER, 0.9))
+		var picked := Game.mode == m
+		if picked:
+			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), UI.ACCENT, false, 3.0)
+			UI.draw_tick_corner(card, s, 40.0)
+		elif card.is_hovered() or card.is_pressed():
+			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.6), false, 2.0)
+		else:
+			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.14), false, 1.0))
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		card.connect(sig, card.queue_redraw)
+	var tag := PanelContainer.new()
+	tag.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 6, 0, Color.TRANSPARENT, 8.0, ["br"]))
+	tag.add_child(UI.label(String(info.tag), 16, UI.INK, "heavy"))
+	tag.position = Vector2(12, 12)
+	tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(tag)
+	var v := VBoxContainer.new()
+	v.position = Vector2(18, art_h + 8)
+	v.add_theme_constant_override("separation", 0)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(v)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_child(UI.label(Game.mode_name(m), 32, UI.AMBER, "heavy"))
+	var map_l := UI.label("CARGO CAGE", 22, UI.TEXT, "heavy")
+	map_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(map_l)
+	v.add_child(head)
+	for line: String in info.lines:
+		v.add_child(UI.label(line, 15, UI.TEXT_DIM, "bold"))
+	var n: Dictionary = (Game.profile.modes as Dictionary).get(m, {})
+	var stats := UI.label("MATCHES %d   ·   WINS %d   ·   KILLS %d" % [int(n.get("matches", 0)), int(n.get("wins", 0)), int(n.get("kills", 0))],
+		15, UI.TEXT, "bold")
+	stats.name = "ModeStats"
+	v.add_child(UI.spacer(4))
+	v.add_child(stats)
+	card.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		Game.mode = m
+		Game.save_settings()
+		close_modal()
+		lobby._refresh_mode())
+	return card
+
+
 # ---------------------------------------------------------------- how to play
 
 func how_to_play() -> void:
 	var v := open_modal("HOW TO PLAY", 1040.0)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 470)
+	scroll.custom_minimum_size = Vector2(0, 520)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	v.add_child(scroll)
+	var page := VBoxContainer.new()
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.add_theme_constant_override("separation", 6)
+	scroll.add_child(page)
+	# MODES across the top: the two modes side by side.
+	page.add_child(UI.section(String(HOW_TO_MODES[0]), 18))
+	var modes := HBoxContainer.new()
+	modes.name = "HowToModes"
+	modes.add_theme_constant_override("separation", 24)
+	page.add_child(modes)
+	for it: Array in HOW_TO_MODES[1]:
+		var item := _howto_item(String(it[0]), _rounds_text(String(it[1])), _rounds_text(String(it[2])))
+		item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		modes.add_child(item)
+	page.add_child(UI.spacer(6))
 	var cols := HBoxContainer.new()
 	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_theme_constant_override("separation", 24)
-	scroll.add_child(cols)
+	page.add_child(cols)
 	var left := VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_theme_constant_override("separation", 6)
@@ -111,7 +216,12 @@ func how_to_play() -> void:
 			col.add_child(UI.spacer(6))
 		col.add_child(UI.section(String(g[0]), 18))
 		for it in g[1]:
-			col.add_child(_howto_item(String(it[0]), String(it[1]), String(it[2])))
+			col.add_child(_howto_item(String(it[0]), _rounds_text(String(it[1])), _rounds_text(String(it[2]))))
+
+
+## A HOW TO PLAY text with {rounds} filled in (the rounds a match is played to).
+static func _rounds_text(t: String) -> String:
+	return t.format({"rounds": Game.ROUNDS_TO_WIN})
 
 
 func _howto_item(icon_name: String, title: String, text: String) -> Control:

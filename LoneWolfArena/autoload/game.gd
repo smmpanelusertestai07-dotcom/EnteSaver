@@ -9,12 +9,16 @@ const SETTINGS_PATH := "user://settings.json"
 const PROFILE_PATH := "user://profile.json"
 const HUD_PATH := "user://hud_layout.json"
 
-## The two modes START plays (the setting "mode", see `mode`): TRAINING GROUND is 1 vs a bot
-## (EASY, NORMAL, HARD or the target dummy), LONE WOLF the online 1 vs 1 (Cloud). TRAINING GROUND
-## is the default: on a new install START plays a bot match (the CI emulator test taps START and
+## The two modes START plays (the setting "mode", see `mode`), both on the one map CARGO CAGE:
+## TRAINING GROUND is 1 vs a bot (EASY, NORMAL, HARD) or the target dummy (`practice`), LONE
+## WOLF the online 1 vs 1 (Cloud: START opens the ONLINE window). TRAINING GROUND is the
+## default: on a new install START plays a bot match (the CI emulator test taps START and
 ## expects one).
 const MODE_NAMES := {"training": "TRAINING GROUND", "lonewolf": "LONE WOLF"}
 const DEFAULT_MODE := "training"
+## A match is first to ROUNDS_TO_WIN rounds (the reference mode: first to 5, best of 9); a custom
+## room sets its own (see rounds_to_win()).
+const ROUNDS_TO_WIN := 5
 
 const SETTINGS_VERSION := 5
 const DEFAULT_SETTINGS := {
@@ -125,8 +129,9 @@ var last_result: Dictionary = {}
 ## Ignored in exported builds, so an installed game can't be started in a test mode.
 var autotest := ""
 var shots_dir := ""
-## The next arena run is practice (lobby PRACTICE): a training dummy with endless HP, no zone, no
-## clock, nothing recorded. START clears it.
+## TRAINING GROUND against the target dummy (the lobby's DUMMY chip) instead of a bot: a dummy
+## with endless HP, no zone, no clock, nothing recorded. The chips set it and it stays chosen for
+## this session; an online match ignores it.
 var practice := false
 ## The next arena run is a match against another phone (LONE WOLF): `session` is the Cloud
 ## (internet, see scripts/cloud.gd) that connected the two.
@@ -250,6 +255,18 @@ func _sanitize_settings() -> void:
 ## A mode's player-facing name ("TRAINING GROUND", "LONE WOLF"), the current mode's by default.
 func mode_name(m := "") -> String:
 	return String(MODE_NAMES.get(m if m != "" else mode, MODE_NAMES[DEFAULT_MODE]))
+
+
+## The rounds a match is played to ("FIRST TO n"): ROUNDS_TO_WIN, online a custom room's own
+## number (Cloud.ROOM_RULES, 1 to 7). Test runs of the editor binary may set LW_ROUNDS_TO_WIN
+## (never an exported game). The arena plays by it; the lobby and the match card show it.
+func rounds_to_win(online_match := false) -> int:
+	var n := ROUNDS_TO_WIN
+	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
+		n = maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)     # tests: shorter matches
+	if online_match and not room_rules.is_empty():
+		n = clampi(int(room_rules.get("rounds", ROUNDS_TO_WIN)), 1, 7)
+	return n
 
 
 func _load_json(path: String) -> Variant:
@@ -513,20 +530,35 @@ func vibrate(ms: int) -> void:
 
 
 ## A fight counts as played once it starts, so leaving mid-fight (QUIT MATCH, closing the app)
-## still records it, as a loss.
-func count_match() -> void:
+## still records it, as a loss. `m` is the mode it is played in (a key of MODE_NAMES): it counts
+## in the totals and in that mode's numbers (profile.modes).
+func count_match(m := DEFAULT_MODE) -> void:
 	profile.matches = int(profile.matches) + 1
+	var c := _mode_counts(m)
+	c.matches = int(c.matches) + 1
 	save_profile()
 
 
-## The end of a counted fight: wins, kills and XP.
+## The end of a counted fight: wins, kills and XP, in the totals and in the numbers of the
+## result's mode ("mode_id", see ResultsScreen).
 func record_match(result: Dictionary) -> void:
 	last_result = result
+	var c := _mode_counts(String(result.get("mode_id", DEFAULT_MODE)))
+	var kills := int(result.get("kills", 0))
 	if result.get("won", false):
 		profile.wins = int(profile.wins) + 1
-	profile.kills = int(profile.kills) + int(result.get("kills", 0))
+		c.wins = int(c.wins) + 1
+	profile.kills = int(profile.kills) + kills
+	c.kills = int(c.kills) + kills
 	profile.xp = int(profile.xp) + int(result.get("xp", 0))
 	save_profile()
+
+
+## A mode's numbers in the profile (profile.modes[m]: matches, wins, kills); an unknown mode
+## counts as the default one.
+func _mode_counts(m: String) -> Dictionary:
+	var modes: Dictionary = profile.modes
+	return modes[m] if modes.has(m) else modes[DEFAULT_MODE]
 
 
 func level() -> int:

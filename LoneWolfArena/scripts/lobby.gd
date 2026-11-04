@@ -4,18 +4,20 @@ extends Node3D
 ## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
 ## UI in the battle-royale lobby layout (original art, nothing to buy: no currency, no store):
 ## player card (avatar, name + EDIT, level, XP line) top-left, logo + glyph buttons top-right, a
-## text menu on the left (PRACTICE, ONLINE 1 VS 1, WARDROBE, CUSTOM HUD, SETTINGS, HOW TO PLAY),
-## the mode card "LONE WOLF / CARGO CAGE" with difficulty chips, match stats and the big START
-## bottom-right. WARDROBE opens the outfit picker (every outfit free: item cards, preview on the
-## podium, EQUIP / BACK). START shows the match loading overlay (Loading.start_match) and then
-## enters the arena.
+## text menu on the left (ONLINE 1 VS 1, WARDROBE, CUSTOM HUD, SETTINGS, HOW TO PLAY) and, bottom
+## right, match stats, the opponent chips (TRAINING GROUND: EASY / NORMAL / HARD bot or the
+## DUMMY), the mode card (TRAINING GROUND or LONE WOLF on CARGO CAGE; a tap opens SELECT MODE)
+## and the big START. START plays the card's mode: TRAINING GROUND shows the match loading
+## overlay (Loading.start_match) and enters the arena; LONE WOLF opens the ONLINE window (a duel
+## starts when a challenge is accepted). WARDROBE opens the outfit picker (every outfit free:
+## item cards, preview on the podium, EQUIP / BACK).
 ## This file has the 3D stage, the top bar, the menus, the mode card, START, the settings panel
 ## and input. Three parts have their own files: helpers the lobby makes, which build under `ui`
-## and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, HOW TO PLAY,
-## the name editor, the quit dialog), LobbyFriends (`friends`: ONLINE 1 VS 1, custom rooms,
-## the net signals) and LobbyWardrobe (`wardrobe_ui`: WARDROBE).
-## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton
-## (WARDROBE), Bundle_<id>, EquipButton.
+## and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, SELECT MODE,
+## HOW TO PLAY, the name editor, the quit dialog), LobbyFriends (`friends`: ONLINE 1 VS 1, custom
+## rooms, the net signals) and LobbyWardrobe (`wardrobe_ui`: WARDROBE).
+## Node names used by the screenshot walkthrough: StartButton, ModeCard, Diff_<EASY|NORMAL|HARD|
+## DUMMY>, SettingsButton, BundlesButton (WARDROBE), Bundle_<id>, EquipButton.
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -31,11 +33,23 @@ const HERO_X := 0.41
 const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
 const SKYLINE := "res://assets/ui/lobby_skyline.png"
+## The art each mode shows (mode card, SELECT MODE): [texture, the part of it to show]. LONE
+## WOLF is the two fighters facing off, TRAINING GROUND our hero aiming at a far-off target.
+const MODE_ART := {
+	"training": ["keyart_clean.jpg", Rect2(380, 150, 1320, 660)],
+	"lonewolf": ["mode_lonewolf.jpg", Rect2(0, 30, 640, 320)],
+}
 
 var model: CharacterModel
 var camera: Camera3D
 var ui: CanvasLayer
 var start_btn: Button
+## The mode card above START (node ModeCard: opens SELECT MODE) and what follows the mode.
+var mode_card: Button
+var _mode_label: Label
+var _mode_sub: Label
+var _diff_row: HBoxContainer
+var _stats_row: HBoxContainer
 ## The lobby's parts in their own files (see above).
 var dialogs := LobbyDialogs.new(self)
 var friends := LobbyFriends.new(self)
@@ -661,7 +675,6 @@ func _build_left_menu(root: Control) -> void:
 	menu.add_theme_constant_override("separation", 6)
 	root.add_child(menu)
 	var items := [
-		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
 		["ONLINE 1 VS 1", "v_player", "FriendsButton", _open_friends],
 		["WARDROBE", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
@@ -737,54 +750,58 @@ func _build_right_column(root: Control) -> void:
 	start_btn.offset_bottom = -12
 	start_btn.pressed.connect(_start)
 	root.add_child(start_btn)
-	# Mode card above it.
-	var card := Control.new()
-	card.name = "ModeCard"
-	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	card.offset_left = -430
-	card.offset_right = -12
-	card.offset_top = -170
-	card.offset_bottom = -98
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var thumb := UI.texture("mode_lonewolf.jpg")
-	card.draw.connect(func() -> void:
-		var s := card.size
-		var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
-		card.draw_polygon(pts, PackedColorArray([Color(0.16, 0.12, 0.07, 0.92), Color(0.16, 0.12, 0.07, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.12, 0.09, 0.06, 0.92)]))
-		if thumb:
-			# the two fighters of the mode art, at the slot's aspect (120 x 60)
-			card.draw_texture_rect_region(thumb, Rect2(s.x - 128, 6, 120, s.y - 12), Rect2(110, 96, 420, 210))
-			card.draw_rect(Rect2(s.x - 128, 6, 120, s.y - 12), Color(1, 1, 1, 0.35), false, 1.5)
-		card.draw_rect(Rect2(0, s.y - 2, s.x, 2), Color(UI.AMBER, 0.8)))
-	root.add_child(card)
-	var mode_l := UI.shadowed(UI.label("LONE WOLF", 32, UI.AMBER, "heavy"))
-	mode_l.position = Vector2(20, 2)
-	card.add_child(mode_l)
-	var map_l := UI.label("CARGO CAGE", 22, UI.TEXT, "heavy")
-	map_l.position = Vector2(22, 38)
-	card.add_child(map_l)
-	var sub := UI.label("1 VS 1  ·  1 ROUND", 14, UI.TEXT_DIM, "bold")
-	sub.position = Vector2(138, 44)
-	card.add_child(sub)
-	# Difficulty chips above the card.
-	var diff := HBoxContainer.new()
-	diff.name = "Difficulty"
-	diff.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	diff.offset_left = -430
-	diff.offset_right = -12
-	diff.offset_top = -214
-	diff.offset_bottom = -178
-	diff.add_theme_constant_override("separation", 6)
-	diff.alignment = BoxContainer.ALIGNMENT_END
-	root.add_child(diff)
-	var cap := UI.label("BOT", 15, UI.TEXT_DIM, "bold")
-	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	cap.custom_minimum_size = Vector2(0, 36)
-	diff.add_child(cap)
+	# Mode card above it: the mode START plays (name, map, format, the mode's art); a tap opens
+	# SELECT MODE.
+	mode_card = Button.new()
+	mode_card.name = "ModeCard"
+	mode_card.focus_mode = Control.FOCUS_NONE
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		mode_card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	mode_card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	mode_card.offset_left = -430
+	mode_card.offset_right = -12
+	mode_card.offset_top = -170
+	mode_card.offset_bottom = -98
+	mode_card.draw.connect(_draw_mode_card)
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		mode_card.connect(sig, mode_card.queue_redraw)
+	mode_card.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		_select_mode())
+	root.add_child(mode_card)
+	var text := VBoxContainer.new()
+	text.position = Vector2(20, 2)
+	text.add_theme_constant_override("separation", -4)
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mode_card.add_child(text)
+	_mode_label = UI.shadowed(UI.label("", 32, UI.AMBER, "heavy"))
+	_mode_label.name = "ModeName"
+	text.add_child(_mode_label)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 12)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.add_child(line)
+	line.add_child(UI.label("CARGO CAGE", 22, UI.TEXT, "heavy"))
+	_mode_sub = UI.label("", 14, UI.TEXT_DIM, "bold")
+	_mode_sub.name = "ModeFormat"
+	_mode_sub.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(_mode_sub)
+	# TRAINING GROUND's opponent above the card: a bot level or the target dummy.
+	_diff_row = HBoxContainer.new()
+	_diff_row.name = "Difficulty"
+	_diff_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_diff_row.offset_left = -430
+	_diff_row.offset_right = -12
+	_diff_row.offset_top = -214
+	_diff_row.offset_bottom = -178
+	_diff_row.add_theme_constant_override("separation", 6)
+	_diff_row.alignment = BoxContainer.ALIGNMENT_END
+	root.add_child(_diff_row)
 	var group := ButtonGroup.new()
 	for i in Game.DIFFICULTY_NAMES.size():
-		diff.add_child(_diff_chip(String(Game.DIFFICULTY_NAMES[i]), i, group))
-	# Match stats chips.
+		_diff_row.add_child(_diff_chip(String(Game.DIFFICULTY_NAMES[i]), i, group))
+	_diff_row.add_child(_diff_chip("DUMMY", -1, group))
+	# Match stats chips (above the chips; one row lower when LONE WOLF hides them).
 	var stats := HBoxContainer.new()
 	stats.name = "Stats"
 	stats.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -795,6 +812,7 @@ func _build_right_column(root: Control) -> void:
 	stats.add_theme_constant_override("separation", 6)
 	stats.alignment = BoxContainer.ALIGNMENT_END
 	root.add_child(stats)
+	_stats_row = stats
 	for s in [["v_player", "MATCHES", Game.profile.matches], ["v_trophy", "WINS", Game.profile.wins], ["v_skull", "KILLS", Game.profile.kills]]:
 		var p := PanelContainer.new()
 		p.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.55), 6, 1, Color(1, 1, 1, 0.12), 10.0, ["br"]))
@@ -809,17 +827,74 @@ func _build_right_column(root: Control) -> void:
 		h.add_child(c)
 		p.add_child(h)
 		stats.add_child(p)
+	_refresh_mode()
 
 
+## Draws a mode's art into `dest` of `ci`, cut from its MODE_ART part to dest's shape (centred).
+static func draw_mode_art(ci: CanvasItem, m: String, dest: Rect2) -> void:
+	var art: Array = MODE_ART.get(m, MODE_ART[Game.DEFAULT_MODE])
+	var tex := UI.texture(String(art[0]))
+	if tex == null:
+		ci.draw_rect(dest, Color(0.12, 0.11, 0.1))
+		return
+	var src: Rect2 = art[1]
+	var want := dest.size.x / maxf(dest.size.y, 1.0)
+	if src.size.x / src.size.y > want:
+		var w := src.size.y * want
+		src = Rect2(src.position.x + (src.size.x - w) * 0.5, src.position.y, w, src.size.y)
+	else:
+		var h := src.size.x / want
+		src = Rect2(src.position.x, src.position.y + (src.size.y - h) * 0.5, src.size.x, h)
+	ci.draw_texture_rect_region(tex, dest, src)
+
+
+func _draw_mode_card() -> void:
+	var c := mode_card
+	var s := c.size
+	var a := 0.98 if c.is_pressed() else 0.92
+	var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
+	var warm := Color(0.16, 0.12, 0.07, a)
+	var dark := Color(0.07, 0.06, 0.05, a)
+	c.draw_polygon(pts, PackedColorArray([warm, warm, dark, dark, Color(0.12, 0.09, 0.06, a)]))
+	var thumb := Rect2(s.x - 128, 6, 120, s.y - 12)
+	draw_mode_art(c, Game.mode, thumb)
+	c.draw_rect(thumb, Color(1, 1, 1, 0.35), false, 1.5)
+	# a dropdown chevron beside the mode name: tap to choose the other mode
+	var hot := c.is_hovered() or c.is_pressed()
+	var cx := s.x - 150.0
+	c.draw_polyline(PackedVector2Array([Vector2(cx - 9, 18), Vector2(cx, 27), Vector2(cx + 9, 18)]),
+		UI.ACCENT if hot else Color(1, 1, 1, 0.8), 3.0, true)
+	c.draw_rect(Rect2(0, s.y - 2, s.x, 2), UI.ACCENT if hot else Color(UI.AMBER, 0.8))
+
+
+## The mode card, the opponent chips (TRAINING GROUND only) and the stats row follow Game.mode and
+## the chosen opponent (Game.practice: the target dummy).
+func _refresh_mode() -> void:
+	var training := Game.mode == "training"
+	_mode_label.text = Game.mode_name()
+	if not training:
+		_mode_sub.text = "1 VS 1 ONLINE"
+	elif Game.practice:
+		_mode_sub.text = "TARGET DUMMY"
+	else:
+		_mode_sub.text = "1 VS BOT  ·  FIRST TO %d" % Game.rounds_to_win()
+	_diff_row.visible = training
+	_stats_row.offset_top = -258.0 if training else -214.0
+	_stats_row.offset_bottom = _stats_row.offset_top + 36.0
+	mode_card.queue_redraw()
+
+
+## A chip for TRAINING GROUND's opponent: a bot level (idx into Game.DIFFICULTY_NAMES) or, with
+## idx -1, the target dummy.
 func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
 	var b := Button.new()
 	b.name = "Diff_" + text
 	b.toggle_mode = true
 	b.button_group = group
-	b.button_pressed = idx == int(Game.settings.difficulty)
+	b.button_pressed = Game.practice if idx < 0 else (not Game.practice and idx == int(Game.settings.difficulty))
 	b.focus_mode = Control.FOCUS_NONE
 	b.text = text
-	b.custom_minimum_size = Vector2(104, 36)
+	b.custom_minimum_size = Vector2(100, 36)
 	b.add_theme_font_override("font", UI.font("bold"))
 	b.add_theme_font_size_override("font_size", 17)
 	var off := UI.chamfer(Color(0, 0, 0, 0.55), 8, 1, Color(1, 1, 1, 0.2), 8.0, ["tl", "br"], 0.0)
@@ -836,8 +911,11 @@ func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
 	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_select", -6.0)
-		Game.settings.difficulty = idx
-		Game.save_settings())
+		Game.practice = idx < 0
+		if idx >= 0:
+			Game.settings.difficulty = idx
+			Game.save_settings()
+		_refresh_mode())
 	return b
 
 
@@ -881,23 +959,23 @@ func _update_bundle_label(id: String) -> void:
 	_bundle_label.add_theme_color_override("font_color", LobbyWardrobe.outfit_color(String(info.id)))
 
 
+## START plays the mode on the card: TRAINING GROUND loads the match against the bot (or the
+## target dummy) at once; LONE WOLF opens the ONLINE window, where a duel starts once a player
+## accepts a challenge (or the host of a custom room starts it).
 func _start() -> void:
 	if start_btn.disabled:
 		return
-	Game.practice = false
+	if Game.mode == "lonewolf":
+		_open_friends("online")
+		return
 	Game.online = false
 	start_btn.disabled = true
-	UI.set_caption(start_btn, "MATCHING")
+	UI.set_caption(start_btn, "LOADING")
 	Loading.start_match(self)
 
 
-## Practice against a training dummy that never goes down (no zone, no clock, nothing recorded).
-func _start_practice() -> void:
-	if start_btn.disabled:
-		return
-	Game.practice = true
-	start_btn.disabled = true
-	Loading.start_match(self)
+func _select_mode() -> void:
+	dialogs.select_mode()
 
 
 func _open_settings() -> void:

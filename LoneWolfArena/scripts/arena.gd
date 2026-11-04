@@ -1,9 +1,11 @@
 extends Node3D
-## Match controller for one Lone Wolf round (1 vs 1 bot) on the warehouse arena:
-## PREP (spawn alcoves behind a red barrier, weapon pick for both players, red countdown)
-## -> FIGHT (round banner, 90 s timer, safe zone that holds then shrinks) -> END (kill, time-out
-## on HP, or an integrity flag) -> results screen. Also renders the top-down minimap image once,
-## runs the pause menu and feeds the HUD and scoreboard.
+## Match controller of a 1 vs 1 on the warehouse arena CARGO CAGE, first to rounds_to_win rounds:
+## TRAINING GROUND against the bot or the target dummy (practice), LONE WOLF against another
+## phone online (`mode`, `mode_name`). Each round: PREP (spawn alcoves behind a red barrier,
+## weapon pick for both players, red countdown) -> FIGHT (round banner, 90 s timer, safe zone that
+## holds then shrinks) -> a break, or END (kill, time-out on HP, or an integrity flag) -> results
+## screen. Also renders the top-down minimap image once, runs the pause menu and feeds the HUD and
+## scoreboard.
 
 enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two rounds
 
@@ -15,9 +17,8 @@ const ROUND_TIME := 90.0
 const ZONE_HOLD := 25.0
 const ZONE_SHRINK := 40.0
 const ZONE_MIN := 4.0
-const ROUNDS_TO_WIN := 5         # the reference mode: first to 5 rounds (best of 9)
-const MODE_NAME := "LONE WOLF"
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
+const DUMMY_NAME := "TARGET DUMMY"
 
 var fighters: Array[Fighter] = []
 var player: Player
@@ -30,7 +31,11 @@ var time_left := ROUND_TIME
 var elapsed := 0.0
 var match_time := 0.0
 var round_index := 1
-var rounds_to_win := ROUNDS_TO_WIN
+var rounds_to_win := Game.ROUNDS_TO_WIN       # Game.rounds_to_win(): a custom room's own number online
+## The mode this match is played in (a key of Game.MODE_NAMES): "lonewolf" online, "training"
+## against the bot or the target dummy; mode_name is what the HUD, pause menu and results show.
+var mode := Game.DEFAULT_MODE
+var mode_name := Game.mode_name(Game.DEFAULT_MODE)
 var score := {"player": 0, "bot": 0}
 var picked_weapon := ""
 var pick_note := ""                # prep line under PREPARE: who picks the gun, or which it is
@@ -59,7 +64,7 @@ var _winner: Fighter
 var _draw := false
 var _invalid := false
 var _rng := RandomNumberGenerator.new()
-var practice := false      # Game.practice: a training dummy with endless HP, no zone, no clock, no record
+var practice := false      # Game.practice: the target dummy with endless HP, no zone, no clock, no record
 var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Cloud)
 var _net_t := 0.0
 var _net_begun := false
@@ -83,12 +88,11 @@ func _ready() -> void:
 	map_name = map.map_name
 	zone_center = map.zone_center
 	zone_start_radius = map.zone_start_radius
-	practice = Game.practice
-	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
-		rounds_to_win = maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)     # tests: shorter matches
-	online = Game.online and Game.session != null and bool(Game.session.get("in_session"))
-	if online and not Game.room_rules.is_empty():
-		rounds_to_win = clampi(int(Game.room_rules.get("rounds", ROUNDS_TO_WIN)), 1, 7)
+	online = Game.online and Game.session != null and Game.session.in_session
+	practice = Game.practice and not online
+	mode = "lonewolf" if online else "training"
+	mode_name = Game.mode_name(mode)
+	rounds_to_win = Game.rounds_to_win(online)
 	if Game.online and not online:
 		Game.online = false
 		Game.goto_lobby.call_deferred()        # the other phone left while this one was loading
@@ -358,7 +362,7 @@ func _spawn_fighters() -> void:
 	bot.hold_fire = true
 	bot.frozen = true
 	if practice:
-		bot.display_name = "TRAINING DUMMY"
+		bot.display_name = DUMMY_NAME
 		bot.endless_hp = true
 		player.endless_hp = true
 	fighters.append(bot)
@@ -514,7 +518,7 @@ func _start_fight() -> void:
 	phase = Phase.FIGHT
 	_net_timeup_t = -1.0
 	if not practice and round_index == 1:
-		Game.count_match()
+		Game.count_match(mode)
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
@@ -533,7 +537,7 @@ func _start_fight() -> void:
 	if practice:
 		_place_dummy()
 		zone_radius = 999.0
-		hud.show_center("PRACTICE", 2.0, Color(1.0, 0.82, 0.22), 80, "THE DUMMY NEVER GOES DOWN")
+		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
 	else:
 		var point := rounds_to_win > 1 and maxi(int(score.player), int(score.bot)) == rounds_to_win - 1
 		hud.show_round_banner(round_index, map_name, "MATCH POINT!" if point else "")
@@ -612,8 +616,8 @@ func _next_round() -> void:
 	_start_prep()
 
 
-## Practice: the bot stands still in the open centre bay, facing the player's spawn, and takes
-## every hit without going down.
+## The target dummy (TRAINING GROUND's DUMMY): the bot stands still in the open centre bay, facing
+## the player's spawn, and takes every hit without going down.
 func _place_dummy() -> void:
 	bot.frozen = true
 	bot.hold_fire = true
@@ -622,7 +626,7 @@ func _place_dummy() -> void:
 	bot.aim_yaw = atan2(-d.x, -d.z)
 
 
-## Practice: the gun never runs dry (the magazine still needs reloading).
+## Against the target dummy the gun never runs dry (the magazine still needs reloading).
 func _refill_practice_ammo() -> void:
 	var w := player.weapon()
 	if not w.infinite() and w.reserve < int(w.def.mag):
@@ -808,13 +812,14 @@ func _show_results() -> void:
 	var xp := 0
 	if not _invalid:
 		# capped: one opponent, at most one kill per round
-		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
+		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * Game.ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
+	# "difficulty" is the bot's level, or ONLINE when the opponent is another player.
 	result = {
 		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": int(st.damage),
 		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
-		"mode": MODE_NAME, "map": map_name, "weapon": String(player.gun().def.name),
+		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
 		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
-		"difficulty": Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
+		"difficulty": "ONLINE" if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
 	}
 	if not _invalid:
 		Game.record_match(result)

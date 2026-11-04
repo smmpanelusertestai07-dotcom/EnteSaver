@@ -337,11 +337,13 @@ func _draw_board() -> void:
 	draw_rect(r, Color(HudDraw.PANEL_BG, HudDraw.PANEL_BG.a * a))
 	HudDraw.vband(self, Rect2(r.position, Vector2(r.size.x, 0.09 * u)), Color(1, 1, 1, 0.08 * a), Color(1, 1, 1, 0.02 * a))
 	HudDraw.corner_brackets(self, r.grow(-4), 0.035 * u, Color(1, 1, 1, 0.4 * a), 2.0)
-	var mode := "LONE WOLF"
+	var mode := Game.mode_name()
 	var map_name := "CARGO CAGE"
 	var round_i := 1
 	var goal := 1
 	if arena != null:
+		if arena.get("mode_name") != null:
+			mode = String(arena.get("mode_name"))
 		map_name = String(arena.get("map_name"))
 		round_i = int(arena.get("round_index"))
 		goal = int(arena.get("rounds_to_win"))
@@ -421,5 +423,5 @@ func _draw_board() -> void:
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw, 0.006 * u), Color(0, 0, 0, 0.5 * a))
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw * hpf, 0.006 * u), Color(HudDraw.HP_WHITE, a))
 		y += row_h
-	HudDraw.text(self, "TAP THE SCORE BAR OR THE LIST BUTTON TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
+	HudDraw.text(self, "TAP THE SCORE BAR TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
 		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")

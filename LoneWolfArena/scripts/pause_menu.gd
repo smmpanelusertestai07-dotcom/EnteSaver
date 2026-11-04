@@ -2,7 +2,8 @@ class_name PauseMenu
 extends Control
 ## In-match pause menu (the tree is paused while it is open), in the reference system-dialog
 ## look: a full-width dark band across the middle (0.30 .. 0.70 H) with PAUSED and a yellow
-## underline, the match state (mode, map, score, time left, HP) on the left and RESUME (yellow),
+## underline, the match state (the arena's mode_name, map, FIRST TO n, score, time left, HP) on
+## the left and RESUME (yellow),
 ## SETTINGS (grey) and QUIT MATCH (asks once more) on the right. The match HUD is hidden while
 ## it is open (its weapon-pick panel would show through). Emits `closed` when it goes away.
 ##
@@ -69,22 +70,32 @@ func _ready() -> void:
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	info.add_child(bar)
 	info.add_child(UI.spacer(4))
+	# The match: mode (TRAINING GROUND / LONE WOLF), map and format, then the state chips. Against
+	# the target dummy there is no score and the clock counts up.
 	var arena := get_tree().current_scene
+	var dummy: bool = arena != null and arena.get("practice") == true
 	var mode_row := HBoxContainer.new()
 	mode_row.add_theme_constant_override("separation", 12)
-	mode_row.add_child(UI.label("LONE WOLF", 24, UI.AMBER, "heavy"))
+	var mode_name: Variant = arena.get("mode_name") if arena else null
+	mode_row.add_child(UI.label(String(mode_name) if mode_name != null else Game.mode_name(), 24, UI.AMBER, "heavy"))
 	var map_name := String(arena.get("map_name")) if arena and arena.get("map_name") != null else "CARGO CAGE"
 	mode_row.add_child(UI.label(map_name, 24, UI.TEXT, "heavy"))
+	var goal: Variant = arena.get("rounds_to_win") if arena else null
+	var format := "TARGET DUMMY" if dummy else ("FIRST TO %d" % int(goal) if goal != null else "")
+	if format != "":
+		var f := UI.label("·  " + format, 20, UI.TEXT_DIM, "bold")
+		f.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		mode_row.add_child(f)
 	info.add_child(mode_row)
 	var chips := HBoxContainer.new()
 	chips.add_theme_constant_override("separation", 10)
 	info.add_child(chips)
-	if arena and arena.get("score") is Dictionary:
+	if arena and arena.get("score") is Dictionary and not dummy:
 		var sc: Dictionary = arena.get("score")
 		chips.add_child(_chip("SCORE", "%d : %d" % [int(sc.get("player", 0)), int(sc.get("bot", 0))]))
 	if arena and arena.get("time_left") != null:
 		var t := maxf(float(arena.get("time_left")), 0.0)
-		chips.add_child(_chip("TIME LEFT", "%d:%02d" % [int(t) / 60, int(t) % 60]))
+		chips.add_child(_chip("TIME" if dummy else "TIME LEFT", "%d:%02d" % [int(t) / 60, int(t) % 60]))
 	var p: Variant = arena.get("player") if arena else null
 	if p is Node and (p as Node).get("hp") != null:
 		chips.add_child(_chip("HP", str(roundi(float((p as Node).get("hp"))))))

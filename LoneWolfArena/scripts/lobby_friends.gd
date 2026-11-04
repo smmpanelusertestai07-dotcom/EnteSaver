@@ -243,7 +243,6 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		Game.cloud_service().open_room(p, _room_rules)
 		open("room"))
 	v.add_child(make)
-	v.add_child(UI.label("2 VS 2 and 4 VS 4 rooms (8 slots) need team matches, which are not in this version yet.", 15, UI.TEXT_DIM, "semi"))
 	# Join: room ID + password.
 	var join := HBoxContainer.new()
 	join.add_theme_constant_override("separation", 10)
@@ -561,11 +560,13 @@ func _on_room_changed() -> void:
 		open("room")
 
 
+## Both phones agreed (a challenge accepted, the host started a custom room): load the match. It
+## is LONE WOLF whatever mode the lobby shows; the arena ignores TRAINING GROUND's dummy choice
+## (Game.practice) online, so that choice stays for later.
 func _on_net_session(_host: bool) -> void:
 	if lobby.start_btn.disabled:
 		return
 	var cloud := Game.cloud_service()
-	Game.practice = false
 	Game.online = true
 	Game.session = cloud
 	Game.room_rules = cloud.session_rules.duplicate()
@@ -573,7 +574,7 @@ func _on_net_session(_host: bool) -> void:
 	cloud.leave_join()
 	lobby.dialogs.close_modal()
 	lobby.start_btn.disabled = true
-	UI.set_caption(lobby.start_btn, "MATCHING")
+	UI.set_caption(lobby.start_btn, "LOADING")
 	Loading.start_match(lobby)
 
 

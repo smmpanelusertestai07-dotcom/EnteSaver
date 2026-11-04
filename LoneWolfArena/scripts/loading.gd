@@ -14,9 +14,10 @@ extends Control
 ## Automated runs (Game.autotest) skip straight to the lobby (their scripts expect it) unless a
 ## screenshot tour sets `hold_for_test` to look at this screen.
 ##
-## MATCH: Loading.start_match(host) puts an overlay on top of `host` (mode + map card
-## "LONE WOLF / CARGO CAGE", the map name, the bar), loads the arena scene on a thread for at
-## least MATCH_MIN_S, then Game.goto_arena().
+## MATCH: Loading.start_match(host) puts an overlay on top of `host` (the mode + map card
+## "TRAINING GROUND / CARGO CAGE" or "LONE WOLF / CARGO CAGE" with the match's chips, see
+## match_info(); the map name; the bar), loads the arena scene on a thread for at least
+## MATCH_MIN_S, then Game.goto_arena().
 
 const TIMEOUT_S := 12.0
 const BOOT_MIN_S := 2.4
@@ -239,14 +240,37 @@ func _show_tip() -> void:
 	create_tween().tween_property(_tip, "modulate:a", 1.0, 0.35)
 
 
+## What the match card says about the match being loaded: {"mode", "badge", "chips", "desc"}.
+## Online it is LONE WOLF (FIRST TO n, 1 VS 1 ONLINE, the opponent's name), else TRAINING GROUND
+## against the bot (FIRST TO n, 1 VS BOT, its level) or the target dummy.
+static func match_info(online: bool, opponent: String, dummy: bool, difficulty: int, rounds: int) -> Dictionary:
+	if online:
+		return {"mode": Game.mode_name("lonewolf"), "badge": "1 VS 1",
+			"chips": ["FIRST TO %d" % rounds, "1 VS 1 ONLINE", "VS " + opponent],
+			"desc": "Win the duel before the zone closes in."}
+	if dummy:
+		return {"mode": Game.mode_name("training"), "badge": "TRAINING",
+			"chips": ["TARGET DUMMY", "ENDLESS HP", "NO ZONE"],
+			"desc": "Practise your aim: the dummy never goes down."}
+	var level := String(Game.DIFFICULTY_NAMES[clampi(difficulty, 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	return {"mode": Game.mode_name("training"), "badge": "1 VS 1",
+		"chips": ["FIRST TO %d" % rounds, "1 VS BOT", "BOT: " + level],
+		"desc": "Win the duel before the zone closes in."}
+
+
 func _build_match() -> void:
 	_backdrop(1.12)
 	var shade := ColorRect.new()
 	shade.color = Color(0.02, 0.02, 0.05, 0.35)
 	UI.full_rect(shade)
 	add_child(shade)
+	var online := Game.online and Game.session != null
+	var opponent := String(Game.session.opponent.get("name", "")) if online else ""
+	var info := match_info(online, opponent if opponent != "" else "PLAYER", Game.practice and not online,
+		int(Game.settings.difficulty), Game.rounds_to_win(online))
 	# Mode + map card, top-left.
 	var card := PanelContainer.new()
+	card.name = "MatchCard"
 	card.add_theme_stylebox_override("panel", UI.chamfer(Color(0.07, 0.065, 0.06, 0.9), 14, 1, Color(1, 1, 1, 0.12), 0.0, ["br"]))
 	card.position = Vector2(40, 34)
 	card.custom_minimum_size = Vector2(360, 0)
@@ -264,7 +288,7 @@ func _build_match() -> void:
 		thumb.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		thumb.clip_contents = true
 		v.add_child(thumb)
-		var badge := UI.label(" 1 VS 1 ", 16, UI.INK, "heavy")
+		var badge := UI.label(" %s " % String(info.badge), 16, UI.INK, "heavy")
 		var bp := PanelContainer.new()
 		bp.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 6, 0, Color.TRANSPARENT, 6.0, ["br"]))
 		bp.add_child(badge)
@@ -279,21 +303,26 @@ func _build_match() -> void:
 	var bv := VBoxContainer.new()
 	bv.add_theme_constant_override("separation", 4)
 	body.add_child(bv)
-	var t_row := HBoxContainer.new()
-	t_row.add_theme_constant_override("separation", 12)
-	t_row.add_child(UI.label("LONE WOLF", 32, UI.AMBER, "heavy"))
-	var map_l := UI.label("CARGO CAGE", 32, UI.TEXT, "heavy")
-	t_row.add_child(map_l)
+	# Mode and map on one line; the map moves to a second one when they do not fit.
+	var t_row := HFlowContainer.new()
+	t_row.add_theme_constant_override("h_separation", 12)
+	t_row.add_theme_constant_override("v_separation", -6)
+	var mode_l := UI.label(String(info.mode), 32, UI.AMBER, "heavy")
+	mode_l.name = "MatchMode"
+	t_row.add_child(mode_l)
+	t_row.add_child(UI.label("CARGO CAGE", 32, UI.TEXT, "heavy"))
 	bv.add_child(t_row)
-	var chips := HBoxContainer.new()
-	chips.add_theme_constant_override("separation", 4)
-	for c in ["ROUNDS 1", "1 VS BOT", "BOT: " + String(Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)])]:
+	var chips := HFlowContainer.new()
+	chips.name = "MatchChips"
+	chips.add_theme_constant_override("h_separation", 4)
+	chips.add_theme_constant_override("v_separation", 4)
+	for c: String in info.chips:
 		var cp := PanelContainer.new()
 		cp.add_theme_stylebox_override("panel", UI.chamfer(Color(1, 1, 1, 0.1), 4, 0, Color.TRANSPARENT, 10.0, []))
 		cp.add_child(UI.label(c, 15, UI.TEXT, "bold"))
 		chips.add_child(cp)
 	bv.add_child(chips)
-	var desc := UI.label("Win the duel before the zone closes in.", 16, UI.TEXT_DIM, "semi")
+	var desc := UI.label(String(info.desc), 16, UI.TEXT_DIM, "semi")
 	bv.add_child(desc)
 	# The map name, big, above the bar.
 	var big := UI.shadowed(UI.outlined(UI.label("CARGO CAGE", 132, UI.TEXT, "italic"), 10, Color(0.05, 0.04, 0.03, 0.95)), Vector2(0, 8), Color(0, 0, 0, 0.5))
