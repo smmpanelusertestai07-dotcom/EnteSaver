@@ -22,6 +22,14 @@ extends Node
 ## so the ONLINE tab can list every player who ever played, online or not, and a friend request
 ## can reach a player who is offline: it waits as a retained, signed message on ROOT/fr/<to>/<from>
 ## (the answer on ROOT/fa/<to>/<from>) until that phone comes online, which then clears it.
+## Card v2 ("v": 2) adds what another player's card popup shows (LobbyProfile.open_player): the
+## profile picture, the name card's banner, the level and the signature line, all signed together
+## with the name, outfit and time (card2_text, "sig2"); its "sig" still signs the v1 text, so
+## builds from before v2 keep listing the player. Cards from those builds (no "v") are still
+## accepted, with the v2 fields at their defaults. Nothing else of the profile is published:
+## my_card() is the whole list (the card's JSON adds only the id, the public key, the time and the
+## two signatures). A change to any of it publishes the card again (CARD_CHANGE_S later, so a run
+## of taps in NAME CARD makes one card).
 
 signal peers_changed
 signal invited(peer_name: String)
@@ -52,6 +60,9 @@ const CARD_MAX_AGE_S := 60 * 86400         # cards not refreshed for 60 days are
 const REQUEST_MAX_AGE_S := 30 * 86400      # waiting friend requests and answers older than this are dropped
 const MAX_DIRECTORY := 400
 const CARDS_PER_FRAME := 6                 # signature checks per frame
+const CARD_LEVEL_MAX := 999                # a card's level is shown as 1..999
+const CARD_FIELD_MAX := 64                 # longest avatar, banner or signature text a card may carry
+const CARD_CHANGE_S := 1.5                 # a changed card goes out this long after the change
 
 var state_interval := 0.1      # seconds between state packets
 var my_id := ""                # hash of this phone's public key (set once the key exists)
@@ -67,7 +78,10 @@ var session_rules := {}        # the custom room's rules for this session ({} = 
 var friend_requests: Dictionary:
 	get:
 		return Game.profile.friend_in
-var directory := {}            # id -> {"name", "bundle", "pk", "ts"}: every player with a card (ALL PLAYERS)
+## id -> {"name", "bundle", "pk", "ts", "v", "avatar", "banner", "level", "signature"}: every player
+## with a card (ALL PLAYERS); a v1 card has v 1, the emblem, the default banner, level 0 (unknown)
+## and no signature.
+var directory := {}
 var room_code := ""            # custom room this phone hosts: 6 digits ("" = none)
 var room_pin := ""             # its password (digits)
 var room_rules := {}
@@ -105,7 +119,8 @@ var _crypto := Crypto.new()
 var _dir_want := false         # the ONLINE / FRIENDS window is open: listen to the player cards
 var _dir_queue: Array = []     # cards waiting for their signature check
 var _card_t := 0.0             # seconds until this phone's card is published again
-var _card_sig := ""            # the name|outfit last published
+var _card_sig := ""            # what the card last published shows (card_key)
+var _card_ts := 0              # its time: each new card is at least a second later (others keep the newest)
 var _join := {}                # {"code", "key", "t", "ask_t"}: the custom-room join in progress
 
 
@@ -291,8 +306,9 @@ func _process(delta: float) -> void:
 			join_state = "none"
 			room_changed.emit()
 	_card_t -= delta
-	var card_sig := String(Game.profile.name) + "|" + String(Game.profile.bundle)
-	if _card_t <= 0.0 or card_sig != _card_sig:
+	if card_key(my_card()) != _card_sig:
+		_card_t = minf(_card_t, CARD_CHANGE_S)
+	if _card_t <= 0.0:
 		_publish_card()
 	var checked := 0
 	while not _dir_queue.is_empty() and checked < CARDS_PER_FRAME:
@@ -501,8 +517,8 @@ func _on_inbox(d: Dictionary) -> void:
 	_inbox_budget -= 1.0
 	match String(d.get("t", "")):
 		"inv":
-			if typeof(d.get("sec")) != TYPE_STRING:
-				return
+			if typeof(d.get("sec")) != TYPE_STRING or Game.is_blocked(from):
+				return                   # a blocked player's challenge is ignored (no answer)
 			var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.sec)))
 			if sec.size() != 80:
 				return
@@ -672,6 +688,16 @@ func friend_asked(peer_id: String) -> bool:
 	return (Game.profile.friend_out as Dictionary).has(peer_id)
 
 
+## Takes back a friend request this phone sent (blocking that player): no longer waiting for an
+## answer here, and its retained copy on the broker is deleted, so it does not reach them later.
+func withdraw_request(to: String) -> void:
+	if (Game.profile.friend_out as Dictionary).erase(to):
+		Game.save_profile()
+	if _connected and Game.is_player_id(to) and my_id != "":
+		_publish(ROOT + "/fr/" + to + "/" + my_id, PackedByteArray(), true)
+	friends_changed.emit()
+
+
 func answer_friend(peer_id: String, accept: bool) -> void:
 	if not friend_requests.has(peer_id):
 		return
@@ -729,8 +755,28 @@ static func verify_signed(pk: String, text: String, sig: String) -> bool:
 	return Crypto.new().verify(HashingContext.HASH_SHA256, text.sha256_buffer(), raw, pub)
 
 
+## What a v1 card signs (builds from before card v2 check only this; v2 cards sign it as "sig" too).
 static func card_text(id: String, who: String, bundle: String, ts: int) -> String:
 	return "card|%s|%s|%s|%d" % [id, who, bundle, ts]
+
+
+## What a v2 card signs ("sig2"): every field it shows, so changing any of them breaks it.
+static func card2_text(id: String, who: String, bundle: String, avatar: String, banner: String, level: int,
+		signature: String, ts: int) -> String:
+	return "card2|%s|%s|%s|%s|%s|%d|%s|%d" % [id, who, bundle, avatar, banner, level, signature, ts]
+
+
+## Everything this phone's card shows besides its id, public key and time: the whole public part
+## of the profile (name, outfit, profile picture, name card banner, level, signature line).
+static func my_card() -> Dictionary:
+	var p: Dictionary = Game.profile
+	return {"name": String(p.name), "bundle": String(p.bundle), "avatar": String(p.avatar), "banner": String(p.banner),
+		"level": clampi(Game.level(), 1, CARD_LEVEL_MAX), "signature": String(p.signature)}
+
+
+## A card's content in one string: a change of any field publishes the card again.
+static func card_key(c: Dictionary) -> String:
+	return "%s|%s|%s|%s|%d|%s" % [c.name, c.bundle, c.avatar, c.banner, int(c.level), c.signature]
 
 
 static func waiting_text(kind: String, from: String, to: String, ts: int) -> String:
@@ -741,12 +787,25 @@ func _publish_card() -> void:
 	_card_t = CARD_REFRESH_S
 	if not _connected or _key == null or my_id == "":
 		return
-	var who := String(Game.profile.name)
-	var b := String(Game.profile.bundle)
-	_card_sig = who + "|" + b
-	var ts := int(Time.get_unix_time_from_system())
-	_publish(ROOT + "/p/" + my_id, JSON.stringify({"t": "card", "id": my_id, "name": who, "bundle": b, "pk": _pk_pem,
-		"ts": ts, "sig": _sign(card_text(my_id, who, b, ts))}).to_utf8_buffer(), true)
+	var c := my_card()
+	_card_sig = card_key(c)
+	_card_ts = maxi(int(Time.get_unix_time_from_system()), _card_ts + 1)
+	_publish(ROOT + "/p/" + my_id, card_json(c, my_id, _pk_pem, _card_ts, _key).to_utf8_buffer(), true)
+
+
+## A signed v2 card as published (`key` is the private key of `pk`; tests make cards with it too).
+static func card_json(c: Dictionary, id: String, pk: String, ts: int, key: CryptoKey) -> String:
+	var who := String(c.name)
+	var b := String(c.bundle)
+	var level := int(c.level)
+	return JSON.stringify({"t": "card", "v": 2, "id": id, "name": who, "bundle": b, "avatar": String(c.avatar),
+		"banner": String(c.banner), "level": level, "signature": String(c.signature), "pk": pk, "ts": ts,
+		"sig": _sign_with(key, card_text(id, who, b, ts)),
+		"sig2": _sign_with(key, card2_text(id, who, b, String(c.avatar), String(c.banner), level, String(c.signature), ts))})
+
+
+static func _sign_with(key: CryptoKey, text: String) -> String:
+	return Marshalls.raw_to_base64(Crypto.new().sign(HashingContext.HASH_SHA256, text.sha256_buffer(), key))
 
 
 ## A friend request ("frq") or its acceptance ("fra") that waits for `to` as a retained message.
@@ -769,7 +828,16 @@ func _on_card(topic: String, payload: PackedByteArray) -> void:
 		_dir_queue.append(payload)
 
 
+## A card off the broker (anyone can publish one): checked field by field, its signature verified
+## (v2: "sig2" over every field; a card without "v" is v1: "sig" over the name, outfit and time),
+## then listed with every shown value cleaned. A card over MAX_MESSAGE bytes, wrong types, an
+## over-long field, a "|" inside a v2 field (it would blur where the signed fields part) or a level
+## that is not a whole number from 0 up reject the whole card; an avatar or banner this build does
+## not have shows as the default one (a newer build may have more), the level is kept to
+## 1..CARD_LEVEL_MAX and the signature goes through Game.clean_text (SIGNATURE_MAX).
 func _check_card(payload: PackedByteArray) -> void:
+	if payload.size() > MAX_MESSAGE:
+		return
 	var d: Variant = JSON.parse_string(payload.get_string_from_utf8())
 	if not (d is Dictionary) or String((d as Dictionary).get("t", "")) != "card":
 		return
@@ -778,6 +846,22 @@ func _check_card(payload: PackedByteArray) -> void:
 			return
 	if not (d.get("ts") is float or d.get("ts") is int):
 		return
+	var ver: Variant = d.get("v", 1)
+	if not (ver is float or ver is int) or ((d as Dictionary).has("v") and float(ver) < 2.0):
+		return
+	var v2 := float(ver) >= 2.0
+	var level := 0
+	if v2:
+		for k in ["avatar", "banner", "signature", "sig2"]:
+			if typeof(d.get(k)) != TYPE_STRING:
+				return
+		for k in ["name", "bundle", "avatar", "banner", "signature"]:
+			if "|" in String(d[k]) or (k != "name" and k != "bundle" and String(d[k]).length() > CARD_FIELD_MAX):
+				return
+		var lv: Variant = d.get("level")
+		if not (lv is float or lv is int) or float(lv) != floorf(float(lv)) or float(lv) < 0.0 or float(lv) > 1.0e9:
+			return
+		level = int(lv)
 	var id := String(d.id)
 	var ts := int(d.ts)
 	var now := int(Time.get_unix_time_from_system())
@@ -785,11 +869,21 @@ func _check_card(payload: PackedByteArray) -> void:
 		return
 	if directory.has(id) and int(directory[id].ts) >= ts:
 		return
-	if not verify_signed(String(d.pk), card_text(id, String(d.name), String(d.bundle), ts), String(d.sig)):
+	if v2:
+		if not verify_signed(String(d.pk), card2_text(id, String(d.name), String(d.bundle), String(d.avatar), String(d.banner),
+				level, String(d.signature), ts), String(d.sig2)):
+			return
+	elif not verify_signed(String(d.pk), card_text(id, String(d.name), String(d.bundle), ts), String(d.sig)):
 		return
 	var who := Game.clean_name(String(d.name))
+	var avatar := String(d.avatar) if v2 else ""
+	var banner := String(d.banner) if v2 else ""
 	directory[id] = {"name": who if who != "" else "PLAYER", "bundle": String(CharacterModel.bundle_info(String(d.bundle)).id),
-		"pk": String(d.pk), "ts": ts}
+		"pk": String(d.pk), "ts": ts, "v": 2 if v2 else 1,
+		"avatar": avatar if avatar in Game.avatar_ids() else String(Game.DEFAULT_PROFILE.avatar),
+		"banner": banner if banner in Game.BANNERS else String(Game.DEFAULT_PROFILE.banner),
+		"level": clampi(level, 1, CARD_LEVEL_MAX) if v2 else 0,
+		"signature": Game.clean_text(String(d.signature), Game.SIGNATURE_MAX) if v2 else ""}
 	if directory.size() > MAX_DIRECTORY:
 		var oldest := ""
 		for k: String in directory:
@@ -888,7 +982,7 @@ func leave_join() -> void:
 
 func _on_room_ask(d: Dictionary) -> void:
 	var from := String(d.get("from", "")).left(32)
-	if String(d.get("t", "")) != "ask" or from == "" or from == my_id or _inbox_budget < 1.0:
+	if String(d.get("t", "")) != "ask" or from == "" or from == my_id or _inbox_budget < 1.0 or Game.is_blocked(from):
 		return
 	_inbox_budget -= 1.0
 	if typeof(d.get("pk")) != TYPE_STRING or String(d.pk).length() > 1200 or from != String(d.pk).sha256_text().left(32):

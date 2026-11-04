@@ -73,6 +73,8 @@ var _net_timeup_t := -1.0
 var _break_t := 0.0
 var _bot_pick_t := -1.0
 var _forfeit := false            # the other phone left: the match is ours
+var _deaths := 0                 # times this phone's player went down (the result's "deaths")
+var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 
 
 func _ready() -> void:
@@ -356,6 +358,7 @@ func _spawn_fighters() -> void:
 	if online:
 		bot.display_name = String(Game.session.opponent.get("name", "PLAYER"))
 		bot_bundle = String(Game.session.opponent.get("bundle", "default"))
+		_enemy_id = String(Game.session.opponent.get("id", ""))
 	bot.setup_fighter(bot_bundle, pick)
 	bot.aim_yaw = map.spawn_a_yaw if guest else map.spawn_b_yaw
 	bot.configure(int(Game.settings.difficulty), player)
@@ -698,6 +701,8 @@ func _freeze_all() -> void:
 
 func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	Game.mark("%s eliminated" % ("player" if victim == player else "bot"))
+	if victim == player:
+		_deaths += 1
 	if online and victim == player:
 		Game.session.send_event("died", [headshot])
 	var weapon_icon := ""
@@ -821,6 +826,7 @@ func _show_results() -> void:
 		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
 		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
 		"difficulty": "ONLINE" if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
+		"shots": int(st.shots), "hits": int(st.hits), "deaths": _deaths, "enemy_id": _enemy_id,
 	}
 	if not _invalid:
 		Game.record_match(result)

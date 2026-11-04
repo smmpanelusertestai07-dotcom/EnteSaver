@@ -81,10 +81,12 @@ const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
 const GRAPHICS_NAMES := ["LOW", "MEDIUM", "HIGH", "EXTREME"]
 const XP_PER_LEVEL := 500
 
-const PROFILE_VERSION := 2
+const PROFILE_VERSION := 3
 ## A new player's profile. Loading keeps only these keys, with these value types (see
 ## _merge_into), so every key a save may hold is listed here; the HMAC signature covers the whole
-## dictionary. Player ids are the 32 hex characters of Cloud.my_id.
+## dictionary. Player ids are the 32 hex characters of Cloud.my_id. The profile page
+## (scripts/lobby_profile.gd) shows them: CAREER the counters, HISTORY "history", NAME CARD the
+## avatar, banner and signature, BLOCKED "blocked".
 const DEFAULT_PROFILE := {
 	"profile_version": PROFILE_VERSION,
 	"name": "ROOKIE", "bundle": "default", "matches": 0, "wins": 0, "kills": 0, "xp": 0,
@@ -103,7 +105,11 @@ const DEFAULT_PROFILE := {
 	"friend_in": {},             # id -> {"name", "t"}: friend requests to answer (t: unix time)
 	"friend_out": {},            # id -> {"name", "t"}: friend requests sent, not answered yet
 	"recent": [],                # [{"id", "name", "t"}]: the latest online opponents, newest first
-	"blocked": [],               # ids whose invites and friend requests are ignored
+	"blocked": [],               # ids whose invites and friend requests are ignored (see block())
+	# The last counted matches, newest first (record_match, MAX_HISTORY at most): [{"result" (won,
+	# lost or draw), "mode", "enemy" (name), "id" (an online opponent's id, else ""), "score" and
+	# "enemy_score" (rounds), "kills", "damage", "headshots", "t" (unix time)}].
+	"history": [],
 }
 ## Lifetime counters (whole numbers, 0..COUNTER_MAX) and the ones kept per mode (in "modes").
 const PROFILE_COUNTERS := ["matches", "wins", "kills", "xp", "deaths", "headshots", "damage", "shots", "hits",
@@ -117,6 +123,8 @@ const MAX_FRIENDS := 50
 const MAX_REQUESTS := 50            # each of friend_in and friend_out
 const MAX_RECENT := 20
 const MAX_BLOCKED := 50
+const MAX_HISTORY := 20
+const HISTORY_RESULTS := ["won", "lost", "draw"]
 ## The name card backgrounds, in the order of their art assets/ui/banners/banner_<n>.png
 ## (tools/media/make_banners.py: EMBER RIDGE, GOLD RUSH, HIVE, CONTOUR, SHARDS, SCOPE; see
 ## Login.banner_texture).
@@ -348,6 +356,9 @@ func _migrate_profile(data: Dictionary) -> void:
 		data["guest_ok"] = _flag(data.get("name_set"))
 		data["modes"] = {"training": {"matches": data.get("matches", 0), "wins": data.get("wins", 0),
 			"kills": data.get("kills", 0)}}
+	if int(version) < 3:
+		# Version 3 keeps the last matches (the profile page's HISTORY): none were kept before.
+		data["history"] = []
 	data["profile_version"] = PROFILE_VERSION
 
 
@@ -399,6 +410,33 @@ func _sanitize_profile() -> void:
 			if blocked.size() < MAX_BLOCKED and is_player_id(id) and not blocked.has(id):
 				blocked.append(String(id))
 	profile.blocked = blocked
+	var history := []
+	var saved_history: Variant = profile.get("history")
+	if saved_history is Array:
+		for e: Variant in saved_history:
+			var h := _history_entry(e)
+			if not h.is_empty() and history.size() < MAX_HISTORY:
+				history.append(h)
+	profile.history = history
+
+
+## One HISTORY entry from saved or untrusted data (see DEFAULT_PROFILE "history"): every value
+## checked, names cleaned; {} when it is not one (an unknown result).
+func _history_entry(e: Variant) -> Dictionary:
+	if not e is Dictionary:
+		return {}
+	var d := e as Dictionary
+	var r: Variant = d.get("result")
+	if typeof(r) != TYPE_STRING or not String(r) in HISTORY_RESULTS:
+		return {}
+	var m: Variant = d.get("mode")
+	var who := clean_name(String(d.get("enemy"))) if typeof(d.get("enemy")) == TYPE_STRING else ""
+	var id: Variant = d.get("id")
+	return {"result": String(r), "mode": String(m) if typeof(m) == TYPE_STRING and MODE_NAMES.has(m) else DEFAULT_MODE,
+		"enemy": who if who != "" else "PLAYER", "id": String(id) if is_player_id(id) else "",
+		"score": _count(d.get("score"), 99), "enemy_score": _count(d.get("enemy_score"), 99),
+		"kills": _count(d.get("kills"), 999), "damage": _count(d.get("damage"), 999999),
+		"headshots": _count(d.get("headshots"), 9999), "t": _count(d.get("t"), UNIX_MAX)}
 
 
 ## A whole number 0..hi from a saved value (anything but a number counts as 0).
@@ -454,6 +492,28 @@ func add_friend(id: String, friend_name: String) -> void:
 
 func is_blocked(id: String) -> bool:
 	return (profile.blocked as Array).has(id)
+
+
+## Blocks a player: their challenges and friend requests are ignored (Cloud) and the lobby's
+## lists leave them out; a friend stops being one and requests either way are dropped. At most
+## MAX_BLOCKED players: blocking one more unblocks the oldest.
+func block(id: String) -> void:
+	if not is_player_id(id) or is_blocked(id):
+		return
+	var b: Array = profile.blocked
+	b.append(id)
+	while b.size() > MAX_BLOCKED:
+		b.pop_front()
+	(profile.friends as Dictionary).erase(id)
+	(profile.friend_in as Dictionary).erase(id)
+	(profile.friend_out as Dictionary).erase(id)
+	save_profile()
+
+
+func unblock(id: String) -> void:
+	if (profile.blocked as Array).has(id):
+		(profile.blocked as Array).erase(id)
+		save_profile()
 
 
 func remove_friend(id: String) -> void:
@@ -613,7 +673,8 @@ func count_match(m := DEFAULT_MODE) -> void:
 
 
 ## The end of a counted fight: wins, kills and XP, in the totals and in the numbers of the
-## result's mode ("mode_id", see ResultsScreen).
+## result's mode ("mode_id", see ResultsScreen); the profile page's CAREER counters, a HISTORY
+## entry and, online, the opponent among the recent players.
 func record_match(result: Dictionary) -> void:
 	last_result = result
 	var c := _mode_counts(String(result.get("mode_id", DEFAULT_MODE)))
@@ -624,6 +685,24 @@ func record_match(result: Dictionary) -> void:
 	profile.kills = int(profile.kills) + kills
 	c.kills = int(c.kills) + kills
 	profile.xp = int(profile.xp) + int(result.get("xp", 0))
+	# CAREER: [profile counter, result key] (the arena's result, see ResultsScreen.setup()).
+	for k: Array in [["deaths", "deaths"], ["headshots", "headshots"], ["damage", "damage"], ["shots", "shots"],
+			["hits", "hits"], ["rounds_won", "score_player"], ["rounds_lost", "score_bot"], ["time_played", "time"]]:
+		profile[k[0]] = mini(int(profile[k[0]]) + _count(result.get(k[1])), COUNTER_MAX)
+	profile.hits = mini(int(profile.hits), int(profile.shots))
+	profile.headshots = mini(int(profile.headshots), int(profile.hits))
+	var entry := _history_entry({"result": "draw" if result.get("draw", false) else ("won" if result.get("won", false) else "lost"),
+		"mode": result.get("mode_id"), "enemy": result.get("enemy"), "id": result.get("enemy_id"),
+		"score": result.get("score_player"), "enemy_score": result.get("score_bot"), "kills": result.get("kills"),
+		"damage": result.get("damage"), "headshots": result.get("headshots"), "t": int(Time.get_unix_time_from_system())})
+	var history: Array = profile.history
+	history.push_front(entry)
+	history.resize(mini(history.size(), MAX_HISTORY))
+	if entry.id != "":
+		var recent: Array = (profile.recent as Array).filter(func(r: Dictionary) -> bool: return r.id != entry.id)
+		recent.push_front({"id": entry.id, "name": entry.enemy, "t": entry.t})
+		recent.resize(mini(recent.size(), MAX_RECENT))
+		profile.recent = recent
 	save_profile()
 
 

@@ -120,16 +120,17 @@ static func privacy_sections() -> Array:
 		["", "Wolf Arena has no accounts and no servers of its own. This is everything it keeps and everything "
 			+ "it shares."],
 		["Stored only on this phone", "Your player name, profile picture, name card and outfit, your settings and "
-			+ "control layout, your match stats and level, your friends list and friend requests, and the random "
-			+ "key pair behind your player ID. They stay in the game's private storage on this phone and are left "
+			+ "control layout, your match stats, match history and level, your friends list, friend requests and "
+			+ "blocked players, and the random key pair behind your player ID. They stay in the game's private storage on this phone and are left "
 			+ "out of phone backups. To spot edited saves, the game signs them with a key made from this phone's "
 			+ "device ID; that ID never leaves the phone."],
 		["Shared only when online", ("While you play and the phone has internet, the game connects to a free public "
 			+ "message relay (%s) so friends can see you online, add you and challenge you. It shares your random "
-			+ "player ID, name, outfit and public key there, and the time you were last online: your player card, "
-			+ "which the relay keeps so friends can find you and send you requests while you are offline. Invites "
-			+ "and friend requests carry the same. Like any internet service, the relay sees your phone's internet "
-			+ "(IP) address while it is connected.") % relay],
+			+ "player ID, name, outfit and public key there, your name card (profile picture, banner and signature "
+			+ "line) and level, and the time you were last online: your player card, which the relay keeps so "
+			+ "friends can find you and send you requests while you are offline. Invites and friend requests carry "
+			+ "no more than that. Like any internet service, the relay sees your phone's internet (IP) address while "
+			+ "it is connected.") % relay],
 		["Matches are end-to-end encrypted", "Everything sent during an online match is encrypted on the two phones, "
 			+ "with keys only they hold, before it leaves them: the relay only passes on scrambled data."],
 		["What the game never does", "No account, no e-mail address or phone number, no ads, no analytics or "

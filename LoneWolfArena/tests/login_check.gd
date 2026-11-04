@@ -13,8 +13,8 @@ extends Node
 ## - the intro sting: automated runs skip it, a tap before SKIP_AFTER is ignored and one after it
 ##   skips, it ends by itself, and IntroSting.playing() follows it;
 ## - the Privacy Notice stays true to scripts/cloud.gd: every relay host, the card and request
-##   ages, and the player card still carries what the notice lists (Cloud.card_text). Change the
-##   notice (Login.privacy_sections) together with what goes online.
+##   ages, and the player card still carries what the notice lists (Cloud.card_text, card2_text,
+##   my_card). Change the notice (Login.privacy_sections) together with what goes online.
 ## Returns the number of failed checks.
 
 var _fails := 0
@@ -46,15 +46,20 @@ func _check_texts() -> void:
 	_check(notice.contains("%d days after you were last online" % roundi(Cloud.CARD_MAX_AGE_S / 86400.0))
 		and notice.contains("dropped after %d days" % roundi(Cloud.REQUEST_MAX_AGE_S / 86400.0)),
 		"the Privacy Notice gives the card and request ages of cloud.gd")
-	# What the player card carries (Cloud.card_text: id, name, outfit, time; the card adds the
-	# public key) is what the notice lists. A card that carries more needs the notice changed.
-	var card_args := -1
+	# What the player card carries (Cloud.card_text: id, name, outfit, time; card v2's card2_text adds
+	# the picture, banner, level and signature from Cloud.my_card; the card adds the public key) is
+	# what the notice lists. A card that carries more needs the notice changed.
+	var card_args := {}
 	for m: Dictionary in (load("res://scripts/cloud.gd") as Script).get_script_method_list():
-		if String(m.name) == "card_text":
-			card_args = (m.args as Array).size()
-	_check(card_args == 4, "the player card carries the ID, name, outfit and time the Privacy Notice lists (card_text has %d fields)"
-		% card_args)
-	for what: String in ["random player ID, name, outfit and public key", "the time you were last online", "end-to-end encrypted",
+		if String(m.name) in ["card_text", "card2_text"]:
+			card_args[String(m.name)] = (m.args as Array).size()
+	_check(card_args.get("card_text") == 4 and card_args.get("card2_text") == 8,
+		"the player card carries the ID, name, outfit, name card, level and time the Privacy Notice lists (%s)" % str(card_args))
+	var shown := Cloud.my_card().keys()
+	shown.sort()
+	_check(shown == ["avatar", "banner", "bundle", "level", "name", "signature"], "the player card shows what the notice lists (%s)" % str(shown))
+	for what: String in ["random player ID, name, outfit and public key", "name card (profile picture, banner and signature line) and level",
+			"the time you were last online", "match history", "blocked players", "end-to-end encrypted",
 			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data"]:
 		_check(notice.contains(what), "the Privacy Notice says: %s" % what)
 	var terms := ""

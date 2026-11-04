@@ -4,7 +4,7 @@ extends Control
 ## built by arena.gd: won, draw, invalid, kills, damage, headshots, accuracy, time, xp, enemy,
 ## mode (the name shown: TRAINING GROUND / LONE WOLF), mode_id ("training" / "lonewolf"), map,
 ## weapon, score_player, score_bot, hp_left, difficulty (the bot's level, or ONLINE against a
-## player), taken.
+## player), taken; shots, hits, deaths and enemy_id go to the profile (Game.record_match).
 ## Layout (reference result screens, original art): mode + map top-left; a medal emblem with
 ## the big title (gold VICTORY / grey DEFEAT / white DRAW / red INVALID) top centre; the round
 ## score; a stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY, TIME, HP LEFT) with your

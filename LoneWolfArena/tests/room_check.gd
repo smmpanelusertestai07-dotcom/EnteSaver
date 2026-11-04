@@ -1,13 +1,20 @@
 extends Node
 ## Friends and custom rooms end to end (Cloud through tests/mqtt_mock.gd, started by
 ## tools/qa/run_checks.sh). The guest (LW_NET_ROLE=guest) asks the host to be friends and the host
-## accepts; the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
+## accepts; each phone lists the other's signed player card (v2: picture, banner, level and
+## signature, kept by the broker) and sees a new banner arrive once the other phone changes it;
+## the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
 ## and ammo); the guest tries a wrong password (refused), then the right one; the host sees it in
 ## the room and starts; both play the match with the room's rules (the host's walls never run out)
 ## and the host wins. Prints "ROOM CHECK DONE bad=N".
 
 const CODE := "424242"
 const PIN := "4821"
+## Each phone's name card (its banner changes to "then" once it has seen the other's card).
+const CARDS := {
+	"host": {"avatar": "neon", "banner": "hive", "signature": "HOST SIDE", "xp": 5740, "then": "shards"},
+	"guest": {"avatar": "royal", "banner": "scope", "signature": "GUEST SIDE", "xp": 0, "then": "contour"},
+}
 
 var bad := 0
 var at: Node
@@ -16,6 +23,10 @@ var at: Node
 func run(autotest: Node) -> int:
 	at = autotest
 	var host := OS.get_environment("LW_NET_ROLE") == "host"
+	var me: Dictionary = CARDS["host" if host else "guest"]
+	var them: Dictionary = CARDS["guest" if host else "host"]
+	for k: String in ["avatar", "banner", "signature", "xp"]:
+		Game.profile[k] = me[k]
 	var cloud := Game.cloud_service()
 	cloud.start_lobby()
 	var started := [false]
@@ -35,12 +46,23 @@ func run(autotest: Node) -> int:
 		_fail("not friends after the request was accepted")
 	if not cloud.friend_requests.is_empty() or not (Game.profile.friend_out as Dictionary).is_empty():
 		_fail("friend requests left over after the answer")
-	# ALL PLAYERS: the other phone's signed card is kept by the broker and listed.
+	# ALL PLAYERS: the other phone's signed card (v2) is kept by the broker and listed whole; a
+	# change of its banner publishes it again.
 	cloud.start_directory()
 	if not await _until(func() -> bool: return cloud.directory.has(other), 20.0):
 		_fail("the other player's card never arrived")
-	elif String(cloud.directory[other].name) != String(cloud.peers[other].name):
-		_fail("the card's name differs from the lobby's")
+	else:
+		var card: Dictionary = cloud.directory[other]
+		var level := clampi(1 + int(them.xp) / Game.XP_PER_LEVEL, 1, Cloud.CARD_LEVEL_MAX)
+		if String(card.name) != String(cloud.peers[other].name):
+			_fail("the card's name differs from the lobby's")
+		if int(card.v) != 2 or card.avatar != them.avatar or card.banner != them.banner or int(card.level) != level \
+				or card.signature != them.signature:
+			_fail("the other player's v2 card did not come through whole: %s" % str(card))
+		at.log_line("card v2: picture %s, banner %s, LV %d, \"%s\"" % [card.avatar, card.banner, int(card.level), card.signature])
+		Game.profile.banner = me.then
+		if not await _until(func() -> bool: return String((cloud.directory.get(other, {}) as Dictionary).get("banner", "")) == them.then, 20.0):
+			_fail("the other player's new banner never arrived (a changed card is published again)")
 	cloud.stop_directory()
 	at.log_line("friends: %s (code %s)" % [Game.is_friend(other), Cloud.friend_code(other)])
 	# Custom room.
