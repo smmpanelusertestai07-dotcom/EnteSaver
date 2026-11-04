@@ -73,7 +73,7 @@ func run(autotest: Node) -> int:
 		if p.shields < 9 or p.weapon().reserve < 300:
 			_fail("unlimited walls / ammo did not top up (walls %d, reserve %d)" % [p.shields, p.weapon().reserve])
 		await at.wait(1.0)
-		b.take_damage(9999.0, "head", p, p.global_position)
+		await _shoot_down(at, arena, p, b)
 	if not await _until(func() -> bool: return bool(arena.get("_result_shown")), 30.0):
 		return _done("the match did not end")
 	var winner: Variant = arena.get("_winner")
@@ -104,3 +104,14 @@ func _done(error: String) -> int:
 		_fail(error)
 	at.log_line("ROOM CHECK DONE bad=%d" % bad)
 	return bad
+
+## The other phone takes only real hits (one bullet of the round's gun at most, at most as fast
+## as it fires), so the host lands real headshots until the remote player goes down.
+func _shoot_down(runner: Node, match_arena: Node, shooter: Fighter, target: Fighter) -> void:
+	var d: Dictionary = Weapons.DEFS[String(match_arena.call("_round_gun"))]
+	var hit := float(d.damage) * float(d.head_mult) * Weapons.pen_mult(d, "head")
+	for _i in 20:
+		if not target.alive:
+			return
+		target.take_damage(hit, "head", shooter, shooter.global_position)
+		await runner.wait(maxf(float(d.interval), 0.12))

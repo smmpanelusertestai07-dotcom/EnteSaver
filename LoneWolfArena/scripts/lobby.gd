@@ -743,7 +743,7 @@ func _build_left_menu(root: Control) -> void:
 	root.add_child(menu)
 	var items := [
 		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
-		["PLAY WITH FRIENDS", "v_player", "FriendsButton", _open_friends],
+		["ONLINE 1 VS 1", "v_player", "FriendsButton", _open_friends],
 		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],

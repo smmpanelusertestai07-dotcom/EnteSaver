@@ -15,28 +15,28 @@ extends Control
 
 signal pause_pressed
 
-const BUTTONS := ["fire_r", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook", "settings"]
+const BUTTONS := ["fire_r", "fire_l", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook", "settings"]
 const GLYPHS := {
-	"fire_r": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
+	"fire_r": "v_fire", "fire_l": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
 	"prone": "stance_prone", "sprint": "stance_sprint", "medkit": "v_medkit", "wall": "v_wall",
 	"grenade": "item_grenade", "settings": "v_settings", "freelook": "v_eye",
 }
 const GLYPH_FALLBACK := {"prone": "v_prone", "sprint": "v_sprint", "jump": "v_chevron"}
 const GLYPH_SCALE := {
-	"fire_r": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
+	"fire_r": 0.54, "fire_l": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
 	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
-const SHORT_LABELS := {"settings": "MENU"}
+const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
 const DMG_LIFE := 0.95
 const DMG_MERGE := 0.32            # hits on the same target within this much GAME time add up into one number
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
 const KILL_BANNER_TIME := 2.8
 const KILL_X_TIME := 0.9
-const SPRINT_PUSH := 1.12          # joystick deflection (in ring radii) that counts as past the ring
-const SPRINT_HOLD := 0.3           # seconds past the ring before the sprint locks
+const SPRINT_PUSH := 1.0           # joystick deflection (in ring radii) that counts as past the ring
+const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint locks (pushing further = run)
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
 const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
@@ -401,7 +401,7 @@ func _press(id: String, index: int) -> void:
 	_pressed[id] = 0.16
 	_touches[index] = {"kind": "ui", "id": id}
 	match id:
-		"fire_r":
+		"fire_r", "fire_l":
 			_touches[index] = {"kind": "fire", "id": id}
 			_held[id] = true
 			_cancel_auto_sprint()
@@ -460,7 +460,8 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 			player.add_free_look(rel)
 		"fire":
 			_touches[index]["pos"] = pos
-			player.add_look(rel, true)
+			if String(_touches[index].id) == "fire_r":
+				player.add_look(rel, true)
 
 
 ## A held FIRE button moves with the finger like a joystick knob, as in the reference mode:
@@ -774,7 +775,7 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	if player != null and not editor_mode:
 		var ws := player.weapon()
 		match id:
-			"fire_r":
+			"fire_r", "fire_l":
 				en = not player.hold_fire
 			"scope":
 				act = player.ads
@@ -807,8 +808,9 @@ func _draw_button(id: String, vs: Vector2) -> void:
 		HudDraw.glyph_button(self, c, r, _glyph(id), o, pressed)
 		return
 	var glyph := _glyph(id)
-	if id == "fire_r" and not editor_mode:
-		c = _fire_center(id, c, r, vs)
+	if (id == "fire_r" or id == "fire_l") and not editor_mode:
+		if id == "fire_r":
+			c = _fire_center(id, c, r, vs)
 		if player != null and player.ready_item != "":
 			glyph = _glyph(player.ready_item)   # a wall or grenade in hand: FIRE uses it
 		elif player != null and Weapons.is_melee(player.weapon().def):

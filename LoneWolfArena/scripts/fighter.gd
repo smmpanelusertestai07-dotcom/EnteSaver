@@ -735,8 +735,8 @@ func move_speed() -> float:
 		_:
 			if sprinting and move_dir.y > 0.3:
 				speed = SPRINT_SPEED
-			elif deflect < 0.6:
-				speed = WALK_SPEED * deflect / 0.6
+			elif deflect < 0.45:
+				speed = WALK_SPEED * deflect / 0.45      # a light push walks, a normal push runs
 	var d := weapon().def
 	speed *= float(d.get("move", 1.0))
 	if ads:
