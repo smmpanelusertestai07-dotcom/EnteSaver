@@ -306,7 +306,7 @@ func edit_name(first := false) -> void:
 	le.text = String(Game.profile.name)
 	le.max_length = 14
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	le.custom_minimum_size = Vector2(0, 54)
+	le.custom_minimum_size = Vector2(0, 56)
 	le.virtual_keyboard_enabled = true
 	le.virtual_keyboard_show_on_focus = true
 	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
@@ -318,7 +318,7 @@ func edit_name(first := false) -> void:
 	le.add_theme_color_override("font_color", UI.TEXT)
 	le.add_theme_color_override("caret_color", UI.ACCENT)
 	line.add_child(le)
-	var dice := UI.button("RANDOM", 20, "light", Vector2(150, 54))
+	var dice := UI.button("RANDOM", 20, "light", Vector2(150, 56))
 	dice.name = "NameRandom"
 	dice.pressed.connect(func() -> void:
 		le.text = Game.random_name()
@@ -329,14 +329,14 @@ func edit_name(first := false) -> void:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 12)
-	var cancel := UI.button("KEEP" if first else "CANCEL", 20, "light", Vector2(170, 52))
+	var cancel := UI.button("KEEP" if first else "CANCEL", 20, "light", Vector2(170, 56))
 	var keep := func() -> void:
 		if first:
 			Game.profile.name_set = true
 			Game.save_profile()
 		close_modal()
 	cancel.pressed.connect(keep)
-	var ok := UI.button("OK", 22, "primary", Vector2(170, 52))
+	var ok := UI.button("OK", 22, "primary", Vector2(170, 56))
 	ok.name = "NameOk"
 	var apply := func() -> void:
 		var n := Game.clean_name(le.text)
@@ -444,11 +444,11 @@ func confirm_quit() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 14)
 	v.add_child(row)
-	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 52))
+	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 56))
 	cancel.name = "QuitCancel"
 	cancel.pressed.connect(close_modal)
 	row.add_child(cancel)
-	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 52))
+	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 56))
 	quit.name = "QuitConfirm"
 	quit.pressed.connect(func() -> void: lobby.get_tree().quit())
 	row.add_child(quit)
