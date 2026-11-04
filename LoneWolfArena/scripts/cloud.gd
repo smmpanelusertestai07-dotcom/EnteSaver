@@ -155,6 +155,19 @@ func _make_key() -> void:
 	_keygen_out.append(Crypto.new().generate_rsa(2048))     # appended once; read on the main thread
 
 
+## Loads this phone's key, or starts making it, WITHOUT going online (the first profile setup
+## shows the player ID): my_id is set once the key exists; start_lobby() later reuses it.
+func prepare_identity() -> void:
+	if _key != null or _keygen != -1:
+		return
+	var saved := CryptoKey.new()
+	if FileAccess.file_exists(_key_path()) and saved.load(_key_path()) == OK:
+		_use_key(saved)
+		return
+	status = "preparing"
+	_keygen = WorkerThreadPool.add_task(_make_key)
+
+
 ## The phone keeps its key, so its id (and the friend code friends know it by) stays the same.
 ## Local test runs share one data folder: each role (LW_NET_ROLE) keeps its own.
 static func _key_path() -> String:

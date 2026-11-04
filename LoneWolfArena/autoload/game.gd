@@ -117,7 +117,10 @@ const MAX_FRIENDS := 50
 const MAX_REQUESTS := 50            # each of friend_in and friend_out
 const MAX_RECENT := 20
 const MAX_BLOCKED := 50
-const BANNERS := ["default"]
+## The name card backgrounds, in the order of their art assets/ui/banners/banner_<n>.png
+## (tools/media/make_banners.py: EMBER RIDGE, GOLD RUSH, HIVE, CONTOUR, SHARDS, SCOPE; see
+## Login.banner_texture).
+const BANNERS := ["default", "gold_rush", "hive", "contour", "shards", "scope"]
 
 var settings: Dictionary = {}
 ## The mode START plays (a key of MODE_NAMES), kept as the setting "mode": save_settings()
@@ -659,11 +662,16 @@ func mark_ui(what: String, item: CanvasItem, local_point: Vector2) -> void:
 	print("[LoneWolf] ui %s %d %d" % [what, roundi(p.x), roundi(p.y)])
 
 
-## Where a session starts once the boot screen is done. The guest login (PLAY AS GUEST, the
-## privacy notice) and the first profile setup come later as their own scene; until then this is
-## the lobby, as before.
+## Where a session starts once the boot screen is done: the guest login (scenes/login.tscn: PLAY
+## AS GUEST, then the first profile setup) until the player has passed it (profile.guest_ok),
+## the lobby after that. Automated runs always start in the lobby (their scripts expect it).
 func goto_login() -> void:
-	goto_lobby()
+	if bool(profile.get("guest_ok", false)) or autotest != "":
+		goto_lobby()
+		return
+	get_tree().paused = false
+	Engine.time_scale = 1.0
+	get_tree().change_scene_to_file("res://scenes/login.tscn")
 
 
 func goto_lobby() -> void:

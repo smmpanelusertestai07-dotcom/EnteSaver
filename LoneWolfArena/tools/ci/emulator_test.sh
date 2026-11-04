@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Installs the APK on a running Android emulator, launches the game, presses START,
-# plays a few seconds (hold FIRE, move, look) and collects screenshots + logcat.
+# Installs the APK on a running Android emulator, launches the game (intro sting, boot screen),
+# passes the first-run guest login (PLAY AS GUEST, then CONFIRM on the profile setup), presses
+# START, plays a few seconds (hold FIRE, move, look) and collects screenshots + logcat.
 # The game logs one-time "[LoneWolf] ..." markers, which are checked at the end.
 # Usage: emulator_test.sh <apk> <out_dir>
 set -u
@@ -40,18 +41,59 @@ adb shell wm density 280
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb logcat -c
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-wait_mark "lobby ready" 120
+# After the intro sting and the boot screen a fresh install opens the guest login; a player who
+# passed it before goes straight to the lobby.
+first=""
+for ((i = 0; i < 150; i += 2)); do
+  if has_mark "login ready"; then first=login; break; fi
+  if has_mark "lobby ready"; then first=lobby; break; fi
+  sleep 2
+done
+log "first screen: ${first:-none} after ${i}s"
 sleep 8
-shot 01_lobby
-read -r W H < <(python3 -c "import struct;d=open('$OUT/01_lobby.png','rb').read(24);print(*struct.unpack('>II',d[16:24]))")
+shot 01_start
+read -r W H < <(python3 -c "import struct;d=open('$OUT/01_start.png','rb').read(24);print(*struct.unpack('>II',d[16:24]))")
 log "screen ${W}x${H}"
 # Godot stretch: the virtual canvas is 720 px tall and its width expands to the aspect ratio.
 S=$(python3 -c "print($H/720.0)")
 VW=$(python3 -c "print($W/($H/720.0))")
 px() { python3 -c "print(int(round($1)))"; }
-# A fresh install first asks for a name: keep the offered one (OK) so START is free. The name
-# field has the focus, so the on-screen keyboard may be up: BACK closes only the keyboard then.
-if wait_mark "name prompt" 40; then
+# A text field with the focus may have the on-screen keyboard up: BACK closes only the keyboard.
+keyboard_away() {
+  if adb shell dumpsys input_method 2>/dev/null | grep -q "mInputShown=true"; then
+    log "keyboard shown: closing it"
+    adb shell input keyevent KEYCODE_BACK
+    sleep 2
+  fi
+}
+if [ "$first" = login ]; then
+  # PLAY AS GUEST: bottom centre, 150 px above the bottom edge.
+  read -r GX GY < <(ui_pos guest "$(px "$VW*0.5*$S")" "$(px "570*$S")")
+  for try in 1 2 3; do
+    log "tap PLAY AS GUEST at $GX,$GY"
+    adb shell input tap "$GX" "$GY"
+    wait_mark "profile setup" 60 && break
+  done
+  sleep 3
+  keyboard_away
+  shot 01b_profile
+  # CONFIRM keeps the offered name, picture and name card: bottom right of the centred box
+  # (1176 px plus a 32..110 px gap wide), 72 px above the bottom edge.
+  GAP=$(python3 -c "print(min(110, max(32, $VW - 1256)))")
+  read -r CX CY < <(ui_pos confirm "$(px "($VW*0.5+(1176+$GAP)*0.5-170)*$S")" "$(px "648*$S")")
+  for try in 1 2 3; do
+    log "tap CONFIRM at $CX,$CY"
+    adb shell input tap "$CX" "$CY"
+    wait_mark "profile created" 40 && break
+    keyboard_away
+  done
+  wait_mark "lobby ready" 120
+  sleep 8
+fi
+shot 01_lobby
+# Builds before the guest login asked for a name in the lobby on a fresh install: keep the
+# offered one (OK) so START is free (the profile setup sets the name, so this does not come).
+if ! has_mark "profile created" && wait_mark "name prompt" 40; then
   sleep 3
   if adb shell dumpsys input_method 2>/dev/null | grep -q "mInputShown=true"; then
     log "keyboard shown for the name field"
@@ -111,8 +153,11 @@ grep -iE " godot " "$OUT/logcat.txt" | grep -iE "error|script|OpenGL API" | head
 log "markers:"; cat "$OUT/markers.txt"
 log "crash lines: $(wc -l < "$OUT/crashes.txt")  godot error lines: $(wc -l < "$OUT/godot_errors.txt")"
 status=0
-for m in "lobby ready" "match started" "player fired" "player moved" "signature ok" "pause opened" "pause closed"; do
+for m in "intro done" "lobby ready" "match started" "player fired" "player moved" "signature ok" "pause opened" "pause closed"; do
   grep -q "\] $m" "$OUT/markers.txt" || { log "MISSING marker: $m"; status=3; }
 done
+if grep -q "\] login ready" "$OUT/markers.txt" && ! grep -q "\] profile created" "$OUT/markers.txt"; then
+  log "MISSING marker: profile created (the guest login was shown but not passed)"; status=3
+fi
 if [ "$(alive)" != "yes" ]; then log "GAME NOT RUNNING AT END"; status=2; fi
 exit $status
