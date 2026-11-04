@@ -33,6 +33,15 @@ func run(autotest: Node) -> int:
 			return _done("friend request not sent")
 	if not await _until(func() -> bool: return Game.is_friend(other), 20.0):
 		_fail("not friends after the request was accepted")
+	if not cloud.friend_requests.is_empty() or not (Game.profile.friend_out as Dictionary).is_empty():
+		_fail("friend requests left over after the answer")
+	# ALL PLAYERS: the other phone's signed card is kept by the broker and listed.
+	cloud.start_directory()
+	if not await _until(func() -> bool: return cloud.directory.has(other), 20.0):
+		_fail("the other player's card never arrived")
+	elif String(cloud.directory[other].name) != String(cloud.peers[other].name):
+		_fail("the card's name differs from the lobby's")
+	cloud.stop_directory()
 	at.log_line("friends: %s (code %s)" % [Game.is_friend(other), Cloud.friend_code(other)])
 	# Custom room.
 	if host:

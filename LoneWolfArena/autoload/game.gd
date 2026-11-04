@@ -432,6 +432,10 @@ func add_friend(id: String, friend_name: String) -> void:
 	save_profile()
 
 
+func is_blocked(id: String) -> bool:
+	return (profile.blocked as Array).has(id)
+
+
 func remove_friend(id: String) -> void:
 	if (profile.friends as Dictionary).erase(id):
 		save_profile()

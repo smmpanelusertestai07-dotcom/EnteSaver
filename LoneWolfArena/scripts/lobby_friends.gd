@@ -20,6 +20,8 @@ var _friend_query := ""                # FRIENDS tab search (an ID or a name)
 var _room_rules := Cloud.ROOM_RULES.duplicate()     # the next custom room's rules
 var _room_pin_draft := ""              # the password typed before a rule button rebuilt the tab
 var _room_join_code := ""              # the room this phone asked to join (for its status line)
+var _dir_on := false                   # this window asked the cloud for the player cards
+const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -52,6 +54,9 @@ func on_lobby_exit() -> void:
 
 ## Every frame: the open list follows the service (players, requests, invites).
 func process(delta: float) -> void:
+	if _dir_on and not (lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal)):
+		_dir_on = false
+		Game.cloud_service().stop_directory()
 	if _net_list and is_instance_valid(_net_list):
 		_net_refresh_t -= delta
 		if _net_refresh_t <= 0.0:
@@ -70,7 +75,9 @@ func open(kind := "online") -> void:
 	var svc: Node = _net_service()
 	if kind != "wifi":
 		Game.cloud_service().start_lobby()
-	var v := lobby.dialogs.open_modal("PLAY WITH FRIENDS", 980.0)
+		Game.cloud_service().start_directory()          # every registered player, online or not
+		_dir_on = true
+	var v := lobby.dialogs.open_modal("ONLINE 1 VS 1", 980.0)
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 10)
 	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"]]:
@@ -83,8 +90,8 @@ func open(kind := "online") -> void:
 		tabs.add_child(b)
 	v.add_child(tabs)
 	var notes := {
-		"online": "Everyone playing right now, from anywhere. DUEL 1 VS 1 challenges a player, ADD FRIEND sends a friend request.",
-		"friends": "Add players as friends with their ID. Friends who are online can be challenged to a 1 vs 1 duel.",
+		"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
+		"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
 		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
 		"wifi": "Same Wi-Fi or one phone's hotspot: nearby players show up by name.",
 	}
@@ -346,7 +353,8 @@ func _refresh_friends() -> void:
 	for id in peers:
 		sig += "|%s:%s" % [id, peers[id].name]
 	if cloud:
-		sig += "|f%d|r%s" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys()))]
+		sig += "|f%d|r%s|o%d|d%d" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
+			(Game.profile.friend_out as Dictionary).size(), cloud.directory.size()]
 		for id in peers:
 			sig += ",a" if cloud.friend_asked(String(id)) else ""
 	if sig == _net_sig:
@@ -358,7 +366,41 @@ func _refresh_friends() -> void:
 		_fill_friends(cloud, waiting)
 		return
 	for id: String in peers:
-		_net_list.add_child(_player_row(svc, id, String(peers[id].name), waiting))
+		_net_list.add_child(_player_row(svc, id, String(peers[id].name), waiting, "  ·  ONLINE"))
+	if cloud and _net_kind == "online":
+		var offline := _offline_players(cloud, "")
+		if not offline.is_empty():
+			var head := UI.label("ALL PLAYERS  ·  %d" % offline.size(), 19, UI.TEXT_DIM, "bold")
+			head.name = "AllPlayersHead"
+			_net_list.add_child(head)
+		for id: String in offline:
+			_net_list.add_child(_player_row(svc, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
+
+
+## Players with a card who are not online right now (search: an ID start or part of the name),
+## most recently seen first.
+func _offline_players(cloud: Cloud, query: String) -> Array:
+	var out := []
+	for id: String in cloud.directory:
+		if cloud.peers.has(id):
+			continue
+		if query != "" and not (Cloud.friend_code(id).begins_with(query) or String(cloud.directory[id].name).contains(query)):
+			continue
+		out.append(id)
+	out.sort_custom(func(a: String, b: String) -> bool: return int(cloud.directory[a].ts) > int(cloud.directory[b].ts))
+	return out.slice(0, MAX_ALL_PLAYERS)
+
+
+## "LAST SEEN 5 MIN AGO" from a card's unix time.
+static func _ago(ts: int) -> String:
+	var s := maxi(int(Time.get_unix_time_from_system()) - ts, 0)
+	if s < 120:
+		return "SEEN JUST NOW"
+	if s < 3600:
+		return "LAST SEEN %d MIN AGO" % (s / 60)
+	if s < 86400:
+		return "LAST SEEN %d H AGO" % (s / 3600)
+	return "LAST SEEN %d DAY%s AGO" % [s / 86400, "" if s / 86400 == 1 else "S"]
 
 
 ## One player in a list: name and code, ADD (online, not yet a friend) and CHALLENGE.
@@ -371,7 +413,7 @@ func _player_row(svc: Node, id: String, who: String, waiting: String, online_tag
 	name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(name_l)
 	var cloud := svc as Cloud
-	if cloud and not Game.is_friend(id) and cloud.peers.has(id):
+	if cloud and not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
 		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 52))
 		add.disabled = asked
@@ -421,15 +463,19 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 			if Cloud.friend_code(id).begins_with(_friend_query) or who.contains(_friend_query):
 				_net_list.add_child(_player_row(cloud, id, who, waiting, "  ·  ONLINE"))
 				found += 1
+		for id: String in _offline_players(cloud, _friend_query):
+			_net_list.add_child(_player_row(cloud, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
+			found += 1
 		if found == 0:
-			_net_list.add_child(UI.label("NOBODY ONLINE MATCHES \"%s\"" % _friend_query, 18, UI.TEXT_DIM, "semi"))
+			_net_list.add_child(UI.label("NO PLAYER MATCHES \"%s\"" % _friend_query, 18, UI.TEXT_DIM, "semi"))
 	var friends: Dictionary = Game.profile.friends
 	if friends.is_empty():
 		_net_list.add_child(UI.label("NO FRIENDS YET: SEARCH A PLAYER'S ID OR NAME, OR TAP ADD FRIEND IN THE ONLINE TAB.", 18, UI.TEXT_DIM, "semi"))
 	for id: String in friends:
 		var on := cloud.peers.has(id)
 		var who := String(friends[id].name) if String(friends[id].name) != "" else "PLAYER"
-		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else "  ·  OFFLINE")
+		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
+		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen)
 		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 52))
 		rm.pressed.connect(func() -> void:
 			Game.remove_friend(id)
@@ -469,6 +515,10 @@ func _on_net_invited(who: String, svc: Node) -> void:
 
 
 var _seen_requests := {}
+
+
+func _on_directory_changed() -> void:
+	_net_sig = "-"
 
 
 ## A new friend request shows up at once: a popup with ACCEPT / DECLINE when no window is open
@@ -553,6 +603,7 @@ func _connect_net(svc: Node) -> void:
 	if svc is Cloud:
 		(svc as Cloud).room_changed.connect(_on_room_changed)
 		(svc as Cloud).friends_changed.connect(_on_friends_changed)
+		(svc as Cloud).directory_changed.connect(_on_directory_changed)
 	svc.invited.connect(_on_net_invited.bind(svc))
 	svc.invite_cancelled.connect(_on_net_invite_cancelled.bind(svc))
 	svc.invite_answered.connect(_on_net_answered.bind(svc))
@@ -562,7 +613,8 @@ func _connect_net(svc: Node) -> void:
 
 ## Drops this object's connections (the handlers above, the lambda too) from a service.
 func _disconnect_net(svc: Node) -> void:
-	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended", "room_changed", "friends_changed"]:
+	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended", "room_changed", "friends_changed",
+			"directory_changed"]:
 		if not svc.has_signal(sig):
 			continue
 		for c: Dictionary in svc.get_signal_connection_list(sig):

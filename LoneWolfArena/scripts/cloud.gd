@@ -14,6 +14,12 @@ extends Node
 ## opponent or a "bye" ends the match. Anyone can publish to a public broker, so invites are rate
 ## limited and the list is capped. The lobby shows names, outfits and public keys only; nothing is
 ## stored by the game anywhere.
+##
+## Player cards (topic ROOT/p/<id>, kept by the broker as a RETAINED message): every phone that
+## has gone online leaves {id, name, outfit, public key, last-seen time} signed with its own key,
+## so the ONLINE tab can list every player who ever played, online or not, and a friend request
+## can reach a player who is offline: it waits as a retained, signed message on ROOT/fr/<to>/<from>
+## (the answer on ROOT/fa/<to>/<from>) until that phone comes online, which then clears it.
 
 signal peers_changed
 signal invited(peer_name: String)
@@ -25,6 +31,7 @@ signal event_received(kind: String, data: Array)
 signal state_received(state: PackedFloat32Array)
 signal friends_changed                 # a friend request came in or was answered
 signal room_changed                    # the hosted custom room got a player / a join attempt ended
+signal directory_changed               # a player card came in (the ALL PLAYERS list)
 
 const ROOT := "lonewolfarena/v1"
 const BROKERS := ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"]
@@ -38,6 +45,11 @@ const MAX_PEERS := 40
 const INBOX_RATE := 4.0        # inbox messages handled per second (each invite costs an RSA decrypt)
 const JOIN_TIMEOUT_MS := 15000 # a custom-room join attempt gives up after this
 const ROOM_RULES := {"rounds": 5, "ammo": false, "walls": false, "frags": false}
+const CARD_REFRESH_S := 1800.0             # this phone's card is published again (last seen) every 30 min
+const CARD_MAX_AGE_S := 60 * 86400         # cards not refreshed for 60 days are not listed
+const REQUEST_MAX_AGE_S := 30 * 86400      # waiting friend requests and answers older than this are dropped
+const MAX_DIRECTORY := 400
+const CARDS_PER_FRAME := 6                 # signature checks per frame
 
 var state_interval := 0.1      # seconds between state packets
 var my_id := ""                # hash of this phone's public key (set once the key exists)
@@ -48,7 +60,12 @@ var opponent := {}             # {"id", "name", "bundle"}
 var queue: Array = []
 var status := ""               # "preparing", "connecting", "online", "offline"
 var session_rules := {}        # the custom room's rules for this session ({} = a plain duel)
-var friend_requests := {}      # id -> {"name", "t"}: asked to be friends, not answered yet
+## Friend requests to answer and the ones this phone sent live in the (signed) profile, so they
+## survive a restart: id -> {"name", "t"}.
+var friend_requests: Dictionary:
+	get:
+		return Game.profile.friend_in
+var directory := {}            # id -> {"name", "bundle", "pk", "ts"}: every player with a card (ALL PLAYERS)
 var room_code := ""            # custom room this phone hosts: 6 digits ("" = none)
 var room_pin := ""             # its password (digits)
 var room_rules := {}
@@ -83,7 +100,10 @@ var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", 
 var _last_heard := 0
 var _inbox_budget := 8.0
 var _crypto := Crypto.new()
-var _friend_asked := {}        # id -> ticks: friend requests this phone sent
+var _dir_want := false         # the ONLINE / FRIENDS window is open: listen to the player cards
+var _dir_queue: Array = []     # cards waiting for their signature check
+var _card_t := 0.0             # seconds until this phone's card is published again
+var _card_sig := ""            # the name|outfit last published
 var _join := {}                # {"code", "key", "t", "ask_t"}: the custom-room join in progress
 
 
@@ -255,6 +275,14 @@ func _process(delta: float) -> void:
 		if Time.get_ticks_msec() - int(_join.t) > JOIN_TIMEOUT_MS and join_state == "asking":
 			join_state = "none"
 			room_changed.emit()
+	_card_t -= delta
+	var card_sig := String(Game.profile.name) + "|" + String(Game.profile.bundle)
+	if _card_t <= 0.0 or card_sig != _card_sig:
+		_publish_card()
+	var checked := 0
+	while not _dir_queue.is_empty() and checked < CARDS_PER_FRAME:
+		checked += 1
+		_check_card(_dir_queue.pop_front())
 	if _want_lobby:
 		_announce_t -= delta
 		if _announce_t <= 0.0:
@@ -336,12 +364,14 @@ func _unsubscribe(topic: String) -> void:
 	_send_packet(_packet(0xA2, body))
 
 
-func _publish(topic: String, payload: PackedByteArray) -> void:
+## retain: the broker keeps the message for whoever subscribes later (an empty retained message
+## deletes the kept one).
+func _publish(topic: String, payload: PackedByteArray, retain := false) -> void:
 	if not _connected:
 		return
 	var body := _str(topic)
 	body.append_array(payload)
-	_send_packet(_packet(0x30, body))
+	_send_packet(_packet(0x31 if retain else 0x30, body))
 
 
 func _publish_json(topic: String, d: Dictionary) -> void:
@@ -379,6 +409,11 @@ func _parse() -> void:
 					status = "online"
 					_ping_t = PING_S
 					_subscribe(ROOT + "/u/" + my_id)
+					_subscribe(ROOT + "/fr/" + my_id + "/+")      # friend requests waiting for this phone
+					_subscribe(ROOT + "/fa/" + my_id + "/+")      # answers to the ones it sent
+					if _dir_want:
+						_subscribe(ROOT + "/p/+")
+					_card_t = 0.0                                  # (re)publish this phone's card now
 					if _want_lobby:
 						_subscribe(ROOT + "/lobby")
 						_announce_t = 0.0
@@ -402,6 +437,15 @@ func _parse() -> void:
 
 
 func _on_publish(topic: String, payload: PackedByteArray) -> void:
+	if topic.begins_with(ROOT + "/p/"):
+		_on_card(topic, payload)
+		return
+	if topic.begins_with(ROOT + "/fr/" + my_id + "/") or topic.begins_with(ROOT + "/fa/" + my_id + "/"):
+		if not payload.is_empty():
+			var w: Variant = JSON.parse_string(payload.get_string_from_utf8())
+			if w is Dictionary:
+				_on_waiting(topic.get_slice("/", 2) == "fr", topic.get_slice("/", 4), w)
+		return
 	if topic == ROOT + "/lobby" or topic == ROOT + "/u/" + my_id:
 		var d: Variant = JSON.parse_string(payload.get_string_from_utf8())
 		if d is Dictionary and typeof(d.get("id", d.get("from"))) == TYPE_STRING:
@@ -485,15 +529,14 @@ func _on_inbox(d: Dictionary) -> void:
 			var asker := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 			if Game.is_friend(from):
 				_publish_json(ROOT + "/u/" + from, {"t": "fra", "from": my_id, "name": String(Game.profile.name)})
-			elif friend_requests.size() < 20:
-				friend_requests[from] = {"name": asker if asker != "" else "PLAYER", "t": Time.get_ticks_msec()}
+			elif not Game.is_blocked(from) and not friend_requests.has(from) and friend_requests.size() < Game.MAX_REQUESTS:
+				friend_requests[from] = {"name": asker if asker != "" else "PLAYER", "t": int(Time.get_unix_time_from_system())}
+				Game.save_profile()
 				friends_changed.emit()
 		"fra":
-			if _friend_asked.has(from):
-				_friend_asked.erase(from)
+			if (Game.profile.friend_out as Dictionary).has(from):
 				var friend := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
-				Game.add_friend(from, friend if friend != "" else "PLAYER")
-				friends_changed.emit()
+				_became_friends(from, friend)
 		"rin", "rno":
 			# The custom room's host: the password was right (wait for START) or wrong.
 			if join_state == "asking" and String(d.get("code", "")) == String(_join.get("code", "")):
@@ -590,17 +633,28 @@ func _leave_room() -> void:
 
 # ---------------------------------------------------------------- friends
 
-## Asks a listed player to be friends (they see the request in their friends list).
+## Asks a player to be friends, online or not: the signed request waits for them as a retained
+## message (and goes straight to a phone that is online right now, older versions included).
 func request_friend(peer_id: String) -> bool:
-	if not _connected or peer_id == my_id or not peers.has(peer_id):
+	if not _connected or peer_id == my_id or not Game.is_player_id(peer_id) or Game.is_friend(peer_id):
 		return false
-	_friend_asked[peer_id] = Time.get_ticks_msec()
-	_publish_json(ROOT + "/u/" + peer_id, {"t": "frq", "from": my_id, "name": String(Game.profile.name), "pk": _pk_pem})
+	if not peers.has(peer_id) and not directory.has(peer_id):
+		return false
+	var out: Dictionary = Game.profile.friend_out
+	if not out.has(peer_id) and out.size() >= Game.MAX_REQUESTS:
+		return false
+	var who := String(peers[peer_id].name) if peers.has(peer_id) else String(directory[peer_id].name)
+	out[peer_id] = {"name": who, "t": int(Time.get_unix_time_from_system())}
+	Game.save_profile()
+	_publish_waiting("frq", peer_id)
+	if peers.has(peer_id):
+		_publish_json(ROOT + "/u/" + peer_id, {"t": "frq", "from": my_id, "name": String(Game.profile.name), "pk": _pk_pem})
+	friends_changed.emit()
 	return true
 
 
 func friend_asked(peer_id: String) -> bool:
-	return _friend_asked.has(peer_id)
+	return (Game.profile.friend_out as Dictionary).has(peer_id)
 
 
 func answer_friend(peer_id: String, accept: bool) -> void:
@@ -608,10 +662,165 @@ func answer_friend(peer_id: String, accept: bool) -> void:
 		return
 	var req: Dictionary = friend_requests[peer_id]
 	friend_requests.erase(peer_id)
+	Game.save_profile()
+	_publish(ROOT + "/fr/" + my_id + "/" + peer_id, PackedByteArray(), true)     # the waiting request is answered
 	if accept:
 		Game.add_friend(peer_id, String(req.name))
+		_publish_waiting("fra", peer_id)
 		_publish_json(ROOT + "/u/" + peer_id, {"t": "fra", "from": my_id, "name": String(Game.profile.name)})
 	friends_changed.emit()
+
+
+func _became_friends(id: String, friend_name: String) -> void:
+	(Game.profile.friend_out as Dictionary).erase(id)
+	Game.add_friend(id, friend_name if friend_name != "" else "PLAYER")      # (saves the profile)
+	friends_changed.emit()
+
+
+# ---------------------------------------------------------------- player cards (ALL PLAYERS)
+
+## The ONLINE / FRIENDS window is open: get every player card the broker keeps.
+func start_directory() -> void:
+	if _dir_want:
+		return
+	_dir_want = true
+	if _connected:
+		_subscribe(ROOT + "/p/+")
+
+
+func stop_directory() -> void:
+	if not _dir_want:
+		return
+	_dir_want = false
+	_dir_queue.clear()
+	if _connected:
+		_unsubscribe(ROOT + "/p/+")
+
+
+func _sign(text: String) -> String:
+	return Marshalls.raw_to_base64(_crypto.sign(HashingContext.HASH_SHA256, text.sha256_buffer(), _key))
+
+
+## Checks a signature made with the private key that belongs to `pk` (a PEM public key).
+static func verify_signed(pk: String, text: String, sig: String) -> bool:
+	if pk.length() > 1200 or sig.length() > 700:
+		return false
+	var pub := CryptoKey.new()
+	if pub.load_from_string(pk, true) != OK:
+		return false
+	var raw := Marshalls.base64_to_raw(sig)
+	if raw.size() != 256:
+		return false
+	return Crypto.new().verify(HashingContext.HASH_SHA256, text.sha256_buffer(), raw, pub)
+
+
+static func card_text(id: String, who: String, bundle: String, ts: int) -> String:
+	return "card|%s|%s|%s|%d" % [id, who, bundle, ts]
+
+
+static func waiting_text(kind: String, from: String, to: String, ts: int) -> String:
+	return "%s|%s|%s|%d" % [kind, from, to, ts]
+
+
+func _publish_card() -> void:
+	_card_t = CARD_REFRESH_S
+	if not _connected or _key == null or my_id == "":
+		return
+	var who := String(Game.profile.name)
+	var b := String(Game.profile.bundle)
+	_card_sig = who + "|" + b
+	var ts := int(Time.get_unix_time_from_system())
+	_publish(ROOT + "/p/" + my_id, JSON.stringify({"t": "card", "id": my_id, "name": who, "bundle": b, "pk": _pk_pem,
+		"ts": ts, "sig": _sign(card_text(my_id, who, b, ts))}).to_utf8_buffer(), true)
+
+
+## A friend request ("frq") or its acceptance ("fra") that waits for `to` as a retained message.
+func _publish_waiting(kind: String, to: String) -> void:
+	if not _connected or _key == null:
+		return
+	var ts := int(Time.get_unix_time_from_system())
+	var topic := ROOT + ("/fr/" if kind == "frq" else "/fa/") + to + "/" + my_id
+	_publish(topic, JSON.stringify({"t": kind, "from": my_id, "to": to, "name": String(Game.profile.name), "pk": _pk_pem,
+		"ts": ts, "sig": _sign(waiting_text(kind, my_id, to, ts))}).to_utf8_buffer(), true)
+
+
+func _on_card(topic: String, payload: PackedByteArray) -> void:
+	if payload.is_empty():
+		var gone := topic.get_slice("/", 3)
+		if directory.erase(gone):
+			directory_changed.emit()
+		return
+	if _dir_want and _dir_queue.size() < MAX_DIRECTORY * 2:
+		_dir_queue.append(payload)
+
+
+func _check_card(payload: PackedByteArray) -> void:
+	var d: Variant = JSON.parse_string(payload.get_string_from_utf8())
+	if not (d is Dictionary) or String((d as Dictionary).get("t", "")) != "card":
+		return
+	for k in ["id", "name", "bundle", "pk", "sig"]:
+		if typeof(d.get(k)) != TYPE_STRING:
+			return
+	if not (d.get("ts") is float or d.get("ts") is int):
+		return
+	var id := String(d.id)
+	var ts := int(d.ts)
+	var now := int(Time.get_unix_time_from_system())
+	if id == my_id or id != String(d.pk).sha256_text().left(32) or ts > now + 600 or now - ts > CARD_MAX_AGE_S:
+		return
+	if directory.has(id) and int(directory[id].ts) >= ts:
+		return
+	if not verify_signed(String(d.pk), card_text(id, String(d.name), String(d.bundle), ts), String(d.sig)):
+		return
+	var who := Game.clean_name(String(d.name))
+	directory[id] = {"name": who if who != "" else "PLAYER", "bundle": String(CharacterModel.bundle_info(String(d.bundle)).id),
+		"pk": String(d.pk), "ts": ts}
+	if directory.size() > MAX_DIRECTORY:
+		var oldest := ""
+		for k: String in directory:
+			if oldest == "" or int(directory[k].ts) < int(directory[oldest].ts):
+				oldest = k
+		directory.erase(oldest)
+	if Game.is_friend(id) and who != "" and String(Game.profile.friends[id].name) != who:
+		Game.add_friend(id, who)          # a friend's new name
+	directory_changed.emit()
+
+
+## A signed friend request or answer that waited for this phone (retained): checked, used once,
+## then deleted from the broker.
+func _on_waiting(is_request: bool, from: String, d: Dictionary) -> void:
+	var kind := "frq" if is_request else "fra"
+	var topic := ROOT + ("/fr/" if is_request else "/fa/") + my_id + "/" + from
+	for k in ["from", "to", "name", "pk", "sig"]:
+		if typeof(d.get(k)) != TYPE_STRING:
+			return
+	if not (d.get("ts") is float or d.get("ts") is int) or String(d.get("t", "")) != kind:
+		return
+	var ts := int(d.ts)
+	var now := int(Time.get_unix_time_from_system())
+	if String(d.from) != from or String(d.to) != my_id or from == my_id or from != String(d.pk).sha256_text().left(32) \
+			or ts > now + 600 or now - ts > REQUEST_MAX_AGE_S:
+		return
+	if _inbox_budget < 1.0:
+		return
+	_inbox_budget -= 1.0
+	if not verify_signed(String(d.pk), waiting_text(kind, from, my_id, ts), String(d.sig)):
+		return
+	var who := Game.clean_name(String(d.name))
+	if is_request:
+		if Game.is_friend(from):
+			_publish(topic, PackedByteArray(), true)
+			_publish_waiting("fra", from)            # already friends: answer yes again
+		elif Game.is_blocked(from):
+			_publish(topic, PackedByteArray(), true)
+		elif not friend_requests.has(from) and friend_requests.size() < Game.MAX_REQUESTS:
+			friend_requests[from] = {"name": who if who != "" else "PLAYER", "t": ts}
+			Game.save_profile()
+			friends_changed.emit()
+	else:
+		_publish(topic, PackedByteArray(), true)
+		if (Game.profile.friend_out as Dictionary).has(from):
+			_became_friends(from, who)
 
 
 # ---------------------------------------------------------------- custom rooms

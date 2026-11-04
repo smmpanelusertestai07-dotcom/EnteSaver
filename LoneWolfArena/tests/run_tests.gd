@@ -33,6 +33,7 @@ func _ready() -> void:
 	_test_profile_keys()
 	_test_profile_migration()
 	_test_honour()
+	_test_signed_cards()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -483,3 +484,23 @@ func _test_honour() -> void:
 	_check(ResultsScreen.honour({"won": true, "hp_left": 170, "taken": 30}) == "UNTOUCHABLE", "under 50 damage taken and alive")
 	_check(ResultsScreen.honour({"won": false, "hp_left": 0, "taken": 30}) == "FIGHTER", "a dead player is never untouchable")
 	_check(ResultsScreen.honour({"invalid": true, "won": true, "hp_left": 20, "headshots": 3}) == "", "a voided match has no honour")
+
+
+## Player cards and waiting friend requests are signed with the phone's own key: a good signature
+## checks out, a changed name, time or key does not.
+func _test_signed_cards() -> void:
+	var key := Crypto.new().generate_rsa(2048)
+	var other := Crypto.new().generate_rsa(2048)
+	var pk := key.save_to_string(true)
+	var id := pk.sha256_text().left(32)
+	var text := Cloud.card_text(id, "SWIFTWOLF42", "default", 1793800000)
+	var sig := Marshalls.raw_to_base64(Crypto.new().sign(HashingContext.HASH_SHA256, text.sha256_buffer(), key))
+	_check(Cloud.verify_signed(pk, text, sig), "a player card's signature checks out")
+	_check(not Cloud.verify_signed(pk, Cloud.card_text(id, "FAKENAME", "default", 1793800000), sig), "a card with a changed name is rejected")
+	_check(not Cloud.verify_signed(pk, Cloud.card_text(id, "SWIFTWOLF42", "default", 1793800001), sig), "a card with a changed time is rejected")
+	_check(not Cloud.verify_signed(other.save_to_string(true), text, sig), "a card signed with another key is rejected")
+	_check(not Cloud.verify_signed("not a key", text, sig) and not Cloud.verify_signed(pk, text, "AAAA"), "junk keys and signatures are rejected")
+	var req := Cloud.waiting_text("frq", id, "0123456789abcdef0123456789abcdef", 1793800000)
+	var rsig := Marshalls.raw_to_base64(Crypto.new().sign(HashingContext.HASH_SHA256, req.sha256_buffer(), key))
+	_check(Cloud.verify_signed(pk, req, rsig) and not Cloud.verify_signed(pk, Cloud.waiting_text("fra", id, "0123456789abcdef0123456789abcdef", 1793800000), rsig),
+		"a friend request's signature does not pass as an answer")
