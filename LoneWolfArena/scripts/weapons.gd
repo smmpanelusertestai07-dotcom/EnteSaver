@@ -8,7 +8,9 @@ extends RefCounted
 ##
 ## Damage = base x zone (head / body / limb) x range falloff x armour. Arms count as body; legs
 ## and feet ("limb") take less. Each gun comes with fixed attachments (`attach`, shown at the
-## pick); their effect is already in its numbers. `pen` is the share of armour a gun ignores.
+## pick); their effect is already in its numbers: a SCOPE 2X aims at twice the hip view's zoom
+## (ads_fov 37.27 against Player.FOV_HIP 68) and turns with the 2x Scope sensitivity
+## (Player.sight_of). `pen` is the share of armour a gun ignores.
 
 const DEFS := {
 	"ar": {
@@ -95,7 +97,7 @@ const DEFS := {
 		"interval": 0.1, "auto": true, "mag": 30, "reserve": 120,
 		"reload": 2.6, "pellets": 1, "spread_hip": 1.3, "spread_ads": 0.3, "spread_move": 1.3, "spread_air": 4.5,
 		"spread_per_shot": 0.26, "spread_max": 3.0, "spread_recover": 8.0,
-		"recoil_v": 0.26, "recoil_h": 0.12, "recoil_ramp": 0.035, "scope": "reddot", "ads_fov": 50.0,
+		"recoil_v": 0.26, "recoil_h": 0.12, "recoil_ramp": 0.035, "scope": "reddot", "ads_fov": 37.27,
 		"move": 0.88, "fire_move": 0.8, "equip": 0.4, "assist": 1.0, "crosshair": "ring",
 		"tint": Color(0.62, 0.66, 0.6), "attach": ["MUZZLE", "FOREGRIP", "SCOPE 2X"],
 	},
@@ -128,7 +130,7 @@ const DEFS := {
 		"interval": 0.32, "auto": false, "mag": 10, "reserve": 40,
 		"reload": 2.4, "pellets": 1, "spread_hip": 2.0, "spread_ads": 0.15, "spread_move": 1.5, "spread_air": 5.0,
 		"spread_per_shot": 0.6, "spread_max": 2.5, "spread_recover": 7.0,
-		"recoil_v": 0.7, "recoil_h": 0.18, "recoil_ramp": 0.0, "scope": "reddot", "ads_fov": 40.0,
+		"recoil_v": 0.7, "recoil_h": 0.18, "recoil_ramp": 0.0, "scope": "reddot", "ads_fov": 37.27,
 		"move": 0.9, "fire_move": 0.75, "equip": 0.45, "assist": 0.8, "crosshair": "ring",
 		"tint": Color(0.8, 0.6, 0.42), "attach": ["SCOPE 2X", "MUZZLE"],
 	},

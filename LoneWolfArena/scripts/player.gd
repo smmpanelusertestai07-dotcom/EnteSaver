@@ -135,12 +135,31 @@ func is_scoped() -> bool:
 	return ads and scope_type() == "sniper"
 
 
+## The sight a gun aims through: "sniper" (the full scope), "2x" (a red-dot gun that lists a SCOPE
+## 2X: it aims at twice the hip view's zoom, see Weapons), "reddot", or "none" (iron sights, fists).
+static func sight_of(def: Dictionary) -> String:
+	var s := String(def.get("scope", "none"))
+	if s == "reddot" and "SCOPE 2X" in (def.get("attach", []) as Array):
+		return "2x"
+	return s
+
+
+## The sensitivity setting that turns the view: General from the hip, the sight's own while aiming
+## (Red Dot also for iron sights).
+static func sens_key(def: Dictionary, aiming: bool) -> String:
+	if not aiming:
+		return "sens_general"
+	match sight_of(def):
+		"sniper":
+			return "sens_sniper"
+		"2x":
+			return "sens_2x"
+	return "sens_reddot"
+
+
 ## Sensitivity for the current view (settings are 1..200, 100 = default speed).
 func _sensitivity() -> float:
-	var s: float = Game.settings.sens_general
-	if ads:
-		s = Game.settings.sens_sniper if scope_type() == "sniper" else Game.settings.sens_reddot
-	return maxf(s, 1.0) / 100.0
+	return maxf(float(Game.settings.get(sens_key(weapon().def, ads), 100)), 1.0) / 100.0
 
 
 func reset_for_round(pos: Vector3, yaw: float) -> void:
@@ -185,11 +204,18 @@ func forget_aim_hold() -> void:
 
 
 func _assist_active() -> bool:
-	return assist_on and not is_free_looking()
+	return assist_on and not is_free_looking() and assist_allowed(int(Game.settings.get("aim_precision", 0)), ads)
+
+
+## The Aim precision setting: 0 assisted (the assist always works), 1 manual while aiming down a
+## sight (assisted from the hip), 2 fully manual. The red crosshair shows either way.
+static func assist_allowed(precision: int, aiming: bool) -> bool:
+	return precision <= 0 or (precision == 1 and not aiming)
 
 
 ## Free look (the eye button): while it is held a drag turns the camera all the way around the
-## character (its face too) without turning the character or the aim.
+## character (its face too) without turning the character or the aim, at the Free Look
+## sensitivity.
 func start_free_look() -> void:
 	free_look = alive and not firing
 
@@ -197,7 +223,7 @@ func start_free_look() -> void:
 func add_free_look(rel: Vector2) -> void:
 	if not free_look:
 		return
-	var deg_per_px := 130.0 / maxf(get_viewport().get_visible_rect().size.y, 1.0) * _sensitivity()
+	var deg_per_px := 130.0 / maxf(get_viewport().get_visible_rect().size.y, 1.0) * maxf(float(Game.settings.sens_freelook), 1.0) / 100.0
 	_free.x -= deg_to_rad(rel.x * deg_per_px)
 	_free.y = clampf(_free.y - deg_to_rad(rel.y * deg_per_px), deg_to_rad(-55.0), deg_to_rad(35.0))
 
@@ -211,12 +237,15 @@ func is_free_looking() -> bool:
 	return free_look or _free.length() > 0.02
 
 
+## A look drag of rel pixels: 130 degrees per screen height at sensitivity 100 (x the zoom while
+## aiming). A drag on the right fire button (from_fire_button) turns at Fire Button Drag percent of
+## that; the head "stop" keeps its share of the screen in thumb travel at any sensitivity.
 func add_look(rel: Vector2, from_fire_button := false) -> void:
 	if not alive:
 		return
 	var s := _sensitivity()
 	if from_fire_button:
-		s *= float(Game.settings.sens_fire) / 100.0
+		s *= maxf(float(Game.settings.sens_fire), 1.0) / 100.0
 	var vh := get_viewport().get_visible_rect().size.y
 	var deg_per_px := 130.0 / maxf(vh, 1.0) * s
 	if ads:
@@ -534,13 +563,14 @@ func _think(delta: float) -> void:
 	_v_drag = 0.0
 	_update_aim_assist(delta)
 	if firing and _shot_wait >= 0.0:
-		# The first shot leaves when the drag that began with the press stops (or never came).
+		# The first shot leaves when the drag that began with the press stops (or never came);
+		# manual aim (Aim precision) fires it at once.
 		_shot_wait += delta
 		var settling := _on_column and assist_target != null and aim_pitch > _head_in and aim_pitch <= _lip_hi \
 			and _shot_wait < DRAG_SHOT_WINDOW + DRAG_SHOT_SETTLE
 		# just beside a target: the pull puts the crosshair on it first (at most DRAG_SHOT_WINDOW)
 		settling = settling or (assist_target != null and aim_zone == "" and not _on_column and _shot_wait < DRAG_SHOT_WINDOW)
-		if (_shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_move >= 0.03)) and not settling:
+		if not _assist_active() or ((_shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_move >= 0.03)) and not settling):
 			_shot_wait = -1.0
 			_try_fire()
 	elif firing:

@@ -4,8 +4,9 @@ extends Node
 ## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
 ## captions bright, drag to turn the character, START position report), name edit (pencil tap,
 ## long name ends in "..."), the player card, how to play, the
-## wardrobe (card tap, rarity tab), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
-## sensitivity presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
+## wardrobe (card tap, rarity tab), every settings tab (tab taps, HIGH graphics, EXTREME's question,
+## the FAST / STANDARD sensitivity presets, RESET's question), credits, the quit dialog, START -> match
+## loading overlay -> arena, the pause menu
 ## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
 ## shortcut), results screens (win, defeat, draw, invalid) with the opponent's row in an empty
 ## scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
@@ -165,6 +166,15 @@ func run(at: Node) -> int:
 		if high_q:
 			await _tap(high_q)
 		_check(int(Game.settings.graphics) == 2, "tapping HIGH sets graphics 2")
+		# EXTREME asks first (it can heat the phone); back answers the question, not the panel.
+		await _tap(_find_text(sp, "EXTREME"))
+		await _settle(0.4)
+		await at.shot("m07b_settings_extreme")
+		_check(sp.find_child("Confirm", true, false) != null and int(Game.settings.graphics) == 2, "EXTREME asks before it applies")
+		_back()
+		await _settle(0.4)
+		_check(_settings(lobby) != null and sp.find_child("Confirm", true, false) == null and int(Game.settings.graphics) == 2,
+			"back closes the question and keeps the settings open")
 		Game.settings.graphics = g_before
 		await _tap(_find_text(sp, "CONTROLS"))
 		await _settle(0.4)
@@ -175,16 +185,26 @@ func run(at: Node) -> int:
 		await at.shot("m09_settings_controls_more")
 		await _tap(_find_text(sp, "SENSITIVITY"))
 		await _settle(0.3)
-		var high := _find_text(sp, "HIGH")
-		if high:
-			await _tap(high)
+		var fast := _find_text(sp, "FAST")
+		if fast:
+			await _tap(fast)
 		await _settle(0.3)
 		await at.shot("m10_settings_sensitivity")
-		_check(int(Game.settings.sens_general) == 185 and int(Game.settings.sens_sniper) == 150, "HIGH preset sets 185 / 150")
-		var deflt := _find_text(sp, "DEFAULT")
-		if deflt:
-			await _tap(deflt)
-		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "DEFAULT preset sets 100 / 71")
+		var fp: Dictionary = SettingsPanel.SENS_PRESETS.FAST
+		_check(int(Game.settings.sens_general) == int(fp.sens_general) and int(Game.settings.sens_sniper) == int(fp.sens_sniper)
+			and int(Game.settings.sens_2x) == int(fp.sens_2x), "FAST preset sets its values")
+		var standard := _find_text(sp, "STANDARD")
+		if standard:
+			await _tap(standard)
+		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "STANDARD preset sets 100 / 71")
+		# RESET asks first; CANCEL keeps everything.
+		await _tap(sp.find_child("Reset", true, false) as Control)
+		await _settle(0.4)
+		await at.shot("m10b_settings_reset_confirm")
+		_check(sp.find_child("Confirm", true, false) != null, "RESET asks before it resets")
+		await _tap(sp.find_child("ConfirmCancel", true, false) as Control)
+		await _settle(0.3)
+		_check(sp.find_child("Confirm", true, false) == null, "CANCEL closes the question")
 		await _tap(_find_text(sp, "SOUND"))
 		await _settle(0.3)
 		await at.shot("m11_settings_sound")

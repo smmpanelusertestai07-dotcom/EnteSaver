@@ -29,6 +29,12 @@ func _ready() -> void:
 	_test_signer_digests()
 	_test_settings_sanitize()
 	_test_settings_v5()
+	_test_fps_options()
+	_test_sensitivity_per_sight()
+	_test_controls_settings()
+	_test_settings_panel()
+	_test_auto_graphics()
+	_test_perf_governor()
 	_test_modes()
 	_test_profile_keys()
 	_test_profile_migration()
@@ -312,6 +318,368 @@ func _test_settings_v5() -> void:
 	_check(s.sens_general == 100 and s.sens_freelook == 100 and s.sens_2x == 100 and s.dynamic_joystick == false and s.vol_music == 10,
 		"a version 1 file migrates as before")
 	Game.settings = saved
+
+
+## The frame rates offered per screen: 30 and 60 always, 90 and 120 only where the screen refreshes
+## that fast (an unknown rate offers 30 and 60).
+func _test_fps_options() -> void:
+	_check(Game.FPS_OPTIONS == [30, 60, 90, 120], "the frame-rate setting holds 30, 60, 90 or 120")
+	_check(Game.fps_options_for(60.0) == [30, 60] and Game.fps_options_for(59.94) == [30, 60] and Game.fps_options_for(50.0) == [30, 60],
+		"a 60 Hz (or slower) screen offers 30 and 60")
+	_check(Game.fps_options_for(90.0) == [30, 60, 90] and Game.fps_options_for(89.0) == [30, 60, 90], "a 90 Hz screen adds 90")
+	_check(Game.fps_options_for(120.0) == [30, 60, 90, 120] and Game.fps_options_for(119.88) == [30, 60, 90, 120]
+		and Game.fps_options_for(144.0) == [30, 60, 90, 120], "a 120 Hz (or faster) screen offers all four")
+	_check(Game.fps_options_for(NAN) == [30, 60] and Game.fps_options_for(-1.0) == [30, 60] and Game.fps_options_for(0.0) == [30, 60],
+		"an unknown refresh rate offers 30 and 60")
+	_check(Game.fps_choices().has(30) and Game.fps_choices().has(60), "this screen's choices include 30 and 60")
+	var saved := Game.settings.duplicate(true)
+	Game.settings.fps = 120
+	Game._sanitize_settings()
+	_check(Game.settings.fps == 120, "120 FPS is a valid setting")
+	Game.settings.fps = 75
+	Game._sanitize_settings()
+	_check(Game.settings.fps == 60, "a frame rate outside the options falls back to 60")
+	Game.settings = saved
+
+
+## Each sight turns with its own sensitivity, and the SCOPE 2X guns really aim at a 2x zoom.
+func _test_sensitivity_per_sight() -> void:
+	var d := Weapons.DEFS
+	_check(Player.sens_key(d.ar, false) == "sens_general" and Player.sens_key(d.sniper, false) == "sens_general"
+		and Player.sens_key(d.groza, false) == "sens_general", "from the hip every gun turns with General")
+	_check(Player.sens_key(d.ar, true) == "sens_reddot" and Player.sens_key(d.pistol, true) == "sens_reddot", "red-dot guns aim with Red Dot")
+	_check(Player.sens_key(d.lever, true) == "sens_reddot", "iron sights aim with Red Dot")
+	_check(Player.sens_key(d.sniper, true) == "sens_sniper" and Player.sens_key(d.kar98k, true) == "sens_sniper", "sniper scopes aim with Sniper Scope")
+	_check(Player.sens_key(d.groza, true) == "sens_2x" and Player.sens_key(d.sks, true) == "sens_2x", "the SCOPE 2X guns aim with 2x Scope")
+	var twos := []
+	for id: String in Weapons.PICKABLE:
+		var def: Dictionary = d[id]
+		var sight := Player.sight_of(def)
+		if "SCOPE 2X" in (def.attach as Array):
+			twos.append(id)
+			var zoom := tan(deg_to_rad(Player.FOV_HIP) * 0.5) / tan(deg_to_rad(float(def.ads_fov)) * 0.5)
+			_near(zoom, 2.0, "%s aims at twice the hip view's zoom" % id, 0.01)
+			_check(sight == "2x", "%s aims through its 2x scope" % id)
+		else:
+			_check(sight == String(def.scope), "%s aims through its own sight (%s)" % [id, sight])
+		_check(Game.DEFAULT_SETTINGS.has(Player.sens_key(def, true)), "%s's sight has a sensitivity setting" % id)
+	_check(twos == ["groza", "sks"], "GROZA and SKS carry the 2x scope (%s)" % [twos])
+	_check(SettingsPanel.guns_with_sight("2x") == PackedStringArray(["GROZA", "SKS"]), "the 2x row names the guns it is for")
+
+
+## Aim precision, the left fire button and visual effects: defaults, sanitising and what they switch.
+func _test_controls_settings() -> void:
+	var d: Dictionary = Game.DEFAULT_SETTINGS
+	_check(d.aim_precision == 0 and d.left_fire == 0 and d.visual_effects == true, "aim assist, the left fire button and the effects start as before")
+	_check(Player.assist_allowed(0, false) and Player.assist_allowed(0, true), "ASSISTED: the assist works from the hip and while aiming")
+	_check(Player.assist_allowed(1, false) and not Player.assist_allowed(1, true), "MANUAL IN SCOPE: assisted from the hip only")
+	_check(not Player.assist_allowed(2, false) and not Player.assist_allowed(2, true), "FULL MANUAL: no assist")
+	var saved := Game.settings.duplicate(true)
+	Game.settings.merge({"aim_precision": 7, "left_fire": -2, "visual_effects": "no"}, true)
+	Game._sanitize_settings()
+	_check(Game.settings.aim_precision == 2 and Game.settings.left_fire == 0 and Game.settings.visual_effects == true,
+		"aim precision and the left fire button are clamped, effects fall back to on")
+	var hud := HUD.new()
+	Game.settings.left_fire = 1
+	var hidden_at_hip := not hud._button_visible("fire_l") and hud._button_visible("fire_r")
+	Game.settings.left_fire = 0
+	_check(hidden_at_hip and hud._button_visible("fire_l"), "the left fire button shows always, or only while aiming")
+	hud.free()
+	Game.settings = saved
+	var lights := Effects.lights_enabled
+	var share := Effects.particle_share
+	Effects.configure(2, true)
+	_check(Effects.lights_enabled and is_equal_approx(Effects.particle_share, 1.0), "HIGH with effects: lights and every particle")
+	Effects.configure(1, true)
+	_check(not Effects.lights_enabled and is_equal_approx(Effects.particle_share, 1.0), "MEDIUM: no lights")
+	Effects.configure(0, true)
+	_check(not Effects.lights_enabled and is_equal_approx(Effects.particle_share, 0.5), "LOW: half the particles")
+	Effects.configure(3, false)
+	_check(not Effects.lights_enabled and is_equal_approx(Effects.particle_share, 0.5), "effects off: no lights, half the particles")
+	Effects.configure(0, false)
+	_check(is_equal_approx(Effects.particle_share, 0.25), "LOW with the effects off: a quarter")
+	Effects.lights_enabled = lights
+	Effects.particle_share = share
+
+
+## The settings screen: every setting a player can change is in exactly one tab (whose RESET puts it
+## back), the presets set all six sensitivities, and the screen's controls do what they say.
+func _test_settings_panel() -> void:
+	var shown := {}
+	var twice := []
+	for keys: Array in SettingsPanel.TAB_KEYS:
+		for k: String in keys:
+			if shown.has(k):
+				twice.append(k)
+			shown[k] = true
+	var missing := []
+	for k: String in Game.DEFAULT_SETTINGS:
+		if not shown.has(k) and not (k in SettingsPanel.NOT_SHOWN):
+			missing.append(k)
+	_check(missing.is_empty() and twice.is_empty(), "every setting is in one tab or deliberately not shown (missing %s, twice %s)" % [missing, twice])
+	_check(shown.keys().all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k))
+		and SettingsPanel.NOT_SHOWN.all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k) and not shown.has(k)),
+		"the tabs and the not-shown list name real settings")
+	_check(["graphics_auto", "graphics", "fps", "show_fps", "visual_effects", "vibration"].all(func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[0]),
+		"BASIC: graphics (AUTO), frame rate, FPS counter, visual effects, vibration")
+	_check(["dynamic_joystick", "aim_precision", "left_fire", "crosshair_color", "crosshair_size"].all(func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]),
+		"CONTROLS: joystick, aim precision, left fire button, crosshair colour and size")
+	var sens: Array = SettingsPanel.TAB_KEYS[1]
+	_check(sens == SettingsPanel.SENS_ROWS.map(func(r: Array) -> String: return String(r[1])) and sens.size() == 6,
+		"SENSITIVITY shows its six rows in order")
+	_check(SettingsPanel.PRESET_NAMES == ["STANDARD", "FAST"] and SettingsPanel.SENS_PRESETS.size() == 2, "two presets: STANDARD and FAST")
+	var dp: Dictionary = SettingsPanel.SENS_PRESETS.STANDARD
+	var fp: Dictionary = SettingsPanel.SENS_PRESETS.FAST
+	_check(dp.size() == 6 and sens.all(func(k: String) -> bool: return dp.has(k) and int(dp[k]) == int(Game.DEFAULT_SETTINGS[k])),
+		"the STANDARD preset is the defaults of all six")
+	var in_range := fp.size() == 6
+	for k: String in sens:
+		var lim: Array = Game.SETTING_RANGES[k]
+		in_range = in_range and fp.has(k) and int(fp[k]) >= int(lim[0]) and int(fp[k]) <= int(lim[1])
+	_check(in_range and int(fp.sens_general) > int(dp.sens_general), "the FAST preset sets all six, faster, within range")
+	_check(SettingsPanel.COLOR_NAMES.size() == Game.CROSSHAIR_COLORS.size(), "every crosshair colour has a name")
+	_check(SettingsPanel.PRECISION_NAMES.size() == int(Game.SETTING_RANGES.aim_precision[1]) + 1
+		and SettingsPanel.PRECISION_NOTES.size() == SettingsPanel.PRECISION_NAMES.size()
+		and SettingsPanel.LEFT_FIRE_NAMES.size() == int(Game.SETTING_RANGES.left_fire[1]) + 1, "every aim precision and left fire value has a choice")
+	# The screen itself (automated: AUTO guesses nothing, nothing is saved).
+	var saved := Game.settings.duplicate(true)
+	var saved_pending := Game.auto_graphics_pending
+	var saved_at := Game.autotest
+	Game.autotest = "unit"
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	var panel := SettingsPanel.new()
+	add_child(panel)
+	panel._show_tab(1)
+	for k: String in sens:
+		Game.settings[k] = 37
+	panel._ask_reset()
+	_check(panel._ask_layer != null and Game.settings.sens_general == 37, "RESET asks first and changes nothing yet")
+	(panel._ask_layer.find_child("ConfirmCancel", true, false) as Button).pressed.emit()
+	_check(panel._ask_layer == null and Game.settings.sens_general == 37, "CANCEL keeps the settings")
+	panel._ask_reset()
+	(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
+	_check(panel._ask_layer == null and sens.all(func(k: String) -> bool: return Game.settings[k] == Game.DEFAULT_SETTINGS[k]),
+		"a confirmed RESET on SENSITIVITY restores all six")
+	panel._apply_preset(1)
+	_check(panel._preset_index() == 1 and Game.settings.sens_2x == fp.sens_2x and Game.settings.sens_freelook == fp.sens_freelook,
+		"the FAST preset applies all six")
+	var slider: HSlider = (panel._sens_rows.sens_freelook as Control).get_meta("slider")
+	slider.value = 90
+	_check(Game.settings.sens_freelook == 90 and panel._preset_index() == -1, "a slider moved off the preset applies at once")
+	panel._show_tab(2)
+	panel._set_precision(2)
+	_check(Game.settings.aim_precision == 2 and panel._aim_note.text == SettingsPanel.PRECISION_NOTES[2], "aim precision applies and explains itself")
+	Game.settings.merge({"crosshair_color": 3, "crosshair_size": 140, "dynamic_joystick": true, "left_fire": 1}, true)
+	panel._reset_tab()
+	_check(Game.settings.crosshair_color == 0 and Game.settings.crosshair_size == 100 and Game.settings.dynamic_joystick == false
+		and Game.settings.aim_precision == 0 and Game.settings.left_fire == 0, "RESET on CONTROLS restores joystick, aim precision, left fire and crosshair")
+	var colors := panel.find_child("CrosshairColor", true, false)
+	_check(colors != null and colors.get_child_count() == Game.CROSSHAIR_COLORS.size() and panel.find_child("CrosshairPreview", true, false) != null
+		and panel.find_child("AimPrecision", true, false) != null and panel.find_child("LeftFire", true, false) != null,
+		"CONTROLS offers aim precision, the left fire button, every crosshair colour and a preview")
+	panel._show_tab(0)
+	var gseg := panel.find_child("GraphicsChoice", true, false)
+	_check(gseg != null and gseg.get_child_count() == 5, "graphics: AUTO and the four levels")
+	panel._on_graphics(3)
+	_check(Game.settings.graphics == 2 and Game.settings.graphics_auto == false and panel._graphics_note.text.begins_with("Low"),
+		"picking HIGH turns AUTO off")
+	panel._on_graphics(4)
+	_check(panel._ask_layer != null and Game.settings.graphics == 2 and (gseg.get_child(3) as Button).button_pressed
+		and not (gseg.get_child(4) as Button).button_pressed, "EXTREME asks first (it can heat the phone); the row keeps HIGH meanwhile")
+	(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
+	_check(Game.settings.graphics == 3 and (gseg.get_child(4) as Button).button_pressed, "confirmed: EXTREME")
+	panel._on_graphics(0)
+	_check(Game.settings.graphics_auto == true and panel._graphics_note.text == "AUTO picked EXTREME for this phone",
+		"AUTO names the level it picked (%s)" % panel._graphics_note.text)
+	var fseg := panel.find_child("FpsChoice", true, false)
+	_check(fseg != null and fseg.get_child_count() == Game.fps_choices().size(), "the frame-rate row offers this screen's rates")
+	var changes := [0]
+	var count := func() -> void: changes[0] += 1
+	Game.settings_changed.connect(count)
+	panel._apply("visual_effects", false)
+	_check(Game.settings.visual_effects == false and changes[0] == 1, "visual effects apply at once (the arena re-applies its effects)")
+	panel._apply("show_fps", true)
+	_check(changes[0] == 1, "a setting the HUD reads live does not re-apply the scene")
+	Game.settings_changed.disconnect(count)
+	Game.settings.merge({"fps": 30, "vibration": false, "graphics_auto": false, "graphics": 3}, true)
+	panel._reset_tab()
+	_check(Game.settings.fps == 60 and Game.settings.show_fps == false and Game.settings.vibration == true and Game.settings.graphics_auto == true
+		and Game.settings.visual_effects == true, "RESET on BASIC: 60 FPS, no counter, effects and vibration on, AUTO graphics")
+	panel._ask_reset()
+	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	_check(panel._ask_layer == null and panel.is_inside_tree() and not panel.is_queued_for_deletion(), "back closes the question, not the settings")
+	panel.free()
+	Game.settings = saved
+	Game.auto_graphics_pending = saved_pending
+	Game.autotest = saved_at
+	Game.apply_settings()
+
+
+## AUTO graphics: the first guess from the device, the measured step and the flow (a lowered level
+## is measured once more, then kept).
+func _test_auto_graphics() -> void:
+	var gib := 1024 * 1024 * 1024
+	var phone := Vector2i(2400, 1080)
+	var small := Vector2i(1600, 720)
+	_check(PerfGovernor.device_level("llvmpipe (LLVM 20.1.2, 256 bits)", 16, 32 * gib, Vector2i(1920, 1080), false) == 0
+		and PerfGovernor.device_level("Google SwiftShader", 8, 8 * gib, phone, true) == 0, "a software renderer gets LOW")
+	_check(PerfGovernor.device_level("NVIDIA GeForce RTX 3060", 12, 32 * gib, Vector2i(2560, 1440), false) == 2
+		and PerfGovernor.device_level("Intel(R) HD Graphics", 2, 4 * gib, Vector2i(1366, 768), false) == 1, "a desktop gets HIGH (MEDIUM on 2 cores)")
+	_check(PerfGovernor.device_level("Adreno (TM) 740", 8, 8 * gib, Vector2i(3088, 1440), true) == 2, "a flagship phone gets HIGH, even on a big screen")
+	_check(PerfGovernor.device_level("Adreno (TM) 619", 8, 6 * gib, phone, true) == 1
+		and PerfGovernor.device_level("Mali-G57 MC2", 8, 4 * gib, small, true) == 1, "a mid-range phone gets MEDIUM")
+	_check(PerfGovernor.device_level("Adreno (TM) 610", 8, 4 * gib, small, true) == 0
+		and PerfGovernor.device_level("Mali-G52 MC2", 8, 4 * gib, small, true) == 0
+		and PerfGovernor.device_level("PowerVR Rogue GE8320", 8, 3 * gib, small, true) == 0, "an entry-level GPU gets LOW")
+	_check(PerfGovernor.device_level("Mali-G57 MC2", 4, 4 * gib, phone, true) == 0
+		and PerfGovernor.device_level("Mali-G57 MC2", 8, 2 * gib, phone, true) == 0
+		and PerfGovernor.device_level("Mali-G57 MC2", 8, 6 * gib, Vector2i(3200, 1440), true) == 0,
+		"4 cores, under 3 GiB of memory or a huge screen take a level off")
+	_check(PerfGovernor.device_level("Mali-G710 MC10", 8, 8 * gib, phone, true) == 2 and PerfGovernor.device_level("Mali-G710 MC10", 4, 8 * gib, phone, true) == 1,
+		"a flagship GPU with 4 cores gets MEDIUM")
+	_check(PerfGovernor.device_level("Maleoon 910", 0, 0, phone, true) == 1, "an unknown phone starts at MEDIUM")
+	var tiers := {"Adreno (TM) 506": -1, "Adreno (TM) 540": 0, "Adreno (TM) 612": -1, "Adreno (TM) 618": 0, "Adreno (TM) 650": 1,
+		"Adreno (TM) 702": -1, "Adreno (TM) 710": 0, "Adreno (TM) 750": 1, "Adreno (TM) 830": 1, "Mali-T830 MP2": -1, "Mali-G31 MP2": -1,
+		"Mali-G68 MC4": 0, "Mali-G76 MP12": 1, "Mali-G615 MC6": 0, "Mali-G720 MC7": 1, "Immortalis-G925": 1, "Samsung Xclipse 940": 1,
+		"PowerVR B-Series BXM-8-256": -1, "": 0}
+	var wrong := []
+	for gpu: String in tiers:
+		if PerfGovernor.gpu_tier(gpu) != int(tiers[gpu]):
+			wrong.append(gpu)
+	_check(wrong.is_empty(), "GPU classes from the driver's name (wrong: %s)" % [wrong])
+	# The measured step at 60 FPS (16.7 ms a frame).
+	var t := 1000.0 / 60.0
+	_check(PerfGovernor.refine_level(1, _frames(60, t), 5.0, t) == 2, "frames on target with the CPU and GPU idle most of the time: a level up")
+	_check(PerfGovernor.refine_level(2, _frames(60, t), 5.0, t) == 2, "AUTO never goes past HIGH")
+	_check(PerfGovernor.refine_level(1, _frames(60, t), 5.0, t, false) == 1, "a second measurement never goes up")
+	_check(PerfGovernor.refine_level(1, _frames(60, t), 0.0, t) == 1 and PerfGovernor.refine_level(1, _frames(60, t), 12.0, t) == 1,
+		"no level up without clear room (or when the driver does not tell)")
+	_check(PerfGovernor.refine_level(2, _frames(60, t * 1.25), 15.0, t) == 1, "frames a quarter too long: a level down")
+	_check(PerfGovernor.refine_level(2, _frames(60, t * 1.8), 25.0, t) == 0, "far too slow: two levels down")
+	_check(PerfGovernor.refine_level(1, _frames(52, t) + _frames(8, t * 2.5), 5.0, t) == 0, "one frame in ten over twice the target: a level down")
+	_check(PerfGovernor.refine_level(0, _frames(60, t * 3.0), 40.0, t) == 0, "LOW is the floor")
+	_check(PerfGovernor.refine_level(2, _frames(3, t * 3.0), 40.0, t) == 2, "too few frames tell nothing")
+	_check(PerfGovernor.refine_level(1, _frames(60, 1000.0 / 30.0), 9.0, 1000.0 / 30.0) == 2, "at 30 FPS the budget is 33 ms a frame")
+	# The flow (automated: nothing is saved and no device guess is made).
+	var saved := Game.settings.duplicate(true)
+	var saved_pending := Game.auto_graphics_pending
+	var saved_at := Game.autotest
+	Game.autotest = "unit"
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game.start_auto_graphics()
+	_check(not Game.auto_graphics_pending and Game.settings.graphics == 1 and Game.settings.graphics_auto, "automated runs keep their level (no measuring)")
+	Game.settings.graphics = 2
+	Game.auto_graphics_pending = true        # as on a phone whose first guess was HIGH
+	_check(Game.auto_graphics_first_pass(), "the first measurement may go up")
+	Game.finish_auto_graphics(1)
+	_check(Game.settings.graphics == 1 and Game.auto_graphics_pending and not Game.settings.graphics_auto_done and not Game.auto_graphics_first_pass(),
+		"a lowered level is measured once more")
+	Game.finish_auto_graphics(0)
+	_check(Game.settings.graphics == 0 and not Game.auto_graphics_pending and Game.settings.graphics_auto_done, "the second answer is kept")
+	Game.finish_auto_graphics(2)
+	_check(Game.settings.graphics == 0, "nothing changes once AUTO is done")
+	Game.start_auto_graphics()
+	Game.auto_graphics_pending = true
+	Game.settings.graphics = 1
+	Game.finish_auto_graphics(2)
+	_check(Game.settings.graphics == 2 and not Game.auto_graphics_pending and Game.settings.graphics_auto_done, "a raised level is kept at once")
+	Game.start_auto_graphics()
+	Game.auto_graphics_pending = true
+	Game.stop_auto_graphics()
+	Game.settings.graphics = 3
+	Game.finish_auto_graphics(0)
+	_check(Game.settings.graphics == 3 and not Game.settings.graphics_auto, "a level picked by hand stops AUTO's measuring")
+	var file: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 5, "graphics": 2, "graphics_auto": true, "graphics_auto_done": true}))
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game._apply_saved_settings(file)
+	_check(Game.settings.graphics == 2 and Game.settings.graphics_auto_done == true, "AUTO's measured level is kept in the settings file")
+	Game.settings = saved
+	Game.auto_graphics_pending = saved_pending
+	Game.autotest = saved_at
+	Game.apply_settings()
+
+
+## n frame times of ms each.
+func _frames(n: int, ms: float) -> PackedFloat32Array:
+	var a := PackedFloat32Array()
+	for i in n:
+		a.append(ms)
+	return a
+
+
+## Dynamic resolution, driven with modelled frame times (no viewport): it settles where the frames
+## fit, never below the floor or above the level's own scale, holds in the first second of a round,
+## on a single long frame and in the band between its thresholds, undoes a step down that did not
+## help, and backs off after a step up that had to be undone.
+func _test_perf_governor() -> void:
+	var t60 := 1.0 / 60.0
+	_near(PerfGovernor.target_fps(60, 60.0), 60.0, "60 FPS on a 60 Hz screen")
+	_near(PerfGovernor.target_fps(90, 60.0), 60.0, "a 90 FPS cap on a 60 Hz screen runs at 60")
+	_near(PerfGovernor.target_fps(120, 120.0), 120.0, "120 FPS on a 120 Hz screen")
+	_near(PerfGovernor.target_fps(30, 120.0), 30.0, "a lower frame cap is the target")
+	_near(PerfGovernor.target_fps(60, NAN), 60.0, "an unknown refresh rate counts as 60 Hz")
+	_near(PerfGovernor.target_fps(0, 144.0), 144.0, "no frame cap: the screen's rate")
+	var g := PerfGovernor.new()
+	g.target_s = t60
+	# GPU-bound (25 ms at full size, growing with the pixels): it settles at 0.85 (18 ms, in the band).
+	g.reset(1.0)
+	var r := _govern(g, func(s: float) -> float: return maxf(0.010, 0.025 * s * s), 40.0)
+	_near(float(r.scale), 0.85, "GPU-bound frames: the 3D scale steps down to where they fit")
+	_near(float(r.lowest), 0.85, "... and no lower")
+	g.reset(1.0)
+	r = _govern(g, func(s: float) -> float: return 0.06 * s * s, 60.0)
+	_near(float(r.lowest), PerfGovernor.FLOOR, "a very slow GPU: down to the floor, never below")
+	# CPU-bound: a step down does not help, so it is undone and lowering pauses.
+	g.reset(1.0)
+	r = _govern(g, func(_s: float) -> float: return 0.022, 60.0)
+	_check(float(r.lowest) >= 0.949 and float(r.below) < 0.2,
+		"CPU-bound frames: a step down that does not help is undone (lowest %.2f, lowered %.0f %% of the time)" % [r.lowest, float(r.below) * 100.0])
+	# Room to spare: back up one slow step at a time to the level's own scale, never above it.
+	g.reset(0.85)
+	g.scale = 0.6
+	r = _govern(g, func(_s: float) -> float: return t60, 60.0)
+	_near(float(r.scale), 0.85, "frames on target: back up to the level's own scale")
+	_check(float(r.highest) <= 0.851 and int(r.raises) == 5, "0.05 at a time, never above it (%d steps)" % r.raises)
+	# Hysteresis: frames between FAST and SLOW x the target change nothing.
+	g.reset(1.0)
+	g.scale = 0.8
+	r = _govern(g, func(_s: float) -> float: return t60 * 1.1, 60.0)
+	_check(is_equal_approx(float(r.scale), 0.8) and float(r.lowest) >= 0.799 and int(r.raises) == 0, "frames 10 % over the target: no change")
+	# A step up that has to be undone: the next try waits twice as long (no pumping).
+	g.reset(1.0)
+	g.scale = 0.9
+	r = _govern(g, func(s: float) -> float: return t60 if s <= 0.901 else 0.02, 150.0)
+	_check(int(r.raises) <= 4 and float(r.highest) <= 0.951 and float(r.lowest) >= 0.899, "a step up that is too much backs off (%d tries in 150 s)" % r.raises)
+	g.reset(1.0)
+	r = _govern(g, func(_s: float) -> float: return 0.025, 10.0, 0.5)
+	_check(is_equal_approx(float(r.scale), 1.0), "nothing changes in the first second of a round")
+	g.reset(1.0)
+	_check(is_equal_approx(g.advance(2.0, 99.0), 1.0) and is_equal_approx(g.advance(0.6, 99.0), 1.0) and g._avg == 0.0,
+		"a load or a pause (one long frame) is left out")
+	g.free()
+
+
+## Runs a governor on frames from model(scale) -> seconds for `seconds`, `round_t` s into the round
+## (99: mid-round): the final, lowest and highest scale, the share of the time below the ceiling and
+## the steps up.
+func _govern(g: PerfGovernor, model: Callable, seconds: float, round_t := 99.0) -> Dictionary:
+	var t := 0.0
+	var below := 0.0
+	var out := {"lowest": g.scale, "highest": g.scale, "raises": 0}
+	while t < seconds:
+		var dt: float = model.call(g.scale)
+		var was := g.scale
+		g.advance(dt, round_t)
+		if g.scale > was + 0.001:
+			out.raises = int(out.raises) + 1
+		out.lowest = minf(float(out.lowest), g.scale)
+		out.highest = maxf(float(out.highest), g.scale)
+		if g.scale < g.ceiling - 0.001:
+			below += dt
+		t += dt
+	out.scale = g.scale
+	out.below = below / t
+	return out
 
 
 func _test_modes() -> void:
