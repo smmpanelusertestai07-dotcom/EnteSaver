@@ -122,10 +122,20 @@ listed here. If a part needs something new from the core, add it in its own file
   the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with
   `in_match = true`.
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
-  `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics
-  change emits `Game.settings_changed` so the arena re-applies its quality at once. With
+  `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
+  visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
+  once. `TAB_KEYS` lists each tab's settings (its RESET), `NOT_SHOWN` the rest; RESET and EXTREME
+  ask first in a `Confirm` layer (`ConfirmOk`, `ConfirmCancel`; back closes it). With
   `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
   note (`EditHudNote`): leaving for the editor would abandon the match.
+- Performance: `PerfGovernor.attach(scene, level_scale, dynamic := true)` (scripts/perf_governor.gd)
+  from `Arena.apply_graphics()` (dynamic 3D resolution, 0.6 at the least) and the lobby's
+  `_apply_quality()` (measuring only). AUTO graphics: `Game.start_auto_graphics()` (a first guess
+  from `PerfGovernor.device_level()`, then `Game.auto_graphics_pending` until a scene's governor
+  measured the frames and called `Game.finish_auto_graphics(level)`), `Game.stop_auto_graphics()`.
+  Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`.
+- Aim settings on `Player`: `sight_of(def)` ("sniper", "2x", "reddot", "none"), `sens_key(def,
+  aiming)` (the sensitivity setting a view turns with), `assist_allowed(aim_precision, aiming)`.
 - Lobby Android back closes the top layer (popup, settings, wardrobe), then shows a quit
   dialog (`QuitDialog`, `QuitCancel`, `QuitConfirm`); it is ignored during the START overlay.
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, menus, mode card, START, settings,

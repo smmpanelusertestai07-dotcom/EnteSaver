@@ -430,13 +430,14 @@ func apply_graphics() -> void:
 	var vp := get_viewport()
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = [0.7, 0.85, 1.0, 1.0][clampi(g, 0, 3)]
+	PerfGovernor.attach(self, vp.scaling_3d_scale)       # lowers it while frames run long (and AUTO measures)
 	vp.msaa_3d = Viewport.MSAA_2X if g >= 2 else Viewport.MSAA_DISABLED
 	if sun:
 		sun.shadow_enabled = g >= 1
 	RenderingServer.directional_shadow_atlas_set_size(4096 if g >= 3 else 2048, true)
 	if env:
 		env.environment.glow_enabled = g >= 1
-	Effects.lights_enabled = g >= 2
+	Effects.configure(g, bool(Game.settings.visual_effects))
 	if map:
 		map.apply_quality(g)
 	if hud:

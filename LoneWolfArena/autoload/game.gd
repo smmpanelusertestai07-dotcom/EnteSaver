@@ -25,19 +25,23 @@ const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"mode": DEFAULT_MODE,
 	"graphics": 1,
-	"graphics_auto": true,        # the game picks the graphics level for the phone
+	"graphics_auto": true,        # the game picks the graphics level for the phone (see AUTO graphics)
+	"graphics_auto_done": false,  # AUTO has measured this phone (until then the next lobby or match does)
 	"fps": 60,
 	"show_fps": false,
 	"sens_general": 100,
 	"sens_reddot": 100,
-	"sens_2x": 100,               # the 2x scope (until it has its own, it aims with Red Dot)
+	"sens_2x": 100,               # aiming through a 2x scope (Player.sens_key)
 	"sens_sniper": 71,
-	"sens_freelook": 100,         # free look (the eye button; until wired, it turns with General)
+	"sens_freelook": 100,         # free look (the eye button)
 	"sens_fire": 100,             # a drag that starts on the fire button, % of the view's own
 	"dynamic_joystick": false,
 	"vibration": true,
 	"crosshair_color": 0,         # index into CROSSHAIR_COLORS
 	"crosshair_size": 100,        # % of the standard crosshair (CROSSHAIR_SCALE)
+	"aim_precision": 0,           # aim assist: 0 always, 1 not while aiming down a sight, 2 never (Player.assist_allowed)
+	"left_fire": 0,               # the left fire button: 0 always, 1 only while aiming
+	"visual_effects": true,       # muzzle / explosion lights and full particle bursts (Effects.configure)
 	"vol_master": 85,
 	"vol_sfx": 90,
 	"vol_music": 45,
@@ -61,11 +65,13 @@ const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
 	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "sens_fire": [1, 200], "vol_master": [0, 100],
 	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2], "crosshair_color": [0, 3],
-	"crosshair_size": [50, 150],
+	"crosshair_size": [50, 150], "aim_precision": [0, 2], "left_fire": [0, 1],
 }
 ## On/off settings: anything but true or false falls back to the default.
-const BOOL_SETTINGS := ["graphics_auto", "show_fps", "dynamic_joystick", "vibration"]
-const FPS_OPTIONS := [30, 60, 90]
+const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects"]
+## Every frame rate the setting can hold; the settings offer those the screen can show
+## (fps_choices).
+const FPS_OPTIONS := [30, 60, 90, 120]
 
 ## The crosshair's idle colour (it always turns red on an enemy).
 const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
@@ -163,6 +169,8 @@ func _ready() -> void:
 				shots_dir = arg.substr(8)
 	settings = DEFAULT_SETTINGS.duplicate(true)
 	_apply_saved_settings(_load_json(SETTINGS_PATH))
+	if bool(settings.graphics_auto) and not bool(settings.graphics_auto_done):
+		start_auto_graphics()        # the first run: a guess now, measured in the lobby
 	_load_profile()
 	var hud: Variant = _load_json(HUD_PATH)
 	hud_layout = hud if hud is Dictionary else {}
@@ -498,6 +506,68 @@ func crosshair_color() -> Color:
 func crosshair_scale() -> float:
 	var r: Array = SETTING_RANGES.crosshair_size
 	return CROSSHAIR_SCALE * float(clampi(int(settings.crosshair_size), int(r[0]), int(r[1]))) / 100.0
+
+
+## The frame rates the settings offer on a screen that refreshes `hz` times a second: 30 and 60
+## always, 90 and 120 only where the screen can show them (an unknown rate, NaN or 0, offers 30
+## and 60).
+func fps_options_for(hz: float) -> Array:
+	var out := []
+	for f: int in FPS_OPTIONS:
+		if f <= 60 or hz >= f - 2.0:
+			out.append(f)
+	return out
+
+
+## The frame rates offered on this screen.
+func fps_choices() -> Array:
+	return fps_options_for(DisplayServer.screen_get_refresh_rate())
+
+
+# ---------------------------------------------------------------- AUTO graphics
+
+## AUTO graphics (graphics_auto): the game picks LOW..HIGH for this phone. start_auto_graphics()
+## sets a first guess from the hardware (PerfGovernor.device_level) and asks for a measurement:
+## while auto_graphics_pending the lobby's or the arena's PerfGovernor measures the frame times for
+## a few seconds and finish_auto_graphics() takes its level. A lowered level is measured once more
+## (it may go lower still, never back up); then graphics_auto_done keeps the result until AUTO is
+## picked again, the frame rate changes or BASIC is reset. Automated runs keep a fixed level.
+var auto_graphics_pending := false
+var _auto_passes := 0
+
+
+func start_auto_graphics() -> void:
+	settings.graphics_auto = true
+	settings.graphics_auto_done = false
+	_auto_passes = 0
+	auto_graphics_pending = autotest == ""
+	if auto_graphics_pending:
+		settings.graphics = PerfGovernor.device_level(RenderingServer.get_video_adapter_name(), OS.get_processor_count(),
+			int(OS.get_memory_info().get("physical", 0)), DisplayServer.screen_get_size(), OS.has_feature("mobile"))
+
+
+## A level picked by hand: AUTO is off and stops measuring.
+func stop_auto_graphics() -> void:
+	settings.graphics_auto = false
+	auto_graphics_pending = false
+
+
+## True for AUTO's first measurement (it may go a level up; the second one only down).
+func auto_graphics_first_pass() -> bool:
+	return _auto_passes == 0
+
+
+## A measurement's answer (PerfGovernor): the level is applied and saved; a lowered one is
+## measured once more.
+func finish_auto_graphics(picked: int) -> void:
+	if not auto_graphics_pending:
+		return
+	var lowered := picked < int(settings.graphics)
+	_auto_passes += 1
+	settings.graphics = clampi(picked, 0, PerfGovernor.AUTO_MAX)
+	auto_graphics_pending = bool(settings.graphics_auto) and lowered and _auto_passes < 2
+	settings.graphics_auto_done = not auto_graphics_pending
+	save_settings()
 
 
 func _setup_audio_buses() -> void:

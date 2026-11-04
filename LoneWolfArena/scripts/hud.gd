@@ -394,6 +394,9 @@ func _button_visible(id: String) -> bool:
 	match id:
 		"sprint":
 			return int(Game.settings.get("run_mode", 2)) != 1
+		"fire_l":
+			# setting Left fire button: always, or only while aiming down a sight
+			return int(Game.settings.get("left_fire", 0)) == 0 or (player != null and player.ads)
 	return true
 
 
