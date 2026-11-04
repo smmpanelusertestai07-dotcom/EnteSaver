@@ -56,6 +56,8 @@ var room_guest := {}           # {"id", "name"}: who joined it with the right pa
 var join_state := ""           # custom room this phone joins: "", "asking", "in", "wrong", "none"
 var _brokers: Array = BROKERS
 var _broker_i := 0
+var _fail_n := 0               # failed connects in a row on the current broker
+var _alone_t := 0.0            # seconds on a backup broker with nobody else in the lobby
 var _ws: WebSocketPeer
 var _connected := false        # CONNACK received
 var _sent_connect := false
@@ -166,8 +168,14 @@ func _connect() -> void:
 	status = "connecting"
 
 
+## Every phone should sit on the SAME broker or players never see each other: a dropped
+## connection retries the first broker (three tries) before falling back to the next one, and a
+## phone that is alone on a backup broker goes back to the first one (see _process).
 func _next_broker() -> void:
-	_broker_i = (_broker_i + 1) % _brokers.size()
+	_fail_n += 1
+	if _fail_n >= 3:
+		_broker_i = (_broker_i + 1) % _brokers.size()
+		_fail_n = 0
 	_retry_t = 2.0
 	status = "offline"
 
@@ -213,6 +221,22 @@ func _process(delta: float) -> void:
 		return
 	if not _connected:
 		return
+	if _broker_i != 0 and not in_session and _room == "" and room_code == "" and _outgoing.is_empty() \
+			and _join.is_empty() and peers.is_empty():
+		_alone_t += delta
+		if _alone_t > 20.0:
+			_alone_t = 0.0
+			_broker_i = 0
+			_fail_n = 0
+			_send_packet(PackedByteArray([0xE0, 0x00]))
+			_ws.close()
+			_ws = null
+			_connected = false
+			_retry_t = 0.5
+			status = "offline"
+			return
+	else:
+		_alone_t = 0.0
 	_ping_t -= delta
 	if _ping_t <= 0.0:
 		_ping_t = PING_S
@@ -351,6 +375,7 @@ func _parse() -> void:
 			0x20:                    # CONNACK
 				if body.size() >= 2 and body[1] == 0:
 					_connected = true
+					_fail_n = 0
 					status = "online"
 					_ping_t = PING_S
 					_subscribe(ROOT + "/u/" + my_id)

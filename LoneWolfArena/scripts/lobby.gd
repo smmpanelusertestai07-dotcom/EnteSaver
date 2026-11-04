@@ -87,7 +87,9 @@ func _ready() -> void:
 	Game.settings_changed.connect(_apply_quality)
 	_connect_net(Game.lan_service())
 	_connect_net(Game.cloud_service())
-	Game.lan.start_discovery()
+	# Online presence starts with the lobby, so friends and other players see this phone online
+	# as soon as the game is open (the same-Wi-Fi mode is gone: no LAN discovery any more).
+	Game.cloud_service().start_lobby()
 
 
 ## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
@@ -114,7 +116,7 @@ func _exit_tree() -> void:
 		if not Game.cloud.in_session:
 			Game.cloud.close_room()
 			Game.cloud.leave_join()
-		Game.cloud.stop_lobby()
+		# presence stays on through a match: friends keep seeing this phone online
 	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
 	var vp := get_viewport()
 	if vp:
@@ -994,7 +996,7 @@ func _open_friends(kind := "online") -> void:
 	var v := _open_modal("PLAY WITH FRIENDS", 980.0)
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 10)
-	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"], ["wifi", "SAME WI-FI"]]:
+	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"]]:
 		var b := UI.button(String(t[1]), 19, "primary" if t[0] == kind else "dark", Vector2(205, 48))
 		b.name = "Tab_" + String(t[0])
 		var tk := String(t[0])
