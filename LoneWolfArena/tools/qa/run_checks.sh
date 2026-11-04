@@ -50,6 +50,7 @@ step unit godot --headless --path . res://tests/run_tests.tscn
 if [ "${1:-}" != "quick" ]; then
   step sim godot --headless --path . -- --autotest=sim
   step aim godot --headless --path . -- --autotest=aim
+  step login godot --headless --path . -- --autotest=script:res://tests/login_check.gd
   step anim godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
   step bot godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
   step soak env LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
