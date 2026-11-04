@@ -12,6 +12,16 @@ static var _hole_mat: StandardMaterial3D
 static var muzzle_tex: Texture2D
 static var glow_tex: Texture2D
 static var lights_enabled := true
+## Share of each burst's particles that are made (they are CPU-simulated), see configure().
+static var particle_share := 1.0
+
+
+## The graphics level and the VISUAL EFFECTS setting (full): lights on muzzle flashes and explosions
+## from HIGH up and only with the effects on; particle bursts at half on LOW and at half again with
+## the effects off (a burst keeps 2 particles at least, so hits still spark).
+static func configure(level: int, full: bool) -> void:
+	lights_enabled = level >= 2 and full
+	particle_share = (0.5 if level <= 0 else 1.0) * (1.0 if full else 0.5)
 
 
 static func _mat(color: Color, additive := true, tex: Texture2D = null, billboard := false) -> StandardMaterial3D:
@@ -121,7 +131,7 @@ static func _burst(parent: Node, pos: Vector3, normal: Vector3, color: Color, am
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.explosiveness = 1.0
-	p.amount = amount
+	p.amount = maxi(roundi(amount * particle_share), 2)
 	p.lifetime = life
 	p.local_coords = false
 	p.mesh = _box(Vector3(size, size, size * 3.0))

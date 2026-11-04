@@ -89,13 +89,28 @@ func _ready() -> void:
 	friends.on_lobby_ready()
 
 
-## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
-## is a little lighter than the arena, so each level gets a bit more than in a match.
+## The graphics setting on the stage, at build and again on every change (settings_changed): 3D
+## resolution and anti-aliasing (the stage, about 150-170 draw calls, is a little lighter than the
+## arena, so each level gets a bit more than in a match), and from MEDIUM up the glow, the key
+## light's shadow and the dust motes (CPU-simulated: LOW and VISUAL EFFECTS off drop them). The
+## stage's PerfGovernor only measures the phone for AUTO graphics (no dynamic resolution here).
 func _apply_quality() -> void:
-	var q: Array = STAGE_QUALITY[clampi(int(Game.settings.graphics), 0, STAGE_QUALITY.size() - 1)]
+	var g := clampi(int(Game.settings.graphics), 0, STAGE_QUALITY.size() - 1)
+	var q: Array = STAGE_QUALITY[g]
 	var vp := get_viewport()
 	vp.scaling_3d_scale = float(q[0])
 	vp.msaa_3d = int(q[1]) as Viewport.MSAA
+	var stage_env := get_node_or_null(^"StageEnv") as WorldEnvironment
+	if stage_env:
+		stage_env.environment.glow_enabled = g >= 1
+	var key_light := get_node_or_null(^"KeyLight") as Light3D
+	if key_light:
+		key_light.shadow_enabled = g >= 1
+	var motes := get_node_or_null(^"Motes") as CPUParticles3D
+	if motes:
+		motes.visible = g >= 1 and bool(Game.settings.visual_effects)
+		motes.emitting = motes.visible
+	PerfGovernor.attach(self, float(q[0]), false)
 
 
 func _mark_start() -> void:
@@ -143,12 +158,11 @@ func _on_viewport_resized() -> void:
 # ---------------------------------------------------------------- 3D stage
 
 func _build_stage() -> void:
-	var hi := int(Game.settings.graphics) >= 1
 	var vp := get_viewport()
 	_vp_msaa = vp.msaa_3d
 	_vp_scale = vp.scaling_3d_scale
-	_apply_quality()
 	var env := WorldEnvironment.new()
+	env.name = "StageEnv"
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
@@ -169,8 +183,7 @@ func _build_stage() -> void:
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.tonemap_exposure = 0.95
 	e.tonemap_white = 4.0                 # roll off highlights (white outfits) instead of clipping
-	e.glow_enabled = hi
-	e.glow_intensity = 0.55
+	e.glow_intensity = 0.55               # glow on from MEDIUM (_apply_quality)
 	e.glow_bloom = 0.06
 	e.glow_hdr_threshold = 1.0
 	e.fog_enabled = true
@@ -222,13 +235,13 @@ func _build_stage() -> void:
 	# Lights: warm key from the side with the only shadow (a gradient across the body), cool +
 	# warm rims, soft fill.
 	var key := SpotLight3D.new()
+	key.name = "KeyLight"                 # its shadow from MEDIUM (_apply_quality)
 	key.position = Vector3(3.1, 4.0, 2.7)
 	key.light_energy = 2.5
 	key.spot_range = 12.0
 	key.spot_angle = 28.0
 	key.spot_attenuation = 0.8
 	key.light_color = Color(1.0, 0.9, 0.8)
-	key.shadow_enabled = hi
 	add_child(key)
 	key.look_at(Vector3(0, 1.0, 0))
 	var rim := SpotLight3D.new()
@@ -264,6 +277,7 @@ func _build_stage() -> void:
 	camera.position = view[0]
 	camera.look_at(view[1])
 	camera.current = true
+	_apply_quality()
 
 
 func _unshaded(c: Color, additive := false, tex: Texture2D = null) -> StandardMaterial3D:
