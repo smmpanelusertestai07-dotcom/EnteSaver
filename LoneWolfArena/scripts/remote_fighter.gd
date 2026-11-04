@@ -1,9 +1,9 @@
 class_name RemoteFighter
 extends Bot
-## The other phone's player in a Wi-Fi match (stands in for the bot, so the arena, HUD and
-## results treat it the same). It has no AI: it follows the state that phone sends 20 times a
-## second (smoothed), shows its shots, and never loses HP by itself: hits on it are sent to its
-## phone, which applies them and reports its HP and its death back.
+## The other phone's player in an online match (stands in for the bot, so the arena, HUD and
+## results treat it the same). It has no AI: it follows the state that phone sends (Cloud: 10
+## times a second, smoothed), shows its shots, and never loses HP by itself: hits on it are sent
+## to its phone, which applies them and reports its HP and its death back.
 
 const STATE_SIZE := 10
 

@@ -1,10 +1,10 @@
 class_name LobbyFriends
 extends RefCounted
-## PLAY WITH FRIENDS in the lobby (Lan / Cloud) and the net services' signals while the lobby is
-## open: the challenge popup, a declined or cancelled challenge, the custom room's changes and the
-## session that starts an online match. The lobby makes it (Lobby.friends) and calls
-## on_lobby_ready() from its _ready, on_lobby_exit() from its _exit_tree and process() every
-## frame; popups open through Lobby.dialogs.
+## ONLINE 1 VS 1 in the lobby (LONE WOLF, through Cloud) and the online service's signals while
+## the lobby is open: the challenge popup, a declined or cancelled challenge, friend requests, the
+## custom room's changes and the session that starts an online match. The lobby makes it
+## (Lobby.friends) and calls on_lobby_ready() from its _ready, on_lobby_exit() from its _exit_tree
+## and process() every frame; popups open through Lobby.dialogs.
 ## Node names: Tab_<online|friends|room>, NetList, MyId, FriendSearch, FriendAccept,
 ## FriendDecline, RoomHead, RoomStart, RoomPin, Rule_<key>, RoomCreate, JoinCode, JoinPin,
 ## RoomJoin, JoinState, AcceptButton.
@@ -28,28 +28,25 @@ func _init(owner_lobby: Lobby) -> void:
 	lobby = owner_lobby
 
 
-## The lobby is up: listen to both services and go online.
+## The lobby is up: listen to the online service and go online.
 func on_lobby_ready() -> void:
-	_connect_net(Game.lan_service())
 	_connect_net(Game.cloud_service())
 	# Online presence starts with the lobby, so friends and other players see this phone online
-	# as soon as the game is open (the same-Wi-Fi mode is gone: no LAN discovery any more).
+	# as soon as the game is open.
 	Game.cloud_service().start_lobby()
 
 
 ## The lobby is leaving the tree.
 func on_lobby_exit() -> void:
-	for svc: Node in [Game.lan, Game.cloud]:
-		if svc:
-			_disconnect_net(svc)
-			svc.cancel_invite()
-	if Game.lan:
-		Game.lan.stop_discovery()
-	if Game.cloud:
-		if not Game.cloud.in_session:
-			Game.cloud.close_room()
-			Game.cloud.leave_join()
-		# presence stays on through a match: friends keep seeing this phone online
+	var cloud := Game.cloud
+	if cloud == null:
+		return
+	_disconnect_net(cloud)
+	cloud.cancel_invite()
+	if not cloud.in_session:
+		cloud.close_room()
+		cloud.leave_join()
+	# presence stays on through a match: friends keep seeing this phone online
 
 
 ## Every frame: the open list follows the service (players, requests, invites).
@@ -64,19 +61,19 @@ func process(delta: float) -> void:
 			_refresh_friends()
 
 
-# ---------------------------------------------------------------- play with friends (Lan / Cloud)
+# ---------------------------------------------------------------- online 1 vs 1 (Cloud)
 
-## Two ways to find a friend: ONLINE (internet, no account: a free public relay carries
-## end-to-end encrypted messages, see Cloud) and SAME WI-FI (no server at all, see Lan). Players
-## show up by name; CHALLENGE sends a request, the other phone accepts or declines. The ONLINE
-## list connects only once this tab is opened.
+## The ONLINE window (LONE WOLF's START and the ONLINE 1 VS 1 menu row open it). No account: a
+## free public relay carries end-to-end encrypted messages (see Cloud). Tabs: ONLINE (players
+## online now, then every player with a card), FRIENDS (your ID, search, requests, friends) and
+## CUSTOM ROOM. Players show up by name; DUEL 1 VS 1 sends a challenge, the other phone accepts
+## or declines. The player cards are listened to only while this window is open.
 func open(kind := "online") -> void:
 	_net_kind = kind
-	var svc: Node = _net_service()
-	if kind != "wifi":
-		Game.cloud_service().start_lobby()
-		Game.cloud_service().start_directory()          # every registered player, online or not
-		_dir_on = true
+	var cloud := Game.cloud_service()
+	cloud.start_lobby()
+	cloud.start_directory()          # every registered player, online or not
+	_dir_on = true
 	var v := lobby.dialogs.open_modal("ONLINE 1 VS 1", 980.0)
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 10)
@@ -93,7 +90,6 @@ func open(kind := "online") -> void:
 		"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
 		"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
 		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
-		"wifi": "Same Wi-Fi or one phone's hotspot: nearby players show up by name.",
 	}
 	var info := UI.label(String(notes[kind]), 17, UI.TEXT_DIM, "semi")
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -107,12 +103,11 @@ func open(kind := "online") -> void:
 	_net_list = VBoxContainer.new()
 	_net_list.name = "NetList"
 	_net_list.add_theme_constant_override("separation", 8)
-	_net_list.custom_minimum_size = Vector2(0, 170 if kind in ["online", "wifi"] else 0)
+	_net_list.custom_minimum_size = Vector2(0, 170 if kind == "online" else 0)
 	v.add_child(_net_list)
 	_net_sig = "-"
 	_net_note = ""
-	if svc:
-		_refresh_friends()
+	_refresh_friends()
 
 
 ## FRIENDS tab head: this phone's ID and a search box (an ID or a name among the players online).
@@ -309,27 +304,20 @@ func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEd
 	return le
 
 
-func _net_service() -> Node:
-	return (Game.lan_service() as Node) if _net_kind == "wifi" else (Game.cloud_service() as Node)
-
-
 func _refresh_friends() -> void:
 	if _net_list == null or not is_instance_valid(_net_list):
 		return
-	var svc: Node = _net_service()
-	var waiting := String(svc.waiting_for())
-	var peers: Dictionary = svc.peers
-	var cloud := svc as Cloud
-	if _net_kind != "wifi" and String(svc.status) != "online":
-		match String(svc.status):
+	var cloud := Game.cloud_service()
+	var waiting := cloud.waiting_for()
+	var peers: Dictionary = cloud.peers
+	if cloud.status != "online":
+		match cloud.status:
 			"preparing":
 				_net_status.text = "GETTING READY..."
 			"connecting":
 				_net_status.text = "CONNECTING..."
 			_:
 				_net_status.text = "NO INTERNET: RETRYING..."
-	elif _net_kind == "wifi" and String(svc.local_address()) == "":
-		_net_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
 	elif waiting != "":
 		_net_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
 	elif _net_note != "":
@@ -340,9 +328,9 @@ func _refresh_friends() -> void:
 	elif _net_kind == "room":
 		_net_status.text = "ROOM OPEN: SHARE ITS ID AND PASSWORD" if cloud.room_code != "" else ""
 	elif peers.is_empty():
-		_net_status.text = "LOOKING FOR PLAYERS ONLINE..." if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
+		_net_status.text = "LOOKING FOR PLAYERS ONLINE..."
 	else:
-		_net_status.text = "PLAYERS ONLINE" if _net_kind == "online" else "PLAYERS NEARBY"
+		_net_status.text = "PLAYERS ONLINE"
 	if _net_kind == "room":
 		return
 	if _net_kind == "friends" and lobby.dialogs.modal and cloud.my_id != "":
@@ -352,11 +340,10 @@ func _refresh_friends() -> void:
 	var sig := waiting + "|" + _net_kind + "|" + _friend_query
 	for id in peers:
 		sig += "|%s:%s" % [id, peers[id].name]
-	if cloud:
-		sig += "|f%d|r%s|o%d|d%d" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
-			(Game.profile.friend_out as Dictionary).size(), cloud.directory.size()]
-		for id in peers:
-			sig += ",a" if cloud.friend_asked(String(id)) else ""
+	sig += "|f%d|r%s|o%d|d%d" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
+		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size()]
+	for id in peers:
+		sig += ",a" if cloud.friend_asked(String(id)) else ""
 	if sig == _net_sig:
 		return
 	_net_sig = sig
@@ -366,15 +353,15 @@ func _refresh_friends() -> void:
 		_fill_friends(cloud, waiting)
 		return
 	for id: String in peers:
-		_net_list.add_child(_player_row(svc, id, String(peers[id].name), waiting, "  ·  ONLINE"))
-	if cloud and _net_kind == "online":
+		_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
+	if _net_kind == "online":
 		var offline := _offline_players(cloud, "")
 		if not offline.is_empty():
 			var head := UI.label("ALL PLAYERS  ·  %d" % offline.size(), 19, UI.TEXT_DIM, "bold")
 			head.name = "AllPlayersHead"
 			_net_list.add_child(head)
 		for id: String in offline:
-			_net_list.add_child(_player_row(svc, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
+			_net_list.add_child(_player_row(cloud, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
 
 
 ## Players with a card who are not online right now (search: an ID start or part of the name),
@@ -403,17 +390,15 @@ static func _ago(ts: int) -> String:
 	return "LAST SEEN %d DAY%s AGO" % [s / 86400, "" if s / 86400 == 1 else "S"]
 
 
-## One player in a list: name and code, ADD (online, not yet a friend) and CHALLENGE.
-func _player_row(svc: Node, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
+## One player in a list: name and code, ADD FRIEND (not a friend yet) and DUEL 1 VS 1 (online now).
+func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
-	var label := "%s  #%s" % [who, Cloud.friend_code(id) if svc is Cloud else id.left(4).to_upper()]
-	var name_l := UI.label(label + online_tag, 24, UI.TEXT, "heavy")
+	var name_l := UI.label("%s  #%s%s" % [who, Cloud.friend_code(id), online_tag], 24, UI.TEXT, "heavy")
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(name_l)
-	var cloud := svc as Cloud
-	if cloud and not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
+	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
 		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 52))
 		add.disabled = asked
@@ -423,14 +408,14 @@ func _player_row(svc: Node, id: String, who: String, waiting: String, online_tag
 			_net_sig = "-"
 			_refresh_friends())
 		row.add_child(add)
-	if svc.peers.has(id):
+	if cloud.peers.has(id):
 		var b := UI.button("CANCEL" if waiting != "" else "DUEL 1 VS 1", 19, "light" if waiting != "" else "primary", Vector2(210, 52))
 		b.pressed.connect(func() -> void:
-			var sv: Node = _net_service()
+			var sv := Game.cloud_service()
 			_net_note = ""
-			if String(sv.waiting_for()) != "":
+			if sv.waiting_for() != "":
 				sv.cancel_invite()
-			elif not bool(sv.invite(id)):
+			elif not sv.invite(id):
 				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
 			_net_sig = "-"
 			_refresh_friends())
@@ -487,7 +472,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 
 # ---------------------------------------------------------------- net signals
 
-func _on_net_invited(who: String, svc: Node) -> void:
+func _on_net_invited(who: String) -> void:
 	_net_list = null
 	Audio.play("ui_select", 0.0)
 	if bool(Game.settings.get("vibration", true)):
@@ -501,14 +486,14 @@ func _on_net_invited(who: String, svc: Node) -> void:
 	row.add_theme_constant_override("separation", 12)
 	var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
 	no.pressed.connect(func() -> void:
-		svc.answer(false)
+		Game.cloud_service().answer(false)
 		lobby.dialogs.close_modal())
 	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
 	yes.name = "AcceptButton"
 	yes.pressed.connect(func() -> void:
 		yes.disabled = true
 		UI.set_caption(yes, "CONNECTING")
-		svc.answer(true))
+		Game.cloud_service().answer(true))
 	row.add_child(no)
 	row.add_child(yes)
 	v.add_child(row)
@@ -559,12 +544,12 @@ func _on_friends_changed() -> void:
 		return
 
 
-func _on_net_invite_cancelled(_svc: Node) -> void:
+func _on_net_invite_cancelled() -> void:
 	if lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal) and lobby.dialogs.modal.find_child("AcceptButton", true, false):
 		lobby.dialogs.close_modal()
 
 
-func _on_net_answered(accepted: bool, who: String, _svc: Node) -> void:
+func _on_net_answered(accepted: bool, who: String) -> void:
 	if not accepted:
 		_net_note = "%s DECLINED (OR DID NOT ANSWER)" % who
 		_net_sig = "-"
@@ -576,47 +561,43 @@ func _on_room_changed() -> void:
 		open("room")
 
 
-func _on_net_session(_host: bool, svc: Node) -> void:
+func _on_net_session(_host: bool) -> void:
 	if lobby.start_btn.disabled:
 		return
+	var cloud := Game.cloud_service()
 	Game.practice = false
 	Game.online = true
-	Game.session = svc
-	var rules: Variant = svc.get("session_rules")
-	Game.room_rules = (rules as Dictionary).duplicate() if rules is Dictionary else {}
-	if svc is Cloud:
-		(svc as Cloud).close_room()
-		(svc as Cloud).leave_join()
+	Game.session = cloud
+	Game.room_rules = cloud.session_rules.duplicate()
+	cloud.close_room()
+	cloud.leave_join()
 	lobby.dialogs.close_modal()
 	lobby.start_btn.disabled = true
 	UI.set_caption(lobby.start_btn, "MATCHING")
 	Loading.start_match(lobby)
 
 
-func _on_net_ended(reason: String, _svc: Node) -> void:
+func _on_net_ended(reason: String) -> void:
 	Game.online = false
 	_net_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
 	_net_sig = "-"
 
 
-func _connect_net(svc: Node) -> void:
-	if svc is Cloud:
-		(svc as Cloud).room_changed.connect(_on_room_changed)
-		(svc as Cloud).friends_changed.connect(_on_friends_changed)
-		(svc as Cloud).directory_changed.connect(_on_directory_changed)
-	svc.invited.connect(_on_net_invited.bind(svc))
-	svc.invite_cancelled.connect(_on_net_invite_cancelled.bind(svc))
-	svc.invite_answered.connect(_on_net_answered.bind(svc))
-	svc.session_started.connect(_on_net_session.bind(svc))
-	svc.session_ended.connect(_on_net_ended.bind(svc))
+func _connect_net(cloud: Cloud) -> void:
+	cloud.room_changed.connect(_on_room_changed)
+	cloud.friends_changed.connect(_on_friends_changed)
+	cloud.directory_changed.connect(_on_directory_changed)
+	cloud.invited.connect(_on_net_invited)
+	cloud.invite_cancelled.connect(_on_net_invite_cancelled)
+	cloud.invite_answered.connect(_on_net_answered)
+	cloud.session_started.connect(_on_net_session)
+	cloud.session_ended.connect(_on_net_ended)
 
 
-## Drops this object's connections (the handlers above, the lambda too) from a service.
-func _disconnect_net(svc: Node) -> void:
+## Drops this object's connections (the handlers above) from the service, which outlives the lobby.
+func _disconnect_net(cloud: Cloud) -> void:
 	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended", "room_changed", "friends_changed",
 			"directory_changed"]:
-		if not svc.has_signal(sig):
-			continue
-		for c: Dictionary in svc.get_signal_connection_list(sig):
+		for c: Dictionary in cloud.get_signal_connection_list(sig):
 			if (c.callable as Callable).get_object() == self:
-				svc.disconnect(sig, c.callable)
+				cloud.disconnect(sig, c.callable)

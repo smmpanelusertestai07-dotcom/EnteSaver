@@ -6,11 +6,14 @@ model: inherit
 ---
 Run from LoneWolfArena/ and report every number:
 - `tools/qa/run_checks.sh` first, the same set CI runs: texture import settings, import, compile,
-  GDScript warnings, unit tests, a full match (sim), aim assist, animations, bot, soak and guard.
-  Report every step, and from the aim step's log (in the logs folder it prints) the AIM lines:
-  pull time, head stop error, tracking %, red crosshair
+  GDScript warnings, unit tests, a full match (sim), aim assist, animations, bot, soak, rounds,
+  guard and the online checks (cloud: a 1 vs 1 between two copies through a local relay; room:
+  friends and a custom room). Report every step, and from the aim step's log (in the logs folder
+  it prints) the AIM lines: pull time, head stop error, tracking %, red crosshair
 - `tools/qa/soak.sh 5` (every match must finish, zero SCRIPT ERROR lines, both sides must be able to win)
 - `tools/qa/capture.sh <dir> 1560x720 perf` (draw calls, primitives, nodes, orphans; leak = nodes growing between rounds)
-- if an APK is given: `aapt dump badging` (only VIBRATE and the Wi-Fi play permissions), `apksigner verify --print-certs`
+- if an APK is given: `aapt dump badging` (exactly VIBRATE, INTERNET and ACCESS_NETWORK_STATE for the
+  online 1 vs 1, plus androidx's DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION; no Wi-Fi permission and no
+  android.hardware.wifi feature), `apksigner verify --print-certs`
 Compare against the targets in design/STYLE_SPEC.txt (section "4. Game feel", and the draw-call /
 primitive budget in "2. Map") and list failures first with the exact numbers. Do not edit anything.

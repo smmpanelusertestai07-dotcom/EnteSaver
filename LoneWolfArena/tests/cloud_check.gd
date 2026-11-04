@@ -1,6 +1,6 @@
 extends Node
 ## Internet 1 vs 1 end to end (Cloud, end-to-end encrypted) through tests/mqtt_mock.gd
-## (tools/qa/run_checks.sh starts both, LW_MQTT_URL points Cloud at it): LW_LAN_ROLE=host sees
+## (tools/qa/run_checks.sh starts both, LW_MQTT_URL points Cloud at it): LW_NET_ROLE=host sees
 ## the guest's announcement in the lobby, challenges it; the guest
 ## accepts; both load the arena, exchange their players' state, the host lands a lethal hit on
 ## its copy of the guest, the guest's phone applies it and reports its death, and both show the
@@ -12,21 +12,21 @@ var at: Node
 
 func run(autotest: Node) -> int:
 	at = autotest
-	var host := OS.get_environment("LW_LAN_ROLE") == "host"
-	var lan := Game.cloud_service()
-	lan.start_lobby()
+	var host := OS.get_environment("LW_NET_ROLE") == "host"
+	var cloud := Game.cloud_service()
+	cloud.start_lobby()
 	var started := [false]
-	lan.session_started.connect(func(_h: bool) -> void: started[0] = true)
+	cloud.session_started.connect(func(_h: bool) -> void: started[0] = true)
 	if not host:
-		lan.invited.connect(func(_who: String) -> void: lan.answer(true))
+		cloud.invited.connect(func(_who: String) -> void: cloud.answer(true))
 	var t := 0.0
-	while host and (lan.peers.is_empty() or lan.status != "online") and t < 30.0:
+	while host and (cloud.peers.is_empty() or cloud.status != "online") and t < 30.0:
 		await at.wait(0.25)
 		t += 0.25
 	if host:
-		if lan.peers.is_empty():
+		if cloud.peers.is_empty():
 			return _done("the guest was never discovered")
-		if not lan.invite(String(lan.peers.keys()[0])):
+		if not cloud.invite(String(cloud.peers.keys()[0])):
 			return _done("invite failed")
 	t = 0.0
 	while not started[0] and t < 40.0:
@@ -34,7 +34,7 @@ func run(autotest: Node) -> int:
 		t += 0.25
 	if not started[0]:
 		return _done("no session")
-	at.log_line("session up as %s, opponent %s" % ["host" if host else "guest", lan.opponent.get("name", "?")])
+	at.log_line("session up as %s, opponent %s" % ["host" if host else "guest", cloud.opponent.get("name", "?")])
 	# The lobby takes it from here, as for a player: match loading, then the arena.
 	t = 0.0
 	while (get_tree().current_scene == null or get_tree().current_scene.name != "Arena") and t < 30.0:

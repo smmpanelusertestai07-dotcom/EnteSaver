@@ -51,7 +51,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
   `player moved`, `pause opened`, `pause closed`, `<player|bot> eliminated`, `time up`,
   `round over`, `round <n>`, `match over: <won|lost|draw>`, `results shown`,
-  `wifi match: <host|guest>` (a Wi-Fi 1 vs 1, see scripts/lan.gd),
+  `online match: <host|guest>` (a LONE WOLF online 1 vs 1, see scripts/cloud.gd: the game's
+  only transport; there is no local-network play),
   `signature <state>` (Guard, "ok" when the package manager confirms a signer listed in the
   build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels

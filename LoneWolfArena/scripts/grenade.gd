@@ -9,7 +9,7 @@ const EDGE_DAMAGE := 60.0     # at 5 m, then fading out to RADIUS
 const MODEL := "res://assets/props/grenade.glb"
 
 var thrower: Fighter
-var cosmetic := false      # a Wi-Fi copy of the other phone's grenade: it hurts no fighter here
+var cosmetic := false      # an online copy of the other phone's grenade: it hurts no fighter here
 var _fuse := FUSE
 var _bounced := false
 

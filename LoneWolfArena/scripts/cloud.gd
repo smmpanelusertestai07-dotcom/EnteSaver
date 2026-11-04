@@ -2,11 +2,13 @@ class_name Cloud
 extends Node
 ## Internet 1 vs 1 with no account and no server of our own: free public MQTT brokers (TLS
 ## WebSocket) only relay messages, and everything in a match is end-to-end encrypted on the two
-## phones, so the relay sees scrambled bytes. Same interface as Lan, so the arena runs either.
+## phones, so the relay sees scrambled bytes. It is the game's only transport: LONE WOLF (online
+## 1 vs 1) plays through it, the arena reaches it as Game.session.
 ##
-## Lobby (topic ROOT/lobby): while PLAY ONLINE is open every phone announces {id, name, outfit,
-## RSA-2048 public key} every 3 s and lists the others; the id is a hash of the key, so nobody can
-## announce someone else's id with their own key. CHALLENGE sends that phone (topic ROOT/u/<id>)
+## Lobby (topic ROOT/lobby): from the first time the game's lobby opens (presence then stays on,
+## through matches too) every phone announces {id, name, outfit, RSA-2048 public key} every 3 s
+## and lists the others; the id is a hash of the key, so nobody can announce someone else's id
+## with their own key. DUEL 1 VS 1 sends that phone (topic ROOT/u/<id>)
 ## a fresh room name, AES-256 key and HMAC key encrypted with its public key; the answers carry an
 ## HMAC only the holders of those keys can make. In the room (ROOT/r/<room>) every message is
 ## AES-256-CBC with a random IV plus an HMAC-SHA256 over it, and carries the sender's id and a
@@ -154,9 +156,9 @@ func _make_key() -> void:
 
 
 ## The phone keeps its key, so its id (and the friend code friends know it by) stays the same.
-## Local test runs share one data folder: each role keeps its own.
+## Local test runs share one data folder: each role (LW_NET_ROLE) keeps its own.
 static func _key_path() -> String:
-	var role := OS.get_environment("LW_LAN_ROLE") if not OS.has_feature("template") else ""
+	var role := OS.get_environment("LW_NET_ROLE") if not OS.has_feature("template") else ""
 	return "user://net_identity%s.key" % ("_" + role if role != "" else "")
 
 

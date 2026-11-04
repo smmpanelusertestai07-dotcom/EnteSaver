@@ -17,11 +17,13 @@ app (Ente Saver) and must not be touched for game work.
 - Reference screenshots of other games are for private analysis only: keep them outside the
   repo (or in a git-ignored `reference_private/` folder) and never ship or commit them.
 - No servers of our own, no accounts, no ads/analytics SDKs, no downloads at runtime: everything
-  ships inside the APK. The owner-requested 1 vs 1 with friends has two transports: SAME WI-FI
-  (scripts/lan.gd, phone to phone on the local network) and ONLINE (scripts/cloud.gd: free
-  public MQTT brokers only relay messages; everything in a match is end-to-end encrypted on the
-  phones; the lobby shows only a random id, the name, the outfit and a public key). Hence the
-  APK's INTERNET (Android needs it for any socket) and Wi-Fi state/multicast permissions.
+  ships inside the APK. The owner-requested 1 vs 1 against other players (the LONE WOLF mode)
+  has ONE transport, ONLINE (scripts/cloud.gd: free public MQTT brokers only relay messages;
+  everything in a match is end-to-end encrypted on the phones; the lobby shows only a random id,
+  the name, the outfit and a public key). The same-Wi-Fi mode was removed (2026-11): no local
+  network play, no Wi-Fi permissions. Hence the APK's permissions are exactly VIBRATE, INTERNET
+  (Android needs it for any socket) and ACCESS_NETWORK_STATE; CI and tools/build_apk.sh fail on
+  any other.
 
 ## Originality (legal)
 - The game should FEEL like popular mobile battle-royale "Lone Wolf" modes (layout, flow,

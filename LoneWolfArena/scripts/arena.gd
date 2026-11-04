@@ -60,7 +60,7 @@ var _draw := false
 var _invalid := false
 var _rng := RandomNumberGenerator.new()
 var practice := false      # Game.practice: a training dummy with endless HP, no zone, no clock, no record
-var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Lan/Cloud)
+var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Cloud)
 var _net_t := 0.0
 var _net_begun := false
 var _net_their_ready := false
@@ -138,7 +138,7 @@ func _exit_tree() -> void:
 		Game.session.end_session("left")
 
 
-# ---------------------------------------------------------------- match against another phone (Lan or Cloud)
+# ---------------------------------------------------------------- match against another phone (Cloud)
 
 ## Both phones load the arena at their own pace: each says "ready", and the host starts the prep
 ## on both once it has heard the guest.
@@ -151,7 +151,7 @@ func _net_setup() -> void:
 	Game.session.send_event("ready")
 	for q: Array in queued:
 		_on_net_event(String(q[0]), q[1])
-	Game.mark("wifi match: " + ("host" if Game.session.is_host else "guest"))
+	Game.mark("online match: " + ("host" if Game.session.is_host else "guest"))
 
 
 func _net_begin() -> void:
@@ -828,7 +828,7 @@ func open_pause() -> void:
 	if phase == Phase.END or get_tree().paused:
 		return
 	hud.release_all()
-	if not online:                      # a Wi-Fi match keeps running on the other phone
+	if not online:                      # an online match keeps running on the other phone
 		get_tree().paused = true
 	var menu := PauseMenu.new()
 	pause_layer.add_child(menu)

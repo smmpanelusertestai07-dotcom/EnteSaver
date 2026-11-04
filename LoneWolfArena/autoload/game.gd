@@ -128,30 +128,22 @@ var shots_dir := ""
 ## The next arena run is practice (lobby PRACTICE): a training dummy with endless HP, no zone, no
 ## clock, nothing recorded. START clears it.
 var practice := false
-## The next arena run is a match against another phone: `session` is the Lan (same Wi-Fi) or
-## the Cloud (internet) that connected them; both have the same interface.
+## The next arena run is a match against another phone (LONE WOLF): `session` is the Cloud
+## (internet, see scripts/cloud.gd) that connected the two.
 var online := false
-var session        # Lan or Cloud (untyped: the two share an interface, not a base class)
+var session: Cloud
 ## The custom room's rules the next online match is played with ({} = a plain duel); see
 ## Cloud.ROOM_RULES.
 var room_rules := {}
-var lan: Lan
 var cloud: Cloud
 
 
+## The online service (made on first use; it outlives scene changes).
 func cloud_service() -> Cloud:
 	if cloud == null:
 		cloud = Cloud.new()
 		add_child(cloud)
 	return cloud
-
-
-## The local-network service (made on first use; it outlives scene changes).
-func lan_service() -> Lan:
-	if lan == null:
-		lan = Lan.new()
-		add_child(lan)
-	return lan
 
 signal settings_changed
 

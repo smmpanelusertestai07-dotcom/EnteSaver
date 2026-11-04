@@ -1,6 +1,6 @@
 extends Node
 ## Friends and custom rooms end to end (Cloud through tests/mqtt_mock.gd, started by
-## tools/qa/run_checks.sh). The guest (LW_LAN_ROLE=guest) asks the host to be friends and the host
+## tools/qa/run_checks.sh). The guest (LW_NET_ROLE=guest) asks the host to be friends and the host
 ## accepts; the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
 ## and ammo); the guest tries a wrong password (refused), then the right one; the host sees it in
 ## the room and starts; both play the match with the room's rules (the host's walls never run out)
@@ -15,7 +15,7 @@ var at: Node
 
 func run(autotest: Node) -> int:
 	at = autotest
-	var host := OS.get_environment("LW_LAN_ROLE") == "host"
+	var host := OS.get_environment("LW_NET_ROLE") == "host"
 	var cloud := Game.cloud_service()
 	cloud.start_lobby()
 	var started := [false]

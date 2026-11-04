@@ -112,11 +112,12 @@ if grep -qE "build_(signer|secret)\.txt|build_keys\.gd$" <<< "$FILES"; then
 fi
 BADGING="$("$BT/aapt" dump badging "$OUT")"
 grep -E "^package:|uses-permission|sdkVersion|native-code" <<< "$BADGING"
-# Permissions: vibration, and play with friends (Android needs INTERNET for any socket): phones on
-# the same Wi-Fi (scripts/lan.gd) or, online, public MQTT relays that only carry end-to-end
-# encrypted match messages (scripts/cloud.gd). Anything else fails the build.
+# Permissions: vibration, and the online 1 vs 1 (Android needs INTERNET for any socket; public MQTT
+# relays only carry end-to-end encrypted match messages, scripts/cloud.gd) with the network state.
+# The androidx receiver permission comes with the engine's manifest. Anything else (no Wi-Fi
+# permissions since the same-Wi-Fi mode is gone) fails the build; CI checks the same list.
 PERMS="$(grep -oE "uses-permission: name='[^']+'" <<< "$BADGING" | sed "s/.*name='//; s/'\$//" | sort -u)"
-EXTRA="$(grep -vxE "android\.permission\.(VIBRATE|INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE|CHANGE_WIFI_MULTICAST_STATE)|.*\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" <<< "$PERMS" || true)"
+EXTRA="$(grep -vxE "android\.permission\.(VIBRATE|INTERNET|ACCESS_NETWORK_STATE)|.*\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" <<< "$PERMS" || true)"
 if [ -n "$EXTRA" ]; then
   echo "ERROR: the APK requests unexpected permissions: $EXTRA"; exit 1
 fi
