@@ -13,7 +13,7 @@ import numpy as np
 
 from dsp import (SR, bp, env_ad, env_adsr, fade, finalize, fm, hp, lp, make_ir, modal,
                  mtof, normalize, ns, peq, ramp_exp, reson, reverb, sat, saw, shelf,
-                 sine, smear, square, svf, sweep_exp, triangle, tvec, white, colored,
+                 sine, smear, square, supersaw, svf, sweep_exp, triangle, tvec, white, colored,
                  write_wav, place)
 
 REGISTRY: list[tuple[str, str, callable]] = []
@@ -629,6 +629,76 @@ def ui_back():
         place(out, lp(v, 3000) * env_ad(m, 0.002, tau), st, a)
     out = reverb(out, room(rng, 0.25), wet=0.08)
     return finalize(out, max_len=0.17, fout=0.05)
+
+
+INTRO_HIT = 0.90    # where the intro sting's impact lands (sync the emblem's landing to it)
+
+
+@sfx("intro_sting", "Intro sting (~2.4 s, impact at 0.90 s): a noise whoosh, a bright air swell, an F# drone "
+     "rising an octave and accelerating metal ticks build up, a short suck, then a sub boom with punch "
+     "and a low F# braam stab, a struck-metal clang and a shimmering high ring with sparkles in a large room.")
+def intro_sting():
+    rng = np.random.default_rng(2626)
+    hit = INTRO_HIT
+    n = ns(3.6)
+    dry = np.zeros(n)           # low end: stays out of the reverb so it ends tight
+    wet = np.zeros(n)
+    # -- build-up, cut 35 ms before the hit (the suck makes the impact land harder)
+    m = ns(hit)
+    tm = tvec(m)
+    k = tm / hit
+    gate = np.clip((hit - 0.035 - tm) / 0.025, 0, 1)
+    whoosh = svf(white(m, rng), 180 * (5200 / 180) ** (k ** 1.3), 1.2 + 2.3 * k, "bp")
+    place(wet, normalize(whoosh * k ** 2.2 * gate), 0.0, 0.5)
+    air = hp(white(m, rng), 3500, 2) * np.exp((tm - hit) / 0.16) * gate
+    place(wet, normalize(air), 0.0, 0.26)
+    f = mtof(30) * 2 ** (k ** 1.6)                      # F#1 gliding up to F#2
+    drone = saw(f * 1.004, m, 0.1) + saw(f * 0.996, m, 0.6) + 0.6 * sine(f / 2, m)
+    drone = svf(drone, 160 + 1600 * k ** 2, 1.0, "lp", poles=4) * k ** 1.8 * gate
+    place(wet, normalize(drone), 0.0, 0.34)
+    st, gap, i = 0.22, 0.17, 0
+    while st < hit - 0.07:
+        tick = metal_click(rng, ns(0.05), 2500 * 1.06 ** i, 0.007, noise_gain=0.4)
+        place(wet, tick, st, 0.05 + 0.13 * (st / hit) ** 2)
+        st += gap
+        gap = max(0.04, gap * 0.8)
+        i += 1
+    # -- the hit: a short sub (phone speakers barely play it) under a mid-band body burst that
+    # carries the impact on small speakers
+    m = ns(2.6)
+    tm = tvec(m)
+    place(dry, sat(sine(sweep_exp(m, 120, 38, 0.09), m) * env_ad(m, 0.002, 0.34), 2.2), hit, 0.6)
+    place(dry, sat(thud(ns(0.4), 220, 70, 0.03, 0.06), 1.8), hit, 0.5)
+    place(dry, normalize(bp(white(m, rng), 140, 1400) * env_ad(m, 0.001, 0.07)), hit, 0.42)
+    place(dry, normalize(lp(white(m, rng), 1200, 4) * env_ad(m, 0.001, 0.045)), hit, 0.45)
+    place(dry, normalize(lp(colored(m, rng, 2.0), 180, 4) * env_ad(m, 0.01, 0.4)), hit, 0.22)
+    place(wet, normalize(hp(white(ns(0.05), rng), 2500, 2) * env_ad(ns(0.05), 0.0001, 0.004)), hit, 0.3)
+    braam = np.zeros(m)
+    for mn, a in ((30, 1.0), (37, 0.7), (42, 0.6)):          # F#1, C#2, F#2
+        braam += a * supersaw(mtof(mn), m, voices=5, detune_cents=12, rng=rng)
+    cut = 180 + 2200 * np.exp(-tm / 0.12) * (1 - np.exp(-tm / 0.01))
+    braam = svf(braam, cut, 0.9, "lp", poles=4) * env_adsr(m, 0.006, 0.22, 0.45, 0.35, 0.3)
+    place(wet, sat(normalize(braam), 1.6), hit, 0.4)
+    # -- metallic shimmer: an inharmonic struck plate (beating mode pairs), a high ring, sparkles
+    ratios = np.array([1.0, 1.003, 2.32, 2.326, 3.86, 5.14, 6.78, 8.53])
+    clang = modal(m, mtof(78) * ratios, [1.2, 1.1, 0.8, 0.75, 0.5, 0.35, 0.25, 0.16],
+                  [1.0, 0.8, 0.6, 0.5, 0.4, 0.3, 0.2, 0.12], phases=rng.random(8) * 2 * np.pi)
+    clang = normalize(clang) * env_ad(m, 0.0008, 0.85) + 0.4 * normalize(hp(white(m, rng), 5000) * env_ad(m, 0.0002, 0.006))
+    place(wet, normalize(clang), hit + 0.004, 0.55)
+    ring = np.zeros(m)
+    for mn, a in ((90, 1.0), (97, 0.7), (102, 0.45), (106, 0.25)):   # F#6, C#7, F#7, A#7
+        ring += a * (sine(mtof(mn), m) + 0.7 * sine(mtof(mn) * 1.0045, m, 0.37))
+    ring *= (1 + 0.3 * np.sin(2 * np.pi * 7.5 * tm)) / 1.3 * np.clip(tm / 0.06, 0, 1) * np.exp(-tm / 0.55)
+    place(wet, normalize(ring), hit + 0.02, 0.28)
+    for _ in range(18):
+        st = hit + 0.04 + rng.exponential(0.25)
+        if st < hit + 1.2:
+            note = mtof(rng.choice([97, 100, 102, 104, 106, 109]))
+            place(wet, bell(ns(0.3), note, 0.05, bright=0.7), st, 0.07 + 0.05 * rng.random())
+    ir = make_ir(1.8, rng, predelay=0.02, hf_ratio=0.45, buildup=0.02, bright=1.1)
+    out = hp(dry, 28, 2)
+    out = out + reverb(wet, ir, wet=0.3)[:n]
+    return finalize(sat(normalize(out), 1.3), max_len=2.5, fout=0.65, fin=0.002)
 
 
 def build(out_dir):
