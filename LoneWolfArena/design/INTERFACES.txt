@@ -46,8 +46,9 @@ listed here. If a part needs something new from the core, add it in its own file
   `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
 
 ## Android log lines (read by tools/ci/emulator_test.sh)
-- `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout` and
-  `boot timeout: <n> files still loading`), `lobby ready`,
+- `[LoneWolf] boot screen`, `intro sting`, `intro done`, `boot loaded <n> files in <s>s` (or
+  `boot timeout` and `boot timeout: <n> files still loading`), `login ready`, `profile setup`,
+  `profile created` (the first-run guest login), `lobby ready`,
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
   `player moved`, `pause opened`, `pause closed`, `<player|bot> eliminated`, `time up`,
   `round over`, `round <n>`, `match over: <won|lost|draw>`, `results shown`,
@@ -55,7 +56,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `signature <state>` (Guard, "ok" when the package manager confirms a signer listed in the
   build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
-  (start, fire, joystick) so the test taps controls where the current layout puts them.
+  (guest, name_field, confirm, start, fire, joystick) so the test taps controls where the current
+  layout puts them.
 
 ## Player (scripts/player.gd) -> called by the HUD's touch controls
 - movement `move_dir: Vector2` (joystick, length 0..1, y forward), `set_sprint(on)`
@@ -94,9 +96,15 @@ listed here. If a part needs something new from the core, add it in its own file
 - Main scene: `scenes/loading.tscn` (`Loading`, scripts/loading.gd). The boot screen preloads
   the character, animation and prop GLBs, the sounds and the lobby on worker threads, keeps
   them referenced by the root node `LoadingCache` (meta `resources`) for the app's lifetime,
-  then calls `Game.goto_lobby()` (after `TIMEOUT_S` at the latest; loads still running then are
+  then calls `Game.goto_login()` (after `TIMEOUT_S` at the latest; loads still running then are
   handed to the `LoadingCache` node, a `Loading.Cache`, which collects them as they finish).
   Automated runs skip it; `Loading.hold_for_test = true` keeps it up for a screenshot tour.
+- `IntroSting` (scripts/intro_sting.gd): the launch sting, `IntroSting.play_over(host)` puts it
+  over the boot screen in its own CanvasLayer `IntroLayer` (layer 90) while the boot loads run;
+  the boot screen leaves only once `IntroSting.playing(host)` is false. 2.4 s (`LENGTH`), synced
+  to intro_sting.wav (impact `HIT` 0.90 s); a tap or back after 0.4 s skips it; at the end the
+  lockup lands on the boot screen's logo. Automated runs skip it unless
+  `IntroSting.show_for_test`; `hold_at(t)` freezes it for screenshots.
 - `Loading.start_match(host)`: match-loading overlay (CanvasLayer 100, mode + map card) that
   loads the arena on a thread, then `Game.goto_arena()`. Used by START and PLAY AGAIN.
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
@@ -133,7 +141,21 @@ listed here. If a part needs something new from the core, add it in its own file
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
-  `Game.goto_login()` is the lobby until the guest login scene exists.
+  `Game.goto_login()` opens scenes/login.tscn (`Login`) until `profile.guest_ok`, the lobby after
+  that and always in automated runs.
+- `Login` (scripts/login.gd): GUEST LOGIN (PLAY AS GUEST, the Terms of Use and Privacy Notice as
+  in-game popups, Android back = quit dialog) then CREATE PROFILE (name, picture, name card,
+  preview, player ID; back returns to the guest login). CONFIRM = `Login.create_profile(name,
+  avatar, banner)`: name (clean_name), `name_set`, `guest_ok`, `avatar`, `banner`, then
+  `Game.save_profile()`; WELCOME, then `Game.goto_lobby()`. Shared art helpers:
+  `Login.avatar_texture(id)` (the emblem or an outfit portrait's head) and
+  `Login.banner_texture(id)` (`Game.BANNERS[i]` = assets/ui/banners/banner_<i+1>.png). The
+  Privacy Notice (`Login.privacy_sections()`) states what cloud.gd shares (the player card's
+  fields, Cloud.BROKERS hosts, the card and request ages): change it with them
+  (tests/login_check.gd checks it). The player ID comes from `Cloud.prepare_identity()` (the key
+  made or loaded without going online). Node names: GuestButton, TermsLink, PrivacyLink, Modal,
+  ModalOk, DocScroll, QuitDialog, QuitCancel, QuitConfirm, BackButton, NameField, NameRandom,
+  NameHint, Avatar_<id>, Banner_<id>, NameCard, PlayerId, GuestBadge, ConfirmButton, Welcome.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
   `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`,
   `PlayerCard` (opens the name editor), `PlayerName`, `Logo`, `Modal`, `PlayAgain`, `Lobby`,

@@ -8,11 +8,12 @@ extends Control
 ## the fighters use, every sound) load on worker threads (ResourceLoader.load_threaded_request).
 ## They stay referenced by a small holder node under the root ("LoadingCache"), so later scene
 ## changes reuse them instead of reading the disk again; the sounds also go into Audio's cache.
-## Then Game.goto_lobby(). It never hangs: after TIMEOUT_S it goes to the lobby anyway; the
-## files that are still loading then are collected by the holder as they finish (every threaded
-## request gets its load_threaded_get, so no load token is left behind).
-## Automated runs (Game.autotest) skip straight to the lobby (their scripts expect it) unless a
-## screenshot tour sets `hold_for_test` to look at this screen.
+## Then Game.goto_login() (the guest login, or the lobby). It never hangs: after TIMEOUT_S it moves
+## on anyway; the files that are still loading then are collected by the holder as they finish
+## (every threaded request gets its load_threaded_get, so no load token is left behind).
+## On launch the intro sting (IntroSting) plays on top while the loads run; this screen leaves only
+## after it. Automated runs (Game.autotest) skip both and go to the lobby (their scripts expect
+## it) unless a screenshot tour sets `hold_for_test` to look at this screen.
 ##
 ## MATCH: Loading.start_match(host) puts an overlay on top of `host` (mode + map card
 ## "LONE WOLF / CARGO CAGE", the map name, the bar), loads the arena scene on a thread for at
@@ -111,10 +112,11 @@ func _ready() -> void:
 	_tip_i = randi() % TIPS.size()
 	if mode == "boot":
 		if Game.autotest != "" and not hold_for_test:
-			Game.goto_lobby.call_deferred()
+			Game.goto_login.call_deferred()
 			return
 		Game.mark("boot screen")
 		_build_boot()
+		IntroSting.play_over(self)          # the launch sting on top: the loads below run under it
 		_start_boot_loads()
 	else:
 		_build_match()
@@ -449,12 +451,12 @@ func _process_boot(delta: float) -> void:
 			_finish_boot()
 		else:
 			_status.text = "LOADING GAME FILES" if progress < 0.6 else "PREPARING THE ARENA"
-	elif not _leaving and not hold_for_test:
+	elif not _leaving and not hold_for_test and not IntroSting.playing(self):
 		_leaving = true
 		var tw := create_tween()
 		tw.tween_interval(0.15)
 		tw.tween_property(self, "modulate:a", 0.0, 0.25)
-		tw.tween_callback(Game.goto_lobby)
+		tw.tween_callback(Game.goto_login)
 
 
 func _process_match(delta: float) -> void:
