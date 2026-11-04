@@ -1,23 +1,39 @@
 extends Node
 ## Global state: settings, profile, HUD layout and persistence.
-## Everything is stored locally as JSON in user:// (offline, no database). Automated runs
-## (--autotest) read and write none of it: they start from the defaults and keep their changes
-## in memory, so a test never changes the player's saves and parallel runs share nothing.
+## Everything is stored locally as JSON in user:// (on this phone only: no server, no database).
+## Automated runs (--autotest) read and write none of it: they start from the defaults and keep
+## their changes in memory, so a test never changes the player's saves and parallel runs share
+## nothing.
 
 const SETTINGS_PATH := "user://settings.json"
 const PROFILE_PATH := "user://profile.json"
 const HUD_PATH := "user://hud_layout.json"
 
-const SETTINGS_VERSION := 4
+## The two modes START plays (the setting "mode", see `mode`): TRAINING GROUND is 1 vs a bot
+## (EASY, NORMAL, HARD or the target dummy), LONE WOLF the online 1 vs 1 (Cloud). TRAINING GROUND
+## is the default: on a new install START plays a bot match (the CI emulator test taps START and
+## expects one).
+const MODE_NAMES := {"training": "TRAINING GROUND", "lonewolf": "LONE WOLF"}
+const DEFAULT_MODE := "training"
+
+const SETTINGS_VERSION := 5
 const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
+	"mode": DEFAULT_MODE,
 	"graphics": 1,
+	"graphics_auto": true,        # the game picks the graphics level for the phone
 	"fps": 60,
+	"show_fps": false,
 	"sens_general": 100,
 	"sens_reddot": 100,
+	"sens_2x": 100,               # the 2x scope (until it has its own, it aims with Red Dot)
 	"sens_sniper": 71,
-	"sens_fire": 100,
+	"sens_freelook": 100,         # free look (the eye button; until wired, it turns with General)
+	"sens_fire": 100,             # a drag that starts on the fire button, % of the view's own
 	"dynamic_joystick": false,
+	"vibration": true,
+	"crosshair_color": 0,         # index into CROSSHAIR_COLORS
+	"crosshair_size": 100,        # % of the standard crosshair (CROSSHAIR_SCALE)
 	"vol_master": 85,
 	"vol_sfx": 90,
 	"vol_music": 45,
@@ -25,33 +41,83 @@ const DEFAULT_SETTINGS := {
 	"last_pick": "ar",
 }
 
-## Behaviour the settings screen no longer offers (it keeps to graphics, sensitivity, joystick,
-## custom HUD and sound): always these values, whatever an older settings file says.
+## Behaviour that is not a setting (the settings screen keeps to graphics, sensitivity,
+## joystick, custom HUD and sound): always these values, whatever an older settings file says.
 const FIXED_SETTINGS := {
-	"show_fps": false, "vibration": true, "damage_numbers": true, "hold_fire_scope": true,
-	"reload_on_crosshair": true, "run_mode": 2, "dynamic_crosshair": true,
-	"crosshair_color": 0, "crosshair_size": 50, "sens_fire": 100,
+	"damage_numbers": true, "hold_fire_scope": true, "reload_on_crosshair": true, "run_mode": 2,
+	"dynamic_crosshair": true,
 }
+## Settings that FIXED_SETTINGS held until version 4, whatever the file said: a file from then
+## has no say in them, they start from their defaults (what version 4 played with).
+const FIXED_UNTIL_V4 := ["show_fps", "vibration", "crosshair_color", "crosshair_size", "sens_fire"]
 
 ## Valid ranges of the numeric settings. Values outside them (an edited or corrupted settings
 ## file) are clamped on load and on save, so nothing can index past a list or overdrive a value.
 const SETTING_RANGES := {
-	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_sniper": [1, 200],
-	"sens_fire": [1, 200], "vol_master": [0, 100], "vol_sfx": [0, 100], "vol_music": [0, 100],
-	"difficulty": [0, 2],
+	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
+	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "sens_fire": [1, 200], "vol_master": [0, 100],
+	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2], "crosshair_color": [0, 3],
+	"crosshair_size": [50, 150],
 }
+## On/off settings: anything but true or false falls back to the default.
+const BOOL_SETTINGS := ["graphics_auto", "show_fps", "dynamic_joystick", "vibration"]
 const FPS_OPTIONS := [30, 60, 90]
 
 ## The crosshair's idle colour (it always turns red on an enemy).
 const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
+## The crosshair's scale at crosshair_size 100: the size the HUD drew before it was a setting.
+const CROSSHAIR_SCALE := 1.05
 const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
 const GRAPHICS_NAMES := ["LOW", "MEDIUM", "HIGH", "EXTREME"]
 const XP_PER_LEVEL := 500
 
-var settings: Dictionary = {}
-var profile: Dictionary = {"name": "ROOKIE", "bundle": "default", "matches": 0, "wins": 0, "kills": 0, "xp": 0,
+const PROFILE_VERSION := 2
+## A new player's profile. Loading keeps only these keys, with these value types (see
+## _merge_into), so every key a save may hold is listed here; the HMAC signature covers the whole
+## dictionary. Player ids are the 32 hex characters of Cloud.my_id.
+const DEFAULT_PROFILE := {
+	"profile_version": PROFILE_VERSION,
+	"name": "ROOKIE", "bundle": "default", "matches": 0, "wins": 0, "kills": 0, "xp": 0,
 	"name_set": false,           # false until the player chose a name (also on installs from before the prompt)
-	"friends": {}}               # id -> {"name"}: players who accepted a friend request (online)
+	"guest_ok": false,           # the guest login was passed (version 1 profiles: whoever had chosen a name)
+	"created": 0,                # unix time of the profile's first save (0: never saved)
+	"avatar": "emblem",          # profile picture: the emblem or an outfit's portrait (avatar_ids)
+	"banner": "default",         # name card background (BANNERS)
+	"signature": "",             # a line under the name: clean_name characters, SIGNATURE_MAX at most
+	# Lifetime numbers of counted matches, like Fighter.stats: shots and hits per trigger pull,
+	# headshots = hits with a head pellet, damage dealt in HP, time_played in seconds.
+	"deaths": 0, "headshots": 0, "damage": 0, "shots": 0, "hits": 0, "rounds_won": 0, "rounds_lost": 0,
+	"time_played": 0,
+	"modes": {"training": {"matches": 0, "wins": 0, "kills": 0}, "lonewolf": {"matches": 0, "wins": 0, "kills": 0}},
+	"friends": {},               # id -> {"name"}: players who accepted a friend request (online)
+	"friend_in": {},             # id -> {"name", "t"}: friend requests to answer (t: unix time)
+	"friend_out": {},            # id -> {"name", "t"}: friend requests sent, not answered yet
+	"recent": [],                # [{"id", "name", "t"}]: the latest online opponents, newest first
+	"blocked": [],               # ids whose invites and friend requests are ignored
+}
+## Lifetime counters (whole numbers, 0..COUNTER_MAX) and the ones kept per mode (in "modes").
+const PROFILE_COUNTERS := ["matches", "wins", "kills", "xp", "deaths", "headshots", "damage", "shots", "hits",
+	"rounds_won", "rounds_lost", "time_played"]
+const MODE_COUNTERS := ["matches", "wins", "kills"]
+const COUNTER_MAX := 1000000000
+const UNIX_MAX := 4102444800        # 2100-01-01: the latest time a profile entry may carry
+const NAME_MAX := 14
+const SIGNATURE_MAX := 30
+const MAX_FRIENDS := 50
+const MAX_REQUESTS := 50            # each of friend_in and friend_out
+const MAX_RECENT := 20
+const MAX_BLOCKED := 50
+const BANNERS := ["default"]
+
+var settings: Dictionary = {}
+## The mode START plays (a key of MODE_NAMES), kept as the setting "mode": save_settings()
+## stores it. Anything else sets the default mode.
+var mode: String:
+	get:
+		return String(settings.get("mode", DEFAULT_MODE))
+	set(value):
+		settings["mode"] = value if MODE_NAMES.has(value) else DEFAULT_MODE
+var profile: Dictionary = DEFAULT_PROFILE.duplicate(true)
 var hud_layout: Dictionary = {}
 var last_result: Dictionary = {}
 
@@ -99,21 +165,7 @@ func _ready() -> void:
 			elif arg.begins_with("--shots="):
 				shots_dir = arg.substr(8)
 	settings = DEFAULT_SETTINGS.duplicate(true)
-	var saved: Variant = _load_json(SETTINGS_PATH)
-	var version: Variant = (saved as Dictionary).get("settings_version", 1) if saved is Dictionary else 1
-	if not (version is int or version is float):
-		version = 1
-	if saved is Dictionary and int(version) < 2:
-		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
-		for k in ["sens_general", "sens_reddot", "sens_fire", "settings_version"]:
-			(saved as Dictionary).erase(k)
-	if saved is Dictionary and int(version) < 4:
-		# v4: the joystick stays put by default (the reference's default), as on a new install.
-		(saved as Dictionary).erase("dynamic_joystick")
-	_merge_into(settings, saved)
-	settings.merge(FIXED_SETTINGS, true)
-	settings.settings_version = SETTINGS_VERSION
-	_sanitize_settings()
+	_apply_saved_settings(_load_json(SETTINGS_PATH))
 	_load_profile()
 	var hud: Variant = _load_json(HUD_PATH)
 	hud_layout = hud if hud is Dictionary else {}
@@ -147,14 +199,65 @@ func _merge_into(target: Dictionary, src: Variant) -> void:
 					target[k] = v
 
 
+## Takes a saved settings file (as read from settings.json) over `settings`: brought up to this
+## version, merged (unknown keys and wrongly typed values are dropped), the fixed behaviour forced
+## and every value checked.
+func _apply_saved_settings(saved: Variant) -> void:
+	if saved is Dictionary:
+		_migrate_settings(saved as Dictionary)
+	_merge_into(settings, saved)
+	settings.merge(FIXED_SETTINGS, true)
+	settings.settings_version = SETTINGS_VERSION
+	_sanitize_settings()
+
+
+## Brings a settings file from an older version up to SETTINGS_VERSION, in place, before it is
+## merged.
+func _migrate_settings(saved: Dictionary) -> void:
+	var version: Variant = saved.get("settings_version", 1)
+	if not (version is int or version is float):
+		version = 1
+	if int(version) < 2:
+		# v1 used 0-100 sensitivities and a different crosshair palette: keep the rest.
+		for k in ["sens_general", "sens_reddot", "sens_fire", "settings_version"]:
+			saved.erase(k)
+	if int(version) < 4:
+		# v4: the joystick stays put by default (the reference's default), as on a new install.
+		saved.erase("dynamic_joystick")
+	if int(version) < 5:
+		# v5: the FPS counter, vibration, crosshair colour and size and the fire-button drag are
+		# settings now; they start as version 4 played (crosshair_size 100 is that size). Free
+		# look and the 2x scope get their own sensitivity, which starts at the one they turned
+		# with (General, Red Dot). AUTO graphics stays off for a player who had picked a level
+		# other than the default.
+		for k in FIXED_UNTIL_V4:
+			saved.erase(k)
+		for pair: Array in [["sens_freelook", "sens_general"], ["sens_2x", "sens_reddot"]]:
+			if saved.has(pair[1]):
+				saved[pair[0]] = saved[pair[1]]
+		var g: Variant = saved.get("graphics")
+		if (g is int or g is float) and int(g) != int(DEFAULT_SETTINGS.graphics):
+			saved["graphics_auto"] = false
+
+
 func _sanitize_settings() -> void:
 	for k in SETTING_RANGES:
 		var r: Array = SETTING_RANGES[k]
 		settings[k] = clampi(int(settings[k]), int(r[0]), int(r[1]))
+	for k in BOOL_SETTINGS:
+		if not settings.get(k) is bool:
+			settings[k] = DEFAULT_SETTINGS[k]
 	if not int(settings.fps) in FPS_OPTIONS:
 		settings.fps = 60
 	if not String(settings.last_pick) in Weapons.PICKABLE:
 		settings.last_pick = Weapons.DEFAULT_PICK
+	if not MODE_NAMES.has(settings.get("mode")):
+		settings.mode = DEFAULT_MODE
+
+
+## A mode's player-facing name ("TRAINING GROUND", "LONE WOLF"), the current mode's by default.
+func mode_name(m := "") -> String:
+	return String(MODE_NAMES.get(m if m != "" else mode, MODE_NAMES[DEFAULT_MODE]))
 
 
 func _load_json(path: String) -> Variant:
@@ -188,38 +291,133 @@ func _load_profile() -> void:
 	var raw: Variant = _load_json(PROFILE_PATH)
 	if not raw is Dictionary or (raw as Dictionary).is_empty():
 		return
+	if not _apply_saved_profile(raw as Dictionary):
+		save_profile()
+
+
+## Takes a saved profile (the signed dictionary of profile.json) into `profile`: verified,
+## brought up to this version, merged (unknown keys and wrongly typed values are dropped) and
+## sanitised. A signature that does not match keeps only the name and flags the save; returns
+## whether the save was accepted.
+func _apply_saved_profile(raw: Dictionary) -> bool:
 	var check := Guard.verify_dict(raw)
 	if check.ok:
-		_merge_into(profile, check.data)
+		var data: Dictionary = check.data
+		_migrate_profile(data)
+		_merge_into(profile, data)
 	else:
-		var keep_name: Variant = (raw as Dictionary).get("name", profile.name)
+		var keep_name: Variant = raw.get("name", profile.name)
 		if typeof(keep_name) == TYPE_STRING:
 			profile.name = String(keep_name)
 		Guard.flag("save")
 	_sanitize_profile()
-	if not check.ok:
-		save_profile()
+	return bool(check.ok)
+
+
+## Brings a saved profile from an older version up to PROFILE_VERSION, in place, before it is
+## merged.
+func _migrate_profile(data: Dictionary) -> void:
+	var version: Variant = data.get("profile_version", 1)
+	if not (version is int or version is float):
+		version = 1
+	if int(version) < 2:
+		# Version 2 added the guest login, the profile page's keys and the numbers per mode. A
+		# player who had chosen a name was playing already: no login for them. Until then START
+		# was the bot duel (now TRAINING GROUND) and every match counted only in the totals, so
+		# the totals become its numbers.
+		data["guest_ok"] = _flag(data.get("name_set"))
+		data["modes"] = {"training": {"matches": data.get("matches", 0), "wins": data.get("wins", 0),
+			"kills": data.get("kills", 0)}}
+	data["profile_version"] = PROFILE_VERSION
 
 
 func _sanitize_profile() -> void:
 	var n := clean_name(String(profile.name))
 	profile.name = n if n != "" else "ROOKIE"
 	profile.bundle = String(CharacterModel.bundle_info(String(profile.bundle)).id)
-	for k in ["matches", "wins", "kills", "xp"]:
-		profile[k] = clampi(int(profile[k]), 0, 1000000000)
+	for k: String in PROFILE_COUNTERS:
+		profile[k] = _count(profile.get(k))
 	profile.wins = mini(int(profile.wins), int(profile.matches))
-	var friends := {}
-	var saved: Variant = profile.get("friends")
+	profile.hits = mini(int(profile.hits), int(profile.shots))
+	profile.headshots = mini(int(profile.headshots), int(profile.hits))
+	for k: String in ["name_set", "guest_ok"]:
+		profile[k] = _flag(profile.get(k))
+	profile.created = _count(profile.get("created"), UNIX_MAX)
+	if not String(profile.get("avatar", "")) in avatar_ids():
+		profile.avatar = DEFAULT_PROFILE.avatar
+	if not String(profile.get("banner", "")) in BANNERS:
+		profile.banner = DEFAULT_PROFILE.banner
+	profile.signature = clean_text(String(profile.get("signature", "")), SIGNATURE_MAX)
+	var modes := {}
+	var saved_modes: Variant = profile.get("modes")
+	for m: String in MODE_NAMES:
+		var src: Variant = (saved_modes as Dictionary).get(m) if saved_modes is Dictionary else null
+		var c := {}
+		for k: String in MODE_COUNTERS:
+			c[k] = _count((src as Dictionary).get(k) if src is Dictionary else null)
+		c.wins = mini(int(c.wins), int(c.matches))
+		modes[m] = c
+	profile.modes = modes
+	profile.friends = _player_map(profile.get("friends"), MAX_FRIENDS, false)
+	profile.friend_in = _player_map(profile.get("friend_in"), MAX_REQUESTS, true)
+	profile.friend_out = _player_map(profile.get("friend_out"), MAX_REQUESTS, true)
+	var recent := []
+	var seen := {}
+	var saved_recent: Variant = profile.get("recent")
+	if saved_recent is Array:
+		for e: Variant in saved_recent:
+			var id: Variant = (e as Dictionary).get("id") if e is Dictionary else null
+			if recent.size() < MAX_RECENT and is_player_id(id) and not seen.has(id):
+				seen[id] = true
+				recent.append({"id": String(id), "name": clean_name(String((e as Dictionary).get("name", ""))),
+					"t": _count((e as Dictionary).get("t"), UNIX_MAX)})
+	profile.recent = recent
+	var blocked := []
+	var saved_blocked: Variant = profile.get("blocked")
+	if saved_blocked is Array:
+		for id: Variant in saved_blocked:
+			if blocked.size() < MAX_BLOCKED and is_player_id(id) and not blocked.has(id):
+				blocked.append(String(id))
+	profile.blocked = blocked
+
+
+## A whole number 0..hi from a saved value (anything but a number counts as 0).
+static func _count(v: Variant, hi := COUNTER_MAX) -> int:
+	return clampi(int(v), 0, hi) if (v is int or v is float) else 0
+
+
+## A saved on/off value (anything but true counts as false).
+static func _flag(v: Variant) -> bool:
+	return v is bool and bool(v)
+
+
+## id -> {"name"} (with "t", a unix time, when timed) from a saved player list: valid ids only,
+## names cleaned, at most `limit` entries.
+func _player_map(saved: Variant, limit: int, timed: bool) -> Dictionary:
+	var out := {}
 	if saved is Dictionary:
 		for id: Variant in saved:
 			var e: Variant = (saved as Dictionary)[id]
-			if typeof(id) == TYPE_STRING and String(id).length() == 32 and String(id).is_valid_hex_number() \
-					and e is Dictionary and friends.size() < MAX_FRIENDS:
-				friends[String(id)] = {"name": clean_name(String((e as Dictionary).get("name", "")))}
-	profile.friends = friends
+			if is_player_id(id) and e is Dictionary and out.size() < limit:
+				var entry := {"name": clean_name(String((e as Dictionary).get("name", "")))}
+				if timed:
+					entry.t = _count((e as Dictionary).get("t"), UNIX_MAX)
+				out[String(id)] = entry
+	return out
 
 
-const MAX_FRIENDS := 50
+## A player id: the 32 hex characters of Cloud.my_id.
+func is_player_id(id: Variant) -> bool:
+	return typeof(id) == TYPE_STRING and String(id).length() == 32 and String(id).is_valid_hex_number()
+
+
+## The profile pictures a player can have: the game's emblem (everyone's so far) and the outfits'
+## portraits (by bundle id, assets/ui/bundle_<id>.png).
+func avatar_ids() -> PackedStringArray:
+	var ids := PackedStringArray([DEFAULT_PROFILE.avatar])
+	for b: Dictionary in CharacterModel.BUNDLE_INFO:
+		ids.append(String(b.id))
+	return ids
 
 
 func is_friend(id: String) -> bool:
@@ -228,7 +426,7 @@ func is_friend(id: String) -> bool:
 
 func add_friend(id: String, friend_name: String) -> void:
 	var f: Dictionary = profile.friends
-	if id.length() != 32 or not id.is_valid_hex_number() or (f.size() >= MAX_FRIENDS and not f.has(id)):
+	if not is_player_id(id) or (f.size() >= MAX_FRIENDS and not f.has(id)):
 		return
 	f[id] = {"name": clean_name(friend_name)}
 	save_profile()
@@ -254,14 +452,23 @@ func random_name() -> String:
 
 ## Player names: upper-case A-Z, 0-9, space, _ - . and at most 14 characters.
 func clean_name(t: String) -> String:
+	return clean_text(t, NAME_MAX)
+
+
+## Text a player types for others to see (a name, the profile signature): upper-case A-Z, 0-9,
+## space, _ - . and at most max_len characters.
+func clean_text(t: String, max_len: int) -> String:
 	var out := ""
 	for ch in t.strip_edges().to_upper():
 		if (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch in [" ", "_", "-", "."]:
 			out += ch
-	return out.strip_edges().substr(0, 14)
+	return out.strip_edges().substr(0, max_len)
 
 
+## Saves the signed profile; its first save stamps "created".
 func save_profile() -> void:
+	if int(profile.get("created", 0)) <= 0:
+		profile.created = int(Time.get_unix_time_from_system())
 	_save_json(PROFILE_PATH, Guard.sign_dict(profile))
 
 
@@ -272,6 +479,12 @@ func save_hud_layout(layout: Dictionary) -> void:
 
 func crosshair_color() -> Color:
 	return CROSSHAIR_COLORS[clampi(int(settings.crosshair_color), 0, CROSSHAIR_COLORS.size() - 1)]
+
+
+## The crosshair's scale: crosshair_size is a percentage of the standard size.
+func crosshair_scale() -> float:
+	var r: Array = SETTING_RANGES.crosshair_size
+	return CROSSHAIR_SCALE * float(clampi(int(settings.crosshair_size), int(r[0]), int(r[1]))) / 100.0
 
 
 func _setup_audio_buses() -> void:
@@ -346,6 +559,13 @@ func mark_ui(what: String, item: CanvasItem, local_point: Vector2) -> void:
 	_marks[key] = true
 	var p := item.get_viewport().get_screen_transform() * item.get_global_transform_with_canvas() * local_point
 	print("[LoneWolf] ui %s %d %d" % [what, roundi(p.x), roundi(p.y)])
+
+
+## Where a session starts once the boot screen is done. The guest login (PLAY AS GUEST, the
+## privacy notice) and the first profile setup come later as their own scene; until then this is
+## the lobby, as before.
+func goto_login() -> void:
+	goto_lobby()
 
 
 func goto_lobby() -> void:

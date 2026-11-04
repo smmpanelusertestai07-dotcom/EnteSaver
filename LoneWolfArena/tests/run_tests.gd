@@ -28,6 +28,10 @@ func _ready() -> void:
 	_test_guard()
 	_test_signer_digests()
 	_test_settings_sanitize()
+	_test_settings_v5()
+	_test_modes()
+	_test_profile_keys()
+	_test_profile_migration()
 	_test_honour()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
@@ -236,6 +240,238 @@ func _test_settings_sanitize() -> void:
 	_check(Game.settings.fps == 60, "unknown frame rate falls back to 60")
 	_check(Game.settings.last_pick == Weapons.DEFAULT_PICK, "unknown weapon pick falls back to the default")
 	Game.settings = saved
+
+
+## The settings of version 5 (mode, AUTO graphics, FPS counter, vibration, crosshair colour and
+## size, fire-button / free-look / 2x sensitivity): defaults, ranges, on/off values, migration.
+func _test_settings_v5() -> void:
+	var saved := Game.settings.duplicate(true)
+	var d: Dictionary = Game.DEFAULT_SETTINGS
+	_check(d.mode == "training" and d.graphics_auto == true and d.show_fps == false and d.vibration == true
+		and d.crosshair_color == 0 and d.crosshair_size == 100 and d.sens_fire == 100 and d.sens_freelook == 100
+		and d.sens_2x == 100, "the new settings start as the game played before they existed")
+	_check(d.graphics == 1 and d.fps == 60 and d.sens_general == 100 and d.sens_reddot == 100 and d.sens_sniper == 71
+		and d.vol_master == 85 and d.vol_sfx == 90 and d.vol_music == 45 and d.difficulty == 1
+		and d.dynamic_joystick == false and d.last_pick == "ar", "the older settings keep their defaults")
+	for k in ["show_fps", "vibration", "crosshair_color", "crosshair_size", "sens_fire"]:
+		_check(d.has(k) and not Game.FIXED_SETTINGS.has(k), "%s is a setting now, no longer fixed" % k)
+	_check(Game.FIXED_SETTINGS.has("damage_numbers") and Game.FIXED_SETTINGS.has("run_mode"), "the rest stays fixed")
+	_check(int(Game.SETTING_RANGES.crosshair_color[1]) == Game.CROSSHAIR_COLORS.size() - 1, "the crosshair colour range is the colour list")
+	_near(Game.CROSSHAIR_SCALE, lerpf(0.75, 1.35, 0.5), "crosshair size 100 % is the size the HUD drew before")
+	# Ranges and on/off values.
+	Game.settings = d.duplicate(true)
+	Game.settings.merge({"crosshair_size": 10, "crosshair_color": 9, "sens_freelook": 0, "sens_2x": 900, "sens_fire": -3,
+		"show_fps": "yes", "vibration": 0, "graphics_auto": [], "dynamic_joystick": true, "mode": "battle"}, true)
+	Game._sanitize_settings()
+	var s := Game.settings
+	_check(s.crosshair_size == 50 and s.crosshair_color == 3, "crosshair size and colour are clamped (%s, %s)" % [s.crosshair_size, s.crosshair_color])
+	_check(s.sens_freelook == 1 and s.sens_2x == 200 and s.sens_fire == 1, "free look, 2x and fire-button sensitivity stay in 1..200")
+	_check(s.show_fps == false and s.vibration == true and s.graphics_auto == true and s.dynamic_joystick == true,
+		"an on/off setting that is not true or false falls back to its default; a real one is kept")
+	_check(s.mode == "training", "an unknown mode falls back to TRAINING GROUND")
+	s.crosshair_size = 999
+	s.mode = 7
+	Game._sanitize_settings()
+	_check(s.crosshair_size == 150 and s.mode == "training", "crosshair size at most 150 %, a mode must be a mode's name")
+	_near(Game.crosshair_scale(), Game.CROSSHAIR_SCALE * 1.5, "the crosshair scale follows the size")
+	s.crosshair_size = 100
+	_near(Game.crosshair_scale(), Game.CROSSHAIR_SCALE, "crosshair scale at 100 %")
+	# A version 4 file (through JSON, as saved): the values that were fixed then have no say, free
+	# look and 2x start at the sensitivity they turned with, a picked graphics level keeps AUTO off.
+	var v4: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 4, "graphics": 2, "sens_general": 150,
+		"sens_reddot": 120, "sens_sniper": 60, "vibration": false, "show_fps": true, "crosshair_color": 2,
+		"crosshair_size": 50, "sens_fire": 30, "dynamic_joystick": true, "difficulty": 2, "damage_numbers": false, "bogus": 1}))
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings(v4)
+	s = Game.settings
+	_check(s.settings_version == Game.SETTINGS_VERSION and s.graphics == 2 and s.sens_general == 150 and s.sens_reddot == 120
+		and s.sens_sniper == 60 and s.dynamic_joystick == true and s.difficulty == 2, "a version 4 file keeps its settings")
+	_check(s.vibration == true and s.show_fps == false and s.crosshair_color == 0 and s.crosshair_size == 100 and s.sens_fire == 100,
+		"a version 4 file's fixed values give way to what version 4 played with")
+	_check(s.sens_freelook == 150 and s.sens_2x == 120, "free look and 2x start at General and Red Dot (%s, %s)" % [s.sens_freelook, s.sens_2x])
+	_check(s.graphics_auto == false, "a player who picked a graphics level keeps it (AUTO off)")
+	_check(s.mode == "training" and s.damage_numbers == true and not s.has("bogus"), "fixed behaviour wins, unknown keys are dropped")
+	_check(typeof(s.sens_freelook) == TYPE_INT and typeof(s.graphics) == TYPE_INT, "numbers read from JSON are whole numbers again")
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings({"settings_version": 4, "graphics": 1})
+	_check(Game.settings.graphics_auto == true and Game.settings.sens_freelook == 100, "at the default graphics level AUTO stays on")
+	# A version 5 file keeps every new setting.
+	var v5: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 5, "mode": "lonewolf", "graphics_auto": false,
+		"show_fps": true, "vibration": false, "crosshair_color": 3, "crosshair_size": 140, "sens_fire": 80,
+		"sens_freelook": 90, "sens_2x": 110, "sens_general": 150}))
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings(v5)
+	s = Game.settings
+	_check(s.mode == "lonewolf" and s.graphics_auto == false and s.show_fps == true and s.vibration == false and s.crosshair_color == 3
+		and s.crosshair_size == 140 and s.sens_fire == 80 and s.sens_freelook == 90 and s.sens_2x == 110, "a version 5 file keeps the new settings")
+	# Older files migrate as before: v1's 0-100 sensitivities are dropped, before v4 the joystick resets.
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings({"settings_version": 1, "sens_general": 40, "sens_reddot": 40, "dynamic_joystick": true, "vol_music": 10})
+	s = Game.settings
+	_check(s.sens_general == 100 and s.sens_freelook == 100 and s.sens_2x == 100 and s.dynamic_joystick == false and s.vol_music == 10,
+		"a version 1 file migrates as before")
+	Game.settings = saved
+
+
+func _test_modes() -> void:
+	var saved := Game.settings.duplicate(true)
+	_check(Game.MODE_NAMES.size() == 2 and Game.MODE_NAMES.training == "TRAINING GROUND" and Game.MODE_NAMES.lonewolf == "LONE WOLF",
+		"two modes: TRAINING GROUND and LONE WOLF")
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	_check(Game.DEFAULT_MODE == "training" and Game.DEFAULT_SETTINGS.mode == "training" and Game.mode == "training",
+		"TRAINING GROUND is the default (START plays a bot match)")
+	Game.mode = "lonewolf"
+	_check(Game.mode == "lonewolf" and Game.settings.mode == "lonewolf" and Game.mode_name() == "LONE WOLF", "the mode is kept as a setting")
+	Game.mode = "royale"
+	_check(Game.mode == "training" and Game.mode_name() == "TRAINING GROUND", "an unknown mode sets TRAINING GROUND")
+	_check(Game.mode_name("lonewolf") == "LONE WOLF" and Game.mode_name("nope") == "TRAINING GROUND", "a given mode's name")
+	Game.settings = saved
+
+
+## The profile keys of version 2 (guest login, profile page, numbers per mode, friend requests,
+## recent players, blocks): defaults, sanitising, limits and the signature over all of them.
+func _test_profile_keys() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var d: Dictionary = Game.DEFAULT_PROFILE
+	var missing := ["profile_version", "guest_ok", "created", "avatar", "banner", "signature", "deaths", "headshots", "damage",
+		"shots", "hits", "rounds_won", "rounds_lost", "time_played", "modes", "recent", "blocked", "friend_in",
+		"friend_out"].filter(func(k: String) -> bool: return not d.has(k))
+	_check(missing.is_empty(), "the profile has the new keys (missing %s)" % [missing])
+	_check(d.profile_version == Game.PROFILE_VERSION and d.guest_ok == false and d.created == 0 and d.avatar == "emblem"
+		and d.banner == "default" and d.signature == "" and d.recent.is_empty() and d.blocked.is_empty()
+		and d.friend_in.is_empty() and d.friend_out.is_empty(), "the new profile keys start empty")
+	_check(Game.PROFILE_COUNTERS.all(func(k: String) -> bool: return d[k] == 0)
+		and Game.MODE_NAMES.keys().all(func(m: String) -> bool: return d.modes[m] == {"matches": 0, "wins": 0, "kills": 0}),
+		"every counter starts at 0, per mode too")
+	var avatars := Game.avatar_ids()
+	_check("emblem" in avatars and CharacterModel.BUNDLE_INFO.all(func(b: Dictionary) -> bool: return String(b.id) in avatars),
+		"avatars: the emblem and every outfit's portrait")
+	var ids := []
+	for i in 70:
+		ids.append(("player%d" % i).sha256_text().left(32))
+	_check(Game.is_player_id(ids[0]) and not Game.is_player_id(String(ids[0]).left(31)) and not Game.is_player_id("z".repeat(32))
+		and not Game.is_player_id(42), "player ids are 32 hex characters")
+	_check(Game.clean_text("  Hi, [b]you[/b]!  ", 30) == "HI BYOUB" and Game.clean_text("abcdefgh", 5) == "ABCDE",
+		"typed text keeps the name characters, up to a length")
+	# Out-of-range and malformed values (an edited save, a bug) are repaired.
+	var recent := []
+	recent.append({"id": "not-an-id", "name": "X", "t": 1})
+	for i in 25:
+		recent.append({"id": ids[i], "name": "  foe %d!" % i, "t": 1700000000 + i})
+	recent.insert(2, {"id": ids[0], "name": "AGAIN", "t": 5})     # the same player again: only the newer entry stays
+	recent.append("junk")
+	var reqs := {"bad": {"name": "X", "t": 1}, ids[65]: "not a dict"}
+	for i in 60:
+		reqs[ids[i]] = {"name": "asker %d" % i, "t": -5 if i == 0 else 1700000000}
+	var pals := {}
+	for i in 55:
+		pals[ids[i]] = {"name": "pal %d" % i}
+	Game.profile = d.duplicate(true)
+	Game.profile.merge({"guest_ok": "yes", "created": -9, "avatar": "dragon", "banner": "gold",
+		"signature": "  [b]Hello[/b] world: the very best player of all time!! ", "deaths": -1, "damage": 3.7,
+		"shots": 10, "hits": 25, "headshots": 40, "time_played": -60, "rounds_won": 4.0, "rounds_lost": 2,
+		"modes": {"training": {"matches": 3, "wins": 9, "kills": -2}, "battle": {"matches": 5}},
+		"recent": recent, "blocked": ids.slice(0, 60) + [ids[0], "zz", 42], "friend_in": reqs, "friend_out": reqs.duplicate(true),
+		"friends": pals}, true)
+	Game._sanitize_profile()
+	var p := Game.profile
+	_check(p.guest_ok == false and p.created == 0 and p.avatar == "emblem" and p.banner == "default",
+		"profile: a wrong flag, time, avatar or banner falls back")
+	_check(p.signature == "BHELLOB WORLD THE VERY BEST PL", "profile: the signature keeps name characters, 30 at most (%s)" % p.signature)
+	_check(p.deaths == 0 and p.damage == 3 and typeof(p.damage) == TYPE_INT and p.time_played == 0 and p.rounds_won == 4
+		and typeof(p.rounds_won) == TYPE_INT and p.rounds_lost == 2, "profile: counters are whole numbers, never negative")
+	_check(p.hits == 10 and p.headshots == 10, "profile: hits never exceed shots, headshots never exceed hits")
+	_check(p.modes.keys() == Game.MODE_NAMES.keys() and p.modes.training == {"matches": 3, "wins": 3, "kills": 0}
+		and p.modes.lonewolf == {"matches": 0, "wins": 0, "kills": 0}, "profile: one set of numbers per mode, wins never above matches")
+	_check(p.recent.size() == Game.MAX_RECENT and p.recent[0] == {"id": ids[0], "name": "FOE 0", "t": 1700000000}
+		and p.recent[1].id == ids[1] and p.recent[19].id == ids[19], "profile: 20 recent players at most, newest first, each once")
+	_check(p.blocked.size() == Game.MAX_BLOCKED and p.blocked == ids.slice(0, 50), "profile: 50 blocked ids at most, valid and each once")
+	for k in ["friend_in", "friend_out"]:
+		var r: Dictionary = p[k]
+		_check(r.size() == Game.MAX_REQUESTS and r.has(ids[0]) and not r.has("bad") and not r.has(ids[65]) and not r.has(ids[50])
+			and r[ids[0]] == {"name": "ASKER 0", "t": 0} and r[ids[1]].t == 1700000000, "profile: %s keeps 50 valid requests" % k)
+	_check(p.friends.size() == Game.MAX_FRIENDS and p.friends[ids[0]] == {"name": "PAL 0"}, "profile: 50 friends at most")
+	Game.profile.avatar = "royal"
+	Game._sanitize_profile()
+	_check(Game.profile.avatar == "royal", "an outfit's portrait is a valid avatar")
+	# The signature covers the new keys too.
+	Game.profile = d.duplicate(true)
+	Game.profile.merge({"guest_ok": true, "recent": [{"id": ids[1], "name": "RIVAL", "t": 1700000000}], "blocked": [ids[2]]}, true)
+	Game.profile.modes.training.wins = 1
+	Game.profile.modes.training.matches = 2
+	var parsed: Dictionary = JSON.parse_string(JSON.stringify(Guard.sign_dict(Game.profile), "\t"))
+	_check(Guard.verify_dict(parsed).ok, "a profile with the new keys verifies after a JSON round trip")
+	var edits := {
+		"per-mode wins": func(x: Dictionary) -> void: x.modes.training.wins = 2,
+		"recent players": func(x: Dictionary) -> void: x.recent[0].name = "FAKE",
+		"blocks": func(x: Dictionary) -> void: (x.blocked as Array).clear(),
+		"friend requests": func(x: Dictionary) -> void: x.friend_in[ids[3]] = {"name": "X", "t": 1},
+		"guest login": func(x: Dictionary) -> void: x.guest_ok = false,
+	}
+	for what: String in edits:
+		var copy: Dictionary = parsed.duplicate(true)
+		(edits[what] as Callable).call(copy)
+		_check(not Guard.verify_dict(copy).ok, "the signature covers the %s" % what)
+	# The first save stamps the creation time, later ones keep it (autotest set: nothing is written).
+	var at := Game.autotest
+	Game.autotest = "unit"
+	Game.save_profile()
+	var created := int(Game.profile.created)
+	Game.save_profile()
+	Game.autotest = at
+	_check(created > 1600000000 and int(Game.profile.created) == created, "the first save stamps \"created\", later ones keep it")
+	Game.profile = saved_profile
+
+
+## Saved profiles through the real load path (signature, migration, merge, sanitising): from
+## version 1, from version 2, and an edited one.
+func _test_profile_migration() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var friend_id := "friend".sha256_text().left(32)
+	var old := {"name": "Old Timer", "bundle": "neon", "matches": 12, "wins": 5, "kills": 30, "xp": 2400, "name_set": true,
+		"friends": {friend_id: {"name": "BUDDY"}}}
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var ok := Game._apply_saved_profile(_as_saved(old))
+	var p := Game.profile
+	_check(ok and p.guest_ok == true and p.name_set == true, "an old profile whose player chose a name skips the guest login")
+	_check(p.name == "OLD TIMER" and p.bundle == "neon" and p.matches == 12 and p.wins == 5 and p.kills == 30 and p.xp == 2400
+		and p.friends == {friend_id: {"name": "BUDDY"}}, "an old profile keeps its progress, outfit and friends")
+	_check(p.modes.training == {"matches": 12, "wins": 5, "kills": 30} and p.modes.lonewolf == {"matches": 0, "wins": 0, "kills": 0},
+		"an old profile's totals become TRAINING GROUND's numbers")
+	_check(p.profile_version == Game.PROFILE_VERSION and p.avatar == "emblem" and p.signature == "" and p.recent.is_empty()
+		and p.friend_in.is_empty() and p.created == 0 and p.deaths == 0, "an old profile gets the new keys' defaults")
+	_check(typeof(p.matches) == TYPE_INT and typeof(p.modes.training.wins) == TYPE_INT, "numbers read from JSON are whole numbers again")
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	Game._apply_saved_profile(_as_saved({"name": "ROOKIE", "matches": 1, "name_set": false}))
+	_check(Game.profile.guest_ok == false and Game.profile.modes.training.matches == 1, "an old profile without a chosen name still gets the guest login")
+	# A version 2 profile loads back exactly: every new key kept, nothing migrated again.
+	var v2: Dictionary = Game.DEFAULT_PROFILE.duplicate(true)
+	v2.merge({"name": "NEW ONE", "name_set": true, "guest_ok": false, "created": 1780000000, "avatar": "royal", "signature": "GG",
+		"matches": 9, "wins": 4, "kills": 11, "xp": 900, "deaths": 7, "headshots": 3, "damage": 1800, "shots": 120, "hits": 40,
+		"rounds_won": 20, "rounds_lost": 15, "time_played": 3600,
+		"modes": {"training": {"matches": 6, "wins": 3, "kills": 8}, "lonewolf": {"matches": 3, "wins": 1, "kills": 2}},
+		"recent": [{"id": "r".sha256_text().left(32), "name": "RIVAL", "t": 1780000100}], "blocked": ["b".sha256_text().left(32)],
+		"friend_in": {"i".sha256_text().left(32): {"name": "ASKER", "t": 1780000200}},
+		"friend_out": {"o".sha256_text().left(32): {"name": "ASKED", "t": 1780000300}}, "friends": {friend_id: {"name": "BUDDY"}}}, true)
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	ok = Game._apply_saved_profile(_as_saved(v2))
+	_check(ok and Game.profile == v2, "a version 2 profile loads back exactly (every new key kept, no second migration)")
+	# An edited save is still rejected: only the name is kept, and the edit is flagged.
+	var flags_before := Guard.flags.size()
+	var edited := _as_saved(v2)
+	edited.xp = 999999
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	ok = Game._apply_saved_profile(edited)
+	_check(not ok and Game.profile.name == "NEW ONE" and Game.profile.xp == 0 and Game.profile.guest_ok == false
+		and Game.profile.modes.lonewolf.matches == 0 and Guard.flags.has("save"), "an edited profile is rejected, only its name is kept")
+	Guard.flags.resize(flags_before)
+	Game.profile = saved_profile
+
+
+## A profile as profile.json holds it: signed, then through JSON (numbers come back as floats).
+func _as_saved(p: Dictionary) -> Dictionary:
+	var d: Dictionary = JSON.parse_string(JSON.stringify(Guard.sign_dict(p), "\t"))
+	return d
 
 
 func _test_honour() -> void:

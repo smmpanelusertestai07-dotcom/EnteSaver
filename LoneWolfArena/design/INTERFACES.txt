@@ -116,10 +116,17 @@ listed here. If a part needs something new from the core, add it in its own file
   note (`EditHudNote`): leaving for the editor would abandon the match.
 - Lobby Android back closes the top layer (popup, settings, wardrobe), then shows a quit
   dialog (`QuitDialog`, `QuitCancel`, `QuitConfirm`); it is ignored during the START overlay.
+- Modes: `Game.mode` is "training" (TRAINING GROUND, vs bots, the default) or "lonewolf" (LONE
+  WOLF, online 1 vs 1), kept as the setting "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`.
+- Saves: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
+  files are migrated by settings_version), the profile keys `Game.DEFAULT_PROFILE` (signed as a
+  whole; older profiles are migrated by profile_version). Crosshair: `Game.crosshair_color()`,
+  `Game.crosshair_scale()`.
 - No credits screen: `Licences.publish()` prints the licence notices the shipped parts need
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
-- Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`.
+- Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
+  `Game.goto_login()` is the lobby until the guest login scene exists.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
   `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`,
   `PlayerCard` (opens the name editor), `PlayerName`, `Logo`, `Modal`, `PlayAgain`, `Lobby`,

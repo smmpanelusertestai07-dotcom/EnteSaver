@@ -977,7 +977,7 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 	var on := player.crosshair_on_target
 	var hit := _hit_t > 0.0
 	var col := Color(1.0, 0.16, 0.13) if (on or hit) else Game.crosshair_color()
-	var sc := lerpf(0.75, 1.35, float(Game.settings.crosshair_size) / 100.0)
+	var sc := Game.crosshair_scale()
 	var dyn := bool(Game.settings.dynamic_crosshair)
 	var outline := Color(0, 0, 0, 0.45)
 	var shade := Color(0, 0, 0, 0.3)          # soft shadow under the thin lines
