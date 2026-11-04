@@ -104,8 +104,12 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 - Crosshair sizes (radius, the reference's M1887 circle is ~0.07 h across): rifle ring 0.028 h (grows
   with the spread up to 0.06 h), shotgun ring 0.035 h fixed, fists a dot in a 0.0175 h ring; lines
   ~1.4 px with a soft shadow.
-- Settings (only what the reference mode offers): BASIC (graphics LOW .. EXTREME, 30/60/90 FPS),
-  CONTROLS (dynamic joystick, custom HUD), SENSITIVITY (general, red dot, sniper scope,
-  fire-button drag), SOUND; per-tab RESET. Everything else is fixed at its best value.
+- Settings (the reference's conventions, our own words and values): BASIC (graphics AUTO / LOW ..
+  EXTREME with AUTO's pick marked and a heat warning before EXTREME, 30/60 FPS plus 90/120 where
+  the screen refreshes that fast, show FPS, visual effects, vibration), CONTROLS (dynamic
+  joystick, aim precision ASSISTED / MANUAL IN SCOPE / FULL MANUAL, left fire button ALWAYS / WHEN
+  AIMING, crosshair colour and size 50-150 % with a live preview, custom HUD), SENSITIVITY 1-200
+  (general, red dot, 2x scope, sniper scope, free look, fire-button drag; presets STANDARD /
+  FAST), SOUND; per-tab RESET that asks first. Everything else is fixed at its best value.
 - Pause: full-width dark band, PAUSED, score / time left / HP chips, RESUME, SETTINGS, QUIT MATCH
   (asks again).
