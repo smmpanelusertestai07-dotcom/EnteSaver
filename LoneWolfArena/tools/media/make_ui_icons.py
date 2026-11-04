@@ -127,6 +127,23 @@ ICONS["headshot"] = svg(dot(64, 52, 22) + path("M28 112 C28 88 44 78 64 78 C84 7
                         + ring(64, 52, 36, 5) + line(64, 4, 64, 20, 5) + line(12, 52, 28, 52, 5) + line(100, 52, 116, 52, 5))
 # Alive / player count.
 ICONS["player"] = svg(dot(64, 38, 24) + path("M20 116 C20 84 40 70 64 70 C88 70 108 84 108 116 Z"))
+# Guest (PLAY AS GUEST): a head-and-shoulders bust inside a round frame that cuts it off at the
+# bottom like an avatar picture (the frame keeps it apart from "player" and "headshot").
+ICONS["guest"] = svg('<defs><clipPath id="frame"><circle cx="64" cy="64" r="45"/></clipPath></defs>'
+                     + ring(64, 64, 54, 9)
+                     + '<g clip-path="url(#frame)">' + dot(64, 50, 18)
+                     + path("M24 116 C24 88 42 76 64 76 C86 76 104 88 104 116 Z") + "</g>")
+# Profile / ID card: a card with a photo window (bust inside) and three text lines.
+ICONS["profile"] = svg('<rect x="6" y="20" width="116" height="88" rx="12" fill="%s"/>' % W
+                       + '<rect x="17" y="32" width="44" height="64" rx="7" fill="#000"/>'
+                       + dot(39, 53, 10) + path("M22 96 C22 80 29 71 39 71 C49 71 56 80 56 96 Z")
+                       + '<rect x="71" y="44" width="40" height="9" rx="4.5" fill="#000"/>'
+                       + '<rect x="71" y="60" width="40" height="9" rx="4.5" fill="#000"/>'
+                       + '<rect x="71" y="76" width="27" height="9" rx="4.5" fill="#000"/>')
+# Add friend: a bust with a plus sign beside its head.
+ICONS["friend_add"] = svg(dot(50, 40, 21) + path("M10 114 C10 84 28 70 50 70 C72 70 90 84 90 114 Z")
+                          + '<rect x="97" y="34" width="12" height="40" rx="3" fill="%s"/>' % W
+                          + '<rect x="83" y="48" width="40" height="12" rx="3" fill="%s"/>' % W)
 # Timer.
 ICONS["timer"] = svg(ring(64, 70, 44, 8) + '<rect x="54" y="8" width="20" height="12" rx="3" fill="%s"/>' % W
                      + line(64, 70, 64, 42, 8) + line(64, 70, 84, 82, 8))

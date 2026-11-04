@@ -38,7 +38,10 @@ tools/qa/run_checks.sh                                    # import, compile, uni
 tools/qa/capture.sh /tmp/shots 1560x720 screens           # screenshot walkthrough (Xvfb + llvmpipe)
 python3 tools/qa/compare.py /tmp/shots_old /tmp/shots /tmp/cmp   # screen-by-screen diff
 tools/build_apk.sh                                        # signed release APK (see script header)
+python3 tools/qa/cloudphone/vsphone.py pads               # real phone (owner's VSPhone), see script header
 ```
+VSPhone keys live only in ~/.lonewolf/vsphone.env (never in the repo). Use the phone only to test
+this game; never open or drive other apps on it.
 Release key: the owner keeps the backup of ~/.lonewolf (release.keystore, release.pass,
 save_secret, sent to them privately on 2026-10-30). In a fresh environment ask them for it and put
 it back before building a release; never make a new key (updates would stop installing over the
