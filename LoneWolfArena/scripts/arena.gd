@@ -188,8 +188,13 @@ func _on_net_event(kind: String, data: Array) -> void:
 			if data.size() == 6:
 				remote.remote_shot(Vector3(float(data[0]), float(data[1]), float(data[2])), Vector3(float(data[3]), float(data[4]), float(data[5])))
 		"hit":
-			if data.size() == 5 and String(data[1]) in ["head", "body", "limb"]:
-				player.take_damage(clampf(float(data[0]), 0.0, 2000.0), String(data[1]), remote, Vector3(float(data[2]), float(data[3]), float(data[4])))
+			# Only while the round is fought, never faster than this round's gun can fire, and never
+			# more than one bullet (pellet), punch or frag of it can do: a tampered phone cannot
+			# send fake damage.
+			if data.size() == 5 and String(data[1]) in ["head", "body", "limb"] and phase == Phase.FIGHT \
+					and _remote_hit_allowed():
+				var zone := String(data[1])
+				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote, Vector3(float(data[2]), float(data[3]), float(data[4])))
 		"died":
 			if remote.alive and data.size() == 1:
 				player.stats.kills += 1
@@ -231,6 +236,41 @@ func _on_net_ended(_reason: String) -> void:
 	else:
 		_end_round(null)
 	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+
+
+var _hit_tokens := 0.0
+var _hit_tokens_t := 0
+
+
+## The most one reported hit can do in this zone: a bullet (one pellet) of this round's gun at
+## point-blank range, a punch, or (on the body) a frag at its centre, before the armour.
+func _max_remote_hit(zone: String) -> float:
+	var best := 0.0
+	for id: String in [_round_gun(), "fists"]:
+		var d: Dictionary = Weapons.DEFS[id]
+		best = maxf(best, float(d.damage) * Weapons.zone_mult(d, zone, 0.0) * Weapons.pen_mult(d, zone))
+	if zone == "body":
+		best = maxf(best, Grenade.MAX_DAMAGE)
+	return best * 1.02
+
+
+func _round_gun() -> String:
+	return picked_weapon if Weapons.DEFS.has(picked_weapon) else Weapons.DEFAULT_PICK
+
+
+## Hit reports may not come faster than the round's gun fires (all its pellets), with headroom for
+## network bunching: a token bucket refilled at 1.5 x that rate.
+func _remote_hit_allowed() -> bool:
+	var d: Dictionary = Weapons.DEFS[_round_gun()]
+	var rate := maxf(float(d.pellets) / maxf(float(d.interval), 0.05), 1.0 / 0.45) * 1.5 + 3.0
+	var burst := maxf(float(d.pellets) * 3.0, 12.0)
+	var now := Time.get_ticks_msec()
+	_hit_tokens = minf(burst, _hit_tokens + float(now - _hit_tokens_t) / 1000.0 * rate)
+	_hit_tokens_t = now
+	if _hit_tokens < 1.0:
+		return false
+	_hit_tokens -= 1.0
+	return true
 
 
 ## Called by RemoteFighter for every hit this phone's player lands on it.

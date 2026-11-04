@@ -13,6 +13,8 @@ extends RefCounted
 ## centre, jump and crouch to its right, prone at the top, the wall button over the fire button,
 ## medkit and sprint on the left, the weapon panel and its three slots 45 % larger; no left
 ## fire, reload, scoreboard or free-look buttons (reload: tap the panel; scores: tap the bar).
+## Later additions (missing from a saved layout, they take their default place): free look and a
+## LEFT FIRE button over the left side (hold to fire with the left thumb; it does not aim).
 
 const VERSION := 5
 const REF_ASPECT := 20.0 / 9.0
@@ -26,11 +28,12 @@ const STRIP_H := 0.17            # zone status strip under the minimap, in minim
 const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button
 
 ## Hit-test order (first wins when two widgets overlap) and editor list.
-const ORDER := ["settings", "weapons", "fire_r", "scope", "freelook", "wall", "jump", "crouch", "prone", "sprint",
+const ORDER := ["settings", "weapons", "fire_r", "fire_l", "scope", "freelook", "wall", "jump", "crouch", "prone", "sprint",
 	"medkit", "grenade", "minimap", "joystick"]
 const DEFAULTS := {
 	"joystick": {"x": 0.18, "y": 0.71, "s": 0.23, "o": 0.8, "a": "l"},
 	"fire_r": {"x": 0.798, "y": 0.68, "s": 0.26, "o": 0.9, "a": "r"},
+	"fire_l": {"x": 0.09, "y": 0.39, "s": 0.15, "o": 0.85, "a": "l"},
 	"scope": {"x": 0.835, "y": 0.4, "s": 0.104, "o": 0.85, "a": "r"},
 	"freelook": {"x": 0.945, "y": 0.375, "s": 0.09, "o": 0.85, "a": "r"},
 	"wall": {"x": 0.0375, "y": 0.53, "s": 0.11, "o": 0.85, "a": "l"},
@@ -45,7 +48,7 @@ const DEFAULTS := {
 	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
 }
 const LABELS := {
-	"joystick": "MOVE", "fire_r": "FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
+	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
 	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "freelook": "FREE LOOK",
 	"weapons": "WEAPONS", "minimap": "MAP",
 }

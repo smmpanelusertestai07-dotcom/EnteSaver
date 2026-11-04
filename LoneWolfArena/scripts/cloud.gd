@@ -462,6 +462,9 @@ func _on_inbox(d: Dictionary) -> void:
 					_room_tag(_join.key, "inv", from).to_utf8_buffer(), String(d.rc).to_utf8_buffer()):
 				answer(true, rules_from(d.get("rules")))
 				return
+			if invited.get_connections().is_empty():
+				answer(false)            # in a match (no lobby listening): say no at once, not after 25 s
+				return
 			invited.emit(String(_incoming.name))
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):

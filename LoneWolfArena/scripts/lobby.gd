@@ -756,7 +756,7 @@ func _build_left_menu(root: Control) -> void:
 	root.add_child(menu)
 	var items := [
 		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
-		["PLAY WITH FRIENDS", "v_player", "FriendsButton", _open_friends],
+		["ONLINE 1 VS 1", "v_player", "FriendsButton", _open_friends],
 		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
 		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
 		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
@@ -1006,7 +1006,7 @@ func _open_friends(kind := "online") -> void:
 		tabs.add_child(b)
 	v.add_child(tabs)
 	var notes := {
-		"online": "Play anyone online from anywhere. No sign-up: players who have this screen open show up by name.",
+		"online": "Everyone playing right now, from anywhere. DUEL 1 VS 1 challenges a player, ADD FRIEND sends a friend request.",
 		"friends": "Add players as friends with their ID. Friends who are online can be challenged to a 1 vs 1 duel.",
 		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
 		"wifi": "Same Wi-Fi or one phone's hotspot: nearby players show up by name.",
@@ -1345,7 +1345,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 				_net_list.add_child(_player_row(cloud, id, who, waiting, "  ·  ONLINE"))
 				found += 1
 		if found == 0:
-			_net_list.add_child(UI.label("NOBODY ONLINE MATCHES \"%s\" (THEY NEED THIS SCREEN OPEN)" % _friend_query, 18, UI.TEXT_DIM, "semi"))
+			_net_list.add_child(UI.label("NOBODY ONLINE MATCHES \"%s\"" % _friend_query, 18, UI.TEXT_DIM, "semi"))
 	var friends: Dictionary = Game.profile.friends
 	if friends.is_empty():
 		_net_list.add_child(UI.label("NO FRIENDS YET: SEARCH A PLAYER'S ID OR NAME, OR TAP ADD FRIEND IN THE ONLINE TAB.", 18, UI.TEXT_DIM, "semi"))
@@ -1364,8 +1364,11 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 
 func _on_net_invited(who: String, svc: Node) -> void:
 	_net_list = null
-	var v := _open_modal("CHALLENGE", 640.0)
-	var t := UI.label("%s wants a 1 vs 1 (%s)" % [who, "online" if svc is Cloud else "Wi-Fi"], 26, UI.TEXT, "heavy")
+	Audio.play("ui_select", 0.0)
+	if bool(Game.settings.get("vibration", true)):
+		Input.vibrate_handheld(250)
+	var v := _open_modal("DUEL CHALLENGE", 640.0)
+	var t := UI.label("%s challenges you to a 1 vs 1 duel" % who, 26, UI.TEXT, "heavy")
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(t)
 	var row := HBoxContainer.new()
@@ -1384,6 +1387,47 @@ func _on_net_invited(who: String, svc: Node) -> void:
 	row.add_child(no)
 	row.add_child(yes)
 	v.add_child(row)
+
+
+var _seen_requests := {}
+
+
+## A new friend request shows up at once: a popup with ACCEPT / DECLINE when no window is open
+## (with the FRIENDS tab open it simply appears in its list).
+func _on_friends_changed() -> void:
+	_net_sig = "-"
+	var cloud := Game.cloud_service()
+	for id: String in cloud.friend_requests:
+		if _seen_requests.has(id):
+			continue
+		_seen_requests[id] = true
+		Audio.play("ui_select", 0.0)
+		if bool(Game.settings.get("vibration", true)):
+			Input.vibrate_handheld(120)
+		if _modal and is_instance_valid(_modal):
+			return
+		var who := String(cloud.friend_requests[id].name)
+		_net_list = null
+		var v := _open_modal("FRIEND REQUEST", 640.0)
+		var t := UI.label("%s  #%s wants to be your friend" % [who, Cloud.friend_code(id)], 26, UI.TEXT, "heavy")
+		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(t)
+		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_END
+		row.add_theme_constant_override("separation", 12)
+		var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
+		no.pressed.connect(func() -> void:
+			Game.cloud_service().answer_friend(id, false)
+			_close_modal())
+		var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
+		yes.name = "AcceptFriendButton"
+		yes.pressed.connect(func() -> void:
+			Game.cloud_service().answer_friend(id, true)
+			_close_modal())
+		row.add_child(no)
+		row.add_child(yes)
+		v.add_child(row)
+		return
 
 
 func _on_net_invite_cancelled(_svc: Node) -> void:
@@ -1429,7 +1473,7 @@ func _on_net_ended(reason: String, _svc: Node) -> void:
 func _connect_net(svc: Node) -> void:
 	if svc is Cloud:
 		(svc as Cloud).room_changed.connect(_on_room_changed)
-		(svc as Cloud).friends_changed.connect(func() -> void: _net_sig = "-")
+		(svc as Cloud).friends_changed.connect(_on_friends_changed)
 	svc.invited.connect(_on_net_invited.bind(svc))
 	svc.invite_cancelled.connect(_on_net_invite_cancelled.bind(svc))
 	svc.invite_answered.connect(_on_net_answered.bind(svc))
