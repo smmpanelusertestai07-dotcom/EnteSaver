@@ -27,9 +27,9 @@ const DEFAULT_SETTINGS := {
 	"show_fps": false,
 	"sens_general": 100,
 	"sens_reddot": 100,
-	"sens_2x": 100,               # the 2x scope (until it has its own, it aims with Red Dot)
+	"sens_2x": 100,               # aiming through a 2x scope (Player.sens_key)
 	"sens_sniper": 71,
-	"sens_freelook": 100,         # free look (the eye button; until wired, it turns with General)
+	"sens_freelook": 100,         # free look (the eye button)
 	"sens_fire": 100,             # a drag that starts on the fire button, % of the view's own
 	"dynamic_joystick": false,
 	"vibration": true,
