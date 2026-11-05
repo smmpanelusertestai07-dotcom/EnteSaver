@@ -8,7 +8,10 @@ extends RefCounted
 ## right. CAREER: the lifetime numbers with their rates and averages ("-" while there is nothing to
 ## divide by), then one row per mode. HISTORY: the last Game.MAX_HISTORY counted matches, newest
 ## first (profile "history", Game.record_match). NAME CARD: the banner and the profile picture,
-## saved at once; the name card shows them live. BLOCKED: the blocked players with UNBLOCK.
+## saved at once; the name card shows them live. BLOCKED: the blocked players with UNBLOCK, by the
+## name known for them (kept with the block) else their short ID; it follows blocks made elsewhere,
+## and while it shows, the player cards are listened to (Cloud.start_directory), so names and cards
+## arrive.
 ## The name card: the banner art behind the profile picture (a tap opens NAME CARD), the name with
 ## EDIT (the lobby's name editor), the level with an XP bar to the next one, the PLAYER ID (short;
 ## COPY puts the whole id on the clipboard), the signature line with EDIT, the outfit and PLAYING
@@ -58,6 +61,9 @@ var _player_box: VBoxContainer     # its content while it is open
 var _player_shown := ""            # what it shows (_player_state)
 var _player_t := 0.0
 var _player_note := ""
+var _blocked_shown := ""           # what BLOCKED lists (_blocked_key): it is built again on a change
+var _blocked_t := 0.0
+var _dir_on := false               # BLOCKED or a card opened here wants the player cards (Cloud.start_directory)
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -215,7 +221,7 @@ static func mode_stats(p: Dictionary, m: String) -> Dictionary:
 
 
 ## A player's name when this phone knows it (friends and requests, the lobby, the player cards,
-## recent opponents, HISTORY), else "".
+## the name kept with a block, recent opponents, HISTORY), else "".
 static func known_name(id: String) -> String:
 	var p: Dictionary = Game.profile
 	for k: String in ["friends", "friend_in", "friend_out"]:
@@ -227,6 +233,9 @@ static func known_name(id: String) -> String:
 		return String(cloud.peers[id].name)
 	if cloud and cloud.directory.has(id):
 		return String(cloud.directory[id].name)
+	for e: Dictionary in p.blocked:
+		if e.id == id and String(e.name) != "":
+			return String(e.name)
 	for e: Dictionary in p.recent:
 		if String(e.id) == id and String(e.name) != "":
 			return String(e.name)
@@ -359,13 +368,23 @@ func close() -> void:
 		_card_box = null
 	lobby._main_ui.visible = true
 	lobby.refresh_player_card()
+	_want_directory(false)
 
 
-## Every frame: the name card follows the profile (the name editor, the signature, a new id).
+## The lobby is leaving the tree (a match starts): the player cards are not wanted any more.
+func on_lobby_exit() -> void:
+	_want_directory(false)
+
+
+## Every frame: the name card follows the profile (the name editor, the signature, a new id),
+## BLOCKED and an open player card follow what changes elsewhere (a block or unblock made from
+## the ONLINE window over PROFILE, a name card that arrives), and the player cards are listened
+## to while BLOCKED or a player card opened from PROFILE shows (their names and cards).
 func process(delta: float) -> void:
 	if layer and _card_box and _card_key() != _card_shown:
 		_build_card()
-	if _player_box and is_instance_valid(_player_box) and _player_box.is_inside_tree():
+	var card_open := _player_box != null and is_instance_valid(_player_box) and _player_box.is_inside_tree()
+	if card_open:
 		_player_t -= delta
 		if _player_t <= 0.0:
 			_player_t = 0.5
@@ -373,6 +392,23 @@ func process(delta: float) -> void:
 				_fill_player()
 	elif _player_box:
 		_player_box = null
+	if layer and tab == "blocked":
+		_blocked_t -= delta
+		if _blocked_t <= 0.0:
+			_blocked_t = 0.5
+			if _blocked_key() != _blocked_shown:
+				_show_tab("blocked", true)
+	_want_directory(layer != null and (tab == "blocked" or (card_open and _player_back == "")))
+
+
+func _want_directory(on: bool) -> void:
+	if on == _dir_on:
+		return
+	_dir_on = on
+	if on:
+		Game.cloud_service().start_directory("profile")
+	elif Game.cloud:
+		Game.cloud.stop_directory("profile")
 
 
 func _tab_button(key: String, text: String) -> Button:
@@ -411,9 +447,11 @@ func _style_tab(b: Button, on: bool) -> void:
 	b.queue_redraw()
 
 
-func _show_tab(key: String) -> void:
+## Shows a tab; again: built anew where it was scrolled to (keep_scroll, BLOCKED after a change).
+func _show_tab(key: String, keep_scroll := false) -> void:
 	if layer == null:
 		return
+	var was := _scroll.scroll_vertical
 	tab = "career"
 	for known: Array in TABS:
 		if known[0] == key:
@@ -426,6 +464,8 @@ func _show_tab(key: String) -> void:
 		_list.remove_child(c)
 		c.queue_free()
 	_scroll.scroll_vertical = 0
+	if keep_scroll and was > 0:
+		_scroll.set_deferred("scroll_vertical", was)      # after the new rows are laid out
 	match tab:
 		"history":
 			_fill_history()
@@ -731,6 +771,7 @@ func _after_card_change() -> void:
 
 func _fill_blocked() -> void:
 	var blocked: Array = Game.profile.blocked
+	_blocked_shown = _blocked_key()
 	_list.add_child(_head_row("BLOCKED PLAYERS", "%d OF %d" % [blocked.size(), Game.MAX_BLOCKED]))
 	var note := UI.label("Their challenges, friend requests and room requests are ignored, and they are left out of your lists. Tap a player to see their card.",
 		16, UI.TEXT_DIM, "semi")
@@ -742,26 +783,40 @@ func _fill_blocked() -> void:
 			"To block a player, tap their name in the ONLINE window and choose BLOCK on their card."))
 		return
 	for i in range(blocked.size() - 1, -1, -1):          # the latest block first
-		var id := String(blocked[i])
+		var id := String(blocked[i].id)
 		var code := Cloud.friend_code(id)
-		var who := known_name(id)
 		var row := HBoxContainer.new()
 		row.name = "BlockedRow_" + code
 		row.add_theme_constant_override("separation", 12)
-		var nb := player_button(id, ("%s  #%s" % [who, code]) if who != "" else "#" + code)
+		var nb := player_button(id, who_label(id))
 		nb.pressed.connect(open_player.bind(id, ""))
 		row.add_child(nb)
 		var un := UI.button("UNBLOCK", 19, "light", Vector2(170, 56))
 		un.name = "Unblock_" + code
-		un.pressed.connect(_ask_unblock_listed.bind(id, who if who != "" else "#" + code))
+		un.pressed.connect(_ask_unblock_listed.bind(id, who_label(id)))
 		row.add_child(un)
 		_list.add_child(row)
+
+
+## A player as BLOCKED names them: "NAME  #CODE", or "#CODE" while their name is unknown.
+static func who_label(id: String) -> String:
+	var who := known_name(id)
+	var code := Cloud.friend_code(id)
+	return "%s  #%s" % [who, code] if who != "" else "#" + code
+
+
+## What BLOCKED shows, in one string: the blocks and the names known for them.
+func _blocked_key() -> String:
+	var parts := PackedStringArray()
+	for e: Dictionary in Game.profile.blocked:
+		parts.append(who_label(String(e.id)))
+	return "|".join(parts)
 
 
 func _ask_unblock_listed(id: String, who: String) -> void:
 	var done := func() -> void:
 		Game.unblock(id)
-		_show_tab("blocked")
+		_show_tab("blocked", true)
 	lobby.dialogs.confirm("UNBLOCK PLAYER", "Unblock %s? They can challenge you and send you friend requests again." % who,
 		"UNBLOCK", done)
 
@@ -1072,7 +1127,7 @@ func _close_player() -> void:
 		return
 	lobby.dialogs.close_modal()
 	if layer and tab == "blocked":
-		_show_tab("blocked")
+		_show_tab("blocked", true)
 
 
 ## What the player card shows that can change while it is open (presence, their card, friends,
@@ -1135,7 +1190,7 @@ func _fill_player() -> void:
 	var sig := String(card.get("signature", ""))
 	var sig_text := "“%s”" % sig
 	if sig == "":
-		sig_text = "NO SIGNATURE YET" if not card.is_empty() else "THEIR NAME CARD HAS NOT ARRIVED YET"
+		sig_text = "NO SIGNATURE YET" if not card.is_empty() else "NO NAME CARD SEEN YET"
 	_player_box.add_child(_field("SIGNATURE", sig_text, 21, "semi", UI.TEXT if sig != "" else UI.TEXT_DIM, "PlayerSignature"))
 	var note := _player_note
 	if note == "" and blocked:
@@ -1214,14 +1269,27 @@ func _ask_block(id: String, who: String, unblock: bool) -> void:
 		_block(id)
 		if back_to != "":
 			lobby.friends.open(back_to)
+			lobby.friends.note("%s BLOCKED" % who)        # they are gone from the list: say why
 		else:
 			reopen.call()
-	lobby.dialogs.confirm("BLOCK PLAYER", ("Block %s? Their challenges and friend requests will be ignored, they stop being your " +
-		"friend and they are left out of your lists. You can unblock them in PROFILE, under BLOCKED.") % who, "BLOCK", done, reopen, true)
+	lobby.dialogs.confirm("BLOCK PLAYER", block_question(who), "BLOCK", done, reopen, true)
+
+
+## The BLOCK question. With BLOCKED full it names the block that a new one lifts (the oldest:
+## Game.block_lifts), as that player can challenge and send requests again.
+static func block_question(who: String) -> String:
+	var t := ("Block %s? Their challenges and friend requests will be ignored, they stop being your friend and they are " +
+		"left out of your lists. You can unblock them in PROFILE, under BLOCKED.") % who
+	var lifted := Game.block_lifts()
+	if not lifted.is_empty():
+		t += " BLOCKED is full (%d): this lifts your oldest block, %s." % [Game.MAX_BLOCKED, who_label(String(lifted.id))]
+	return t
 
 
 ## A block, online part first (Cloud.drop_player: a challenge either way, their room seat and the
-## friend request sent to them end), then the profile (Game.block).
+## friend request sent to them end), then the profile (Game.block, with the name this phone knows
+## them by, so BLOCKED names them after a restart).
 func _block(id: String) -> void:
+	var who := known_name(id)
 	Game.cloud_service().drop_player(id)
-	Game.block(id)
+	Game.block(id, who)

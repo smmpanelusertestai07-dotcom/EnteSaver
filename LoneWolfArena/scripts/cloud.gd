@@ -116,7 +116,7 @@ var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", 
 var _last_heard := 0
 var _inbox_budget := 8.0
 var _crypto := Crypto.new()
-var _dir_want := false         # the ONLINE / FRIENDS window is open: listen to the player cards
+var _dir_wants := {}           # who wants the player cards (the ONLINE window, PROFILE): listened to while any does
 var _dir_queue: Array = []     # cards waiting for their signature check
 var _card_t := 0.0             # seconds until this phone's card is published again
 var _card_sig := ""            # what the card last published shows (card_key)
@@ -445,7 +445,7 @@ func _parse() -> void:
 					if not (Game.profile.withdrawn as Array).is_empty():
 						_send_withdrawals()                        # requests taken back while offline
 						Game.save_profile()
-					if _dir_want:
+					if not _dir_wants.is_empty():
 						_subscribe(ROOT + "/p/+")
 					_card_t = 0.0                                  # (re)publish this phone's card now
 					if _want_lobby:
@@ -766,19 +766,19 @@ func _became_friends(id: String, friend_name: String) -> void:
 
 # ---------------------------------------------------------------- player cards (ALL PLAYERS)
 
-## The ONLINE / FRIENDS window is open: get every player card the broker keeps.
-func start_directory() -> void:
-	if _dir_want:
-		return
-	_dir_want = true
-	if _connected:
+## Someone wants every player card the broker keeps: `by` names who (the ONLINE window "window",
+## PROFILE's BLOCKED and the cards it opens "profile"); the cards are listened to while anyone
+## does, so one closing does not cut off the other.
+func start_directory(by := "window") -> void:
+	var first := _dir_wants.is_empty()
+	_dir_wants[by] = true
+	if first and _connected:
 		_subscribe(ROOT + "/p/+")
 
 
-func stop_directory() -> void:
-	if not _dir_want:
+func stop_directory(by := "window") -> void:
+	if not _dir_wants.erase(by) or not _dir_wants.is_empty():
 		return
-	_dir_want = false
 	_dir_queue.clear()
 	if _connected:
 		_unsubscribe(ROOT + "/p/+")
@@ -870,7 +870,7 @@ func _on_card(topic: String, payload: PackedByteArray) -> void:
 		if directory.erase(gone):
 			directory_changed.emit()
 		return
-	if _dir_want and _dir_queue.size() < MAX_DIRECTORY * 2:
+	if not _dir_wants.is_empty() and _dir_queue.size() < MAX_DIRECTORY * 2:
 		_dir_queue.append(payload)
 
 

@@ -137,6 +137,7 @@ func _mark_start() -> void:
 
 func _exit_tree() -> void:
 	friends.on_lobby_exit()
+	profile_ui.on_lobby_exit()
 	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
 	var vp := get_viewport()
 	if vp:

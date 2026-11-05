@@ -108,7 +108,9 @@ const DEFAULT_PROFILE := {
 	# at the next connection (Cloud.withdraw_request)
 	"withdrawn": [],
 	"recent": [],                # [{"id", "name", "t"}]: the latest online opponents, newest first
-	"blocked": [],               # ids whose invites and friend requests are ignored (see block())
+	# [{"id", "name" ("" when unknown), "t"}]: blocked players, oldest first; their invites and
+	# friend requests are ignored (see block())
+	"blocked": [],
 	# The last counted matches, newest first (record_match, MAX_HISTORY at most): [{"result" (won,
 	# lost or draw), "mode", "enemy" (name), "id" (an online opponent's id, else ""), "score" and
 	# "enemy_score" (rounds), "kills", "damage", "headshots", "t" (unix time)}].
@@ -407,7 +409,7 @@ func _sanitize_profile() -> void:
 				recent.append({"id": String(id), "name": clean_name(String((e as Dictionary).get("name", ""))),
 					"t": _count((e as Dictionary).get("t"), UNIX_MAX)})
 	profile.recent = recent
-	profile.blocked = _id_list(profile.get("blocked"), MAX_BLOCKED)
+	profile.blocked = _blocked_list(profile.get("blocked"))
 	var history := []
 	var saved_history: Variant = profile.get("history")
 	if saved_history is Array:
@@ -472,6 +474,24 @@ func _id_list(saved: Variant, limit: int) -> Array:
 	return out
 
 
+## The saved blocks (DEFAULT_PROFILE "blocked"): valid ids only, each once, at most MAX_BLOCKED,
+## names cleaned. A bare id, as builds before the name was kept saved a block, is a block without
+## a name.
+func _blocked_list(saved: Variant) -> Array:
+	var out := []
+	var seen := {}
+	if saved is Array:
+		for e: Variant in saved:
+			var d: Dictionary = e if e is Dictionary else {"id": e}
+			var id: Variant = d.get("id")
+			if out.size() < MAX_BLOCKED and is_player_id(id) and not seen.has(id):
+				seen[id] = true
+				var who: Variant = d.get("name")
+				out.append({"id": String(id), "name": clean_name(String(who)) if typeof(who) == TYPE_STRING else "",
+					"t": _count(d.get("t"), UNIX_MAX)})
+	return out
+
+
 ## A player id: the 32 hex characters of Cloud.my_id.
 func is_player_id(id: Variant) -> bool:
 	return typeof(id) == TYPE_STRING and String(id).length() == 32 and String(id).is_valid_hex_number()
@@ -499,17 +519,30 @@ func add_friend(id: String, friend_name: String) -> void:
 
 
 func is_blocked(id: String) -> bool:
-	return (profile.blocked as Array).has(id)
+	for e: Dictionary in profile.blocked:
+		if e.id == id:
+			return true
+	return false
+
+
+## The blocked ids as a set (id -> true): for filtering long lists (ALL PLAYERS).
+func blocked_ids() -> Dictionary:
+	var out := {}
+	for e: Dictionary in profile.blocked:
+		out[e.id] = true
+	return out
 
 
 ## Blocks a player: their challenges and friend requests are ignored (Cloud) and the lobby's
-## lists leave them out; a friend stops being one and requests either way are dropped. At most
-## MAX_BLOCKED players: blocking one more unblocks the oldest.
-func block(id: String) -> void:
+## lists leave them out; a friend stops being one and requests either way are dropped. Their name
+## (`who`, "" when unknown) and the time are kept with the block, so BLOCKED still names them
+## after a restart. At most MAX_BLOCKED players: blocking one more lifts the oldest block (the one
+## block_lifts() returns).
+func block(id: String, who := "") -> void:
 	if not is_player_id(id) or is_blocked(id):
 		return
 	var b: Array = profile.blocked
-	b.append(id)
+	b.append({"id": id, "name": clean_name(who), "t": int(Time.get_unix_time_from_system())})
 	while b.size() > MAX_BLOCKED:
 		b.pop_front()
 	(profile.friends as Dictionary).erase(id)
@@ -518,10 +551,19 @@ func block(id: String) -> void:
 	save_profile()
 
 
+## The block that the next block would lift (BLOCKED is full: the oldest), else {}.
+func block_lifts() -> Dictionary:
+	var b: Array = profile.blocked
+	return b[0] if b.size() >= MAX_BLOCKED else {}
+
+
 func unblock(id: String) -> void:
-	if (profile.blocked as Array).has(id):
-		(profile.blocked as Array).erase(id)
-		save_profile()
+	var b: Array = profile.blocked
+	for i in b.size():
+		if b[i].id == id:
+			b.remove_at(i)
+			save_profile()
+			return
 
 
 func remove_friend(id: String) -> void:

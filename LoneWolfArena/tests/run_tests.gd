@@ -828,13 +828,19 @@ func _test_profile_keys() -> void:
 		and p.modes.lonewolf == {"matches": 0, "wins": 0, "kills": 0}, "profile: one set of numbers per mode, wins never above matches")
 	_check(p.recent.size() == Game.MAX_RECENT and p.recent[0] == {"id": ids[0], "name": "FOE 0", "t": 1700000000}
 		and p.recent[1].id == ids[1] and p.recent[19].id == ids[19], "profile: 20 recent players at most, newest first, each once")
-	_check(p.blocked.size() == Game.MAX_BLOCKED and p.blocked == ids.slice(0, 50), "profile: 50 blocked ids at most, valid and each once")
+	_check(p.blocked.size() == Game.MAX_BLOCKED and p.blocked.map(func(e: Dictionary) -> String: return e.id) == ids.slice(0, 50)
+		and p.blocked[0] == {"id": ids[0], "name": "", "t": 0}, "profile: 50 blocks at most, valid ids each once; a bare id is a block without a name")
 	_check(p.withdrawn == ids.slice(3, 53), "profile: 50 requests to delete at most, valid ids each once (%d)" % p.withdrawn.size())
 	for k in ["friend_in", "friend_out"]:
 		var r: Dictionary = p[k]
 		_check(r.size() == Game.MAX_REQUESTS and r.has(ids[0]) and not r.has("bad") and not r.has(ids[65]) and not r.has(ids[50])
 			and r[ids[0]] == {"name": "ASKER 0", "t": 0} and r[ids[1]].t == 1700000000, "profile: %s keeps 50 valid requests" % k)
 	_check(p.friends.size() == Game.MAX_FRIENDS and p.friends[ids[0]] == {"name": "PAL 0"}, "profile: 50 friends at most")
+	Game.profile.blocked = [{"id": ids[1], "name": "  rude guy! ", "t": 1700000000}, {"id": ids[1], "name": "AGAIN"}, {"id": "zz"},
+		{"name": "X"}, ids[2], 42, {"id": ids[3], "name": 5, "t": -4}]
+	Game._sanitize_profile()
+	_check(Game.profile.blocked == [{"id": ids[1], "name": "RUDE GUY", "t": 1700000000}, {"id": ids[2], "name": "", "t": 0},
+		{"id": ids[3], "name": "", "t": 0}], "profile: a block keeps a cleaned name and its time (%s)" % str(Game.profile.blocked))
 	Game.profile.avatar = "royal"
 	Game._sanitize_profile()
 	_check(Game.profile.avatar == "royal", "an outfit's portrait is a valid avatar")
@@ -903,6 +909,7 @@ func _test_profile_migration() -> void:
 	var v3: Dictionary = v2.duplicate(true)
 	v3.profile_version = 3
 	v3.history = []
+	v3.blocked = [{"id": "b".sha256_text().left(32), "name": "", "t": 0}]       # a bare id is a block without a name
 	_check(Game.PROFILE_VERSION == 3 and Game.DEFAULT_PROFILE.history == [], "version 3: a new profile has an empty HISTORY")
 	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
 	ok = Game._apply_saved_profile(_as_saved(v2))
@@ -1224,13 +1231,25 @@ func _test_blocking() -> void:
 	_check(p.blocked.size() == 1, "a player is blocked once, a junk id never")
 	Game.unblock(x)
 	_check(not Game.is_blocked(x) and p.blocked.is_empty(), "UNBLOCK lifts the block")
+	Game.block(x, " xena! ")
+	_check(p.blocked.size() == 1 and p.blocked[0].id == x and p.blocked[0].name == "XENA" and int(p.blocked[0].t) > 1600000000
+		and LobbyProfile.known_name(x) == "XENA" and LobbyProfile.who_label(x) == "XENA  #" + Cloud.friend_code(x),
+		"a block keeps the name and the time: BLOCKED names the player after a restart")
+	Game.unblock(x)
 	var many := []
-	for i in Game.MAX_BLOCKED + 1:
+	for i in Game.MAX_BLOCKED:
 		many.append(("pest%d" % i).sha256_text().left(32))
-		Game.block(many[i])
+		Game.block(many[i], "PEST %d" % i if i == 0 else "")
+	var full_question := LobbyProfile.block_question("NEWCOMER")
+	_check(Game.block_lifts().get("id") == many[0] and full_question.contains("lifts your oldest block, PEST 0  #" + Cloud.friend_code(many[0])),
+		"with BLOCKED full the BLOCK question names the block it lifts (%s)" % full_question)
+	many.append(("pest%d" % Game.MAX_BLOCKED).sha256_text().left(32))
+	Game.block(many[Game.MAX_BLOCKED])
 	_check(p.blocked.size() == Game.MAX_BLOCKED and not Game.is_blocked(many[0]) and Game.is_blocked(many[1])
 		and Game.is_blocked(many[Game.MAX_BLOCKED]), "at most %d blocks: one more lifts the oldest" % Game.MAX_BLOCKED)
 	p.blocked.clear()
+	_check(Game.block_lifts().is_empty() and not LobbyProfile.block_question("NEWCOMER").contains("oldest"),
+		"with room in BLOCKED the question lifts nothing")
 	# What the online service ignores from a blocked player (a control player y gets through).
 	var cl := Cloud.new()
 	cl.my_id = "me".sha256_text().left(32)

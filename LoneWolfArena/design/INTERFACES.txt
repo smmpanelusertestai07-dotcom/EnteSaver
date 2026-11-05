@@ -169,7 +169,10 @@ listed here. If a part needs something new from the core, add it in its own file
   `ProfileTab_<career|history|namecard|blocked>`: CAREER (`career_stats(profile)`: rates and
   averages "-" without data; `Career_<key>`, `CareerMode_<mode>`), HISTORY (`HistoryRow_<n>`,
   `HistoryEmpty`), NAME CARD (`Banner_<id>`, `Avatar_<id>`, saved at once), BLOCKED
-  (`Unblock_<code>` asks first, `BlockedEmpty`). The name card (`NameCard`): `CardAvatar`,
+  (`BlockedRow_<code>`: `LobbyProfile.who_label(id)`, the name kept with the block else `#CODE`;
+  `Unblock_<code>` asks first, `BlockedEmpty`; it follows blocks made elsewhere, and while it or a
+  card opened from PROFILE shows, `Cloud.start_directory("profile")` gets the player cards). The
+  name card (`NameCard`): `CardAvatar`,
   `CardName` + `CardEditName`, `CardLevel` + `CardXp`, `CardId` + `CardCopy` (the whole id to the
   clipboard), `CardSignature` + `CardEditSignature` (`SignatureEdit`, `SignatureOk`), `CardOutfit`,
   `CardSince`.
@@ -197,7 +200,12 @@ listed here. If a part needs something new from the core, add it in its own file
 - Saves: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
   files are migrated by settings_version), the profile keys `Game.DEFAULT_PROFILE` (signed as a
   whole; older profiles are migrated by profile_version). Crosshair: `Game.crosshair_color()`,
-  `Game.crosshair_scale()`. Profile version 3 adds "history" (`Game.MAX_HISTORY` = 20 entries,
+  `Game.crosshair_scale()`. Blocks: profile "blocked" = [{id, name ("" when unknown), t}], oldest
+  first, `Game.MAX_BLOCKED` = 50 (`Game.block(id, name)` lifts the oldest when full:
+  `Game.block_lifts()`; `Game.unblock(id)`, `Game.is_blocked(id)`, `Game.blocked_ids()`; a bare id
+  saved by an earlier build loads as a block without a name). "withdrawn": ids whose friend request
+  was taken back offline (Cloud deletes it on the relay at the next connection). Profile version 3
+  adds "history" (`Game.MAX_HISTORY` = 20 entries,
   newest first: {result won|lost|draw, mode, enemy, id, score, enemy_score, kills, damage,
   headshots, t}), added by `Game.record_match` and checked entry by entry on load; a version 2
   profile starts it empty.
@@ -205,7 +213,9 @@ listed here. If a part needs something new from the core, add it in its own file
   bundle, avatar, banner, level, signature, pk, ts, sig, sig2}; sig2 signs
   "card2|id|name|bundle|avatar|banner|level|signature|ts" (`Cloud.card2_text`), sig the v1 text
   "card|id|name|bundle|ts" (older builds list it; cards without "v" are v1 and still accepted).
-  `Cloud.my_card()` is everything public; `_check_card` checks every field (types, size, no "|",
+  `Cloud.my_card()` is everything public; the cards are listened to while anyone wants them
+  (`Cloud.start_directory(by)` / `stop_directory(by)`: the ONLINE window "window", PROFILE
+  "profile"); `_check_card` checks every field (types, size, no "|",
   avatar / banner known else the default, level 1..CARD_LEVEL_MAX, `Game.clean_text` signature).
   The Privacy Notice (`Login.privacy_sections`) lists these fields.
 - No credits screen: `Licences.publish()` prints the licence notices the shipped parts need

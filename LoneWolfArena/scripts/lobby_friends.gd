@@ -46,6 +46,9 @@ func on_lobby_exit() -> void:
 	if cloud == null:
 		return
 	_disconnect_net(cloud)
+	if _dir_on:
+		_dir_on = false
+		cloud.stop_directory("window")
 	cloud.cancel_invite()
 	if not cloud.in_session:
 		cloud.close_room()
@@ -57,7 +60,7 @@ func on_lobby_exit() -> void:
 func process(delta: float) -> void:
 	if _dir_on and not (lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal)):
 		_dir_on = false
-		Game.cloud_service().stop_directory()
+		Game.cloud_service().stop_directory("window")
 	if _net_list and is_instance_valid(_net_list):
 		_net_refresh_t -= delta
 		if _net_refresh_t <= 0.0:
@@ -76,7 +79,7 @@ func open(kind := "online") -> void:
 	_net_kind = kind
 	var cloud := Game.cloud_service()
 	cloud.start_lobby()
-	cloud.start_directory()          # every registered player, online or not
+	cloud.start_directory("window")  # every registered player, online or not
 	_dir_on = true
 	var v := lobby.dialogs.open_modal("ONLINE 1 VS 1", 980.0)
 	var tabs := HBoxContainer.new()
@@ -320,7 +323,8 @@ func _refresh_friends() -> void:
 	var cloud := Game.cloud_service()
 	var waiting := cloud.waiting_for()
 	var peers: Dictionary = cloud.peers
-	var listed := peers.keys().filter(func(i: String) -> bool: return not Game.is_blocked(i))     # blocked players are left out
+	var blocked := Game.blocked_ids()
+	var listed := peers.keys().filter(func(i: String) -> bool: return not blocked.has(i))     # blocked players are left out
 	if cloud.status != "online":
 		match cloud.status:
 			"preparing":
@@ -351,8 +355,8 @@ func _refresh_friends() -> void:
 	var sig := waiting + "|" + _net_kind + "|" + _friend_query
 	for id in peers:
 		sig += "|%s:%s" % [id, peers[id].name]
-	sig += "|f%d|r%s|o%d|d%d|b%d" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
-		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size(), (Game.profile.blocked as Array).size()]
+	sig += "|f%d|r%s|o%d|d%d|b%s" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
+		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size(), ",".join(PackedStringArray(blocked.keys()))]
 	for id in peers:
 		sig += ",a" if cloud.friend_asked(String(id)) else ""
 	if sig == _net_sig:
@@ -394,8 +398,9 @@ func _fit_list() -> void:
 ## most recently seen first; blocked players are left out.
 func _offline_players(cloud: Cloud, query: String) -> Array:
 	var out := []
+	var blocked := Game.blocked_ids()
 	for id: String in cloud.directory:
-		if cloud.peers.has(id) or Game.is_blocked(id):
+		if cloud.peers.has(id) or blocked.has(id):
 			continue
 		if query != "" and not (_id_matches(id, query) or String(cloud.directory[id].name).contains(query)):
 			continue
@@ -458,6 +463,14 @@ func challenge(id: String) -> void:
 		sv.cancel_invite()
 	elif not sv.invite(id):
 		_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
+	_net_sig = "-"
+	_refresh_friends()
+
+
+## A line in the window's status (after a BLOCK on a card: who was blocked); it shows while the
+## service is online and nothing more pressing is said there, until the window opens again.
+func note(text: String) -> void:
+	_net_note = text
 	_net_sig = "-"
 	_refresh_friends()
 

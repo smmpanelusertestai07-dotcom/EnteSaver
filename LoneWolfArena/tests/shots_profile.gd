@@ -134,9 +134,11 @@ func run(at: Node) -> int:
 	var copy := layer.find_child("CardCopy", true, false) as Button
 	_check(DisplayServer.clipboard_get() == cloud.my_id and copy != null and copy.text == "COPIED",
 		"COPY puts the whole player ID on the clipboard and says COPIED")
-	# BLOCKED: names where known, the short ID else; UNBLOCK asks first.
+	# BLOCKED: the name kept with the block (nothing else here knows TOXICTOM), the short ID for a
+	# block without one; UNBLOCK asks first. While it shows, the player cards are listened to.
 	await _tap(layer.find_child("ProfileTab_blocked", true, false) as Control)
 	await _settle(0.4)
+	_check(_cards_wanted(cloud, "profile"), "BLOCKED listens to the player cards (their names and cards arrive)")
 	var known_id := _id(BLOCKED_KNOWN[0])
 	var unknown_id := _id(BLOCKED_UNKNOWN)
 	var known_btn := layer.find_child("Player_" + Cloud.friend_code(known_id), true, false) as Button
@@ -161,13 +163,43 @@ func run(at: Node) -> int:
 	await _settle(0.5)
 	var pop := lobby.get("_modal") as Control
 	_check(pop != null and _text(pop, "CardName") == "TOXICTOM" and (pop.find_child("PlayerBlock", true, false) as Button).text == "UNBLOCK"
-		and pop.find_child("PlayerFriend", true, false) == null and pop.find_child("PlayerDuel", true, false) == null,
-		"a blocked player's card offers UNBLOCK only")
+		and pop.find_child("PlayerFriend", true, false) == null and pop.find_child("PlayerDuel", true, false) == null
+		and _text(pop, "PlayerSignature") == "NO NAME CARD SEEN YET", "a blocked player's card offers UNBLOCK only")
 	await _at.shot("p04c_blocked_card")
 	_back()
 	await _settle(0.4)
 	_check(lobby.get("_modal") == null and layer.find_child("BlockedRow_" + Cloud.friend_code(known_id), true, false) != null,
 		"back closes the card and BLOCKED is still there")
+	# A change made elsewhere shows in BLOCKED: TOXICTOM (online now) is unblocked on their card,
+	# DUEL 1 VS 1 there opens the ONLINE window over PROFILE, and its X goes back to BLOCKED.
+	cloud.peers[known_id] = {"name": BLOCKED_KNOWN[1], "bundle": BLOCKED_KNOWN[2], "pk": "", "seen": Time.get_ticks_msec()}
+	await _tap(layer.find_child("Player_" + Cloud.friend_code(known_id), true, false) as Control)
+	await _settle(0.5)
+	pop = lobby.get("_modal") as Control
+	if pop:
+		await _tap(pop.find_child("PlayerBlock", true, false) as Control)
+		await _settle(0.4)
+		await _tap(lobby.find_child("ConfirmOk", true, false) as Control)
+		await _settle(0.5)
+	pop = lobby.get("_modal") as Control
+	var duel: Control = pop.find_child("PlayerDuel", true, false) as Control if pop else null
+	_check(not Game.is_blocked(known_id) and duel != null, "UNBLOCK on the card: they can be challenged again")
+	if duel:
+		await _tap(duel)
+		await _settle(0.5)
+	var over := lobby.get("_modal") as Control
+	_check(over != null and over.find_child("Tab_online", true, false) != null and lobby.find_child("Profile", true, false) != null,
+		"DUEL 1 VS 1 opens the ONLINE window over PROFILE")
+	_back()
+	await _settle(0.8)
+	_check(lobby.get("_modal") == null and layer.find_child("BlockedRow_" + Cloud.friend_code(known_id), true, false) == null
+		and _has_label(layer, "1 OF %d" % Game.MAX_BLOCKED), "back on BLOCKED, it lists only who is still blocked")
+	Game.block(known_id, BLOCKED_KNOWN[1])                # as from the ONLINE window over PROFILE
+	cloud.peers.erase(known_id)
+	await _settle(0.8)
+	var back_btn := layer.find_child("Player_" + Cloud.friend_code(known_id), true, false) as Button
+	_check(back_btn != null and back_btn.text == "TOXICTOM  #" + Cloud.friend_code(known_id) and _has_label(layer, "2 OF %d" % Game.MAX_BLOCKED),
+		"a block made elsewhere shows up in BLOCKED, by name")
 	# HISTORY with no match yet.
 	var history: Array = Game.profile.history
 	Game.profile.history = []
@@ -177,6 +209,7 @@ func run(at: Node) -> int:
 		"HISTORY without matches says so")
 	await _at.shot("p05_history_empty")
 	Game.profile.history = history
+	_check(not _cards_wanted(cloud, "profile"), "PROFILE stops listening to the player cards when BLOCKED is left")
 	# Android back closes PROFILE.
 	_back()
 	await _settle(0.5)
@@ -257,6 +290,10 @@ func _tour_cards(lobby: Node, cloud: Cloud) -> void:
 	_check(Game.is_blocked(stranger_id) and win != null and win.find_child("Tab_online", true, false) != null
 		and win.find_child("Player_" + Cloud.friend_code(stranger_id), true, false) == null,
 		"BLOCK hides the player: back on the ONLINE tab without them")
+	var last_block: Dictionary = (Game.profile.blocked as Array).back()
+	_check(last_block.id == stranger_id and last_block.name == STRANGER[1]
+		and String((lobby.get("friends") as Object).get("_net_note")) == STRANGER[1] + " BLOCKED",
+		"the block keeps their name, and the ONLINE window says who was blocked")
 	await _at.shot("p09_online_after_block")
 	# ALL PLAYERS is longer than the screen: a finger swipe that starts on a player's name scrolls
 	# it and opens no card.
@@ -285,8 +322,8 @@ func _sample_profile() -> Dictionary:
 		"rounds_lost": 131, "time_played": 30250,
 		"modes": {"training": {"matches": 36, "wins": 23, "kills": 117}, "lonewolf": {"matches": 12, "wins": 6, "kills": 34}},
 		"friends": {_id(FRIEND[0]): {"name": FRIEND[1]}},
-		"recent": [{"id": _id(BLOCKED_KNOWN[0]), "name": BLOCKED_KNOWN[1], "t": now - 2 * 86400}],
-		"blocked": [_id(BLOCKED_UNKNOWN), _id(BLOCKED_KNOWN[0])]}, true)
+		"blocked": [{"id": _id(BLOCKED_UNKNOWN), "name": "", "t": now - 9 * 86400},
+			{"id": _id(BLOCKED_KNOWN[0]), "name": BLOCKED_KNOWN[1], "t": now - 2 * 86400}]}, true)
 	# [result, mode, opponent, score, theirs, kills, damage, headshots, minutes ago]
 	var matches := [["won", "lonewolf", FRIEND[1], 5, 3, 5, 1214, 3, 25], ["lost", "lonewolf", "VIPERQUEEN", 2, 5, 2, 640, 1, 130],
 		["won", "training", "BOT VIPER", 5, 2, 5, 1176, 3, 190], ["draw", "training", "BOT ONYX", 4, 4, 4, 912, 1, 300],
@@ -357,6 +394,19 @@ func _done(saved_profile: Dictionary) -> int:
 	Game.profile = saved_profile
 	_at.log_line("PROFILE TOUR DONE fails=%d" % _fails)
 	return _fails
+
+
+## Whether a Label under `root` says exactly `text`.
+func _has_label(root: Node, text: String) -> bool:
+	for n in root.find_children("*", "Label", true, false):
+		if (n as Label).text == text:
+			return true
+	return false
+
+
+## Whether `by` (Cloud.start_directory) has the online service listening to the player cards.
+func _cards_wanted(cloud: Cloud, by: String) -> bool:
+	return (cloud.get("_dir_wants") as Dictionary).has(by)
 
 
 ## The text of the Label (or Button) named `node_name` under `root` ("" when there is none).
