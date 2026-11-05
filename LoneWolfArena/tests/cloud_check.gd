@@ -10,6 +10,11 @@ extends Node
 ## result (host VICTORY, guest DEFEAT), which each one's profile keeps: a LONE WOLF entry in
 ## HISTORY with the other phone's id and name (its row opens their card), the deaths and rounds in
 ## CAREER, the other phone among the recent players. Prints "CLOUD CHECK DONE bad=N".
+## The direct path (NetDirect; run_checks.sh sets LW_DIRECT=local: the loopback address is the only
+## candidate, no STUN server is asked): it comes up on both copies, the state goes over it (not the
+## relay) and the ping chip says DIRECT; then the guest blocks its UDP mid-match, the host falls
+## back to the relay within TIMEOUT_MS (the chip says RELAY), the state flows on through the relay
+## on both, and the match ends with the same result.
 
 var bad := 0
 var at: Node
@@ -61,6 +66,7 @@ func run(autotest: Node) -> int:
 	at.log_line("remote at %s, its spawn %s, remote hp %.0f" % [str(b.global_position), str(their_spawn), b.hp])
 	if not (b is RemoteFighter) or b.global_position.distance_to(their_spawn) > 3.0:
 		_fail("the remote player does not follow the other phone's state")
+	await _check_direct(arena)
 	# A tampered phone could send walls, frags and shots without end: the other phone makes only
 	# what one player has in a round (Arena.spawn_cap) and its shots no faster than the gun.
 	if host:
@@ -108,6 +114,7 @@ func run(autotest: Node) -> int:
 		if walls != Fighter.START_SHIELDS or int(spawned.get("wall", 0)) != Fighter.START_SHIELDS \
 				or int(spawned.get("grenade", 0)) != Fighter.START_GRENADES:
 			_fail("a flood of walls and frags from the other phone was not held to one round's items")
+	await _check_fallback(arena, host)
 	# The host takes every round (LW_ROUNDS_TO_WIN sets how many): each next round must start on
 	# both phones with both players back up at full HP, and the match end with the host's win.
 	var round_now := 1
@@ -154,6 +161,67 @@ func run(autotest: Node) -> int:
 		_fail("the opponent is not among the recent players")
 	await at.wait(1.0)
 	return _done("")
+
+
+## The direct path is up on this copy, the state comes over it and goes out over it, the chip
+## says DIRECT with the direct round trip.
+func _check_direct(arena: Node) -> void:
+	var cl: Cloud = Game.session
+	var t := 0.0
+	while not cl.direct_up() and t < 8.0:
+		await at.wait(0.25)
+		t += 0.25
+	if not cl.direct_up():
+		_fail("the direct path never came up")
+		return
+	var d_in := cl.direct.states_in
+	var d_out := cl.direct.states_out
+	var r_out := cl.relay_states_out
+	await at.wait(1.0)
+	var hud_net: HudNet = arena.find_child("HudNet", true, false)
+	await at.wait(0.6)                 # (the ping's first answers)
+	at.log_line("direct: %d states in and %d out over it in 1 s, %d out through the relay, rtt %d ms, chip %s %d ms" % [
+		cl.direct.states_in - d_in, cl.direct.states_out - d_out, cl.relay_states_out - r_out, cl.direct.rtt,
+		hud_net.link_tag() if hud_net else "?", hud_net.ping_ms() if hud_net else -2])
+	if cl.direct.states_in - d_in < 3 or cl.direct.states_out - d_out < 3:
+		_fail("the state does not go over the direct path")
+	if cl.relay_states_out - r_out > 1:
+		_fail("the state still goes through the relay while the direct path is up")
+	if hud_net == null or hud_net.link_tag() != "DIRECT" or cl.direct.rtt < 0 or hud_net.ping_ms() != cl.direct.rtt:
+		_fail("the ping chip does not show the direct round trip with DIRECT")
+
+
+## Mid-match the guest's UDP is blocked: the host stops hearing it and falls back to the relay
+## within TIMEOUT_MS (plus a frame or two), and on both the state goes on through the relay.
+func _check_fallback(arena: Node, host: bool) -> void:
+	var cl: Cloud = Game.session
+	if cl.direct == null:
+		_fail("no direct path to block")
+		return
+	var t := 0.0
+	var seen_up := false               # the host saw the path up and then saw it drop
+	if not host:
+		cl.direct.blocked = true
+		# The host keeps sending direct until it notices (TIMEOUT_MS): the gap the fall back costs.
+		await at.wait(NetDirect.TIMEOUT_MS / 1000.0 + 0.2)
+	else:
+		while cl.direct_up() and t < 8.0:
+			seen_up = true
+			await at.wait(0.05)
+			t += 0.05
+	var down_ms := Time.get_ticks_msec() - cl.direct._rx_ms
+	await at.wait(0.3)
+	var r_in := cl.relay_states_in
+	await at.wait(1.0)
+	var hud_net: HudNet = arena.find_child("HudNet", true, false)
+	at.log_line("UDP blocked on the guest: direct up %s (fell back %d ms after the last packet), %d states in through the relay in 1 s, chip %s" % [
+		str(cl.direct_up()), down_ms, cl.relay_states_in - r_in, hud_net.link_tag() if hud_net else "?"])
+	if cl.direct_up() or (hud_net != null and hud_net.link_tag() != "RELAY"):
+		_fail("still direct with the guest's UDP blocked")
+	if host and (down_ms < NetDirect.TIMEOUT_MS or (seen_up and down_ms > NetDirect.TIMEOUT_MS + 600)):
+		_fail("the fall back to the relay did not come TIMEOUT_MS after the last direct packet")
+	if cl.relay_states_in - r_in < 3:
+		_fail("the state does not come through the relay after the fall back")
 
 
 func _pause_menus(arena: Node) -> int:

@@ -32,7 +32,9 @@
 #                          (end-to-end encrypted), a flood of walls and frags held to one round's
 #                          items, back closing the online pause menu, the opponent's footprints,
 #                          lethal hits and the result on both, which each one's HISTORY keeps
-#                          with the other's id
+#                          with the other's id; the direct UDP path (LW_DIRECT=local: loopback,
+#                          no STUN) comes up, carries the state, and falls back to the relay when
+#                          the guest's UDP is blocked mid-match
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 #   tests/drop_check.gd    online matches that end early: a slow load is waited for, a quit before
 #                          the first fight counts nowhere, the phone that was away gets LEFT and
@@ -80,7 +82,7 @@ if [ "${1:-}" != "quick" ]; then
     h=$!; LW_NET_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd; g=$?
     wait $h; r=$?; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/lan_host.txt"
   step cloud bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47810 > /dev/null 2>&1 & m=$!
-    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810 LW_ROUNDS_TO_WIN=2
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810 LW_ROUNDS_TO_WIN=2 LW_DIRECT=local
     LW_NET_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &
     h=$!; LW_NET_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/cloud_host.txt"

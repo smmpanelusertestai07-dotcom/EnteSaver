@@ -2,7 +2,9 @@ class_name HudNet
 extends Control
 ## The online match's own HUD layer (HUD.bind adds it when the arena is online: HudNet.attach):
 ##  - top right, in the column under the gear beside the weapon panel: the round trip to the other
-##    phone (NetPing: Cloud.peer_rtt, the relay's Cloud.relay_rtt until the other phone answered);
+##    phone (NetPing: Cloud.match_ping: the direct round trip while the direct path is up, else
+##    Cloud.peer_rtt, the relay's Cloud.relay_rtt until the other phone answered), with a small
+##    DIRECT / RELAY tag under it (how the state travels, NetDirect);
 ##  - right of the minimap: CHAT (opens the chat panel: quick messages NetChat.QUICK and free text,
 ##    NetChat.MATCH_MAX characters) and MUTE (the feed hides the opponent's lines), with CHAT on;
 ##    TALK (hold to talk) and SOUND (the speaker), with VOICE CHAT on (NetVoice);
@@ -274,7 +276,14 @@ func ping_ms() -> int:
 	var cloud := Game.session
 	if cloud == null:
 		return -1
-	return NetPing.match_ms(cloud.peer_rtt, cloud.relay_rtt, cloud.status == "online")
+	return cloud.match_ping()
+
+
+## The tag under the ping (Cloud.link_tag): "DIRECT" while the state goes straight to the other
+## phone (NetDirect), else "RELAY".
+func link_tag() -> String:
+	var cloud := Game.session
+	return cloud.link_tag() if cloud != null else ""
 
 
 func _draw() -> void:
@@ -318,11 +327,19 @@ func _draw_ping() -> void:
 			draw_rect(Rect2(x0 + i * (bw + 2.5), top + 22.0 - bh, bw, bh), c)
 		HudDraw.text(self, "---" if ms < 0 else str(mini(ms, 999)), Vector2(box.get_center().x, top + 37.0), 17, col, 1, 3)
 		HudDraw.text(self, "MS", Vector2(box.get_center().x, top + 54.0), 12, Color(UI.TEXT, 0.85), 1, 3)
+		_draw_tag(Vector2(box.get_center().x, box.end.y + 11.0), 1)
 	else:
 		var w := 112.0
 		var box := Rect2(pr.end.x - w, pr.end.y + 6.0, w, 26.0)
 		draw_rect(box, Color(0, 0, 0, 0.42))
 		NetPing.draw(self, Vector2(box.position.x + 8.0, box.get_center().y), 16.0, ms, 15)
+		_draw_tag(Vector2(box.end.x, box.end.y + 11.0), 2)
+
+
+## The small DIRECT / RELAY tag under the ping (centre or right end at `at`).
+func _draw_tag(at: Vector2, align: int) -> void:
+	var tag := link_tag()
+	HudDraw.text(self, tag, at, 11, Color(NetPing.GREEN if tag == "DIRECT" else UI.TEXT, 0.9), align, 3, "bold")
 
 
 func _draw_button(id: String, c: Vector2) -> void:

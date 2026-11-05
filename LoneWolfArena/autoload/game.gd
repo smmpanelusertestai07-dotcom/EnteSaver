@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS := {
 	"voice_chat": false,          # push-to-talk in an online match (NetVoice; asks for the microphone)
 	"challenges_from": 0,         # DUEL CHALLENGES FROM: CHALLENGES_EVERYONE, _FRIENDS, _NOBODY (Cloud.challenge_allowed)
 	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
+	"direct_connect": true,       # DIRECT CONNECTION: the match state straight to the other phone (NetDirect)
 }
 ## The values of the setting challenges_from (SettingsOnline shows them in this order).
 const CHALLENGES_EVERYONE := 0
@@ -88,7 +89,7 @@ const SETTING_RANGES := {
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects",
 	"reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope", "freelook_button", "chat", "friend_chat", "show_career", "voice_chat",
-	"friend_requests"]
+	"friend_requests", "direct_connect"]
 ## Every frame rate the setting can hold; the settings offer those the screen can show
 ## (fps_choices).
 const FPS_OPTIONS := [30, 60, 90, 120]

@@ -115,6 +115,9 @@ static func privacy_sections() -> Array:
 	var relay := hosts[0]
 	if hosts.size() > 1:
 		relay += ", or " + ", ".join(hosts.slice(1)) + " as a backup"
+	var stun := PackedStringArray()
+	for srv: Array in NetDirect.STUN_SERVERS:
+		stun.append(String(srv[0]))
 	var card_days := roundi(Cloud.CARD_MAX_AGE_S / 86400.0)
 	var request_days := roundi(Cloud.REQUEST_MAX_AGE_S / 86400.0)
 	return [
@@ -140,6 +143,13 @@ static func privacy_sections() -> Array:
 			+ "while they are offline the relay keeps your last unread message for them, and their game deletes it "
 			+ "from the relay once it has it. Only friends can message you, never a blocked player; Settings, ONLINE "
 			+ "turns chat off."],
+		["Direct connection", ("On unless you turn DIRECT CONNECTION off (Settings, ONLINE). For a faster match, "
+			+ "the two phones then try to send the game's moves straight to each other instead of through the "
+			+ "relay. To find the way, your phone asks public STUN servers (%s) for the internet address they see, "
+			+ "so they see your phone's IP address, and the two phones swap their network addresses, encrypted, "
+			+ "inside the match. So your opponent's game learns your phone's IP address (and yours learns theirs); "
+			+ "the game never shows or keeps it. What goes directly is end-to-end encrypted too. Both players need "
+			+ "it on. Turned off, your phone never sends its address and the match goes only through the relay.") % ", ".join(stun)],
 		["Voice chat", "Off unless you turn VOICE CHAT on (Settings, ONLINE), which asks for the microphone. The "
 			+ "microphone is used only while you hold TALK in an online match: the sound goes straight to the other "
 			+ "phone, end-to-end encrypted, and is never stored or recorded, here or anywhere else."],
@@ -151,8 +161,8 @@ static func privacy_sections() -> Array:
 			+ "find the other phone, never to know where you are."],
 		["What the game never does", "No account, no e-mail address or phone number, no ads, no analytics or "
 			+ "tracking, no location, no contacts or camera, no microphone except while you hold TALK, and nothing "
-			+ "to buy. Apart from the relay above and the phone you play with on your own network, nothing leaves "
-			+ "your phone."],
+			+ "to buy. Apart from the relay and the direct connection above, and the phone you play with on your "
+			+ "own network, nothing leaves your phone."],
 		["Remove everything", ("Uninstall the game, or clear its data (Android Settings, Apps, Wolf Arena, Storage). "
 			+ "That deletes everything the game keeps on this phone, your player ID included, for good. Your last "
 			+ "player card stays on the relay: other players' games stop showing it %d days after you were last "

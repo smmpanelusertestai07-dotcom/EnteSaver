@@ -9,7 +9,10 @@ extends RefCounted
 ##    microphone (RECORD_AUDIO) at that moment; refused, it stays off and says so;
 ##  - DUEL CHALLENGES FROM EVERYONE / FRIENDS ONLY / NOBODY (Cloud.challenge_allowed: the others are
 ##    declined at once and never shown) and FRIEND REQUESTS ON / OFF (Cloud.requests_allowed: off,
-##    they are ignored and never shown).
+##    they are ignored and never shown);
+##  - DIRECT CONNECTION ON / OFF (NetDirect, last on the tab): the match state goes straight to the
+##    other phone (faster), which shows each phone's IP address to the other; OFF never sends an
+##    address and plays through the relay only.
 
 const CHALLENGE_CHOICES := ["EVERYONE", "FRIENDS ONLY", "NOBODY"]     # by Game.CHALLENGES_* value
 
@@ -43,6 +46,7 @@ static func build(panel: SettingsPanel) -> void:
 		"Push to talk in online matches: sent only while you hold the button, encrypted, never stored"))
 	body.add_child(note)
 	panel._hint.text = "No account: chat and voice are encrypted on your phone; the relay only passes them on."
+	_build_direct(panel)
 
 
 ## VOICE CHAT: on Android the microphone permission is asked for first; refused, it stays OFF.
@@ -64,3 +68,11 @@ static func _set_voice(panel: SettingsPanel, on: bool, note: Label) -> void:
 		if not granted and panel.is_inside_tree():
 			panel._show_tab(panel._current)
 	tree.on_request_permissions_result.connect(answer, CONNECT_ONE_SHOT)
+
+
+## DIRECT CONNECTION (NetDirect): the last row of the tab.
+static func _build_direct(panel: SettingsPanel) -> void:
+	var body: VBoxContainer = panel._body
+	body.add_child(UI.section("CONNECTION"))
+	body.add_child(UI.plate_row("Direct connection", panel._toggle("direct_connect"),
+		"Faster matches: the two phones talk directly, so your opponent's game learns your IP address. OFF: relay only"))

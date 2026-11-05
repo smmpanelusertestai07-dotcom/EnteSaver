@@ -36,7 +36,7 @@ const TAB_KEYS := [
 	["dynamic_joystick", "run_mode", "aim_precision", "left_fire", "hold_fire_scope", "reload_button", "switch_button",
 		"freelook_button", "reload_on_crosshair", "crosshair_color", "crosshair_size"],
 	["vol_master", "vol_sfx", "vol_music", "vol_voice"],
-	["chat", "friend_chat", "show_career", "voice_chat", "challenges_from", "friend_requests"],
+	["chat", "friend_chat", "show_career", "voice_chat", "challenges_from", "friend_requests", "direct_connect"],
 ]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
 const SCENE_KEYS := ["visual_effects"]

@@ -5,7 +5,8 @@ extends Node
 ## The lobby's ping chip, a friend's chat window, a player card with its CAREER block, a friend's
 ## message as a notice with the unread badge, the settings' ONLINE tab (top and end) and SOUND
 ## tab, then a match HUD with the online layer (ping under the gear, CHAT / MUTE /
-## TALK / SOUND, the feed under the score bar) and its chat panel. Returns the failed checks.
+## TALK / SOUND, the feed under the score bar; the ping of the direct path with its DIRECT tag) and
+## its chat panel. Returns the failed checks.
 
 const FRIEND := "tour-chat-friend"
 
@@ -94,17 +95,25 @@ func run(at: Node) -> int:
 	await at.wait(2.5)
 	Game.session = cloud
 	cloud.peer_rtt = 142
+	# The direct path up (NetDirect, never opened here): the chip shows its round trip and DIRECT.
+	var direct := NetDirect.new(true, Crypto.new().generate_random_bytes(32))
+	direct.rtt = 38
+	direct._rx_ms = Time.get_ticks_msec() + 3600000
+	direct._peer_hears = true
+	cloud.direct = direct
 	var hud: HUD = arena.get("hud")
 	var net := HudNet.attach(hud)
 	net.add_line("NIGHTFOX21", "NICE SHOT! YOU GOT LUCKY THERE", false)
 	net.add_line("YOU", "GG", true)
 	await at.wait(0.5)
 	_check(net.button_centers().size() == 4, "CHAT, MUTE, TALK and SOUND show with chat and voice on")
+	_check(net.link_tag() == "DIRECT" and net.ping_ms() == 38, "the ping chip shows the direct round trip, tagged DIRECT")
 	await at.shot("n05_match_hud")
 	net.open_panel()
 	await at.wait(0.4)
 	await at.shot("n06_match_chat_panel")
 	net.close_panel()
+	cloud.direct = null
 	Game.session = null
 	Game.profile = saved_profile
 	Game.settings = saved_settings

@@ -636,3 +636,14 @@ func _multicast_lock(on: bool) -> void:
 	elif not on and _mlock != null:
 		_mlock.call("release")
 		_mlock = null
+
+
+## A local-network session already runs straight between the two phones: it never asks a STUN
+## server or sends an address (NetDirect stays off).
+func direct_allowed() -> bool:
+	return false
+
+
+## The match HUD's tag under the ping: the match goes over the local network.
+func link_tag() -> String:
+	return "LOCAL"
