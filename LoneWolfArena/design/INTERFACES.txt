@@ -35,7 +35,9 @@ listed here. If a part needs something new from the core, add it in its own file
   death it learns of (both down by then: a draw) or at its time-out (higher HP), and sends "rend"
   [round, winner, host score, guest score, timed out, headshot, killer]; the guest shows exactly
   that (score, banner, the match's end) and starts each round on the host's "begin" / "round",
-  one-way trip earlier (`peer_rtt` / 2). A forfeit win keeps the real score (no round added).
+  one-way trip earlier (`peer_rtt` / 2, or `relay_rtt` before that is measured). The host takes
+  that trip off the guest's death reports, so "first one down" is fair. A forfeit win keeps the
+  real score (no round added).
 - Cloud: a frame gap while a match loads or in the first `Cloud.LOAD_STALL_MS` after its arena
   listens is the load (shader compiles), not this phone away (`Cloud.load_stall`); an app pause
   still counts. The other phone, told by "ka" keep-alives that it loads, waits that much longer.

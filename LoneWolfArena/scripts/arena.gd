@@ -85,9 +85,11 @@ var _net_buckets := {}           # kind of message from the other phone -> [toke
 var _net_spawns := {}            # "wall" / "grenade" -> how many the other phone's player used this round
 var _my_spawns := {}             # the same for this phone's player (online, held to spawn_cap)
 ## Online the host decides each round (_net_decide): the deaths it learned of this round
-## ("player" / "bot" as the host sees them -> [killer, headshot]), decided DEATH_SETTLE_S after
-## the first, so two deaths that close are one draw on both phones; the guest reports its own
-## death ("died", with its cause) and applies the host's word ("rend": winner, score, round).
+## ("player" / "bot" as the host sees them -> [killer, headshot, when (s, the guest's one-way trip
+## taken off its report)]), decided once the other phone's report of a death up to DEATH_SETTLE_S
+## after the first could have come: two deaths that close are one draw on both phones, else the
+## first one down loses. The guest reports its own death ("died", with its cause) and applies the
+## host's word ("rend": winner, score, round).
 const DEATH_SETTLE_S := 0.35
 var _round_deaths := {}
 var _settle_t := -1.0
@@ -885,9 +887,11 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		# The host decides the round (a moment later: a second death that close makes it a draw);
 		# the guest waits for its word.
 		if Game.session.is_host:
-			_round_deaths["player" if victim == player else "bot"] = [killer, headshot]
+			var trip := _one_way()
+			var late := 0.0 if victim == player else trip
+			_round_deaths["player" if victim == player else "bot"] = [killer, headshot, Time.get_ticks_msec() / 1000.0 - late]
 			if _settle_t < 0.0:
-				_settle_t = DEATH_SETTLE_S
+				_settle_t = DEATH_SETTLE_S + trip - late
 		return
 	var winner := killer if killer else ((player as Fighter) if victim == bot else (bot as Fighter))
 	_end_round(winner, headshot, false, killer)
@@ -914,6 +918,13 @@ func _net_decide(timed_out := false) -> void:
 	_settle_t = -1.0
 	var me_dead := _round_deaths.has("player")
 	var they_dead := _round_deaths.has("bot")
+	if me_dead and they_dead:
+		# Both down: that close together a draw, else the first one down loses.
+		var dt := float(_round_deaths.player[2]) - float(_round_deaths.bot[2])
+		if absf(dt) > DEATH_SETTLE_S:
+			_round_deaths.erase("bot" if dt < 0.0 else "player")
+			me_dead = dt < 0.0
+			they_dead = not me_dead
 	var winner: Fighter = null
 	var info: Array = [null, false]
 	if me_dead != they_dead:
@@ -933,11 +944,22 @@ func _net_decide(timed_out := false) -> void:
 		int(score.player), int(score.bot), timed_out, hs, 1 if killer == player else (-1 if killer == bot else 0)])
 
 
+## The time a message takes from one phone to the other (s), at most 0.5 s: half the measured round
+## trip to it; before that is measured, this phone's round trip to the relay (phone, relay, phone);
+## else 0.15 s.
+func _one_way() -> float:
+	if int(Game.session.peer_rtt) > 0:
+		return clampf(float(Game.session.peer_rtt) / 2000.0, 0.0, 0.5)
+	if int(Game.session.relay_rtt) > 0:
+		return clampf(float(Game.session.relay_rtt) / 1000.0, 0.0, 0.5)
+	return 0.15
+
+
 ## The guest's prep starts when the host's "begin" / "round" arrives, the one-way trip late: it is
 ## shortened by that, so both fights (and their zones) start about together, on the host's clock.
 func _follow_host_clock() -> void:
-	if Game.session.peer_rtt > 0 and phase == Phase.PREP:
-		prep_left = maxf(prep_left - clampf(float(Game.session.peer_rtt) / 2000.0, 0.0, 1.0), 0.5)
+	if phase == Phase.PREP:
+		prep_left = maxf(prep_left - _one_way(), 0.5)
 
 
 ## A round is decided (an elimination, or the time-out: winner null = a draw). The score goes up;
