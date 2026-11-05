@@ -6,7 +6,8 @@ extends RefCounted
 ## - an opponent who went down by itself (zone, fall, own frag) gets the out banner, never the
 ##   kill's ELIMINATED badge;
 ## - in the ONLINE lists only the row of the player a challenge waits for reads CANCEL;
-## - SWITCH sits beside RELOAD on every screen, and a layout saved at its old place moves it.
+## - SWITCH sits beside RELOAD on every screen, and a layout saved at its old place moves it;
+## - the bot's levels go EASY < NORMAL < HARD.
 
 const ArenaCode := preload("res://scripts/arena.gd")     # (the arena script has no class name)
 
@@ -21,6 +22,7 @@ static func run(runner: Node) -> void:
 	me._out_banner()
 	me._challenge_rows()
 	me._switch_place()
+	me._bot_levels()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -96,6 +98,27 @@ func _switch_place() -> void:
 	_check(is_equal_approx(old.swap.x, HudLayout.DEFAULTS.swap.x) and is_equal_approx(old.swap.y, HudLayout.DEFAULTS.swap.y)
 		and is_equal_approx(old.swap.s, 0.12) and is_equal_approx(old.swap.o, 0.6) and is_equal_approx(mine.swap.x, 0.5) and mine.swap.a == "c",
 		"a saved SWITCH at its old place moves beside RELOAD (keeping size and opacity); one the player moved stays")
+
+
+## The bot's levels: EASY <= NORMAL <= HARD in every number (reaction, aim error and the pause
+## between bursts the lower the stronger), strictly in reaction, aim and headshots; NORMAL (for a
+## casual player) nearer EASY than HARD in reaction and aim.
+func _bot_levels() -> void:
+	var lower_is_harder := ["reaction", "error", "pause"]
+	var bad := PackedStringArray()
+	for k: String in Bot.DIFF[1]:
+		var e := float(Bot.DIFF[0][k])
+		var n := float(Bot.DIFF[1][k])
+		var h := float(Bot.DIFF[2][k])
+		var sgn := -1.0 if k in lower_is_harder else 1.0
+		if sgn * (n - e) < 0.0 or sgn * (h - n) < 0.0 or (k in ["reaction", "error", "head"] and (sgn * (n - e) <= 0.0 or sgn * (h - n) <= 0.0)):
+			bad.append(k)
+	_check(bad.is_empty() and Bot.DIFF[0].size() == Bot.DIFF[1].size() and Bot.DIFF[2].size() == Bot.DIFF[1].size(),
+		"the bot's levels go EASY < NORMAL < HARD %s" % bad)
+	var near_easy := true
+	for k: String in ["reaction", "error"]:
+		near_easy = near_easy and absf(float(Bot.DIFF[1][k]) - float(Bot.DIFF[0][k])) < absf(float(Bot.DIFF[2][k]) - float(Bot.DIFF[1][k]))
+	_check(near_easy, "NORMAL is nearer EASY than HARD in reaction and aim")
 
 
 func _challenge_rows() -> void:

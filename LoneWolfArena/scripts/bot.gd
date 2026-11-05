@@ -9,9 +9,12 @@ const DETOUR_S := 0.8
 ## Seconds without getting closer to the zone's centre before the bot tries another way in.
 const ZONE_REROUTE_S := 2.5
 
+## The levels EASY, NORMAL, HARD. NORMAL is for a casual player on a phone (one lost 0-5 in 2.5
+## minutes to its earlier, sharper numbers): it sits nearer EASY than HARD in reaction and aim.
+## Every number keeps EASY <= NORMAL <= HARD in strength (tests/match_unit_check.gd).
 const DIFF := [
 	{"reaction": 0.85, "error": 6.5, "head": 0.06, "burst_min": 3, "burst_max": 5, "pause": 0.75, "turn": 150.0, "strafe": 0.55, "shield": 0.2, "crouch": 0.0, "hear": 30.0, "sg_range": 5.0, "jump": 0.0, "grenade": 0.0},
-	{"reaction": 0.5, "error": 4.0, "head": 0.16, "burst_min": 4, "burst_max": 8, "pause": 0.45, "turn": 240.0, "strafe": 0.8, "shield": 0.45, "crouch": 0.15, "hear": 45.0, "sg_range": 7.0, "jump": 0.12, "grenade": 0.35},
+	{"reaction": 0.68, "error": 5.4, "head": 0.1, "burst_min": 3, "burst_max": 6, "pause": 0.6, "turn": 185.0, "strafe": 0.65, "shield": 0.3, "crouch": 0.08, "hear": 38.0, "sg_range": 6.0, "jump": 0.06, "grenade": 0.2},
 	{"reaction": 0.24, "error": 2.0, "head": 0.3, "burst_min": 6, "burst_max": 12, "pause": 0.28, "turn": 380.0, "strafe": 1.0, "shield": 0.75, "crouch": 0.35, "hear": 60.0, "sg_range": 9.0, "jump": 0.25, "grenade": 0.6},
 ]
 ## The zone keeps closing: stay this far inside its edge (m), and start moving in this many
