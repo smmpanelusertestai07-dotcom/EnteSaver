@@ -96,8 +96,10 @@ func _check_texts() -> void:
 	_check(terms.contains("Play fair") and terms.contains("provided as is") and terms.contains("nothing to buy"),
 		"the Terms of Use: fair play, as is, free")
 	_check(not (notice + terms).contains("http") and not (notice + terms).contains("www."), "the documents carry no web links")
-	_check(Cloud.new().has_method("forget_me") and terms.contains("DELETE MY DATA"),
+	var probe := Cloud.new()
+	_check(probe.has_method("forget_me") and terms.contains("DELETE MY DATA"),
 		"DELETE MY DATA is what the notice and the terms say it is (Cloud.forget_me)")
+	probe.free()
 
 
 func _check_art() -> void:

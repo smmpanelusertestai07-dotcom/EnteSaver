@@ -1837,6 +1837,7 @@ func _test_online_status() -> void:
 		and (lf._net_list.get_child(0) as Label).text == "PLAYERS ONLINE", "the PLAYERS ONLINE heading is the list's first row: it scrolls with its section")
 	lf._net_scroll.free()
 	lf._net_status.free()
+	lf.lan = null                     # (its LobbyLan holds it; a lobby lets go in LobbyLan.on_lobby_exit)
 	cl.free()
 	Game.cloud = saved_cloud
 	Game.profile = saved_profile
