@@ -6,7 +6,8 @@ extends Node
 ## knocked bot teammate, which stands up with REVIVE_HP after REVIVE_S; the pause menu pauses this
 ## offline match; the player knocked has no gun, finished is out, and the camera then follows a
 ## teammate still UP; three enemies knocked do not end the round, the last one UP down wipes their
-## team; the results hold 8 rows and the profile counts the match as TRAINING. Then a DUO match: a
+## team, and a teammate knocked at the round's end stands up in the next round, played to 2-0;
+## the results hold 8 rows and the profile counts the match as TRAINING. Then a DUO match: a
 ## bot revives its knocked teammate, then the bots play it to its end. No damage is ever taken from
 ## a teammate.
 ## Prints "TEAM OFFLINE CHECK DONE bad=N".
@@ -139,7 +140,11 @@ func _squad() -> void:
 	at.log_line("player out: alive %s, spectating %s" % [p.alive, watched.display_name if watched else "nobody"])
 	if p.alive or watched == null or watched.team != p.team or not watched.alive or watched.knocked:
 		_fail("once out, the camera does not follow a teammate still UP")
-	# Three enemies knocked: the round goes on; the last one UP down wipes the team.
+	# Three enemies knocked: the round goes on; the last one UP down wipes the team (a teammate
+	# knocked just before stays down to the round's end: the next round stands it up).
+	arena.rounds_to_win = 2
+	var a2 := arena.slot_fighter(2)
+	a2.take_damage(9999.0, "head", e4, e4.global_position)
 	for e: Fighter in foes.slice(1):
 		e.take_damage(9999.0, "head", a1, a1.global_position)
 	await at.wait(0.3)
@@ -154,6 +159,31 @@ func _squad() -> void:
 	if not wiped or int(a1.stats.kills) != 4 or int(a1.stats.knocks) != 3:
 		_fail("the last one UP down did not wipe the team (or the kills are off)")
 	t = 0.0
+	while arena.phase == 1 and t < 3.0:
+		await at.wait(0.05)
+		t += 0.05
+	if not a2.knocked or arena.team_score != [1, 0] or arena.phase != 3:
+		_fail("round 1 did not go to the player's team (score %s, phase %d)" % [str(arena.team_score), arena.phase])
+	# Round 2: everyone back on their feet, then the other team wiped again.
+	t = 0.0
+	while not (arena.phase == 0 and arena.round_index == 2) and t < 20.0:
+		await at.wait(0.2)
+		t += 0.2
+	Engine.time_scale = 3.0
+	var reset_ok := arena.phase == 0 and arena.round_index == 2
+	for f in arena.fighters:
+		reset_ok = reset_ok and f.alive and not f.knocked and f.stance == Fighter.Stance.STAND and f.hp == Fighter.MAX_HP
+	at.log_line("round 2: phase %d, everyone up and standing %s, %s %s" % [arena.phase, reset_ok, a2.display_name, Fighter.Stance.keys()[a2.stance]])
+	if not reset_ok:
+		_fail("the next round did not stand everyone up with full HP")
+	await at.wait_for_phase(arena, 1, 30.0)
+	for f in arena.fighters:
+		if f != p:
+			f.frozen = true
+	for e: Fighter in foes.slice(1):
+		e.take_damage(9999.0, "head", a1, a1.global_position)
+	e4.take_damage(9999.0, "head", a1, a1.global_position)
+	t = 0.0
 	while not arena._result_shown and t < 20.0:
 		await at.wait(0.25)
 		t += 0.25
@@ -162,8 +192,8 @@ func _squad() -> void:
 	var training: Dictionary = Game.profile.modes.get("training", {})
 	at.log_line("squad result: shown %s, won %s, score %s, rows %d, mode %s, training matches %d" % [arena._result_shown, r.get("won"),
 		str(arena.team_score), (r.get("rows", []) as Array).size(), r.get("mode_id"), int(training.get("matches", 0))])
-	if not arena._result_shown or not bool(r.get("won", false)) or not bool(r.get("team", false)):
-		_fail("the SQUAD match did not end in a win with team results")
+	if not arena._result_shown or not bool(r.get("won", false)) or not bool(r.get("team", false)) or arena.team_score != [2, 0]:
+		_fail("the SQUAD match did not end in a 2-0 win with team results")
 	if (r.get("rows", []) as Array).size() != 8 or String(r.get("mode_id", "")) != "training" or int(training.get("matches", 0)) != 1:
 		_fail("the results rows or the profile's TRAINING count are off")
 	if _outs_before_knock > 0:

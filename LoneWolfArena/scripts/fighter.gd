@@ -480,6 +480,12 @@ func die(killer: Fighter, headshot := false) -> void:
 func reset_for_round(pos: Vector3, yaw: float) -> void:
 	alive = true
 	round_over = false
+	knocked = false                  # (before the stance: a knocked fighter may not change it)
+	knock_hp = 0.0
+	knocked_by = null
+	_stop_reviving()
+	revived_by = null
+	last_attacker = null
 	cancel_heal()
 	_stop_heal_sound()
 	healing = false
@@ -506,13 +512,6 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	set_loadout(weapons[0].id if not weapons.is_empty() else Weapons.DEFAULT_PICK)
 	last_damage_time = -99.0
 	last_attacked_time = -99.0
-	knocked = false
-	knock_hp = 0.0
-	knocked_by = null
-	reviving = null
-	revive_t = 0.0
-	revived_by = null
-	last_attacker = null
 
 
 ## On the same team (team modes only; never itself).

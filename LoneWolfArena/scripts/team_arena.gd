@@ -37,6 +37,12 @@ const REVIVE_CANCEL_M := 2.5              # a revive stops when the two are fart
 const SPAWN_SIDE := 1.2                   # m beside the alcove's middle line (members 0 / 1 of a team)
 const SPAWN_BACK := 2.0                   # m deeper into the alcove (members 2 / 3)
 const ENEMY_TEAM_NAME := "ORANGE TEAM"
+## SQUAD costs about twice the 1 vs 1's draw calls (8 fighters; measured with tools/qa's Xvfb
+## renderer: LOW 189 / 99, MEDIUM 349 / 159), so at LOW and MEDIUM the other fighters farther than
+## SHADOW_CUT_M from the camera cast no shadow (checked SHADOW_CUT_S apart), and the bots' looks
+## around fall on different frames (Bot.perceive_timer, Bot._retarget_t).
+const SHADOW_CUT_M := 15.0
+const SHADOW_CUT_S := 0.25
 const BOT_OUTFITS := ["desert", "neon", "shadow", "royal", "default"]
 
 var team_size := 0                        # players a team: 2 DUO, 4 SQUAD (the HUD: > 1 means a team match)
@@ -53,6 +59,8 @@ var _picked := {}                         # slot -> the gun it holds this round
 var _pick_at := {}                        # bot slot -> s until it picks (prep)
 var _applying := 0                        # inside _apply_decision: downs it causes are not reported
 var _spectate_killer: Fighter             # who took the player out (followed when no teammate is UP)
+var _shadow_t := 0.0
+var _shadow_cut := {}                     # fighter -> true while its shadow is cut (SHADOW_CUT_M)
 
 
 func _ready() -> void:
@@ -309,6 +317,7 @@ func _spawn_fighters() -> void:
 			b.enemies = foes
 			b.allies = mates
 			b.perceive_timer = _rng.randf() * 0.1      # their looks around fall on different frames
+			b._retarget_t = _rng.randf() * Bot.RETARGET_S
 			b.frozen = true
 		f.died.connect(_on_team_died)
 		f.knocked_down.connect(_on_knocked)
@@ -475,6 +484,32 @@ func _physics_process(delta: float) -> void:
 			if (_break_t >= brk and is_referee()) or _break_t >= brk + 8.0:
 				_next_round()
 	_update_spectate()
+	_update_shadow_cut(delta)
+
+
+## LOW / MEDIUM: fighters far from the camera cast no shadow (see SHADOW_CUT_M). A gun picked later
+## brings new meshes: the next check cuts those too.
+func _update_shadow_cut(delta: float) -> void:
+	_shadow_t -= delta
+	if _shadow_t > 0.0 or player == null:
+		return
+	_shadow_t = SHADOW_CUT_S
+	var cut_on := int(Game.settings.graphics) <= 1
+	var eye := player.camera.global_position if player.camera != null else player.global_position
+	for f in fighters:
+		if f == player or f.model == null:
+			continue
+		var cut := cut_on and f.global_position.distance_to(eye) > SHADOW_CUT_M
+		if not cut and not bool(_shadow_cut.get(f, false)):
+			continue
+		_shadow_cut[f] = cut
+		for mi: GeometryInstance3D in f.model.find_children("*", "GeometryInstance3D", true, false):
+			if cut and mi.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON:
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mi.set_meta("lw_shadow_cut", true)
+			elif not cut and mi.has_meta("lw_shadow_cut"):
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				mi.remove_meta("lw_shadow_cut")
 
 
 func zone_next() -> float:
