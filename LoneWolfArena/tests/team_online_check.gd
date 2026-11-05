@@ -9,6 +9,8 @@ extends Node
 ##     both, results whose tables match (each copy writes its table to LW_TEAM_OUT; the step compares
 ##     the two files), every state the guest sent arrived (a lossless mock: 100%), the match in each
 ##     HISTORY.
+##  d. TEAM INVITE again, and the host quits once the fight began: the guest's match cannot go on
+##     (the bots ran on the host): THE HOST LEFT, back to the lobby, the match kept as ENDED.
 ##  b. random DUO (the team search): both search ROOT/mm/t2, the lower id challenges ("tinv" quick),
 ##     the other takes it at once: each player with a bot teammate against the other. The guest sees
 ##     the host's bots move, a guest hit on a host bot lands on the host, the guest's pause menu
@@ -44,7 +46,11 @@ func run(autotest: Node) -> int:
 		return _done("")
 	if not await _until(func() -> bool: return get_tree().current_scene is Lobby and not cloud.in_session, 30.0):
 		return _done("never back in the lobby after the first match")
-	await at.wait(2.0)
+	await at.wait(1.0)
+	await _host_quits()
+	if not await _until(func() -> bool: return get_tree().current_scene is Lobby and not cloud.in_session, 30.0):
+		return _done("never back in the lobby after the host left")
+	await at.wait(1.0)
 	var role_host := host
 	await _random_duo()
 	host = role_host
@@ -196,8 +202,8 @@ func _coop() -> bool:
 				file.close()
 	at.log_line("relay states: sent %d, taken %d" % [cloud.relay_states_out, cloud.relay_states_in])
 	var hist: Array = Game.profile.get("history", [])
-	if hist.size() != _history_before + 1:
-		_fail("HISTORY does not keep the match (%d entries, %d before)" % [hist.size(), _history_before])
+	if hist.size() != _history_before + 1 or String((hist[0] as Dictionary).get("result", "")) != "won":
+		_fail("HISTORY does not keep the won match (%d entries, %d before)" % [hist.size(), _history_before])
 	else:
 		at.log_line("HISTORY: %s" % str(hist[0]).left(200))
 	Game.goto_lobby()
@@ -214,6 +220,47 @@ func _table(arena: TeamArenaNet) -> String:
 				parts.append("%d:%s k%d kn%d rv%d d%d hs%d a%d" % [s, String(r.name), int(r.kills), int(r.get("knocks", 0)),
 					int(r.get("revives", 0)), int(r.damage), int(r.headshots), int(r.accuracy)])
 	return " | ".join(parts)
+
+
+# ---------------------------------------------------------------- d. the host leaves a coop match
+
+func _host_quits() -> void:
+	_started = false
+	_history_before = (Game.profile.get("history", []) as Array).size()
+	Game.match_notice = []
+	if host:
+		_link(2, true, cloud.my_id, other)
+		if not cloud.team_invite(other, 2, true):
+			_fail("the second team invite did not go out")
+			return
+	elif await _until(func() -> bool: return cloud.has_invite(), 20.0):
+		_link(2, true, other, cloud.my_id)
+		cloud.answer(true)
+	if not await _until(func() -> bool: return _started, 25.0):
+		_fail("the second team invite never started a session")
+		return
+	var arena := await _arena()
+	if arena == null:
+		return
+	await at.wait(1.5)
+	if host:
+		arena.record_left()              # QUIT MATCH
+		Game.goto_lobby()
+		return
+	if not await _until(func() -> bool: return arena._called_off, 15.0):
+		_fail("the guest's match went on after the host left")
+		return
+	var notice: Array = Game.match_notice.duplicate()          # (the lobby shows it and clears it)
+	if not await _until(func() -> bool: return get_tree().current_scene is Lobby, 20.0):
+		_fail("the guest never went back to the lobby when the host left")
+		return
+	var hist: Array = Game.profile.get("history", [])
+	at.log_line("the host left: notice %s, HISTORY %s" % [str(notice), str(hist[0]).left(120) if not hist.is_empty() else "empty"])
+	if notice.is_empty() or String(notice[0]) != "THE HOST LEFT":
+		_fail("the guest was not told THE HOST LEFT")
+	var want := "ended" if "ended" in Game.HISTORY_RESULTS else "lost"     # (builds before the team records: no win)
+	if hist.size() != _history_before + 1 or String((hist[0] as Dictionary).get("result", "")) != want:
+		_fail("the match the host left is not kept as %s" % want.to_upper())
 
 
 # ---------------------------------------------------------------- b. random DUO (team search)

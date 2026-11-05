@@ -536,9 +536,10 @@ func _on_net_ended(reason: String) -> void:
 	var who := other.display_name if other != null else "PLAYER"
 	if reason != "left" or not _counted:
 		super(reason)
-		if reason == "left":             # (the 1 vs 1 names its opponent: here the other player)
-			Game.match_notice = ["THE HOST LEFT" if coop and not am_host else "OPPONENT LEFT",
-				"%s left before the match began. Nothing was counted." % who]
+		if reason == "left":             # (the 1 vs 1's words name an opponent: here the other player)
+			var title := ("THE HOST LEFT" if not am_host else "TEAMMATE LEFT") if coop else "OPPONENT LEFT"
+			hud.show_center(title, 2.6, Color.WHITE, 80, "THE MATCH DID NOT START")
+			Game.match_notice = [title, "%s left before the match began. Nothing was counted." % who]
 		return
 	if coop and am_host:
 		# The guest left: its slot is OUT for the rest of the match ("<NAME> LEFT"); the bots play on.
