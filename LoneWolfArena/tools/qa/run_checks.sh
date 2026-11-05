@@ -27,6 +27,9 @@
 #                          items, lethal hits and the result on both, which each one's HISTORY
 #                          keeps with the other's id
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
+#   tests/drop_check.gd    online matches that end early: a slow load is waited for, a quit before
+#                          the first fight counts nowhere, the phone that was away gets LEFT and
+#                          the other the win
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -75,6 +78,11 @@ if [ "${1:-}" != "quick" ]; then
     LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd > "$0" 2>&1 &
     h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/room_host.txt"
+  step drop bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47812 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47812
+    LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/drop_host.txt"
 fi
 # A script error anywhere fails the run even when the check itself exited 0.
 if grep -l "SCRIPT ERROR" "$LOGS"/*.log >/dev/null 2>&1; then

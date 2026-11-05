@@ -13,9 +13,12 @@ extends Node
 ## HMAC only the holders of those keys can make. In the room (ROOT/r/<room>) every message is
 ## AES-256-CBC with a random IV plus an HMAC-SHA256 over it, and carries the sender's id and a
 ## counter (replays are dropped). The inviter hosts. State goes out 10 times a second; a silent
-## opponent or a "bye" ends the match. Anyone can publish to a public broker, so invites are rate
-## limited and the list is capped. The lobby shows names, outfits and public keys only; nothing is
-## stored by the game anywhere.
+## opponent or a "bye" ends the match ("left"); a phone that hears nothing at all from the relay,
+## or was away (background, screen off) longer than the other phone waits, ends it as "connection
+## lost" (it is the one that dropped out; a link that went quiet outside a match is replaced too).
+## While a phone loads the match it sends a keep-alive, so a slow load is not taken for leaving.
+## Anyone can publish to a public broker, so invites are rate limited and the list is capped. The
+## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere.
 ##
 ## Player cards (topic ROOT/p/<id>, kept by the broker as a RETAINED message): every phone that
 ## has gone online leaves {id, name, outfit, public key, last-seen time} signed with its own key,
@@ -34,6 +37,7 @@ extends Node
 signal peers_changed
 signal invited(peer_name: String)
 signal invite_cancelled
+signal invite_failed(peer_name: String)    # a challenge this phone accepted never got going
 signal invite_answered(accepted: bool, peer_name: String)
 signal session_started(host: bool)
 signal session_ended(reason: String)
@@ -49,6 +53,13 @@ const ANNOUNCE_S := 3.0
 const PEER_TIMEOUT_MS := 10000
 const INVITE_TIMEOUT_MS := 25000
 const SILENCE_MS := 8000
+## A phone that was away, or heard nothing at all from the relay, this long in a match has dropped
+## out of it: it says so to itself a little before the other phone's SILENCE_MS runs out, so the
+## two never both take the other for the one who left.
+const AWAY_MS := SILENCE_MS - 1500
+const QUIET_MS := 15000        # nothing at all from the relay this long outside a match: the link is dead
+const KEEP_ALIVE_MS := 60000   # the keep-alive CONNECT asks for: the relay has dropped a phone away longer
+const LOAD_KEEP_MS := 30000    # a new session's keep-alives while its arena loads stop after this
 const PING_S := 20.0
 const MAX_MESSAGE := 4096
 const MAX_PEERS := 40
@@ -123,6 +134,14 @@ var _card_t := 0.0             # seconds until this phone's card is published ag
 var _card_sig := ""            # what the card last published shows (card_key)
 var _card_ts := 0              # its time: each new card is at least a second later (others keep the newest)
 var _join := {}                # {"code", "key", "t", "ask_t"}: the custom-room join in progress
+var last_end_reason := ""      # why the last session ended: "left" or "connection lost"
+var _last_rx_ms := 0           # when the relay last sent this phone anything (its own echoes too)
+var _frame_ms := -1            # when _process last ran (the tick clock; -1 before the first frame)
+var _paused_unix := 0.0        # wall-clock time the app was paused (the tick clock stops in sleep)
+var _away_wall_ms := 0         # how long the last pause lasted by the wall clock, once resumed
+var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
+var _session_ms := 0           # when the session started
+var _keep_t := 0.0             # s until the next keep-alive while the arena loads
 
 
 func _ready() -> void:
@@ -212,6 +231,7 @@ func _connect() -> void:
 	_connected = false
 	_sent_connect = false
 	_connect_t = 0.0
+	_last_rx_ms = Time.get_ticks_msec()
 	if _ws.connect_to_url(String(_brokers[_broker_i])) != OK:
 		_ws = null
 		_next_broker()
@@ -231,7 +251,46 @@ func _next_broker() -> void:
 	status = "offline"
 
 
+## Drops a connection that went dead without closing and connects again soon; a match going on is
+## over for this phone ("connection lost").
+func _reconnect() -> void:
+	if in_session:
+		end_session("connection lost")
+	if _ws != null:
+		_ws.close()
+	_ws = null
+	_connected = false
+	_rx.clear()
+	status = "offline"
+	_retry_t = 0.5
+
+
+## Once a frame (now: the tick clock): how long this phone was gone since the last frame, the gap
+## on the tick clock or an app pause measured on the wall clock (the tick clock stops while the
+## phone sleeps). Away about as long as the other phone waits, it is this phone that dropped out
+## of a match (the other may have ended it by now): whatever waits in its buffer (old states, the
+## other's "bye") must not say otherwise. Away longer than the keep-alive, its link is gone too.
+func _check_away(now: int) -> void:
+	var away := now - _frame_ms if _frame_ms >= 0 else 0
+	_frame_ms = now
+	away = maxi(away, _away_wall_ms)
+	_away_wall_ms = 0
+	if away > AWAY_MS and in_session:
+		end_session("connection lost")
+	if away > KEEP_ALIVE_MS and _ws != null:
+		_reconnect()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED:
+		_paused_unix = Time.get_unix_time_from_system()
+	elif what == NOTIFICATION_APPLICATION_RESUMED and _paused_unix > 0.0:
+		_away_wall_ms = maxi(int((Time.get_unix_time_from_system() - _paused_unix) * 1000.0), 0)
+		_paused_unix = 0.0
+
+
 func _process(delta: float) -> void:
+	_check_away(Time.get_ticks_msec())       # before anything in the buffer is read
 	if _keygen != -1 and not _keygen_out.is_empty():
 		WorkerThreadPool.wait_for_task_completion(_keygen)
 		_keygen = -1
@@ -272,6 +331,13 @@ func _process(delta: float) -> void:
 		return
 	if not _connected:
 		return
+	# Every phone hears its own lobby announcement (3 s), the ping's answer (20 s) and in a match
+	# its own room messages back from the relay: nothing at all for this long means the link died
+	# without closing (the network went away, the relay stalls). In a match that is this phone
+	# dropping out, not the other one leaving.
+	if Time.get_ticks_msec() - _last_rx_ms > (AWAY_MS if in_session else QUIET_MS):
+		_reconnect()
+		return
 	if _broker_i != 0 and not in_session and _room == "" and room_code == "" and _outgoing.is_empty() \
 			and _join.is_empty() and peers.is_empty():
 		_alone_t += delta
@@ -292,20 +358,7 @@ func _process(delta: float) -> void:
 	if _ping_t <= 0.0:
 		_ping_t = PING_S
 		_send_packet(PackedByteArray([0xC0, 0x00]))
-	if _room != "" and not in_session:
-		_join_t -= delta
-		if _join_t <= 0.0:
-			_join_t = 1.0
-			_room_send({"k": "join"})
-	if not _join.is_empty() and not in_session:
-		_join.ask_t = float(_join.ask_t) - delta
-		if _join.ask_t <= 0.0 and join_state == "asking":
-			_join.ask_t = 2.0
-			_publish_json(ROOT + "/c/" + String(_join.code), {"t": "ask", "from": my_id, "name": String(Game.profile.name),
-				"bundle": String(Game.profile.bundle), "pk": _pk_pem, "mac": _room_tag(_join.key, "ask", my_id)})
-		if Time.get_ticks_msec() - int(_join.t) > JOIN_TIMEOUT_MS and join_state == "asking":
-			join_state = "none"
-			room_changed.emit()
+	_tick_room(delta)
 	_card_t -= delta
 	if card_key(my_card()) != _card_sig:
 		_card_t = minf(_card_t, CARD_CHANGE_S)
@@ -339,6 +392,40 @@ func _process(delta: float) -> void:
 	if not _incoming.is_empty() and now - int(_incoming.t) > INVITE_TIMEOUT_MS:
 		_incoming = {}
 		invite_cancelled.emit()
+
+
+## Every frame while connected (now: the tick clock): the room handshake (and how long a challenge
+## accepted here may take), the keep-alive while the match loads, the custom-room join.
+func _tick_room(delta: float, now := Time.get_ticks_msec()) -> void:
+	if _room != "" and not in_session:
+		_join_t -= delta
+		if _join_t <= 0.0:
+			_join_t = 1.0
+			_room_send({"k": "join"})
+		# A challenge accepted here whose room handshake never completes (the challenger went
+		# away right after): give up, so the popup does not wait for ever.
+		if _accept_ms > 0 and now - _accept_ms > JOIN_TIMEOUT_MS:
+			var who := String(opponent.get("name", "PLAYER"))
+			_leave_room()
+			invite_failed.emit(who)
+	elif in_session and event_received.get_connections().is_empty() and now - _session_ms < LOAD_KEEP_MS:
+		# The match is loading here (the arena listens once it is up): a keep-alive every second,
+		# so the other phone does not take a slow load for leaving.
+		_keep_t -= delta
+		if _keep_t <= 0.0:
+			_keep_t = 1.0
+			_room_send({"k": "ka"})
+	if not _join.is_empty() and not in_session:
+		# Asking to join, then (let in) asking again now and then: the host answers while its room
+		# is open, so a room that closed or a host that left is noticed (join_state "none").
+		_join.ask_t = float(_join.ask_t) - delta
+		if _join.ask_t <= 0.0 and join_state in ["asking", "in"]:
+			_join.ask_t = 2.0 if join_state == "asking" else 5.0
+			_publish_json(ROOT + "/c/" + String(_join.code), {"t": "ask", "from": my_id, "name": String(Game.profile.name),
+				"bundle": String(Game.profile.bundle), "pk": _pk_pem, "mac": _room_tag(_join.key, "ask", my_id)})
+		if now - int(_join.t) > JOIN_TIMEOUT_MS and join_state in ["asking", "in"]:
+			join_state = "none"
+			room_changed.emit()
 
 
 # ---------------------------------------------------------------- MQTT 3.1.1 (QoS 0)
@@ -433,6 +520,7 @@ func _parse() -> void:
 		var header := _rx[0]
 		var body := _rx.slice(i, i + length)
 		_rx = _rx.slice(i + length)
+		_last_rx_ms = Time.get_ticks_msec()      # any packet: the link is alive
 		match header & 0xF0:
 			0x20:                    # CONNACK
 				if body.size() >= 2 and body[1] == 0:
@@ -549,6 +637,10 @@ func _on_inbox(d: Dictionary) -> void:
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
 				_incoming = {}
 				invite_cancelled.emit()
+			elif _accept_ms > 0 and String(opponent.get("id", "")) == from and _tagged(d, {"mac": _mac, "room": _room}, "can", from):
+				var who := String(opponent.get("name", "PLAYER"))       # called off just as it was accepted
+				_leave_room()
+				invite_failed.emit(who)
 		"dec":
 			if String(_outgoing.get("id", "")) == from and _tagged(d, _outgoing, "dec", from):
 				var who_out := String(_outgoing.name)
@@ -573,10 +665,14 @@ func _on_inbox(d: Dictionary) -> void:
 				var friend := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 				_became_friends(from, friend)
 		"rin", "rno":
-			# The custom room's host: the password was right (wait for START) or wrong.
-			if join_state == "asking" and String(d.get("code", "")) == String(_join.get("code", "")):
-				join_state = "in" if String(d.t) == "rin" else "wrong"
-				room_changed.emit()
+			# The custom room's host: the password was right (wait for START) or wrong; a "rin"
+			# while in the room says it is still open.
+			if join_state in ["asking", "in"] and String(d.get("code", "")) == String(_join.get("code", "")):
+				var state := "in" if String(d.t) == "rin" else "wrong"
+				_join.t = Time.get_ticks_msec()
+				if state != join_state:
+					join_state = state
+					room_changed.emit()
 
 
 ## Proof that the sender holds an invite's keys: an HMAC over what it says, the room and its id.
@@ -662,6 +758,7 @@ func answer(accept: bool, rules := {}) -> void:
 	is_host = false
 	session_rules = rules
 	_enter_room(inv)
+	_accept_ms = Time.get_ticks_msec()
 	_publish_json(ROOT + "/u/" + String(inv.id), {"t": "acc", "from": my_id, "mac": _tag(inv, "acc", my_id)})
 
 
@@ -681,6 +778,7 @@ func _leave_room() -> void:
 	if _room != "":
 		_unsubscribe(ROOT + "/r/" + _room)
 	_room = ""
+	_accept_ms = 0
 	_aes = PackedByteArray()
 	_mac = PackedByteArray()
 	opponent = {}
@@ -1139,6 +1237,9 @@ func _on_room(msg: PackedByteArray) -> void:
 			_outgoing = {}
 			if not in_session:
 				in_session = true
+				_accept_ms = 0
+				_session_ms = Time.get_ticks_msec()
+				_keep_t = 0.0
 				queue.clear()
 				session_started.emit(is_host)
 		"st":
@@ -1167,10 +1268,13 @@ func _on_room(msg: PackedByteArray) -> void:
 				event_received.emit(String(ev), data)
 
 
+## Ends the match's session: "left" (the other phone said bye or went silent, or this one leaves
+## the arena) or "connection lost" (this phone lost the relay or was away too long).
 func end_session(reason := "left") -> void:
 	var was := in_session
 	if in_session:
 		_room_send({"k": "ev", "e": "bye", "d": []})
+		last_end_reason = reason
 	in_session = false
 	_outgoing = {}
 	_leave_room()

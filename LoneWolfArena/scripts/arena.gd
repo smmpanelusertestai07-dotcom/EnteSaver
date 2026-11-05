@@ -76,6 +76,8 @@ var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 var _counted := false            # Game.count_match counted this match (its first fight began)
+var _called_off := false         # online: the session ended with no result to show (_on_net_ended)
+var _left_scene := false
 ## A custom room's unlimited walls or frags: at most this many per round and player (spawn_cap).
 const ROOM_SPAWN_CAP := 30
 var _net_buckets := {}           # kind of message from the other phone -> [tokens, ms] (_net_rate_ok)
@@ -102,8 +104,13 @@ func _ready() -> void:
 	mode_name = Game.mode_name(mode)
 	rounds_to_win = Game.rounds_to_win(online)
 	if Game.online and not online:
+		# The session ended while this phone was loading: back to the lobby, which says why (never
+		# a match against the bot instead).
 		Game.online = false
-		Game.goto_lobby.call_deferred()        # the other phone left while this one was loading
+		var lost := Game.session != null and Game.session.last_end_reason != "left"
+		Game.match_notice = ["CONNECTION LOST" if lost else "OPPONENT LEFT", ("The connection was lost" if lost
+			else "The other player left") + " before the match began. Nothing was counted."]
+		Game.goto_lobby.call_deferred()
 		return
 	_build_zone()
 	_spawn_fighters()
@@ -251,16 +258,38 @@ func _on_net_event(kind: String, data: Array) -> void:
 				_next_round()
 
 
-func _on_net_ended(_reason: String) -> void:
+## The session ended before the match did. "left": the other phone said bye, or went silent while
+## this one still hears the relay: once the first fight began that is a forfeit, the match is
+## ours. "connection lost": THIS phone lost the relay (no signal, airplane mode, away in the
+## background about as long as the other phone waits), which is never a win: a counted match goes
+## into the profile as QUIT MATCH puts it (LEFT, a defeat). A match whose first fight had not begun
+## counts nowhere either way. Both of those end here and go back to the lobby, which says why.
+func _on_net_ended(reason: String) -> void:
 	if phase == Phase.END:
 		return
-	_forfeit = true
-	var remote := bot as RemoteFighter
-	if remote.alive and phase != Phase.BREAK:
-		remote.die(null, false)
-	else:
-		_end_round(null)
-	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+	if reason == "left" and _counted:
+		_forfeit = true
+		var remote := bot as RemoteFighter
+		if remote.alive and phase != Phase.BREAK:
+			remote.die(null, false)
+		else:
+			_end_round(null)
+		hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+		return
+	var lost := reason != "left"
+	var counts := _counted and not _invalid
+	record_left()
+	_called_off = true
+	phase = Phase.END
+	_end_t = 0.0
+	Engine.time_scale = 1.0
+	_freeze_all()
+	var title := "CONNECTION LOST" if lost else "OPPONENT LEFT"
+	var sub := "THE MATCH COUNTS AS LEFT" if counts else "THE MATCH DID NOT START"
+	hud.show_center(title, 2.6, UI.BAD if lost else Color.WHITE, 80, sub)
+	Game.match_notice = [title, ("The connection was lost: the match counts as LEFT (a defeat)." if counts
+		else ("The connection was lost before the match began. Nothing was counted." if lost
+		else "%s left before the match began. Nothing was counted." % bot.display_name))]
 
 
 ## The most one reported hit can do in this zone: a bullet (one pellet) of this round's gun at
@@ -661,7 +690,11 @@ func _physics_process(delta: float) -> void:
 			_end_t += delta / maxf(Engine.time_scale, 0.01)
 			if _end_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
-			if _end_t > 2.6 and not _result_shown:
+			if _called_off:
+				if _end_t > 2.6 and not _left_scene:
+					_left_scene = true
+					Game.goto_lobby()
+			elif _end_t > 2.6 and not _result_shown:
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -882,7 +915,7 @@ func scoreboard_rows() -> Array:
 func _show_results() -> void:
 	Engine.time_scale = 1.0
 	result = _final_result()
-	if not _invalid:
+	if not _invalid and _counted:          # (a match is counted when its first fight begins)
 		Game.record_match(result)
 	var screen := ResultsScreen.new()
 	pause_layer.add_child(screen)
@@ -898,7 +931,7 @@ func _final_result() -> Dictionary:
 	var won := _winner == player and not _draw and not _invalid
 	var st := player.stats
 	var xp := 0
-	if not _invalid:
+	if not _invalid and _counted:
 		# capped: one opponent, at most one kill per round
 		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * Game.ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
 	return _match_result(won, xp, hp_left)

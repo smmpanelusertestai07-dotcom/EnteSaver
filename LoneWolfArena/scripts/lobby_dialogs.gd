@@ -3,10 +3,11 @@ extends RefCounted
 ## The lobby's popups: the popup frame they share (open_modal / close_modal, one at a time, in
 ## `modal`; back() is the header X and Android back: a popup's own way back, else close), SELECT
 ## MODE, HOW TO PLAY, the player name editor with the first-start name prompt, a confirmation
-## (confirm()) and the "Quit the game?" dialog. The lobby makes it (Lobby.dialogs) and its parts
-## open popups through it; everything is built under the lobby's UI layer.
+## (confirm()), a message with one OK (notice()) and the "Quit the game?" dialog. The lobby makes
+## it (Lobby.dialogs) and its parts open popups through it; everything is built under the lobby's
+## UI layer.
 ## Node names: Modal (or QuitDialog), Close, Mode_<training|lonewolf>, NameEdit, NameRandom,
-## NameOk, ConfirmCancel, ConfirmOk, QuitCancel, QuitConfirm. Markers: "name prompt" and
+## NameOk, ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt" and
 ## "ui name_ok" (the emulator test taps OK there).
 
 ## SELECT MODE: what each mode's card says under its name ({rounds}: Game.ROUNDS_TO_WIN).
@@ -134,6 +135,24 @@ func confirm(title: String, text: String, ok_text: String, on_ok: Callable, on_c
 	ok.pressed.connect(func() -> void:
 		close_modal()
 		on_ok.call())
+
+
+## A message with one OK (X and back close it too): an online match that was called off, a
+## challenge that never got going.
+func notice(title: String, text: String) -> void:
+	var v := open_modal(title, 680.0)
+	var t := UI.label(text, 21, UI.TEXT, "semi")
+	t.name = "NoticeText"
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(600, 0)
+	v.add_child(t)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	v.add_child(row)
+	var ok := UI.button("OK", 22, "primary", Vector2(190, 56))
+	ok.name = "NoticeOk"
+	ok.pressed.connect(close_modal)
+	row.add_child(ok)
 
 
 # ---------------------------------------------------------------- select mode

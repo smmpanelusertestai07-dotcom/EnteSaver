@@ -164,6 +164,9 @@ var session: Cloud
 ## Cloud.ROOM_RULES.
 var room_rules := {}
 var cloud: Cloud
+## [title, text] the lobby shows once when it opens again: why an online match was called off (the
+## connection was lost, or the other player left before it began); [] = nothing to say.
+var match_notice: Array = []
 
 
 ## The online service (made on first use; it outlives scene changes).

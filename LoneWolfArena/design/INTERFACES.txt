@@ -23,6 +23,12 @@ listed here. If a part needs something new from the core, add it in its own file
 - `open_pause()`; the HUD emits `pause_pressed` for it. `record_left()`: the pause menu's QUIT
   MATCH puts a counted match into the profile as LEFT, a defeat (HISTORY result "left"), with what
   was played so far; a match already decided keeps its own result.
+- An online session that ends before the match (Cloud `session_ended(reason)`): "left" (the other
+  phone said bye or went silent) is a forfeit win once the first fight began; "connection lost"
+  (this phone lost the relay, or was away about as long as the other waits: `Cloud.AWAY_MS`) is a
+  LEFT as with QUIT MATCH. Either way a match whose first fight had not begun counts nowhere; those
+  go back to the lobby, which shows `Game.match_notice` ([title, text]) once. What the other
+  phone's events may make here is capped (`spawn_cap(kind)`: its walls and frags per round).
 
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
@@ -154,7 +160,8 @@ listed here. If a part needs something new from the core, add it in its own file
   input) makes four helpers that build under its `ui` and reach it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
   open popup, `back()` (its X and Android back: the popup's meta "on_back" Callable, else close),
-  `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`); SELECT
+  `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`),
+  `notice(title, text)` (one OK: `NoticeText`, `NoticeOk`); SELECT
   MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog), `friends`
   (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind, back)` with its list in `NetScroll`
   (back: reopened under a closing player card, the list scrolls back to where it was), custom

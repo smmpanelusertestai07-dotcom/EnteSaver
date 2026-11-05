@@ -47,6 +47,7 @@ func _ready() -> void:
 	_test_id_search()
 	_test_online_status()
 	_test_net_limits()
+	_test_session_ends()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -1428,3 +1429,77 @@ func _test_net_limits() -> void:
 	_check(shots > 0 and shots <= 8, "shot reports come no faster than the gun fires (%d at once)" % shots)
 	Game.room_rules = saved_rules
 	a.free()
+
+
+## How an online session ends and whose doing it is (Cloud): a phone away about as long as the
+## other one waits (by the tick clock, or asleep by the wall clock) ends its match as "connection
+## lost" before it reads its buffer; a challenge accepted here gives up when the room handshake
+## never comes, at once when it is called off as it is accepted; a loading match sends
+## keep-alives; a joined custom room that stops answering is noticed.
+func _test_session_ends() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var at := Game.autotest
+	Game.autotest = "unit"
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var x := "opponent-x".sha256_text().left(32)
+	var cl := Cloud.new()
+	cl.my_id = "me".sha256_text().left(32)
+	var heard := {"ended": [], "failed": 0, "room": 0}
+	cl.session_ended.connect(func(reason: String) -> void: heard.ended.append(reason))
+	cl.invite_failed.connect(func(_who: String) -> void: heard.failed += 1)
+	cl.room_changed.connect(func() -> void: heard.room += 1)
+	var keys := Crypto.new()
+	var invite := {"id": x, "name": "XENA", "bundle": "default", "room": keys.generate_random_bytes(16).hex_encode(),
+		"aes": keys.generate_random_bytes(32), "mac": keys.generate_random_bytes(32), "t": Time.get_ticks_msec()}
+	var them := Cloud.new()
+	them.my_id = x
+	them._aes = invite.aes
+	them._mac = invite.mac
+	cl._incoming = invite.duplicate()
+	cl.answer(true)
+	cl._tick_room(0.1)
+	_check(cl._room != "" and heard.failed == 0, "an accepted challenge waits for its room handshake")
+	cl._tick_room(0.1, cl._accept_ms + Cloud.JOIN_TIMEOUT_MS + 100)
+	_check(cl._room == "" and heard.failed == 1, "an accepted challenge whose room handshake never comes gives up")
+	cl._incoming = invite.duplicate()
+	cl.answer(true)
+	cl._on_inbox({"t": "can", "from": x, "mac": cl._tag(invite, "can", x)})
+	_check(cl._room == "" and heard.failed == 2, "a challenge called off just as it was accepted ends at once")
+	cl._incoming = invite.duplicate()
+	cl.answer(true)
+	cl._on_room(them._room_packet({"k": "join"}))
+	_check(cl.in_session and cl._accept_ms == 0, "the room handshake starts the session")
+	cl._keep_t = 0.0
+	cl._tick_room(0.1)
+	_check(is_equal_approx(cl._keep_t, 1.0), "a session whose arena still loads sends keep-alives")
+	cl._process(0.016)
+	_check(cl.in_session, "a normal frame keeps the session")
+	cl._check_away(cl._frame_ms + Cloud.AWAY_MS + 500)
+	_check(not cl.in_session and heard.ended == ["connection lost"] and cl.last_end_reason == "connection lost",
+		"a phone away about as long as the other one waits ends its match as connection lost (%s)" % str(heard.ended))
+	cl._incoming = invite.duplicate()
+	cl.answer(true)
+	cl._on_room(them._room_packet({"k": "join"}))
+	cl._process(0.016)
+	cl.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+	cl._paused_unix -= 30.0                              # asleep for 30 s: the tick clock stood still
+	cl.notification(Node.NOTIFICATION_APPLICATION_RESUMED)
+	cl._process(0.016)
+	_check(not cl.in_session and heard.ended.size() == 2 and heard.ended[1] == "connection lost",
+		"a phone that slept through the match ends it as connection lost (%s)" % str(heard.ended))
+	cl._inbox_budget = 8.0
+	cl.join_room("424242", "4821")
+	cl._on_inbox({"t": "rin", "from": x, "code": "424242"})
+	_check(cl.join_state == "in", "the custom room's host lets this phone in")
+	cl._join.t = 0                                        # long ago, then the host answers again
+	cl._on_inbox({"t": "rin", "from": x, "code": "424242"})
+	var answered := int(cl._join.t)
+	cl._tick_room(0.1, answered + Cloud.JOIN_TIMEOUT_MS - 1000)
+	_check(answered > 0 and cl.join_state == "in", "a room whose host still answers keeps its guest")
+	heard.room = 0
+	cl._tick_room(0.1, answered + Cloud.JOIN_TIMEOUT_MS + 100)
+	_check(cl.join_state == "none" and heard.room == 1, "a joined room whose host stopped answering is noticed")
+	cl.free()
+	them.free()
+	Game.profile = saved_profile
+	Game.autotest = at

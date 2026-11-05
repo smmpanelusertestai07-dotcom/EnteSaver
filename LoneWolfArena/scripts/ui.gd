@@ -207,10 +207,13 @@ static func hero_button(text: String, size := 44, min_size := Vector2(300, 80), 
 	return b
 
 
+## A button's caption: a hero button's "Caption" label, else the button's own text.
 static func set_caption(b: Button, text: String) -> void:
 	var cap := b.get_node_or_null("Caption") as Label
 	if cap:
 		cap.text = text
+	else:
+		b.text = text
 
 
 static func _draw_hero(b: Button) -> void:

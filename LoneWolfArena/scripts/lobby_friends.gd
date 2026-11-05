@@ -35,12 +35,16 @@ func _init(owner_lobby: Lobby) -> void:
 	lobby = owner_lobby
 
 
-## The lobby is up: listen to the online service and go online.
+## The lobby is up: listen to the online service and go online; an online match that was called
+## off (Game.match_notice) is explained once.
 func on_lobby_ready() -> void:
 	_connect_net(Game.cloud_service())
 	# Online presence starts with the lobby, so friends and other players see this phone online
 	# as soon as the game is open.
 	Game.cloud_service().start_lobby()
+	if Game.match_notice.size() == 2:
+		lobby.dialogs.notice.call_deferred(String(Game.match_notice[0]), String(Game.match_notice[1]))
+	Game.match_notice = []
 
 
 ## The lobby is leaving the tree.
@@ -626,6 +630,18 @@ func _on_net_invite_cancelled() -> void:
 		lobby.dialogs.close_modal()
 
 
+## A challenge this phone accepted never got going (the challenger went away or called it off as
+## it was accepted): the popup that said CONNECTING gives way to why.
+func _on_net_invite_failed(who: String) -> void:
+	_on_net_invite_cancelled()
+	_net_note = "%s COULD NOT BE REACHED" % who
+	_net_sig = "-"
+	if lobby.start_btn.disabled:
+		return
+	if lobby.dialogs.modal == null or not is_instance_valid(lobby.dialogs.modal):
+		lobby.dialogs.notice("DUEL CANCELLED", "%s could not be reached: the duel did not start." % who)
+
+
 func _on_net_answered(accepted: bool, who: String) -> void:
 	if not accepted:
 		_net_note = "%s DECLINED (OR DID NOT ANSWER)" % who
@@ -642,9 +658,10 @@ func _on_room_changed() -> void:
 ## is LONE WOLF whatever mode the lobby shows; the arena ignores TRAINING GROUND's dummy choice
 ## (Game.practice) online, so that choice stays for later.
 func _on_net_session(_host: bool) -> void:
-	if lobby.start_btn.disabled:
-		return
 	var cloud := Game.cloud_service()
+	if lobby.start_btn.disabled:
+		cloud.end_session("left")       # a match against the bot is loading already: tell the other phone
+		return
 	Game.online = true
 	Game.session = cloud
 	Game.room_rules = cloud.session_rules.duplicate()
@@ -656,10 +673,14 @@ func _on_net_session(_host: bool) -> void:
 	Loading.start_match(lobby)
 
 
+## The session ended while the lobby is up, that is while its match loads: Game.online stays set
+## then, so the arena finds the session gone and comes back here with the reason (it would
+## otherwise start a match against the bot under the LONE WOLF loading card).
 func _on_net_ended(reason: String) -> void:
-	Game.online = false
-	_net_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
+	_net_note = "THE OTHER PLAYER LEFT" if reason == "left" else "CONNECTION LOST"
 	_net_sig = "-"
+	if not (Game.online and lobby.start_btn.disabled):
+		Game.online = false
 
 
 func _connect_net(cloud: Cloud) -> void:
@@ -668,6 +689,7 @@ func _connect_net(cloud: Cloud) -> void:
 	cloud.directory_changed.connect(_on_directory_changed)
 	cloud.invited.connect(_on_net_invited)
 	cloud.invite_cancelled.connect(_on_net_invite_cancelled)
+	cloud.invite_failed.connect(_on_net_invite_failed)
 	cloud.invite_answered.connect(_on_net_answered)
 	cloud.session_started.connect(_on_net_session)
 	cloud.session_ended.connect(_on_net_ended)
@@ -675,8 +697,8 @@ func _connect_net(cloud: Cloud) -> void:
 
 ## Drops this object's connections (the handlers above) from the service, which outlives the lobby.
 func _disconnect_net(cloud: Cloud) -> void:
-	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended", "room_changed", "friends_changed",
-			"directory_changed"]:
+	for sig in ["invited", "invite_cancelled", "invite_failed", "invite_answered", "session_started", "session_ended", "room_changed",
+			"friends_changed", "directory_changed"]:
 		for c: Dictionary in cloud.get_signal_connection_list(sig):
 			if (c.callable as Callable).get_object() == self:
 				cloud.disconnect(sig, c.callable)

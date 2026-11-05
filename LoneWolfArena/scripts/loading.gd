@@ -45,6 +45,8 @@ const GOLD := Color(0.94, 0.745, 0.24)
 
 ## Screenshot tours set this to keep the boot screen up (no automatic lobby).
 static var hold_for_test := false
+## Checks set this to keep the match overlay up at least this many seconds (a slow phone's load).
+static var delay_for_test := 0.0
 
 
 ## The root node "LoadingCache": keeps the boot preloads referenced (meta "resources") and
@@ -509,7 +511,7 @@ func _process_match(delta: float) -> void:
 	progress = maxf(progress, lerpf(progress, goal, minf(1.0, delta * 8.0)))
 	_status.text = "PREPARING WEAPONS" if progress < 0.5 else "ENTERING THE ARENA"
 	var real_s := (Time.get_ticks_msec() - _start_ms) / 1000.0
-	if not _leaving and ((loaded and _t >= MATCH_MIN_S) or real_s >= MATCH_MAX_S):
+	if not _leaving and real_s >= delay_for_test and ((loaded and _t >= MATCH_MIN_S) or real_s >= MATCH_MAX_S):
 		_leaving = true
 		progress = 1.0
 		_pct.text = "100%"
