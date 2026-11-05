@@ -207,6 +207,48 @@ static func hero_button(text: String, size := 44, min_size := Vector2(300, 80), 
 	return b
 
 
+## Screenshot tours and checks set this to stand in for a phone's camera cutout (x >= 0).
+static var margins_for_test := Vector2(-1.0, -1.0)
+
+
+## Keeps a full-screen Control's left and right edges clear of the camera cutout (safe_margins):
+## its offsets follow the cutout now, on a size change and every second (turning the phone over
+## moves the cutout to the other side without one).
+static func keep_clear_of_cutout(c: Control) -> void:
+	var apply := func() -> void:
+		if c.is_inside_tree():
+			var m := safe_margins(c.get_viewport())
+			c.offset_left = m.x
+			c.offset_right = -m.y
+	var t := Timer.new()
+	t.wait_time = 1.0
+	t.autostart = true
+	t.timeout.connect(apply)
+	c.add_child(t)
+	c.resized.connect(apply, CONNECT_DEFERRED)
+	apply.call_deferred()
+
+
+## The sides of the screen that a camera cutout covers, in `vp`'s canvas pixels (x left, y right;
+## the display's safe area, which immersive full screen does not keep clear by itself). In
+## landscape a punch-hole camera sits on a short side. Zero where the whole screen is safe and on
+## desktop builds; at most 12 % of the width a side.
+static func safe_margins(vp: Viewport) -> Vector2:
+	if margins_for_test.x >= 0.0 and not OS.has_feature("template"):
+		return margins_for_test
+	if vp == null or not OS.has_feature("mobile"):
+		return Vector2.ZERO
+	var safe := DisplayServer.get_display_safe_area()
+	var at := DisplayServer.window_get_position()
+	var win := DisplayServer.window_get_size()
+	var canvas_w := vp.get_visible_rect().size.x
+	if safe.size.x <= 0 or win.x <= 0:
+		return Vector2.ZERO
+	var k := canvas_w / float(win.x)
+	return Vector2(clampf(float(safe.position.x - at.x) * k, 0.0, canvas_w * 0.12),
+		clampf(float(at.x + win.x - safe.end.x) * k, 0.0, canvas_w * 0.12))
+
+
 ## A button's caption: a hero button's "Caption" label, else the button's own text.
 static func set_caption(b: Button, text: String) -> void:
 	var cap := b.get_node_or_null("Caption") as Label

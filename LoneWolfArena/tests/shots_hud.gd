@@ -170,6 +170,15 @@ func run(at: Node) -> int:
 	await at.wait(0.25)
 	_check(not p.sprinting, "second tap on sprint stops it", at)
 	p.global_position = home
+	# PRONE: a tap where it is drawn lies down (on any screen width: no other control takes it).
+	var prone_c := HudLayout.center(hud.layout.prone, vs)
+	_check(hud._widget_at(prone_c, vs) == "prone", "a tap on PRONE goes to PRONE (got %s)" % hud._widget_at(prone_c, vs), at)
+	await _tap(at, prone_c)
+	await at.wait(0.6)
+	_check(p.stance == Fighter.Stance.PRONE, "the PRONE button lies down", at)
+	await _tap(at, prone_c)
+	await at.wait(0.6)
+	_check(p.stance == Fighter.Stance.STAND, "a second tap on PRONE stands up", at)
 	# Settings gear opens the pause menu (closed again right away).
 	await _tap(at, HudLayout.center(hud.layout.settings, vs))
 	await at.wait(0.3)
@@ -214,6 +223,15 @@ func run(at: Node) -> int:
 	_check(not b.alive, "the bot is eliminated", at)
 	await at.wait(1.0)
 	await at.shot("hud_16_kill_late")
+	# A camera cutout on the left side: the edge-anchored widgets move off it.
+	UI.margins_for_test = Vector2(64, 0)
+	hud._update_safe_area()
+	await at.wait(0.3)
+	await at.shot("hud_16b_cutout")
+	_check(HudLayout.minimap_rect(hud.layout.minimap, vs).position.x >= 64.0
+		and HudLayout.hit_rect("wall", hud.layout.wall, vs).position.x >= 64.0, "a camera cutout on the left moves the minimap and WALL off it", at)
+	UI.margins_for_test = Vector2(-1, -1)
+	hud._update_safe_area()
 	# HUD editor.
 	Game.goto_hud_editor()
 	await at.wait(1.2)
@@ -230,6 +248,14 @@ func run(at: Node) -> int:
 	await at.wait(0.3)
 	await at.shot("hud_18_editor_drag")
 	_check(eh.selected_id == "jump", "editor selects the dragged control", at)
+	# The gear on the weapon panel's corner is drawn and picked up in the editor too.
+	var gear_c := HudLayout.center(eh.layout.settings, eh.size)
+	_touch(at, 4, gear_c, true)
+	await at.wait(0.1)
+	_touch(at, 4, gear_c, false)
+	await at.wait(0.2)
+	await at.shot("hud_19_editor_gear")
+	_check(eh.selected_id == "settings", "the editor picks the gear on the weapon panel (got %s)" % eh.selected_id, at)
 	at.log_line("HUD TOUR fails=%d" % _fails)
 	return 1 if _fails > 0 else 0
 

@@ -3,6 +3,7 @@ extends Node
 ##   godot --headless --path . res://tests/run_tests.tscn
 
 const GuardCode := preload("res://autoload/guard.gd")     # its static helpers, without the autoload
+const GameCode := preload("res://autoload/game.gd")       # (the same for Game's)
 
 var _fails := 0
 var _passes := 0
@@ -25,6 +26,7 @@ func _ready() -> void:
 	_test_spread()
 	_test_weapon_state()
 	_test_hud_layout()
+	_test_hud_touch_areas()
 	_test_guard()
 	_test_signer_digests()
 	_test_settings_sanitize()
@@ -192,6 +194,76 @@ func _test_hud_layout() -> void:
 			"three non-overlapping weapon slots on %s" % vs)
 		_check(main.end.y <= slots[0].position.y and screen.encloses(main.merge(slots[2])), "weapon panel: main slot above the small ones, on screen (%s)" % vs)
 	_check(HudLayout.center(def.fire_r, Vector2(1560, 720)).x > 1200.0, "layout scales to wide (19.5:9) screens")
+
+
+## The default HUD's touch areas never overlap (as HUD._widget_at tests them: round buttons to
+## 1.15 x their touch radius, the weapon panel's slots grown 4 px), only the gear on the panel's
+## corner on purpose, and keep clear of the score bar, from 16:10 to 22:9; a saved layout with PRONE
+## at its old place takes the new one; a camera cutout moves the edge-anchored widgets in.
+func _test_hud_touch_areas() -> void:
+	var def := HudLayout.resolve({})
+	for vs: Vector2 in [Vector2(1280, 800), Vector2(1280, 720), Vector2(1440, 720), Vector2(1560, 720), Vector2(1600, 720), Vector2(1760, 720)]:
+		var u := HudLayout.unit(vs)
+		var areas := {}          # id -> [circles as Vector3(x, y, r)] or [Rect2]
+		for id: String in HudLayout.DEFAULTS:
+			var w: Dictionary = def[id]
+			match HudLayout.kind(id):
+				"button":
+					var c := HudLayout.center(w, vs)
+					areas[id] = [Vector3(c.x, c.y, HudLayout.touch_radius(w, vs) * 1.15)]
+				"panel":
+					var slots := HudLayout.weapon_slots(w, vs)
+					areas[id] = [HudLayout.weapon_main(w, vs).grow(4), slots[0].grow(4), slots[2].grow(4)]
+				"square":
+					areas[id] = [HudLayout.minimap_rect(w, vs)]
+		var score := Rect2(Vector2(vs.x * 0.5 - 0.33 * u, 0.0), Vector2(0.66 * u, 0.09 * u))
+		var overlaps := PackedStringArray()
+		var ids := areas.keys()
+		for i in ids.size():
+			for j in range(i + 1, ids.size()):
+				if [ids[i], ids[j]] in [["settings", "weapons"], ["weapons", "settings"]]:
+					continue
+				if _areas_meet(areas[ids[i]], areas[ids[j]]):
+					overlaps.append("%s+%s" % [ids[i], ids[j]])
+			if HudLayout.kind(ids[i]) == "button" and _areas_meet(areas[ids[i]], [score]):
+				overlaps.append("%s+score bar" % ids[i])
+		_check(overlaps.is_empty(), "no two default touch areas overlap on %s %s" % [vs, overlaps])
+	var old := HudLayout.resolve({"prone": {"x": 0.673, "y": 0.073, "s": 0.12, "o": 0.5, "a": "c"}, "jump": {"x": 0.5, "y": 0.5, "a": "c"}})
+	_check(old.prone.x == HudLayout.DEFAULTS.prone.x and old.prone.a == "r" and is_equal_approx(old.prone.s, 0.12)
+		and is_equal_approx(old.prone.o, 0.5) and old.jump.x == 0.5, "a saved PRONE at its old place moves to the new one, keeping its size")
+	HudLayout.inset = Vector2(64, 0)
+	var vs := Vector2(1560, 720)
+	var shifted := HudLayout.center(def.wall, vs).x - 64.0
+	HudLayout.inset = Vector2.ZERO
+	var plain := HudLayout.center(def.wall, vs).x
+	HudLayout.inset = Vector2(64, 30)
+	var inside := true
+	for id: String in HudLayout.DEFAULTS:
+		var r := HudLayout.hit_rect(id, def[id], vs)
+		var moved: Dictionary = def[id].duplicate()
+		HudLayout.place(moved, HudLayout.center(def[id], vs), vs)
+		inside = inside and r.position.x >= 64.0 and r.end.x <= vs.x - 30.0 and HudLayout.center(moved, vs).is_equal_approx(HudLayout.center(def[id], vs))
+	HudLayout.inset = Vector2.ZERO
+	_check(is_equal_approx(shifted, plain) and inside, "a camera cutout moves the edge-anchored widgets in by its width, nothing stays under it")
+
+
+## Whether two lists of touch areas (Vector3 circles x, y, r or Rect2) meet anywhere.
+func _areas_meet(a: Array, b: Array) -> bool:
+	for p: Variant in a:
+		for q: Variant in b:
+			if p is Vector3 and q is Vector3:
+				if Vector2(p.x, p.y).distance_to(Vector2(q.x, q.y)) < p.z + q.z:
+					return true
+			elif p is Rect2 and q is Rect2:
+				if (p as Rect2).intersects(q as Rect2):
+					return true
+			else:
+				var c: Vector3 = p if p is Vector3 else q
+				var r: Rect2 = q if p is Vector3 else p
+				var near := Vector2(clampf(c.x, r.position.x, r.end.x), clampf(c.y, r.position.y, r.end.y))
+				if near.distance_to(Vector2(c.x, c.y)) < c.z:
+					return true
+	return false
 
 
 func _test_guard() -> void:
@@ -1513,17 +1585,17 @@ func _test_safe_saves() -> void:
 	var path := "user://save_check.json"
 	for p: String in [path, path + ".bak", path + ".tmp"]:
 		DirAccess.remove_absolute(p)
-	var first := Game.write_json(path, {"n": 1, "name": "ROOKIE"})
-	_check(first and int(Game.read_json(path).get("n", 0)) == 1 and not FileAccess.file_exists(path + ".tmp"),
+	var first := GameCode.write_json(path, {"n": 1, "name": "ROOKIE"})
+	_check(first and int(GameCode.read_json(path).get("n", 0)) == 1 and not FileAccess.file_exists(path + ".tmp"),
 		"a save is written whole and no temporary file is left")
-	Game.write_json(path, {"n": 2})
-	_check(int(Game.read_json(path).get("n", 0)) == 2 and int(Game.read_json(path + ".bak").get("n", 0)) == 1,
+	GameCode.write_json(path, {"n": 2})
+	_check(int(GameCode.read_json(path).get("n", 0)) == 2 and int(GameCode.read_json(path + ".bak").get("n", 0)) == 1,
 		"the save before stays as .bak")
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string("{\"n\": 3, \"name\": \"ROO")             # what a full phone left of a write
 	f.close()
-	_check(int(Game.read_json(path).get("n", 0)) == 1, "a save cut short reads as the one before it")
-	_check(not Game.write_json("user://no_such_folder/x/save.json", {"n": 4}), "a save that cannot be written says so")
+	_check(int(GameCode.read_json(path).get("n", 0)) == 1, "a save cut short reads as the one before it")
+	_check(not GameCode.write_json("user://no_such_folder/x/save.json", {"n": 4}), "a save that cannot be written says so")
 	for p: String in [path, path + ".bak"]:
 		DirAccess.remove_absolute(p)
-	_check(Game.read_json(path).is_empty(), "no save reads as nothing")
+	_check(GameCode.read_json(path).is_empty(), "no save reads as nothing")

@@ -52,6 +52,7 @@ func _ready() -> void:
 	margin.add_theme_constant_override("margin_top", 22)
 	margin.add_theme_constant_override("margin_bottom", 20)
 	_band.add_child(margin)
+	UI.keep_clear_of_cutout(margin)            # the band spans the screen, its content not a camera cutout
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 40)
 	margin.add_child(h)

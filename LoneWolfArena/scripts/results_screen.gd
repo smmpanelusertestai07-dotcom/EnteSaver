@@ -37,6 +37,7 @@ var _intro_t0 := 0                # ticks (ms) of the intro (fade, medal pop, ti
 var _title: Control
 var _title_x := 0.0
 var _enemy := {}                  # the opponent's scoreboard row ({} when the scene has none)
+var _shades: Array[Control] = []  # the full-screen shades behind the content (see _fit_cutout)
 
 
 func setup(result: Dictionary) -> void:
@@ -109,6 +110,18 @@ func _palette() -> Array:
 			return [Color(1, 0.62, 0.55), Color(0.86, 0.18, 0.14), Color(0.95, 0.4, 0.32), Color(0.55, 0.1, 0.08)]
 
 
+## The screen's content stays clear of a camera cutout (UI.safe_margins); its shades reach under it.
+func _fit_cutout() -> void:
+	if not is_inside_tree():
+		return
+	var m := UI.safe_margins(get_viewport())
+	offset_left = m.x
+	offset_right = -m.y
+	for s: Control in _shades:
+		s.offset_left = -m.x
+		s.offset_right = m.y
+
+
 func _build() -> void:
 	var r := _result
 	var pal := _palette()
@@ -123,6 +136,14 @@ func _build() -> void:
 	var low := UI.gradient_rect([[0.0, Color(0, 0, 0, 0)], [0.6, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.7)]])
 	UI.full_rect(low)
 	add_child(low)
+	# Off a camera cutout: the screen keeps its content clear of it, its shades still reach the edges.
+	_shades = [shade, side, low]
+	var fit := Timer.new()
+	fit.wait_time = 1.0
+	fit.autostart = true
+	fit.timeout.connect(_fit_cutout)
+	add_child(fit)
+	_fit_cutout.call_deferred()
 	# Mode + map, top-left.
 	var head := VBoxContainer.new()
 	head.position = Vector2(40, 24)

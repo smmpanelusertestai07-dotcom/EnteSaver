@@ -541,6 +541,7 @@ func _build_ui() -> void:
 	UI.full_rect(_main_ui)
 	_main_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_main_ui)
+	UI.keep_clear_of_cutout(_main_ui)          # the menus, cards and START stay out of a camera cutout
 	var root := _main_ui
 	# soft vignette so text reads over the 3D
 	var top := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.5)], [0.16, Color(0, 0, 0, 0.0)], [0.8, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.55)]])

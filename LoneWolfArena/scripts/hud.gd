@@ -107,7 +107,18 @@ func _ready() -> void:
 	add_child(panels)
 	_lens_tex = _make_lens_texture()
 	resized.connect(func() -> void: _place_minimap(size))
+	_update_safe_area()
 	_place_minimap(size)
+
+
+## Keeps HudLayout.inset at the screen's camera cutout (checked again every second: turning the
+## phone over moves the cutout to the other side without a size change).
+func _update_safe_area() -> void:
+	var m := UI.safe_margins(get_viewport())
+	if m != HudLayout.inset:
+		HudLayout.inset = m
+		if minimap != null:
+			_place_minimap(size)
 
 
 func reload_layout() -> void:
@@ -360,32 +371,33 @@ func _on_down(index: int, pos: Vector2) -> void:
 	_touches[index] = {"kind": "look", "id": ""}
 
 
-## Topmost control under the finger ("" = none). Overlapping buttons: the closest centre wins.
+## Topmost control under the finger ("" = none): as drawn, the round buttons over the weapon panel
+## (the gear first, it sits on the panel's corner); overlapping buttons: the closest centre wins.
 func _widget_at(pos: Vector2, vs: Vector2) -> String:
-	# The small settings gear sits right beside the weapon panel: it wins a touch at its edge.
 	var gear: Dictionary = layout.settings
 	if pos.distance_to(HudLayout.center(gear, vs)) <= HudLayout.touch_radius(gear, vs) * 1.15:
 		return "settings"
 	var best := ""
 	var best_d := INF
 	for id: String in HudLayout.ORDER:
-		if id == "joystick" or id == "minimap" or not _button_visible(id):
+		if HudLayout.kind(id) != "button" or not _button_visible(id):
 			continue
 		var w: Dictionary = layout[id]
-		if id == "weapons":
-			if HudLayout.weapon_main(w, vs).grow(4).has_point(pos):
-				return "weapons:main"
-			var slots := HudLayout.weapon_slots(w, vs)
-			for i in [0, 2]:
-				if slots[i].grow(4).has_point(pos):
-					return "weapons:%d" % i
-			continue
 		var r := HudLayout.touch_radius(w, vs)
 		var d := pos.distance_to(HudLayout.center(w, vs)) / maxf(r, 1.0)
 		if d <= 1.15 and d < best_d:
 			best = id
 			best_d = d
-	return best
+	if best != "":
+		return best
+	var panel: Dictionary = layout.weapons
+	if HudLayout.weapon_main(panel, vs).grow(4).has_point(pos):
+		return "weapons:main"
+	var slots := HudLayout.weapon_slots(panel, vs)
+	for i in [0, 2]:
+		if slots[i].grow(4).has_point(pos):
+			return "weapons:%d" % i
+	return ""
 
 
 func _button_visible(id: String) -> bool:
@@ -572,6 +584,8 @@ func _board_avoid() -> Array[Rect2]:
 
 func _process(delta: float) -> void:
 	var real := delta / maxf(Engine.time_scale, 0.01)
+	if floorf(_time + real) != floorf(_time):
+		_update_safe_area()
 	_time += real
 	if editor_mode:
 		_place_minimap(size)
@@ -737,9 +751,11 @@ func _draw() -> void:
 	_draw_kill_x(u)
 	_draw_damage_numbers(u)
 	if not match_over:
-		_draw_controls(vs)
+		# The panel first: a button the player put over it stays in sight (and takes the taps there,
+		# see _widget_at); the gear sits on the panel's corner.
 		_draw_weapon_panel(vs)
-		_draw_button("settings", vs)          # the gear sits in the corner beside the weapon panel
+		_draw_controls(vs)
+		_draw_button("settings", vs)
 	_draw_hp_block(vs, u)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
@@ -1588,8 +1604,9 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	var feed := [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]]
 	var feed_c := Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0]))
 	var feed_w := HudDraw.text_parts(self, feed, feed_c, fs, 1, 3, "bold", 0.8)
+	_draw_weapon_panel(vs)                    # as in a match: the panel, the buttons, the gear
 	_draw_controls(vs)
-	_draw_weapon_panel(vs)
+	_draw_button("settings", vs)
 	# Labels under (or above) each widget, nudged so they never sit on top of each other or on
 	# another widget (the small corner gear's label goes beside it, not onto the weapon panel).
 	var taken: Array[Rect2] = [Rect2(feed_c - Vector2(feed_w * 0.5, fs * 0.6), Vector2(feed_w, fs * 1.2))]

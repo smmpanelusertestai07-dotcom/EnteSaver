@@ -50,13 +50,21 @@ listed here. If a part needs something new from the core, add it in its own file
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
   screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
   "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
-  (`HudLayout.DEFAULTS`) are the reference phone's places.
+  (`HudLayout.DEFAULTS`) are the reference phone's places, except PRONE (under the weapon panel,
+  left of SCOPE: the reference's place beside the score bar is under the panel below 18:9); no
+  two default touch areas overlap from 16:10 to 22:9 but the gear's on the panel's corner.
 - `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
-  dropped), `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
+  dropped; a widget saved exactly at an old default place in `MOVED` takes the new one),
+  `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
   `to_save(layout)` -> what `Game.save_hud_layout()` stores.
 - Pixels: `center(w, vs)`, `place(w, pos, vs)` (picks the anchor from the screen third),
-  `hit_rect(id, w, vs)`, `touch_radius(w, vs)` (round buttons, at least `MIN_TOUCH` = 0.036 h),
-  `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
+  `hit_rect(id, w, vs)`, `touch_radius(w, vs)` (round buttons, at least `MIN_TOUCH` = 0.036 h;
+  a tap counts to 1.15 x it), `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
+  `HudLayout.inset` (canvas px, x left, y right): a camera cutout's sides, which the HUD keeps up
+  to date from `UI.safe_margins(viewport)`; edge-anchored widgets move in by it.
+- The HUD draws the weapon panel, then the round buttons, then the gear, and a tap goes to what is
+  drawn on top (a button the player put over the panel takes the taps there); the editor
+  (scripts/hud_editor.gd) picks widgets the same way.
 
 ## Android log lines (read by tools/ci/emulator_test.sh)
 - `[LoneWolf] boot screen`, `intro sting`, `intro done`, `boot loaded <n> files in <s>s` (or
@@ -145,6 +153,10 @@ listed here. If a part needs something new from the core, add it in its own file
   ask first in a `Confirm` layer (`ConfirmOk`, `ConfirmCancel`; back closes it). With
   `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
   note (`EditHudNote`): leaving for the editor would abandon the match.
+- Camera cutout: `UI.safe_margins(viewport)` is the screen's left and right sides a cutout covers
+  (canvas px; zero on desktop builds; `UI.margins_for_test` stands in for one in checks);
+  `UI.keep_clear_of_cutout(control)` keeps a full-screen Control's content clear of it (the
+  lobby's main UI, the pause band's content; the results screen and the HUD do the same).
 - Performance: `PerfGovernor.attach(scene, level_scale, dynamic := true)` (scripts/perf_governor.gd)
   from `Arena.apply_graphics()` (dynamic 3D resolution, 0.6 at the least) and the lobby's
   `_apply_quality()` (measuring only). AUTO graphics: `Game.start_auto_graphics()` (a first guess
