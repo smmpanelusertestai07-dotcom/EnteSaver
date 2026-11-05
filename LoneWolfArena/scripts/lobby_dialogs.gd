@@ -2,47 +2,23 @@ class_name LobbyDialogs
 extends RefCounted
 ## The lobby's popups: the popup frame they share (open_modal / close_modal, one at a time, in
 ## `modal`; back() is the header X and Android back: a popup's own way back, else close), SELECT
-## MODE, HOW TO PLAY, the player name editor with the first-start name prompt, a confirmation
-## (confirm()), a message with one OK (notice()) and the "Quit the game?" dialog. The lobby makes
-## it (Lobby.dialogs) and its parts open popups through it; everything is built under the lobby's
-## UI layer.
-## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, NameEdit,
-## NameRandom, NamePreview, NameOk, ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel,
-## QuitConfirm. Markers: "name prompt" and
-## "ui name_ok" (the emulator test taps OK there).
+## MODE (with TRAINING GROUND's opponent chips), the player name editor with the first-start name
+## prompt, a confirmation (confirm()), a message with one OK (notice()) and the "Quit the game?"
+## dialog. The lobby makes it (Lobby.dialogs) and its parts open popups through it; everything is
+## built under the lobby's UI layer. (HOW TO PLAY is in SETTINGS: scripts/how_to_play.gd.)
+## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, Difficulty
+## with Diff_<EASY|NORMAL|HARD|DUMMY>, ModeStats, NameEdit, NameRandom, NamePreview, NameOk,
+## ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt"
+## and "ui name_ok" (the emulator test taps OK there).
 
 ## SELECT MODE: what each mode's card says under its name ({rounds}: Game.ROUNDS_TO_WIN).
 const MODE_INFO := {
-	"training": {"tag": "VS BOT", "lines": ["1 VS BOT: EASY, NORMAL OR HARD", "OR THE TARGET DUMMY, TO PRACTISE YOUR AIM"]},
+	"training": {"tag": "VS BOT", "lines": ["1 VS A BOT, OR THE TARGET DUMMY TO PRACTISE YOUR AIM:"]},
 	"lonewolf": {"tag": "ONLINE", "lines": ["1 VS 1 AGAINST ANOTHER PLAYER", "PLAYERS ONLINE, FRIENDS OR A CUSTOM ROOM"]},
 }
-## HOW TO PLAY. Texts may hold {rounds} (Game.ROUNDS_TO_WIN). MODES spans the width on top, the
-## other groups fill two columns under it.
-const HOW_TO_MODES := ["MODES", [
-	["v_crosshair", "TRAINING GROUND", "1 vs a bot (EASY, NORMAL or HARD), first to {rounds} rounds on CARGO CAGE. Or the TARGET DUMMY: it never goes down, no zone, no clock, nothing counted; CHANGE GUN on the weapon panel switches guns."],
-	["v_player", "LONE WOLF", "1 vs 1 online against another player, first to {rounds}. START opens the ONLINE list: duel a player online, a friend or a CUSTOM ROOM."],
-]]
-const HOW_TO := [
-	["MOVE & LOOK", [
-		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
-		["v_eye", "LOOK  ·  FREE LOOK", "Drag on the right side to turn the camera. Hold the eye and drag to look all around, even at your own face."],
-		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
-		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
-		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
-		["v_reload", "RELOAD", "Tap RELOAD beside FIRE or the weapon panel (or it reloads by itself when the magazine is empty)."],
-		["v_fist", "SWITCH  ·  FISTS", "SWITCH swaps the gun and the fists (it shows the other one). Fists out you run 15 % faster."],
-	]],
-	["ITEMS", [
-		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
-		["v_wall", "SHIELD WALL  x2", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
-		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest stops a third), 3 s fuse."],
-	]],
-	["THE MATCH", [
-		["v_player", "FIRST TO {rounds} ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win {rounds} rounds to win the match."],
-		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use (12 guns, fixed attachments); the pick takes turns."],
-		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
-	]],
-]
+## TRAINING GROUND's opponents in SELECT MODE: the bot's levels (Game.DIFFICULTY_NAMES), then the
+## target dummy.
+const DUMMY := "DUMMY"
 
 ## A popup closed (also when another one replaces it): a challenge that waited shows then.
 signal modal_closed
@@ -165,8 +141,10 @@ func notice(title: String, text: String) -> void:
 # ---------------------------------------------------------------- select mode
 
 ## SELECT MODE (the lobby's mode card opens it): the two modes as cards (art, name, map, what
-## START plays, this player's numbers in it). A tap picks one, which START then plays (kept as
-## the setting "mode"), and closes the popup.
+## START plays, this player's numbers in it). A tap on a card picks its mode, which START then
+## plays (kept as the setting "mode"), and closes the popup; on TRAINING GROUND's card the chips
+## pick its opponent too (a bot's level, kept as the setting "difficulty", or the target dummy for
+## this session: Game.practice), which also picks TRAINING GROUND.
 func select_mode() -> void:
 	var v := open_modal("SELECT MODE", 980.0)
 	var row := HBoxContainer.new()
@@ -178,13 +156,14 @@ func select_mode() -> void:
 		16, UI.TEXT_DIM, "semi"))
 
 
-## One mode's card in SELECT MODE (node Mode_<m>): yellow outline and tick on the current mode.
+## One mode's card in SELECT MODE (node Mode_<m>): yellow outline and tick on the current mode;
+## TRAINING GROUND's has the opponent chips (row Difficulty).
 func _mode_choice(m: String) -> Button:
 	var info: Dictionary = MODE_INFO.get(m, MODE_INFO[Game.DEFAULT_MODE])
 	var card := Button.new()
 	card.name = "Mode_" + m
 	card.focus_mode = Control.FOCUS_NONE
-	card.custom_minimum_size = Vector2(440, 340)
+	card.custom_minimum_size = Vector2(440, 372)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
@@ -210,8 +189,13 @@ func _mode_choice(m: String) -> Button:
 	tag.position = Vector2(12, 12)
 	tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(tag)
+	# The text under the art fills the card down to its bottom edge (the numbers sit there).
 	var v := VBoxContainer.new()
-	v.position = Vector2(18, art_h + 8)
+	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	v.offset_left = 18
+	v.offset_right = -18
+	v.offset_top = art_h + 8
+	v.offset_bottom = -12
 	v.add_theme_constant_override("separation", 0)
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(v)
@@ -225,98 +209,80 @@ func _mode_choice(m: String) -> Button:
 	v.add_child(head)
 	for line: String in info.lines:
 		v.add_child(UI.label(line, 15, UI.TEXT_DIM, "bold"))
+	if m == "training":
+		v.add_child(UI.spacer(8))
+		v.add_child(_opponent_chips())
+	var fill := UI.spacer(0)
+	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(fill)
 	var n: Dictionary = (Game.profile.modes as Dictionary).get(m, {})
 	var stats := UI.label("MATCHES %d   ·   WINS %d   ·   KILLS %d" % [int(n.get("matches", 0)), int(n.get("wins", 0)), int(n.get("kills", 0))],
 		15, UI.TEXT, "bold")
 	stats.name = "ModeStats"
-	v.add_child(UI.spacer(4))
 	v.add_child(stats)
 	card.pressed.connect(func() -> void:
 		Audio.play("ui_select", -6.0)
-		Game.mode = m
-		Game.save_settings()
-		close_modal()
-		lobby._refresh_mode())
+		_pick(m))
 	return card
 
 
-# ---------------------------------------------------------------- how to play
-
-func how_to_play() -> void:
-	var v := open_modal("HOW TO PLAY", 1040.0)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 520)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	v.add_child(scroll)
-	var page := VBoxContainer.new()
-	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	page.add_theme_constant_override("separation", 6)
-	scroll.add_child(page)
-	# MODES across the top: the two modes side by side.
-	page.add_child(UI.section(String(HOW_TO_MODES[0]), 18))
-	var modes := HBoxContainer.new()
-	modes.name = "HowToModes"
-	modes.add_theme_constant_override("separation", 24)
-	page.add_child(modes)
-	for it: Array in HOW_TO_MODES[1]:
-		var item := _howto_item(String(it[0]), _rounds_text(String(it[1])), _rounds_text(String(it[2])))
-		item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		modes.add_child(item)
-	page.add_child(UI.spacer(6))
-	var cols := HBoxContainer.new()
-	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cols.add_theme_constant_override("separation", 24)
-	page.add_child(cols)
-	var left := VBoxContainer.new()
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 6)
-	var right := VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 6)
-	cols.add_child(left)
-	cols.add_child(right)
-	for gi in HOW_TO.size():
-		var g: Array = HOW_TO[gi]
-		var col := left if gi == 0 else right
-		if gi > 1:
-			col.add_child(UI.spacer(6))
-		col.add_child(UI.section(String(g[0]), 18))
-		for it in g[1]:
-			col.add_child(_howto_item(String(it[0]), _rounds_text(String(it[1])), _rounds_text(String(it[2]))))
-	UI.drag_scroll(scroll, page)          # a finger drag that starts on an item scrolls the page
+## TRAINING GROUND's opponent (row Difficulty): EASY, NORMAL and HARD bots, then the target dummy
+## (Diff_<name>); the current one is lit while TRAINING GROUND is the mode.
+func _opponent_chips() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "Difficulty"
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var group := ButtonGroup.new()
+	for i in Game.DIFFICULTY_NAMES.size():
+		row.add_child(_opponent_chip(String(Game.DIFFICULTY_NAMES[i]), i, group))
+	row.add_child(_opponent_chip(DUMMY, -1, group))
+	return row
 
 
-## A HOW TO PLAY text with {rounds} filled in (the rounds a match is played to).
-static func _rounds_text(t: String) -> String:
-	return t.format({"rounds": Game.ROUNDS_TO_WIN})
+## A chip for TRAINING GROUND's opponent: a bot level (idx into Game.DIFFICULTY_NAMES) or, with
+## idx -1, the target dummy. A tap picks it with TRAINING GROUND and closes SELECT MODE.
+func _opponent_chip(text: String, idx: int, group: ButtonGroup) -> Button:
+	var b := Button.new()
+	b.name = "Diff_" + text
+	b.toggle_mode = true
+	b.button_group = group
+	b.button_pressed = Game.practice if idx < 0 else (not Game.practice and idx == int(Game.settings.difficulty))
+	b.focus_mode = Control.FOCUS_NONE
+	b.text = text
+	b.custom_minimum_size = Vector2(96, UI.TOUCH_MIN)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.add_theme_font_override("font", UI.font("bold"))
+	b.add_theme_font_size_override("font_size", 17)
+	var off := UI.chamfer(Color(0, 0, 0, 0.55), 8, 1, Color(1, 1, 1, 0.2), 8.0, ["tl", "br"], 0.0)
+	var hov := UI.chamfer(Color(1, 1, 1, 0.1), 8, 1, Color(1, 1, 1, 0.35), 8.0, ["tl", "br"], 0.0)
+	var on := UI.chamfer(UI.ACCENT, 8, 0, Color.TRANSPARENT, 8.0, ["tl", "br"], 0.0)
+	b.add_theme_stylebox_override("normal", off)
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", on)
+	b.add_theme_stylebox_override("hover_pressed", on)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_color_override("font_color", UI.TEXT)
+	b.add_theme_color_override("font_hover_color", UI.TEXT)
+	b.add_theme_color_override("font_pressed_color", UI.INK)
+	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		Game.practice = idx < 0
+		if idx >= 0:
+			Game.settings.difficulty = idx
+		_pick("training"))
+	return b
 
 
-func _howto_item(icon_name: String, title: String, text: String) -> Control:
-	var p := PanelContainer.new()
-	var st := UI.chamfer(Color(1, 1, 1, 0.045), 6, 0, Color.TRANSPARENT, 10.0, ["br"])
-	st.content_margin_top = 5
-	st.content_margin_bottom = 5
-	p.add_theme_stylebox_override("panel", st)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 12)
-	var ic := PanelContainer.new()
-	var ics := UI.box(Color(0, 0, 0, 0.45), 21, 1, Color(1, 1, 1, 0.18), 0.0)
-	ics.set_content_margin_all(7)
-	ic.add_theme_stylebox_override("panel", ics)
-	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ic.add_child(UI.icon(icon_name, 28, UI.TEXT))
-	h.add_child(ic)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", -3)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(UI.label(title, 17, UI.ACCENT, "bold"))
-	var t := UI.label(text, 15, UI.TEXT, "semi")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	t.custom_minimum_size = Vector2(380, 0)
-	v.add_child(t)
-	h.add_child(v)
-	p.add_child(h)
-	return p
+## A mode picked in SELECT MODE: kept (the setting "mode", saved with the bot's level), the popup
+## closes and the lobby's mode card follows.
+func _pick(m: String) -> void:
+	Game.mode = m
+	Game.save_settings()
+	close_modal()
+	lobby._refresh_mode()
 
 
 # ---------------------------------------------------------------- player name
@@ -383,7 +349,6 @@ func edit_name(first := false) -> void:
 			return
 		Game.profile.name = n
 		lobby._name_label.text = n
-		lobby._plate_label.text = n
 		Game.profile.name_set = true
 		Game.save_profile()
 		close_modal()

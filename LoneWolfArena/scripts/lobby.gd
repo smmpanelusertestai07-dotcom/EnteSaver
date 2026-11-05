@@ -1,25 +1,26 @@
 class_name Lobby
 extends Node3D
 ## Lobby: our character large on a lit hexagonal podium in a container yard at sunset (cheap
-## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
-## UI in the battle-royale lobby layout (original art, nothing to buy: no currency, no store):
-## player card (profile picture, name + EDIT, level, XP line: a tap opens PROFILE) top-left, logo +
-## glyph buttons top-right, a
-## text menu on the left (ONLINE 1 VS 1, WARDROBE, CUSTOM HUD, SETTINGS, HOW TO PLAY) and, bottom
-## right, match stats, the opponent chips (TRAINING GROUND: EASY / NORMAL / HARD bot or the
-## DUMMY), the mode card (TRAINING GROUND or LONE WOLF on CARGO CAGE; a tap opens SELECT MODE)
-## and the big START. START plays the card's mode: TRAINING GROUND shows the match loading
-## overlay (Loading.start_match) and enters the arena; LONE WOLF opens the ONLINE window (a duel
-## starts when a challenge is accepted). WARDROBE opens the outfit picker (every outfit free:
-## item cards, preview on the podium, EQUIP / BACK).
-## This file has the 3D stage, the top bar, the menus, the mode card, START, the settings panel
-## and input. Four parts have their own files: helpers the lobby makes, which build under `ui`
-## and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, SELECT MODE,
-## HOW TO PLAY, the name editor, the quit dialog), LobbyFriends (`friends`: ONLINE 1 VS 1, custom
-## rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE) and LobbyProfile
-## (`profile_ui`: PROFILE and another player's card).
-## Node names used by the screenshot walkthrough: StartButton, ModeCard, Diff_<EASY|NORMAL|HARD|
-## DUMMY>, SettingsButton, BundlesButton (WARDROBE), Bundle_<id>, EquipButton.
+## 3D: a few boxes and props, fog, one shadowed light), in the middle; drag on it to turn it.
+## UI in the reference lobby's layout (original art, nothing to buy: no currency, no store):
+## the player card (profile picture, name + EDIT, level, XP line: a tap opens PROFILE) top-left;
+## the logo, the ping chip, FRIENDS and the settings gear top-right; the bar of main buttons
+## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
+## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
+## the opponent is picked too) and the big START. START plays the card's mode: TRAINING GROUND
+## shows the match loading overlay (Loading.start_match) and enters the arena; LONE WOLF opens the
+## ONLINE window (a duel starts when a challenge is accepted). WARDROBE opens the outfit picker
+## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
+## are in SETTINGS (the gear).
+## This file has the 3D stage, the top bar, the bottom bar, the mode card, START, the settings
+## panel and input. Four parts have their own files: helpers the lobby makes, which build under
+## `ui` and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, SELECT
+## MODE with the opponent chips, the name editor, the quit dialog), LobbyFriends (`friends`:
+## ONLINE 1 VS 1, FRIENDS, custom rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE)
+## and LobbyProfile (`profile_ui`: PROFILE and another player's card).
+## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard, BottomBar,
+## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
+## badge), SettingsButton, Bundle_<id>, EquipButton.
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -31,7 +32,7 @@ const CAM_WARD_DIST := 3.75
 const CAM_WARD_Y := 1.0
 const CAM_WARD_LOOK_Y := 1.13
 const CAM_FOV := 38.0
-const HERO_X := 0.41
+const HERO_X := 0.5
 const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
 const SKYLINE := "res://assets/ui/lobby_skyline.png"
@@ -50,8 +51,6 @@ var start_btn: Button
 var mode_card: Button
 var _mode_label: Label
 var _mode_sub: Label
-var _diff_row: HBoxContainer
-var _stats_row: HBoxContainer
 ## The lobby's parts in their own files (see above).
 var dialogs := LobbyDialogs.new(self)
 var friends := LobbyFriends.new(self)
@@ -74,9 +73,6 @@ var _drag_index := -1
 var _idle_t := 0.0
 var _name_label: Label
 var _avatar_view: Control
-var _bundle_label: Label
-var _name_plate: Control
-var _plate_label: Label
 var _time := 0.0
 var _cam_t := 1.0
 var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
@@ -547,14 +543,9 @@ func _build_ui() -> void:
 	var top := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.5)], [0.16, Color(0, 0, 0, 0.0)], [0.8, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.55)]])
 	UI.full_rect(top)
 	root.add_child(top)
-	var left := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.45)], [0.25, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
-	UI.full_rect(left)
-	root.add_child(left)
 	_build_top_bar(root)
-	_build_left_menu(root)
 	_build_right_column(root)
-	_build_bottom_left(root)
-	_build_name_plate(root)
+	_build_bottom_bar(root)
 
 
 func _build_top_bar(root: Control) -> void:
@@ -658,10 +649,11 @@ func _build_top_bar(root: Control) -> void:
 	top_right.alignment = BoxContainer.ALIGNMENT_END
 	top_right.add_theme_constant_override("separation", 8)
 	root.add_child(top_right)
-	var info := UI.glyph_button("v_info", UI.TOUCH_MIN, "?")
-	info.name = "HelpButton"
-	info.pressed.connect(_how_to_play)
-	top_right.add_child(info)
+	# FRIENDS (the FRIENDS tab of the ONLINE window; the unread badge sits on it) and the gear.
+	var pals := UI.glyph_button("v_friends", UI.TOUCH_MIN, "FR")
+	pals.name = "FriendsButton"
+	pals.pressed.connect(_open_friends.bind("friends"))
+	top_right.add_child(pals)
 	var gear := UI.glyph_button("v_settings", UI.TOUCH_MIN, "SET")
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
@@ -704,71 +696,69 @@ func _pencil_button(plate := Vector2(56, 56)) -> Button:
 	return b
 
 
-## The text menu, centred on the left edge between the player card and the outfit line.
-func _build_left_menu(root: Control) -> void:
-	var menu := VBoxContainer.new()
-	menu.name = "Menu"
-	menu.add_theme_constant_override("separation", 6)
-	root.add_child(menu)
+## The bar of main buttons bottom-left, as the reference lobby's: WARDROBE and ONLINE 1 VS 1, a
+## glyph and a caption each with a thin divider between, on a dark translucent strip.
+func _build_bottom_bar(root: Control) -> void:
+	var bar := PanelContainer.new()
+	bar.name = "BottomBar"
+	var st := UI.chamfer(Color(0.02, 0.02, 0.025, 0.62), 12, 1, Color(1, 1, 1, 0.14), 0.0, ["tr"])
+	st.content_margin_left = 6
+	st.content_margin_right = 16
+	bar.add_theme_stylebox_override("panel", st)
+	bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE)
+	bar.offset_left = 12
+	bar.offset_bottom = -12
+	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	root.add_child(bar)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	bar.add_child(row)
 	var items := [
-		["ONLINE 1 VS 1", "v_player", "FriendsButton", _open_friends],
 		["WARDROBE", "v_wardrobe", "BundlesButton", _open_wardrobe],
-		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
-		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
-		["HOW TO PLAY", "v_info", "HowToPlayButton", _how_to_play],
+		["ONLINE 1 VS 1", "v_online", "OnlineButton", _open_friends.bind("online")],
 	]
-	for it in items:
-		menu.add_child(_menu_row(String(it[0]), String(it[1]), String(it[2]), it[3]))
-	menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT, Control.PRESET_MODE_MINSIZE)
-	menu.grow_vertical = Control.GROW_DIRECTION_BOTH
+	for i in items.size():
+		if i > 0:
+			var line := ColorRect.new()
+			line.color = Color(1, 1, 1, 0.22)
+			line.custom_minimum_size = Vector2(1, 26)
+			line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(line)
+		var it: Array = items[i]
+		row.add_child(_bar_button(String(it[0]), String(it[1]), String(it[2]), it[3]))
 
 
-func _menu_row(text: String, icon_name: String, node_name: String, action: Callable) -> Button:
+## One button of the bottom bar: the glyph and the caption, white, accent while pressed.
+func _bar_button(text: String, icon_name: String, node_name: String, action: Callable) -> Button:
 	var b := Button.new()
 	b.name = node_name
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(262, UI.TOUCH_MIN)
+	b.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
 	b.text = text
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.icon = UI.icon_texture(icon_name)
-	b.expand_icon = true
-	b.add_theme_constant_override("icon_max_width", 30)
-	b.add_theme_constant_override("h_separation", 12)
+	b.add_theme_constant_override("icon_max_width", 28)      # (not expanded: its width counts in the button's)
+	b.add_theme_constant_override("h_separation", 10)
 	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 25)
-	var empty := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
-	empty.content_margin_left = 22
-	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
-		b.add_theme_stylebox_override(st, empty)
+	b.add_theme_font_size_override("font_size", 22)
+	var flat := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
+	flat.content_margin_left = 16
+	flat.content_margin_right = 16
+	var lit := flat.duplicate() as StyleBoxFlat
+	lit.bg_color = Color(1, 1, 1, 0.08)
+	for state in ["normal", "focus"]:
+		b.add_theme_stylebox_override(state, flat)
+	for state in ["hover", "pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(state, lit)
 	b.add_theme_color_override("font_color", UI.TEXT)
-	b.add_theme_color_override("font_hover_color", UI.ACCENT)
+	b.add_theme_color_override("font_hover_color", UI.TEXT)
 	b.add_theme_color_override("font_pressed_color", UI.ACCENT)
-	b.add_theme_constant_override("outline_size", 4)
-	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.55))
+	b.add_theme_color_override("font_hover_pressed_color", UI.ACCENT)
+	b.add_theme_constant_override("outline_size", 3)
+	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
 	b.add_theme_color_override("icon_normal_color", UI.TEXT)
-	b.add_theme_color_override("icon_hover_color", UI.ACCENT)
+	b.add_theme_color_override("icon_hover_color", UI.TEXT)
 	b.add_theme_color_override("icon_pressed_color", UI.ACCENT)
-	# The dark plate fading to the right is a child drawn BEHIND the button: a Button's own
-	# `draw` signal fires after it has drawn its text and icon, so a plate drawn there would
-	# cover (and grey out) the caption.
-	var plate := Control.new()
-	plate.name = "Plate"
-	plate.show_behind_parent = true
-	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UI.full_rect(plate)
-	plate.draw.connect(func() -> void:
-		var s := plate.size
-		var a := 0.86 if b.is_pressed() else 0.74
-		var pts := PackedVector2Array([Vector2(0, 2), Vector2(s.x, 2), Vector2(s.x - 14, s.y - 2), Vector2(0, s.y - 2)])
-		plate.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, a), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.0), Color(0, 0, 0, a)])))
-	b.add_child(plate)
-	# only the accent tick is drawn over the button (left of the icon, never over the text)
-	b.draw.connect(func() -> void:
-		b.draw_rect(Rect2(0, 2, 4, b.size.y - 4), UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.3)))
-	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
-		b.connect(sig, func() -> void:
-			b.queue_redraw()
-			plate.queue_redraw())
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
 		action.call())
@@ -822,47 +812,6 @@ func _build_right_column(root: Control) -> void:
 	_mode_sub.name = "ModeFormat"
 	_mode_sub.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	line.add_child(_mode_sub)
-	# TRAINING GROUND's opponent above the card: a bot level or the target dummy.
-	_diff_row = HBoxContainer.new()
-	_diff_row.name = "Difficulty"
-	_diff_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	_diff_row.offset_left = -430
-	_diff_row.offset_right = -12
-	_diff_row.offset_top = -234
-	_diff_row.offset_bottom = -178
-	_diff_row.add_theme_constant_override("separation", 6)
-	_diff_row.alignment = BoxContainer.ALIGNMENT_END
-	root.add_child(_diff_row)
-	var group := ButtonGroup.new()
-	for i in Game.DIFFICULTY_NAMES.size():
-		_diff_row.add_child(_diff_chip(String(Game.DIFFICULTY_NAMES[i]), i, group))
-	_diff_row.add_child(_diff_chip("DUMMY", -1, group))
-	# Match stats chips (above the chips; one row lower when LONE WOLF hides them).
-	var stats := HBoxContainer.new()
-	stats.name = "Stats"
-	stats.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	stats.offset_left = -430
-	stats.offset_right = -12
-	stats.offset_top = -278
-	stats.offset_bottom = -242
-	stats.add_theme_constant_override("separation", 6)
-	stats.alignment = BoxContainer.ALIGNMENT_END
-	root.add_child(stats)
-	_stats_row = stats
-	for s in [["v_player", "MATCHES", Game.profile.matches], ["v_trophy", "WINS", Game.profile.wins], ["v_skull", "KILLS", Game.profile.kills]]:
-		var p := PanelContainer.new()
-		p.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.55), 6, 1, Color(1, 1, 1, 0.12), 10.0, ["br"]))
-		var h := HBoxContainer.new()
-		h.add_theme_constant_override("separation", 6)
-		h.add_child(UI.icon(String(s[0]), 20, UI.TEXT_DIM))
-		var v := UI.label(str(int(s[2])), 22, UI.TEXT, "number")
-		v.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		h.add_child(v)
-		var c := UI.label(String(s[1]), 13, UI.TEXT_DIM, "bold")
-		c.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		h.add_child(c)
-		p.add_child(h)
-		stats.add_child(p)
 	_refresh_mode()
 
 
@@ -903,104 +852,30 @@ func _draw_mode_card() -> void:
 	c.draw_rect(Rect2(0, s.y - 2, s.x, 2), UI.ACCENT if hot else Color(UI.AMBER, 0.8))
 
 
-## The mode card, the opponent chips (TRAINING GROUND only) and the stats row follow Game.mode and
-## the chosen opponent (Game.practice: the target dummy).
+## The mode card follows Game.mode and the opponent chosen in SELECT MODE (the bot's level, or
+## Game.practice: the target dummy).
 func _refresh_mode() -> void:
-	var training := Game.mode == "training"
 	_mode_label.text = Game.mode_name()
-	if not training:
-		_mode_sub.text = "1 VS 1 ONLINE"
-	elif Game.practice:
-		_mode_sub.text = "TARGET DUMMY"
-	else:
-		_mode_sub.text = "1 VS BOT  ·  FIRST TO %d" % Game.rounds_to_win()
-	_diff_row.visible = training
-	_stats_row.offset_top = -278.0 if training else -214.0
-	_stats_row.offset_bottom = _stats_row.offset_top + 36.0
+	_mode_sub.text = mode_format()
 	mode_card.queue_redraw()
 
 
-## A chip for TRAINING GROUND's opponent: a bot level (idx into Game.DIFFICULTY_NAMES) or, with
-## idx -1, the target dummy.
-func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
-	var b := Button.new()
-	b.name = "Diff_" + text
-	b.toggle_mode = true
-	b.button_group = group
-	b.button_pressed = Game.practice if idx < 0 else (not Game.practice and idx == int(Game.settings.difficulty))
-	b.focus_mode = Control.FOCUS_NONE
-	b.text = text
-	b.custom_minimum_size = Vector2(100, 56)      # a 56 px touch target: the chips sit close together
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 17)
-	var off := UI.chamfer(Color(0, 0, 0, 0.55), 8, 1, Color(1, 1, 1, 0.2), 8.0, ["tl", "br"], 0.0)
-	var hov := UI.chamfer(Color(1, 1, 1, 0.1), 8, 1, Color(1, 1, 1, 0.35), 8.0, ["tl", "br"], 0.0)
-	var on := UI.chamfer(UI.ACCENT, 8, 0, Color.TRANSPARENT, 8.0, ["tl", "br"], 0.0)
-	b.add_theme_stylebox_override("normal", off)
-	b.add_theme_stylebox_override("hover", hov)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT)
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		Game.practice = idx < 0
-		if idx >= 0:
-			Game.settings.difficulty = idx
-			Game.save_settings()
-		_refresh_mode())
-	return b
-
-
-func _build_bottom_left(root: Control) -> void:
-	var box := VBoxContainer.new()
-	box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	box.offset_left = 22
-	box.offset_right = 420
-	box.offset_top = -78
-	box.offset_bottom = -12
-	box.add_theme_constant_override("separation", 2)
-	root.add_child(box)
-	var cap := UI.label("OUTFIT", 13, UI.TEXT_DIM, "bold")
-	box.add_child(cap)
-	_bundle_label = UI.shadowed(UI.label("", 22, UI.TEXT, "bold"))
-	_bundle_label.name = "OutfitName"
-	box.add_child(_bundle_label)
-	_update_bundle_label(String(Game.profile.bundle))
-	var ver := UI.label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 13, Color(1, 1, 1, 0.45), "semi")
-	box.add_child(ver)
-
-
-## Name plate under the character's feet (follows the projected position).
-func _build_name_plate(root: Control) -> void:
-	_name_plate = PanelContainer.new()
-	_name_plate.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.6), 6, 1, Color(1, 1, 1, 0.14), 14.0, ["tl", "br"]))
-	_name_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	h.add_child(UI.icon("v_player", 18, UI.ACCENT))
-	_plate_label = UI.label(String(Game.profile.name), 18, UI.TEXT, "bold")
-	h.add_child(_plate_label)
-	_name_plate.add_child(h)
-	root.add_child(_name_plate)
+## The mode card's format line: LONE WOLF "1 VS 1 ONLINE"; TRAINING GROUND "BOT: <level>  ·  FIRST
+## TO n", or "TARGET DUMMY".
+static func mode_format() -> String:
+	if Game.mode != "training":
+		return "1 VS 1 ONLINE"
+	if Game.practice:
+		return "TARGET DUMMY"
+	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	return "BOT: %s  ·  FIRST TO %d" % [level, Game.rounds_to_win()]
 
 
 ## The player card top-left follows the profile (PROFILE picks the picture, the editor the name).
 func refresh_player_card() -> void:
 	_name_label.text = String(Game.profile.name)
-	_plate_label.text = String(Game.profile.name)
 	if _avatar_view:
 		_avatar_view.queue_redraw()
-
-
-## The outfit line bottom-left: the outfit's name in its own colour.
-func _update_bundle_label(id: String) -> void:
-	var info := CharacterModel.bundle_info(id)
-	_bundle_label.text = String(info.name)
-	_bundle_label.add_theme_color_override("font_color", LobbyWardrobe.outfit_color(String(info.id)))
 
 
 ## START plays the mode on the card: TRAINING GROUND loads the match against the bot (or the
@@ -1037,10 +912,6 @@ func _find_settings() -> SettingsPanel:
 
 
 # ---------------------------------------------------------------- the parts in their own files
-
-func _how_to_play() -> void:
-	dialogs.how_to_play()
-
 
 func _edit_name(first := false) -> void:
 	dialogs.edit_name(first)
@@ -1093,14 +964,14 @@ func _input(event: InputEvent) -> void:
 			_idle_t = 0.0
 
 
-## Where a drag turns the character: around it, between the menus.
+## Where a drag turns the character: around it, clear of the bars and the mode card.
 func _in_drag_zone(p: Vector2) -> bool:
 	var vs := get_viewport().get_visible_rect().size
 	var x := p.x / vs.x
 	var y := p.y / vs.y
 	if wardrobe:
 		return x > 0.62 and y > 0.1 and y < 0.68
-	return x > 0.24 and x < 0.66 and y > 0.1 and y < 0.86
+	return x > HERO_X - 0.22 and x < HERO_X + 0.16 and y > 0.1 and y < 0.86
 
 
 func _process(delta: float) -> void:
@@ -1123,12 +994,6 @@ func _process(delta: float) -> void:
 		start_btn.queue_redraw()
 	wardrobe_ui.process()
 	profile_ui.process(delta)
-	if _name_plate and _main_ui.visible and camera:
-		var feet := Vector3(model.global_position.x, PODIUM_TOP, 0.55)
-		if not camera.is_position_behind(feet):
-			var p := camera.unproject_position(feet)
-			# (in _main_ui, which a camera cutout may move in from the screen's left edge)
-			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5 + _main_ui.offset_left, 0)).round()
 
 
 ## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the
@@ -1148,7 +1013,6 @@ func _notification(what: int) -> void:
 		profile_ui.close()
 	elif wardrobe:
 		model.apply_bundle(String(Game.profile.bundle))
-		_update_bundle_label(String(Game.profile.bundle))
 		_close_wardrobe()
 	else:
 		dialogs.confirm_quit()

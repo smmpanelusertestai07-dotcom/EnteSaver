@@ -4,7 +4,7 @@ extends RefCounted
 ## portrait and its own colour, the info strip, EQUIP / BACK) while the camera moves so the
 ## character stands on the right, wearing the outfit the selected card shows. Every outfit is
 ## free and unlocked: no prices, no ranks. The lobby makes it (Lobby.wardrobe_ui) and opens it
-## from WARDROBE (node BundlesButton); back closes it there too.
+## from WARDROBE in its bottom bar (node BundlesButton); back closes it there too.
 ## Node names used by the screenshot walkthrough: Wardrobe, Bundle_<id>, EquipButton, BackButton.
 
 const CARD_SIZE := Vector2(168, 222)
@@ -123,7 +123,6 @@ func open() -> void:
 	back.name = "BackButton"
 	back.pressed.connect(func() -> void:
 		lobby.model.apply_bundle(String(Game.profile.bundle))
-		lobby._update_bundle_label(String(Game.profile.bundle))
 		close())
 	row.add_child(back)
 	_ward_equip = UI.hero_button("EQUIP", 38, Vector2(240, 64))
@@ -131,7 +130,6 @@ func open() -> void:
 	_ward_equip.pressed.connect(func() -> void:
 		Game.profile.bundle = preview_bundle
 		Game.save_profile()
-		lobby._update_bundle_label(preview_bundle)
 		close())
 	row.add_child(_ward_equip)
 	_fill_wardrobe()
@@ -204,7 +202,6 @@ func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
 		Audio.play("ui_select", -6.0)
 		preview_bundle = id
 		lobby.model.apply_bundle(id)
-		lobby._update_bundle_label(id)
 		_update_ward_info()
 		for other in _ward_grid.get_children():
 			(other as Control).queue_redraw())
