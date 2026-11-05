@@ -46,7 +46,7 @@ func run(autotest: Node) -> int:
 		_fail("not friends after the request was accepted")
 	if not cloud.friend_requests.is_empty() or not (Game.profile.friend_out as Dictionary).is_empty():
 		_fail("friend requests left over after the answer")
-	# ALL PLAYERS: the other phone's signed card (v2) is kept by the broker and listed whole; a
+	# ALL PLAYERS: the other phone's signed card (v3, with its career) is kept by the broker and listed whole; a
 	# change of its banner publishes it again.
 	cloud.start_directory()
 	if not await _until(func() -> bool: return cloud.directory.has(other), 20.0):
@@ -56,15 +56,32 @@ func run(autotest: Node) -> int:
 		var level := clampi(1 + int(them.xp) / Game.XP_PER_LEVEL, 1, Cloud.CARD_LEVEL_MAX)
 		if String(card.name) != String(cloud.peers[other].name):
 			_fail("the card's name differs from the lobby's")
-		if int(card.v) != 2 or card.avatar != them.avatar or card.banner != them.banner or int(card.level) != level \
+		if int(card.v) != 3 or (card.career as Dictionary).size() != 5 or card.avatar != them.avatar or card.banner != them.banner or int(card.level) != level \
 				or card.signature != them.signature:
-			_fail("the other player's v2 card did not come through whole: %s" % str(card))
-		at.log_line("card v2: picture %s, banner %s, LV %d, \"%s\"" % [card.avatar, card.banner, int(card.level), card.signature])
+			_fail("the other player's v3 card did not come through whole: %s" % str(card))
+		at.log_line("card v3: picture %s, banner %s, LV %d, \"%s\", career %s" % [card.avatar, card.banner, int(card.level), card.signature,
+			str(card.career)])
 		Game.profile.banner = me.then
 		if not await _until(func() -> bool: return String((cloud.directory.get(other, {}) as Dictionary).get("banner", "")) == them.then, 20.0):
 			_fail("the other player's new banner never arrived (a changed card is published again)")
 	cloud.stop_directory()
 	at.log_line("friends: %s (code %s)" % [Game.is_friend(other), Cloud.friend_code(other)])
+	# Friends chat (NetChat): each phone sends the other a message, encrypted to the friend's key and
+	# left on the relay; it arrives and is kept (unread), and its waiting copy is taken off the relay.
+	var why := "?"
+	for _i in 12:
+		why = cloud.send_friend_chat(other, "hello from %s!" % ("host" if host else "guest"))
+		if why == "":
+			break
+		await at.wait(0.5)
+	if why != "":
+		_fail("the friends chat message could not be sent (%s)" % why)
+	var want := "HELLO FROM %s!" % ("GUEST" if host else "HOST")
+	if not await _until(func() -> bool: return NetChat.messages(other).any(func(m: Array) -> bool:
+			return not bool(m[1]) and String(m[2]) == want), 20.0):
+		_fail("the friend's chat message never arrived")
+	else:
+		at.log_line("friends chat: \"%s\", unread %d" % [want, NetChat.unread(other)])
 	# Custom room.
 	if host:
 		cloud.open_room(PIN, {"rounds": 1, "walls": true, "ammo": true, "frags": false}, CODE)
@@ -98,6 +115,19 @@ func run(autotest: Node) -> int:
 	await at.wait(1.5)
 	var p: Fighter = arena.get("player")
 	var b: Fighter = arena.get("bot")
+	# The online HUD layer: the round trip to the other phone is measured, and the host's chat line
+	# (the room's encryption) shows in the guest's feed.
+	var hud_net: HudNet = (arena.get("hud") as Node).get_node_or_null("HudNet")
+	if hud_net == null:
+		_fail("the online HUD layer (ping, chat) is missing")
+	else:
+		if not await _until(func() -> bool: return cloud.peer_rtt >= 0 and cloud.relay_rtt >= 0, 10.0):
+			_fail("no round trip measured (opponent %d ms, relay %d ms)" % [cloud.peer_rtt, cloud.relay_rtt])
+		at.log_line("ping: opponent %d ms, relay %d ms" % [cloud.peer_rtt, cloud.relay_rtt])
+		if host:
+			hud_net.send("nice shot")
+		elif not await _until(func() -> bool: return hud_net.feed.any(func(e: Dictionary) -> bool: return String(e.text) == "NICE SHOT"), 10.0):
+			_fail("the opponent's chat line never showed")
 	if host:
 		p.deploy_shield()
 		await at.wait(0.3)

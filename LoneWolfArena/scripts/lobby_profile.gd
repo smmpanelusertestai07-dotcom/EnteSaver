@@ -1222,6 +1222,8 @@ func _fill_player() -> void:
 		DisplayServer.clipboard_set(id)
 		_copied(copy))
 	row.add_child(copy)
+	if friend and not blocked:
+		row.add_child(LobbyNet.chat_button(lobby, id, who, "card:" + _player_back, 124.0))     # (scripts/lobby_net.gd)
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(gap)
@@ -1235,6 +1237,9 @@ func _fill_player() -> void:
 	if sig == "":
 		sig_text = "NO SIGNATURE YET" if not card.is_empty() else "NO NAME CARD SEEN YET"
 	_player_box.add_child(_field("SIGNATURE", sig_text, 21, "semi", UI.TEXT if sig != "" else UI.TEXT_DIM, "PlayerSignature"))
+	var career := LobbyNet.career_block(card, w)        # card v3: their CAREER, or that they hide it
+	if career:
+		_player_box.add_child(career)
 	var note := _player_note
 	if note == "" and blocked:
 		note = "BLOCKED: THEIR CHALLENGES AND FRIEND REQUESTS ARE IGNORED"

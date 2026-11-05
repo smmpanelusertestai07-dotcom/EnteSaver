@@ -185,10 +185,10 @@ func _net_begin() -> void:
 
 func _on_net_state(s: PackedFloat32Array) -> void:
 	# The last value is the sender's round: a packet from before a round's reset is dropped. The
-	# other phone sends 10 a second; far more is a flood (each can switch the gun and the stance).
+	# other phone sends 20 a second; far more is a flood (each can switch the gun and the stance).
 	if s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index and phase != Phase.BREAK \
 			and _net_rate_ok("state", 30.0, 30.0):
-		(bot as RemoteFighter).apply_state(s)
+		(bot as RemoteFighter).apply_state(s, Game.session.last_state_sent_ms)
 
 
 func _on_net_event(kind: String, data: Array) -> void:
@@ -674,7 +674,7 @@ func _physics_process(delta: float) -> void:
 	_apply_room_rules()
 	if online and phase != Phase.END:
 		_net_t += delta
-		if _net_t >= float(Game.session.state_interval):
+		if _net_t >= float(Game.session.state_interval) - 0.002:      # (3 ticks of 1/60 s add up to a hair under 0.05)
 			_net_t = 0.0
 			Game.session.send_state(RemoteFighter.pack(player, round_index))
 	match phase:

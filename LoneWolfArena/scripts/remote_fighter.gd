@@ -1,8 +1,8 @@
 class_name RemoteFighter
 extends Bot
 ## The other phone's player in an online match (stands in for the bot, so the arena, HUD and
-## results treat it the same). It has no AI: it follows the state that phone sends (Cloud: 10
-## times a second, smoothed), shows its shots, and never loses HP by itself: hits on it are sent
+## results treat it the same). It has no AI: it follows the state that phone sends (Cloud: 20
+## times a second, drawn a little in the past between the states: NetSmoother), shows its shots, and never loses HP by itself: hits on it are sent
 ## to its phone, which applies them and reports its HP and its death back.
 
 const STATE_SIZE := 10
@@ -12,6 +12,7 @@ var _net_yaw := 0.0
 var _net_pitch := 0.0
 var _net_floor := true
 var _net_heal := false
+var _smooth := NetSmoother.new()
 
 
 ## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; flags: 1 sprint, 2 ads,
@@ -28,17 +29,18 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_net_yaw = yaw
 	_net_pitch = 0.0
 	_net_heal = false
+	_smooth.clear()
 
 
-func apply_state(s: PackedFloat32Array) -> void:
+## A state from the other phone; `sent_ms` is its clock when it sent it (-1: an older build).
+func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 	if not alive:
 		return
 	var pos := Vector3(s[0], s[1], s[2])
-	if not (is_finite(pos.x) and is_finite(pos.y) and is_finite(pos.z)) or pos.length() > 500.0:
+	if not (is_finite(pos.x) and is_finite(pos.y) and is_finite(pos.z)) or pos.length() > 500.0 or not is_finite(s[3]) \
+			or not is_finite(s[4]):
 		return
-	_net_pos = pos
-	_net_yaw = s[3]
-	_net_pitch = clampf(s[4], -1.5, 1.5)
+	_smooth.push(pos, s[3], clampf(s[4], -1.5, 1.5), float(sent_ms), float(Time.get_ticks_msec()))
 	var st := clampi(int(s[5]), 0, 2)
 	if st != int(stance):
 		set_stance(st as Fighter.Stance, true)
@@ -65,15 +67,21 @@ func _physics_process(delta: float) -> void:
 	if _net_pos == Vector3.INF:
 		_net_pos = global_position
 		_net_yaw = aim_yaw
+	var at := _smooth.sample(float(Time.get_ticks_msec()))
+	if not at.is_empty():
+		_net_pos = at.pos
+		_net_yaw = float(at.yaw)
+		_net_pitch = float(at.pitch)
 	var prev := global_position
 	if global_position.distance_to(_net_pos) > 4.0:
 		global_position = _net_pos          # too far behind (a hitch): jump (no run, no step sound)
 		prev = global_position
 	else:
-		global_position = global_position.lerp(_net_pos, 1.0 - exp(-14.0 * delta))
+		# Already smooth (NetSmoother): a quick blend only takes the edge off a correction.
+		global_position = global_position.lerp(_net_pos, 1.0 - exp(-30.0 * delta))
 	velocity = (global_position - prev) / maxf(delta, 0.0001)
-	aim_yaw = lerp_angle(aim_yaw, _net_yaw, 1.0 - exp(-18.0 * delta))
-	aim_pitch = lerpf(aim_pitch, _net_pitch, 1.0 - exp(-18.0 * delta))
+	aim_yaw = lerp_angle(aim_yaw, _net_yaw, 1.0 - exp(-30.0 * delta))
+	aim_pitch = lerpf(aim_pitch, _net_pitch, 1.0 - exp(-30.0 * delta))
 	rotation.y = aim_yaw
 	var w := weapon()
 	w.tick(delta)

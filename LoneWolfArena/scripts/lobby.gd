@@ -666,6 +666,7 @@ func _build_top_bar(root: Control) -> void:
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
 	top_right.add_child(gear)
+	root.add_child(NetPing.lobby_chip())        # the round trip to the relay (scripts/net_ping.gd)
 
 
 ## The pencil (EDIT) button: a 56 px touch target (the 720 px canvas) with its plate drawn in the

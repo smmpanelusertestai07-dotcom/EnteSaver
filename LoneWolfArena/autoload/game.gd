@@ -47,6 +47,11 @@ const DEFAULT_SETTINGS := {
 	"vol_music": 45,
 	"difficulty": 1,
 	"last_pick": "ar",
+	# ONLINE (SettingsPanel's tab, scripts/settings_online.gd)
+	"chat": true,                 # chat in an online match (NetChat)
+	"friend_chat": true,          # FRIENDS CHAT: true friends only, false off
+	"show_career": true,          # SHOW MY CAREER: the player card carries a career summary (Cloud card v3)
+	"voice_chat": false,          # push-to-talk in an online match (NetVoice; asks for the microphone)
 }
 
 ## Behaviour that is not a setting (the settings screen keeps to graphics, sensitivity,
@@ -68,7 +73,8 @@ const SETTING_RANGES := {
 	"crosshair_size": [50, 150], "aim_precision": [0, 2], "left_fire": [0, 1],
 }
 ## On/off settings: anything but true or false falls back to the default.
-const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects"]
+const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects",
+	"chat", "friend_chat", "show_career", "voice_chat"]
 ## Every frame rate the setting can hold; the settings offer those the screen can show
 ## (fps_choices).
 const FPS_OPTIONS := [30, 60, 90, 120]

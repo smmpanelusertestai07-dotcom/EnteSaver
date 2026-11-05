@@ -397,6 +397,7 @@ func _refresh_friends() -> void:
 		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size(), ",".join(PackedStringArray(blocked.keys()))]
 	for id in peers:
 		sig += ",a" if cloud.friend_asked(String(id)) else ""
+	sig += "|u" + NetChat.unread_key()          # a friend's CHAT button shows the unread messages
 	if sig == _net_sig:
 		return
 	_net_sig = sig
@@ -564,6 +565,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var who := String(friends[id].name) if String(friends[id].name) != "" else "PLAYER"
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen)
+		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends"))       # (scripts/lobby_net.gd)
 		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 56))
 		rm.name = "FriendRemove"
 		rm.pressed.connect(func() -> void:

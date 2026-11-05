@@ -14,7 +14,8 @@ extends Control
 ##    the STANDARD / FAST presets;
 ##  - CONTROLS: dynamic joystick, aim precision, the left fire button, crosshair colour and size
 ##    (with a live preview), custom HUD;
-##  - SOUND: master, effects, music.
+##  - SOUND: master, effects, music;
+##  - ONLINE: chat, friends chat, SHOW MY CAREER, voice chat (scripts/settings_online.gd).
 ## Questions (RESET, EXTREME) open over the panel as node "Confirm" (buttons "ConfirmOk" and
 ## "ConfirmCancel"); back closes them first.
 ## _show_tab(i) takes the index in TABS (the screenshot walkthrough opens 2 = CONTROLS).
@@ -23,15 +24,16 @@ extends Control
 
 signal closed
 
-const TABS := ["BASIC", "SENSITIVITY", "CONTROLS", "SOUND"]
+const TABS := ["BASIC", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE"]
 ## Menu order on screen (indices into TABS).
-const ORDER := [0, 2, 1, 3]
+const ORDER := [0, 2, 1, 3, 4]
 ## The settings each tab shows, and its RESET puts back.
 const TAB_KEYS := [
 	["graphics_auto", "graphics", "fps", "show_fps", "visual_effects", "vibration"],
 	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook", "sens_fire"],
 	["dynamic_joystick", "aim_precision", "left_fire", "crosshair_color", "crosshair_size"],
 	["vol_master", "vol_sfx", "vol_music"],
+	["chat", "friend_chat", "show_career", "voice_chat"],
 ]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
 const SCENE_KEYS := ["visual_effects"]
@@ -251,6 +253,8 @@ func _show_tab(i: int) -> void:
 			_build_controls()
 		3:
 			_build_sound()
+		4:
+			SettingsOnline.build(self)
 	# A finger drag that starts on a row scrolls the tab (a tap still presses); a slider keeps its
 	# own drag, so moving one never scrolls the list.
 	UI.drag_scroll(_scroll, _body)
