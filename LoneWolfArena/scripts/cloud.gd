@@ -442,6 +442,9 @@ func _parse() -> void:
 					_subscribe(ROOT + "/u/" + my_id)
 					_subscribe(ROOT + "/fr/" + my_id + "/+")      # friend requests waiting for this phone
 					_subscribe(ROOT + "/fa/" + my_id + "/+")      # answers to the ones it sent
+					if not (Game.profile.withdrawn as Array).is_empty():
+						_send_withdrawals()                        # requests taken back while offline
+						Game.save_profile()
 					if _dir_want:
 						_subscribe(ROOT + "/p/+")
 					_card_t = 0.0                                  # (re)publish this phone's card now
@@ -551,7 +554,7 @@ func _on_inbox(d: Dictionary) -> void:
 				cancel_invite(false)
 				invite_answered.emit(false, who_out)
 		"acc":
-			if String(_outgoing.get("id", "")) == from and _tagged(d, _outgoing, "acc", from):
+			if String(_outgoing.get("id", "")) == from and not Game.is_blocked(from) and _tagged(d, _outgoing, "acc", from):
 				_last_heard = Time.get_ticks_msec()     # the room handshake follows
 		"frq":
 			# A friend request: its key proves the sender's id. Already friends: say yes again.
@@ -627,6 +630,26 @@ func waiting_for() -> String:
 	return String(_outgoing.get("name", ""))
 
 
+## Blocking a player (LobbyProfile, before Game.block) ends what is going on with them here: the
+## challenge this phone sent them (they could still accept it and start the match) is called
+## off, theirs waiting for an answer is dropped unanswered (like any challenge from a blocked
+## player), they lose their seat in the custom room this phone hosts, and the friend request it
+## sent them is taken back (withdraw_request; no friends_changed: the caller redraws its list).
+## From then on their challenges, answers, requests and room messages are ignored
+## (Game.is_blocked).
+func drop_player(id: String) -> void:
+	if String(_outgoing.get("id", "")) == id and not in_session:
+		cancel_invite()
+	if String(_incoming.get("id", "")) == id:
+		_incoming = {}
+		invite_cancelled.emit()
+	if String(room_guest.get("id", "")) == id:
+		room_guest = {}
+		room_changed.emit()
+	if friend_asked(id):
+		withdraw_request(id, false)
+
+
 func answer(accept: bool, rules := {}) -> void:
 	if _incoming.is_empty():
 		return
@@ -676,6 +699,7 @@ func request_friend(peer_id: String) -> bool:
 		return false
 	var who := String(peers[peer_id].name) if peers.has(peer_id) else String(directory[peer_id].name)
 	out[peer_id] = {"name": who, "t": int(Time.get_unix_time_from_system())}
+	(Game.profile.withdrawn as Array).erase(peer_id)     # a new request: no older one to delete any more
 	Game.save_profile()
 	_publish_waiting("frq", peer_id)
 	if peers.has(peer_id):
@@ -688,14 +712,36 @@ func friend_asked(peer_id: String) -> bool:
 	return (Game.profile.friend_out as Dictionary).has(peer_id)
 
 
-## Takes back a friend request this phone sent (blocking that player): no longer waiting for an
-## answer here, and its retained copy on the broker is deleted, so it does not reach them later.
-func withdraw_request(to: String) -> void:
-	if (Game.profile.friend_out as Dictionary).erase(to):
-		Game.save_profile()
-	if _connected and Game.is_player_id(to) and my_id != "":
+## Takes back a friend request this phone sent (blocking that player, drop_player): no longer
+## waiting for an answer here, and its retained copy on the broker is deleted, so it does not
+## reach them later (a phone that is offline gets it when it comes back). Offline the delete waits
+## in the profile ("withdrawn", kept over a restart) and goes out as soon as the relay answers
+## again (CONNACK). notify: emits friends_changed (a caller that redraws its own list passes
+## false: the signal would also pop up a friend request that is still waiting to be seen).
+func withdraw_request(to: String, notify := true) -> void:
+	if not Game.is_player_id(to):
+		return
+	(Game.profile.friend_out as Dictionary).erase(to)
+	var owed: Array = Game.profile.withdrawn
+	if not owed.has(to):
+		owed.append(to)
+	while owed.size() > Game.MAX_REQUESTS:
+		owed.pop_front()
+	_send_withdrawals()
+	Game.save_profile()
+	if notify:
+		friends_changed.emit()
+
+
+## Deletes the retained copies of the friend requests taken back (profile "withdrawn") once
+## connected; the list is then empty (the caller saves the profile).
+func _send_withdrawals() -> void:
+	var owed: Array = Game.profile.withdrawn
+	if not _connected or my_id == "" or owed.is_empty():
+		return
+	for to: String in owed:
 		_publish(ROOT + "/fr/" + to + "/" + my_id, PackedByteArray(), true)
-	friends_changed.emit()
+	owed.clear()
 
 
 func answer_friend(peer_id: String, accept: bool) -> void:
@@ -1034,6 +1080,12 @@ static func rules_from(v: Variant) -> Dictionary:
 func _room_send(d: Dictionary) -> void:
 	if _room == "":
 		return
+	_publish(ROOT + "/r/" + _room, _room_packet(d))
+
+
+## A room message as it goes out: version byte, IV, the AES-256-CBC of the JSON (with this phone's
+## id and the next counter), then the HMAC-SHA256 over all of that.
+func _room_packet(d: Dictionary) -> PackedByteArray:
 	_seq += 1
 	d["f"] = my_id
 	d["n"] = _seq
@@ -1049,7 +1101,7 @@ func _room_send(d: Dictionary) -> void:
 	body.append_array(ctx.update(plain))
 	ctx.finish()
 	body.append_array(_crypto.hmac_digest(HashingContext.HASH_SHA256, _mac, body))
-	_publish(ROOT + "/r/" + _room, body)
+	return body
 
 
 func _on_room(msg: PackedByteArray) -> void:
@@ -1077,7 +1129,10 @@ func _on_room(msg: PackedByteArray) -> void:
 	match kind:
 		"join", "joined":
 			# Each side says "join" every second until the other answers (a message sent before
-			# the other phone subscribed is lost); "joined" is the answer.
+			# the other phone subscribed is lost); "joined" is the answer. No match starts with a
+			# player blocked meanwhile (drop_player has normally left their room already).
+			if Game.is_blocked(String(opponent.get("id", ""))):
+				return
 			if kind == "join":
 				_room_send({"k": "joined"})
 			_outgoing = {}

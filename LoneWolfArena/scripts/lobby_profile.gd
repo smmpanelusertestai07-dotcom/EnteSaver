@@ -1220,8 +1220,8 @@ func _ask_block(id: String, who: String, unblock: bool) -> void:
 		"friend and they are left out of your lists. You can unblock them in PROFILE, under BLOCKED.") % who, "BLOCK", done, reopen, true)
 
 
+## A block, online part first (Cloud.drop_player: a challenge either way, their room seat and the
+## friend request sent to them end), then the profile (Game.block).
 func _block(id: String) -> void:
-	var sv := Game.cloud_service()
-	if sv.friend_asked(id):
-		sv.withdraw_request(id)          # the request this phone sent them stops waiting for them
+	Game.cloud_service().drop_player(id)
 	Game.block(id)

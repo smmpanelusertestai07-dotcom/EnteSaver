@@ -43,6 +43,9 @@ func _ready() -> void:
 	_test_honour()
 	_test_signed_cards()
 	_test_card_v2()
+	_test_blocking()
+	_test_id_search()
+	_test_online_status()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -775,11 +778,11 @@ func _test_profile_keys() -> void:
 	var d: Dictionary = Game.DEFAULT_PROFILE
 	var missing := ["profile_version", "guest_ok", "created", "avatar", "banner", "signature", "deaths", "headshots", "damage",
 		"shots", "hits", "rounds_won", "rounds_lost", "time_played", "modes", "recent", "blocked", "friend_in",
-		"friend_out"].filter(func(k: String) -> bool: return not d.has(k))
+		"friend_out", "withdrawn"].filter(func(k: String) -> bool: return not d.has(k))
 	_check(missing.is_empty(), "the profile has the new keys (missing %s)" % [missing])
 	_check(d.profile_version == Game.PROFILE_VERSION and d.guest_ok == false and d.created == 0 and d.avatar == "emblem"
 		and d.banner == "default" and d.signature == "" and d.recent.is_empty() and d.blocked.is_empty()
-		and d.friend_in.is_empty() and d.friend_out.is_empty(), "the new profile keys start empty")
+		and d.friend_in.is_empty() and d.friend_out.is_empty() and d.withdrawn.is_empty(), "the new profile keys start empty")
 	_check(Game.PROFILE_COUNTERS.all(func(k: String) -> bool: return d[k] == 0)
 		and Game.MODE_NAMES.keys().all(func(m: String) -> bool: return d.modes[m] == {"matches": 0, "wins": 0, "kills": 0}),
 		"every counter starts at 0, per mode too")
@@ -812,7 +815,7 @@ func _test_profile_keys() -> void:
 		"shots": 10, "hits": 25, "headshots": 40, "time_played": -60, "rounds_won": 4.0, "rounds_lost": 2,
 		"modes": {"training": {"matches": 3, "wins": 9, "kills": -2}, "battle": {"matches": 5}},
 		"recent": recent, "blocked": ids.slice(0, 60) + [ids[0], "zz", 42], "friend_in": reqs, "friend_out": reqs.duplicate(true),
-		"friends": pals}, true)
+		"friends": pals, "withdrawn": [ids[3], 7, "zz", ids[3]] + ids.slice(4, 60)}, true)
 	Game._sanitize_profile()
 	var p := Game.profile
 	_check(p.guest_ok == false and p.created == 0 and p.avatar == "emblem" and p.banner == "default",
@@ -826,6 +829,7 @@ func _test_profile_keys() -> void:
 	_check(p.recent.size() == Game.MAX_RECENT and p.recent[0] == {"id": ids[0], "name": "FOE 0", "t": 1700000000}
 		and p.recent[1].id == ids[1] and p.recent[19].id == ids[19], "profile: 20 recent players at most, newest first, each once")
 	_check(p.blocked.size() == Game.MAX_BLOCKED and p.blocked == ids.slice(0, 50), "profile: 50 blocked ids at most, valid and each once")
+	_check(p.withdrawn == ids.slice(3, 53), "profile: 50 requests to delete at most, valid ids each once (%d)" % p.withdrawn.size())
 	for k in ["friend_in", "friend_out"]:
 		var r: Dictionary = p[k]
 		_check(r.size() == Game.MAX_REQUESTS and r.has(ids[0]) and not r.has("bad") and not r.has(ids[65]) and not r.has(ids[50])
@@ -845,6 +849,7 @@ func _test_profile_keys() -> void:
 		"per-mode wins": func(x: Dictionary) -> void: x.modes.training.wins = 2,
 		"recent players": func(x: Dictionary) -> void: x.recent[0].name = "FAKE",
 		"blocks": func(x: Dictionary) -> void: (x.blocked as Array).clear(),
+		"requests to delete": func(x: Dictionary) -> void: (x.withdrawn as Array).append(ids[4]),
 		"friend requests": func(x: Dictionary) -> void: x.friend_in[ids[3]] = {"name": "X", "t": 1},
 		"guest login": func(x: Dictionary) -> void: x.guest_ok = false,
 	}
@@ -1190,3 +1195,154 @@ func _card_listed(cl: Cloud, card: Dictionary, id: String) -> bool:
 	cl.directory.clear()
 	cl._check_card(JSON.stringify(card).to_utf8_buffer())
 	return cl.directory.has(id)
+
+
+## Blocking: Game.block drops the friend and the requests either way (MAX_BLOCKED at most: one
+## more lifts the oldest block), Game.unblock lifts it. The online service (Cloud) ignores a
+## blocked player's challenge, acceptance, friend request, room request and room messages, and
+## Cloud.drop_player ends what was going on with them: the challenge sent to them (they could
+## still accept it), theirs, their seat in the hosted room and the friend request sent to them,
+## whose deletion on the relay waits for the next connection when offline.
+func _test_blocking() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var at := Game.autotest
+	Game.autotest = "unit"          # nothing is written to user://
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var p := Game.profile
+	var x := "blocked-x".sha256_text().left(32)     # the id the "public key" "blocked-x" makes
+	var y := "player-y".sha256_text().left(32)
+	var z := "player-z".sha256_text().left(32)
+	p.friends[x] = {"name": "XENA"}
+	p.friend_in[x] = {"name": "XENA", "t": 1}
+	p.friend_out[x] = {"name": "XENA", "t": 1}
+	p.friends[y] = {"name": "YURI"}
+	Game.block(x)
+	_check(Game.is_blocked(x) and not Game.is_blocked(y) and not Game.is_friend(x) and not p.friend_in.has(x)
+		and not p.friend_out.has(x) and Game.is_friend(y), "a block drops the friend and the requests either way, nobody else's")
+	Game.block(x)
+	Game.block("not-an-id")
+	_check(p.blocked.size() == 1, "a player is blocked once, a junk id never")
+	Game.unblock(x)
+	_check(not Game.is_blocked(x) and p.blocked.is_empty(), "UNBLOCK lifts the block")
+	var many := []
+	for i in Game.MAX_BLOCKED + 1:
+		many.append(("pest%d" % i).sha256_text().left(32))
+		Game.block(many[i])
+	_check(p.blocked.size() == Game.MAX_BLOCKED and not Game.is_blocked(many[0]) and Game.is_blocked(many[1])
+		and Game.is_blocked(many[Game.MAX_BLOCKED]), "at most %d blocks: one more lifts the oldest" % Game.MAX_BLOCKED)
+	p.blocked.clear()
+	# What the online service ignores from a blocked player (a control player y gets through).
+	var cl := Cloud.new()
+	cl.my_id = "me".sha256_text().left(32)
+	var heard := {"invited": 0, "cancelled": 0, "room": 0, "friends": 0, "started": 0}
+	cl.invited.connect(func(_who: String) -> void: heard.invited += 1)
+	cl.invite_cancelled.connect(func() -> void: heard.cancelled += 1)
+	cl.room_changed.connect(func() -> void: heard.room += 1)
+	cl.friends_changed.connect(func() -> void: heard.friends += 1)
+	cl.session_started.connect(func(_host: bool) -> void: heard.started += 1)
+	Game.block(x)
+	cl._on_inbox({"t": "inv", "from": x, "sec": "AAAA", "name": "XENA"})
+	cl._on_inbox({"t": "frq", "from": x, "pk": "blocked-x", "name": "XENA"})
+	cl.room_code = "123456"
+	cl.room_pin = "1234"
+	var room_key := cl._room_key("123456", "1234")
+	cl._on_room_ask({"t": "ask", "from": x, "pk": "blocked-x", "name": "XENA", "mac": cl._room_tag(room_key, "ask", x)})
+	_check(not cl.has_invite() and heard.invited == 0 and not p.friend_in.has(x) and cl.room_guest.is_empty(),
+		"a blocked player's challenge, friend request and room request are ignored")
+	cl._on_room_ask({"t": "ask", "from": y, "pk": "player-y", "name": "YURI", "mac": cl._room_tag(room_key, "ask", y)})
+	_check(String(cl.room_guest.get("id", "")) == y, "an unblocked player with the password gets the room seat (control)")
+	# A challenge sent before the block: their acceptance and their room's "join" start nothing.
+	var keys := Crypto.new()
+	var invite := {"id": x, "name": "XENA", "bundle": "default", "room": keys.generate_random_bytes(16).hex_encode(),
+		"aes": keys.generate_random_bytes(32), "mac": keys.generate_random_bytes(32), "t": Time.get_ticks_msec()}
+	var them := Cloud.new()
+	them.my_id = x
+	them._aes = invite.aes
+	them._mac = invite.mac
+	cl._outgoing = invite.duplicate()
+	cl._enter_room(invite)
+	cl._last_heard = 0
+	cl._on_inbox({"t": "acc", "from": x, "mac": cl._tag(invite, "acc", x)})
+	var acc_heard := cl._last_heard
+	cl._on_room(them._room_packet({"k": "join"}))
+	_check(acc_heard == 0 and not cl.in_session and heard.started == 0, "a blocked player's acceptance and room join start no match")
+	Game.unblock(x)
+	cl._on_inbox({"t": "acc", "from": x, "mac": cl._tag(invite, "acc", x)})
+	acc_heard = cl._last_heard
+	cl._on_room(them._room_packet({"k": "join"}))
+	_check(acc_heard > 0 and cl.in_session and heard.started == 1, "the same acceptance and join from an unblocked player start it (control)")
+	cl.end_session("left")
+	# drop_player (BLOCK on a card) ends the challenge to them, theirs, their room seat and the
+	# friend request sent to them; offline the request's deletion waits for the next connection.
+	cl._outgoing = invite.duplicate()
+	cl._enter_room(invite)
+	cl._incoming = invite.duplicate()
+	cl.room_guest = {"id": x, "name": "XENA"}
+	p.friend_out[x] = {"name": "XENA", "t": 1}
+	heard.cancelled = 0
+	heard.room = 0
+	heard.friends = 0
+	cl.drop_player(x)
+	_check(cl.waiting_for() == "" and cl._room == "" and cl.opponent.is_empty() and not cl.has_invite() and heard.cancelled == 1
+		and cl.room_guest.is_empty() and heard.room == 1, "drop_player calls off the challenge either way and frees their room seat")
+	_check(not cl.friend_asked(x) and p.withdrawn == [x] and heard.friends == 0,
+		"drop_player takes the friend request back without a friend-request alert; offline its deletion waits")
+	cl._outgoing = {"id": y, "name": "YURI", "bundle": "default", "room": "00", "aes": invite.aes, "mac": invite.mac, "t": 0}
+	cl.drop_player(x)
+	_check(cl.waiting_for() == "YURI", "drop_player leaves a challenge to another player alone")
+	cl._outgoing = {}
+	cl._rx = PackedByteArray([0x20, 0x02, 0x00, 0x00])           # CONNACK: the relay answers again
+	cl._parse()
+	_check(cl.status == "online" and p.withdrawn.is_empty(), "the deletion of a request taken back offline goes out on the next connection")
+	cl.withdraw_request(x, false)
+	_check(p.withdrawn.is_empty(), "online a request is taken back at once (nothing left waiting)")
+	p.withdrawn = [z]
+	cl.directory[z] = {"name": "ZED", "bundle": "default", "pk": "", "ts": 1}
+	_check(cl.request_friend(z) and cl.friend_asked(z) and p.withdrawn.is_empty(),
+		"a new request to a player cancels the deletion still waiting for them")
+	cl.free()
+	them.free()
+	Game.profile = saved_profile
+	Game.autotest = at
+
+
+## The FRIENDS tab's search matches an ID by its start: the 8-character code or the start of the
+## whole ID that COPY puts on the clipboard (the search box keeps 14 characters, upper-case).
+func _test_id_search() -> void:
+	var id := "someone".sha256_text().left(32)
+	_check(LobbyFriends._id_matches(id, Cloud.friend_code(id)) and LobbyFriends._id_matches(id, id.to_upper().left(14))
+		and not LobbyFriends._id_matches(id, Cloud.friend_code("someone else".sha256_text().left(32))),
+		"an ID search matches the code or the start of the whole ID, nothing else")
+
+
+## The ONLINE tab's status line goes by the players it lists (LobbyFriends._refresh_friends): with
+## every player online blocked, the list is empty and it still looks for players.
+func _test_online_status() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var saved_cloud := Game.cloud
+	var at := Game.autotest
+	Game.autotest = "unit"
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var x := "blocked-x".sha256_text().left(32)
+	var cl := Cloud.new()
+	cl.status = "online"
+	cl.peers[x] = {"name": "XENA", "bundle": "default", "pk": "", "seen": 0}
+	Game.cloud = cl
+	Game.block(x)
+	var lf := LobbyFriends.new(null)
+	lf._net_scroll = ScrollContainer.new()
+	lf._net_list = VBoxContainer.new()
+	lf._net_scroll.add_child(lf._net_list)
+	lf._net_status = Label.new()
+	lf._refresh_friends()
+	var blocked_only := [lf._net_status.text, lf._net_list.get_child_count()]
+	Game.unblock(x)
+	lf._refresh_friends()
+	_check(blocked_only == ["LOOKING FOR PLAYERS ONLINE...", 0] and lf._net_status.text == "PLAYERS ONLINE"
+		and lf._net_list.get_child_count() == 1, "the ONLINE status counts only the players it lists, not blocked ones (%s)" % str(blocked_only))
+	lf._net_scroll.free()
+	lf._net_status.free()
+	cl.free()
+	Game.cloud = saved_cloud
+	Game.profile = saved_profile
+	Game.autotest = at

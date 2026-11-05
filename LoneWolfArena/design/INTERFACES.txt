@@ -178,7 +178,12 @@ listed here. If a part needs something new from the core, add it in its own file
   `Cloud.directory` card, `PlayerStatus` (online now / last seen), `PlayerId` + `PlayerCopy`,
   `PlayerDuel` (online only, `LobbyFriends.challenge`), `PlayerFriend` (ADD FRIEND / REQUEST SENT /
   REMOVE FRIEND), `PlayerBlock` (BLOCK / UNBLOCK: `Game.block` / `Game.unblock`); both ask first.
-  X and back reopen the ONLINE tab `back_to` ("" just closes).
+  X and back reopen the ONLINE tab `back_to` ("" just closes). BLOCK first calls
+  `Cloud.drop_player(id)`: the challenge sent to them is called off (they could still accept it),
+  theirs is dropped, they lose their seat in the hosted room and the friend request sent to them
+  is taken back (`withdraw_request(id, notify)`: offline its deletion on the relay waits in the
+  profile's "withdrawn" until the next connection); Cloud ignores a blocked player's challenge,
+  acceptance, friend request, room request and room "join".
 - Modes (both 1 vs 1 on CARGO CAGE): `Game.mode` is "training" (TRAINING GROUND, vs a bot or the
   target dummy, the default) or "lonewolf" (LONE WOLF, online 1 vs 1), kept as the setting
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and

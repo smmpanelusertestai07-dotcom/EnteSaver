@@ -320,6 +320,7 @@ func _refresh_friends() -> void:
 	var cloud := Game.cloud_service()
 	var waiting := cloud.waiting_for()
 	var peers: Dictionary = cloud.peers
+	var listed := peers.keys().filter(func(i: String) -> bool: return not Game.is_blocked(i))     # blocked players are left out
 	if cloud.status != "online":
 		match cloud.status:
 			"preparing":
@@ -337,7 +338,7 @@ func _refresh_friends() -> void:
 			if not cloud.friend_requests.is_empty() else "FRIENDS"
 	elif _net_kind == "room":
 		_net_status.text = "ROOM OPEN: SHARE ITS ID AND PASSWORD" if cloud.room_code != "" else ""
-	elif peers.is_empty():
+	elif listed.is_empty():
 		_net_status.text = "LOOKING FOR PLAYERS ONLINE..."
 	else:
 		_net_status.text = "PLAYERS ONLINE"
@@ -363,9 +364,8 @@ func _refresh_friends() -> void:
 	if _net_kind == "friends":
 		_fill_friends(cloud, waiting)
 	else:
-		for id: String in peers:
-			if not Game.is_blocked(id):
-				_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
+		for id: String in listed:
+			_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
 		if _net_kind == "online":
 			var offline := _offline_players(cloud, "")
 			if not offline.is_empty():

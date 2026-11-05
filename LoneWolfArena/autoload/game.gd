@@ -104,6 +104,9 @@ const DEFAULT_PROFILE := {
 	"friends": {},               # id -> {"name"}: players who accepted a friend request (online)
 	"friend_in": {},             # id -> {"name", "t"}: friend requests to answer (t: unix time)
 	"friend_out": {},            # id -> {"name", "t"}: friend requests sent, not answered yet
+	# ids: friend requests taken back while offline (a block): the relay's waiting copy is deleted
+	# at the next connection (Cloud.withdraw_request)
+	"withdrawn": [],
 	"recent": [],                # [{"id", "name", "t"}]: the latest online opponents, newest first
 	"blocked": [],               # ids whose invites and friend requests are ignored (see block())
 	# The last counted matches, newest first (record_match, MAX_HISTORY at most): [{"result" (won,
@@ -392,6 +395,7 @@ func _sanitize_profile() -> void:
 	profile.friends = _player_map(profile.get("friends"), MAX_FRIENDS, false)
 	profile.friend_in = _player_map(profile.get("friend_in"), MAX_REQUESTS, true)
 	profile.friend_out = _player_map(profile.get("friend_out"), MAX_REQUESTS, true)
+	profile.withdrawn = _id_list(profile.get("withdrawn"), MAX_REQUESTS)
 	var recent := []
 	var seen := {}
 	var saved_recent: Variant = profile.get("recent")
@@ -403,13 +407,7 @@ func _sanitize_profile() -> void:
 				recent.append({"id": String(id), "name": clean_name(String((e as Dictionary).get("name", ""))),
 					"t": _count((e as Dictionary).get("t"), UNIX_MAX)})
 	profile.recent = recent
-	var blocked := []
-	var saved_blocked: Variant = profile.get("blocked")
-	if saved_blocked is Array:
-		for id: Variant in saved_blocked:
-			if blocked.size() < MAX_BLOCKED and is_player_id(id) and not blocked.has(id):
-				blocked.append(String(id))
-	profile.blocked = blocked
+	profile.blocked = _id_list(profile.get("blocked"), MAX_BLOCKED)
 	var history := []
 	var saved_history: Variant = profile.get("history")
 	if saved_history is Array:
@@ -461,6 +459,16 @@ func _player_map(saved: Variant, limit: int, timed: bool) -> Dictionary:
 				if timed:
 					entry.t = _count((e as Dictionary).get("t"), UNIX_MAX)
 				out[String(id)] = entry
+	return out
+
+
+## A list of player ids from a saved value: valid ids only, each once, at most `limit`.
+func _id_list(saved: Variant, limit: int) -> Array:
+	var out := []
+	if saved is Array:
+		for id: Variant in saved:
+			if out.size() < limit and is_player_id(id) and not out.has(id):
+				out.append(String(id))
 	return out
 
 
