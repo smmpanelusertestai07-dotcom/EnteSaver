@@ -256,6 +256,9 @@ func _play_again_together(first: TeamArenaNet) -> void:
 	if arena.phase != 1:
 		_fail("the second co-op match never reached FIGHT")
 		return
+	# Both copies are in the fight before the host ends its round (a copy still loading would not
+	# take the host's "rend", and the second match would never end there).
+	await _barrier("again_fight")
 	var mate := arena.slot_fighter(1 if host else 0)
 	at.log_line("second co-op DUO up: host %s, my slot %d, slots %d, session_team %s" % [arena.am_host, arena.my_slot, arena.slots.size(),
 		str(Game.session.session_team)])
