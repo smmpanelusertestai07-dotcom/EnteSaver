@@ -6,7 +6,8 @@ extends Node
 ## is cut to 8 kHz mono and packed as IMA ADPCM (4 bits a sample) in FRAME_MS frames (`encode`),
 ## each sent over the match room's encryption (Cloud.send_voice, rate limited on both sides) and
 ## never stored. The other phone keeps a small jitter buffer (START_FRAMES before it starts,
-## MAX_QUEUE at most) and plays it through an AudioStreamGenerator; the speaker button mutes it.
+## MAX_QUEUE at most) and plays it through an AudioStreamGenerator on the bus OUT_BUS, whose volume
+## is the SOUND tab's VOICE CHAT (setting vol_voice, Game.apply_settings); the speaker button mutes it.
 
 const RATE := 8000
 const FRAME_MS := 100
@@ -19,6 +20,7 @@ const START_FRAMES := 2
 const MAX_QUEUE := 6
 const START_WAIT_S := 0.25
 const BUS := "VoiceIn"
+const OUT_BUS := "Voice"                                 # made by Game (_setup_audio_buses)
 const MIC_PERMISSION := "android.permission.RECORD_AUDIO"
 
 const STEPS := [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80,
@@ -142,6 +144,7 @@ func _ready() -> void:
 	gen.buffer_length = 0.6
 	_out = AudioStreamPlayer.new()
 	_out.stream = gen
+	_out.bus = OUT_BUS
 	add_child(_out)
 
 

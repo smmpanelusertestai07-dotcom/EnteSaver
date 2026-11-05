@@ -5,6 +5,12 @@ extends RefCounted
 ## custom room's changes and the session that starts an online match. The lobby makes it
 ## (Lobby.friends) and calls on_lobby_ready() from its _ready, on_lobby_exit() from its _exit_tree
 ## and process() every frame; popups open through Lobby.dialogs.
+## A friend's chat message that comes in while the lobby is up shows as a notice at the top
+## (LobbyNet.toast: "NAME: first words", a soft sound; a tap opens that chat), unless that chat is
+## open, a match is loading, FRIENDS CHAT is off or the friend is blocked; the ONLINE 1 VS 1 row
+## carries the unread count (LobbyNet.set_badge). A friend request that comes in while a popup is
+## open shows as a notice too (with no popup open it gets its own popup); with FRIEND REQUESTS off
+## none come in (Cloud.requests_allowed) and none pop up.
 ## A tap on a player's name in a list (ONLINE, ALL PLAYERS, the FRIENDS tab's friends and search
 ## results) opens their player card (LobbyProfile.open_player); blocked players are left out of
 ## every list (Game.block).
@@ -28,6 +34,8 @@ var _dir_on := false                   # this window asked the cloud for the pla
 var _place := {}                       # the tab and scroll a player's card was opened from: {"kind", "scroll"}
 var _scroll_back := -1                 # open(kind, true) scrolls the new list back there once it is laid out
 var _scroll_wait := 0
+var _badge_n := -1                     # the unread count the ONLINE 1 VS 1 row shows
+var _badge_t := 0.0
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -64,8 +72,12 @@ func on_lobby_exit() -> void:
 	# presence stays on through a match: friends keep seeing this phone online
 
 
-## Every frame: the open list follows the service (players, requests, invites).
+## Every frame: the open list follows the service (players, requests, invites); the unread badge.
 func process(delta: float) -> void:
+	_badge_t -= delta
+	if _badge_t <= 0.0:
+		_badge_t = 0.5
+		_update_badge()
 	if _scroll_back >= 0 and _net_scroll and is_instance_valid(_net_scroll):
 		_scroll_wait -= 1
 		if _scroll_wait <= 0:                # two frames: the new list and the window are laid out
@@ -672,10 +684,47 @@ func _on_directory_changed() -> void:
 	_net_sig = "-"
 
 
-## A new friend request shows up at once: a popup with ACCEPT / DECLINE when no window is open
-## (with the FRIENDS tab open it simply appears in its list).
+## The ONLINE 1 VS 1 row's unread count, redrawn when it changes.
+func _update_badge() -> void:
+	var n := NetChat.unread_total()
+	if n == _badge_n:
+		return
+	if lobby.ui == null:
+		return
+	var row := lobby.ui.find_child("FriendsButton", true, false) as Control
+	if row:
+		_badge_n = n
+		LobbyNet.set_badge(row, n)
+
+
+## A friend's chat message came in (Cloud.friend_chat_changed, after its checks: friends only,
+## FRIENDS CHAT on, never a blocked player): a notice with a soft sound, unless their chat is open
+## (it shows the message) or a match is loading.
+func _on_friend_message(from: String) -> void:
+	_badge_t = 0.0
+	if lobby.start_btn.disabled or not Game.is_friend(from) or Game.is_blocked(from) or not bool(Game.settings.get("friend_chat", true)):
+		return
+	var m := lobby.dialogs.modal
+	if m and is_instance_valid(m):
+		var chat := m.find_child("ChatWindow", true, false) as LobbyNet
+		if chat and chat.id == from:
+			return
+	var msgs := NetChat.messages(from)
+	if msgs.is_empty() or bool(msgs.back()[1]):
+		return
+	var who := String(((Game.profile.friends as Dictionary)[from] as Dictionary).get("name", "PLAYER"))
+	Audio.play("ui_select", -12.0, 1.3)
+	LobbyNet.toast(lobby, "%s: %s" % [who, NetChat.first_words(String(msgs.back()[2]))], "TAP TO OPEN",
+		func() -> void: LobbyNet.open(lobby, from, who, ""))
+
+
+## A new friend request shows up at once: a popup with ACCEPT / DECLINE when no window is open,
+## a notice at the top (its tap opens the FRIENDS tab) over another popup; with the FRIENDS tab
+## open it simply appears in its list. With FRIEND REQUESTS off nothing pops up.
 func _on_friends_changed() -> void:
 	_net_sig = "-"
+	if not Cloud.requests_allowed():
+		return
 	var cloud := Game.cloud_service()
 	for id: String in cloud.friend_requests:
 		if _seen_requests.has(id):
@@ -684,9 +733,13 @@ func _on_friends_changed() -> void:
 		Audio.play("ui_select", 0.0)
 		if bool(Game.settings.get("vibration", true)):
 			Input.vibrate_handheld(120)
-		if lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal):
-			return
 		var who := String(cloud.friend_requests[id].name)
+		if lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal):
+			var listed := _net_kind == "friends" and _net_list != null and is_instance_valid(_net_list)
+			if not lobby.start_btn.disabled and not listed:     # another popup: a notice, its tap opens FRIENDS
+				LobbyNet.toast(lobby, "FRIEND REQUEST: %s  #%s" % [who, Cloud.friend_code(id)], "TAP TO SEE",
+					func() -> void: open("friends"), "v_friend_add")
+			return
 		_net_list = null
 		var v := lobby.dialogs.open_modal("FRIEND REQUEST", 640.0)
 		var t := UI.label("%s  #%s wants to be your friend" % [who, Cloud.friend_code(id)], 26, UI.TEXT, "heavy")
@@ -778,12 +831,13 @@ func _connect_net(cloud: Cloud) -> void:
 	cloud.invite_answered.connect(_on_net_answered)
 	cloud.session_started.connect(_on_net_session)
 	cloud.session_ended.connect(_on_net_ended)
+	cloud.friend_chat_changed.connect(_on_friend_message)
 
 
 ## Drops this object's connections (the handlers above) from the service, which outlives the lobby.
 func _disconnect_net(cloud: Cloud) -> void:
 	for sig in ["invited", "invite_cancelled", "invite_failed", "invite_answered", "session_started", "session_ended", "room_changed",
-			"friends_changed", "directory_changed"]:
+			"friends_changed", "directory_changed", "friend_chat_changed"]:
 		for c: Dictionary in cloud.get_signal_connection_list(sig):
 			if (c.callable as Callable).get_object() == self:
 				cloud.disconnect(sig, c.callable)

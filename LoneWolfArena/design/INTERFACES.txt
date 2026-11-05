@@ -306,9 +306,20 @@ listed here. If a part needs something new from the core, add it in its own file
   signal `chat_received(text)`; friends `Cloud.send_friend_chat(id, text)` (RSA to the friend's key,
   signed, retained on ROOT/fm/<to>/<from> until read) / signal `friend_chat_changed(id)`; the
   lobby's window and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`,
-  "ChatWindow", "ChatField", "ChatSend", "FriendChat"). Voice `NetVoice` (IMA ADPCM 8 kHz,
-  `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"). Settings tab ONLINE
-  (scripts/settings_online.gd): chat, friend_chat, show_career, voice_chat (asks for RECORD_AUDIO).
+  "ChatWindow", "ChatField", "ChatSend", "FriendChat", bubbles "ChatMine_<n>" / "ChatTheirs_<n>").
+  Lobby notices (lobby only, never in a match): `LobbyNet.toast(lobby, text, caption, on_tap,
+  icon)` ("LobbyToast" in the lobby's CanvasLayer "NoticeLayer", layer 20, TOAST_S): a friend's
+  message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while that
+  chat is open, a match loads, FRIENDS CHAT is off or they are blocked) and a friend request that
+  comes while a popup is open (the tap opens FRIENDS); `LobbyNet.set_badge(row, n)` ("UnreadBadge")
+  puts `NetChat.unread_total()` on the ONLINE 1 VS 1 row (`FriendsButton`). Voice `NetVoice` (IMA
+  ADPCM 8 kHz, `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"; played on the
+  bus "Voice", setting vol_voice). Settings tab ONLINE (scripts/settings_online.gd): chat,
+  friend_chat, show_career, voice_chat (asks for RECORD_AUDIO), challenges_from
+  (`Game.CHALLENGES_EVERYONE` / `_FRIENDS` / `_NOBODY`: `Cloud.challenge_allowed(from)`, the others
+  declined at once, never shown) and friend_requests (off: `Cloud.requests_allowed()` false, new
+  requests ignored and their waiting copies deleted, no popup). SOUND: vol_master, vol_sfx,
+  vol_music, vol_voice, each applied at once (`Game.apply_settings`: buses Master, SFX, Music, Voice).
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
   `Game.goto_login()` opens scenes/login.tscn (`Login`) until `profile.guest_ok`, the lobby after
   that and always in automated runs.

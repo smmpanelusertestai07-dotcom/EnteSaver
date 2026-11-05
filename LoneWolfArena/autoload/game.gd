@@ -51,6 +51,7 @@ const DEFAULT_SETTINGS := {
 	"vol_master": 85,
 	"vol_sfx": 90,
 	"vol_music": 45,
+	"vol_voice": 80,              # the other player's push-to-talk voice (NetVoice, bus "Voice")
 	"difficulty": 1,
 	"last_pick": "ar",
 	# ONLINE (SettingsPanel's tab, scripts/settings_online.gd)
@@ -58,7 +59,13 @@ const DEFAULT_SETTINGS := {
 	"friend_chat": true,          # FRIENDS CHAT: true friends only, false off
 	"show_career": true,          # SHOW MY CAREER: the player card carries a career summary (Cloud card v3)
 	"voice_chat": false,          # push-to-talk in an online match (NetVoice; asks for the microphone)
+	"challenges_from": 0,         # DUEL CHALLENGES FROM: CHALLENGES_EVERYONE, _FRIENDS, _NOBODY (Cloud.challenge_allowed)
+	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
 }
+## The values of the setting challenges_from (SettingsOnline shows them in this order).
+const CHALLENGES_EVERYONE := 0
+const CHALLENGES_FRIENDS := 1
+const CHALLENGES_NOBODY := 2
 
 ## Behaviour that is not a setting (the settings screen keeps to graphics, sensitivity,
 ## joystick, custom HUD and sound): always these values, whatever an older settings file says.
@@ -76,10 +83,12 @@ const SETTING_RANGES := {
 	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "sens_fire": [1, 200], "vol_master": [0, 100],
 	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2], "crosshair_color": [0, 3],
 	"crosshair_size": [50, 150], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
+	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY],
 }
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects",
-	"reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope", "freelook_button", "chat", "friend_chat", "show_career", "voice_chat"]
+	"reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope", "freelook_button", "chat", "friend_chat", "show_career", "voice_chat",
+	"friend_requests"]
 ## Every frame rate the setting can hold; the settings offer those the screen can show
 ## (fps_choices).
 const FPS_OPTIONS := [30, 60, 90, 120]
@@ -740,8 +749,9 @@ func finish_auto_graphics(picked: int) -> void:
 	save_settings()
 
 
+## The volume buses (settings vol_music, vol_sfx, vol_voice), each sent to Master.
 func _setup_audio_buses() -> void:
-	for bus_name in ["Music", "SFX"]:
+	for bus_name in ["Music", "SFX", "Voice"]:
 		if AudioServer.get_bus_index(bus_name) == -1:
 			AudioServer.add_bus()
 			var idx := AudioServer.bus_count - 1
@@ -754,6 +764,7 @@ func apply_settings() -> void:
 	_set_bus("Master", settings.vol_master)
 	_set_bus("Music", settings.vol_music)
 	_set_bus("SFX", settings.vol_sfx)
+	_set_bus("Voice", settings.vol_voice)
 
 
 func _set_bus(bus_name: String, percent: float) -> void:

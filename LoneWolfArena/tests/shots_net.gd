@@ -2,8 +2,9 @@ extends Node
 ## Screenshot tour of the online extras (made-up players; the online service is pointed at a
 ## local port nobody listens on and held still, so no public relay is reached):
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_net.gd
-## The lobby's ping chip, a friend's chat window, a player card with its CAREER block, the
-## settings' ONLINE tab, then a match HUD with the online layer (ping under the gear, CHAT / MUTE /
+## The lobby's ping chip, a friend's chat window, a player card with its CAREER block, a friend's
+## message as a notice with the unread badge, the settings' ONLINE tab (top and end) and SOUND
+## tab, then a match HUD with the online layer (ping under the gear, CHAT / MUTE /
 ## TALK / SOUND, the feed under the score bar) and its chat panel. Returns the failed checks.
 
 const FRIEND := "tour-chat-friend"
@@ -48,6 +49,27 @@ func run(at: Node) -> int:
 		"a friend's card shows their CAREER and a CHAT button")
 	await at.shot("n03_player_card")
 	lobby.dialogs.close_modal()
+	# A friend's message while the lobby is up: a notice at the top and the unread badge on
+	# ONLINE 1 VS 1; a tap on the notice opens that chat.
+	NetChat.add(id, now - 5, false, "ARE YOU ONLINE? I WANT A REMATCH ON CARGO CAGE TONIGHT")
+	cloud.friend_chat_changed.emit(id)
+	await at.wait(0.6)
+	var toast := lobby.find_child("LobbyToast", true, false) as Button
+	var badge := lobby.ui.find_child("UnreadBadge", true, false) as Label
+	_check(toast != null and badge != null and badge.visible and badge.text == "1", "a friend's message shows a notice and the unread badge")
+	await at.shot("n03b_friend_notice")
+	if toast:
+		toast.pressed.emit()
+	await at.wait(0.6)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("ChatWindow", true, false) != null, "a tap on the notice opens that chat")
+	lobby.dialogs.close_modal()
+	Game.settings.friend_chat = false
+	NetChat.add(id, now - 2, false, "STILL THERE?")
+	cloud.friend_chat_changed.emit(id)
+	await at.wait(0.3)
+	_check(lobby.find_child("LobbyToast", true, false) == null, "no notice with FRIENDS CHAT off")
+	Game.settings.friend_chat = true
+	NetChat.mark_read(id)
 	lobby._open_settings()
 	await at.wait(0.5)
 	var panel := lobby._find_settings()
@@ -55,6 +77,12 @@ func run(at: Node) -> int:
 		panel._show_tab(4)
 		await at.wait(0.4)
 		await at.shot("n04_settings_online")
+		panel._scroll.scroll_vertical = 10000
+		await at.wait(0.3)
+		await at.shot("n04b_settings_online_end")
+		panel._show_tab(3)
+		await at.wait(0.3)
+		await at.shot("n04c_settings_sound")
 		panel._close()
 	# A match with the online layer (a training match stands in: the layer is added by hand).
 	Game.settings.voice_chat = true
