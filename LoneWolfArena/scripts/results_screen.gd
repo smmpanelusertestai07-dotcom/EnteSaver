@@ -663,8 +663,9 @@ func _notification(what: int) -> void:
 ## PLAY AGAIN TOGETHER after a co-op match ("<NAME> WANTS TO PLAY AGAIN"), REMATCH after one against
 ## them. The fresh invite is a team invite with the same size and coop (Cloud.team_invite, not
 ## quick), and once both want it only the old host sends it (it runs the bots: the same roles and
-## sides); the tap also tells Cloud (Cloud.play_again) so that player's invite reaches this screen,
-## friend or not. The new match is the team match of the session it starts (_on_session).
+## sides). While the screen offers the button, Cloud lets that player's team invite of the same size
+## and coop through to it (Cloud.play_again), friend or not: as ACCEPT, or taken at once after this
+## player's tap. The new match is the team match of the session it starts (_on_session).
 func _build_online() -> void:
 	_status = UI.outlined(UI.label("", 19, UI.TEXT, "bold"), 4)
 	_status.name = "RematchStatus"
@@ -699,6 +700,11 @@ func _build_online() -> void:
 	if _rematch.disabled:
 		return
 	var cl := Game.cloud_service()
+	if _team_again:
+		# Their team invite reaches this screen (as ACCEPT, or taken at once after this player's tap)
+		# for as long as the screen offers the button, not only after the tap: once the old session
+		# is gone (a phone away, the relay dropped), each phone's fresh invite must still get through.
+		cl.play_again = {"id": _peer_id, "size": int(_again_team.size), "coop": bool(_again_team.coop)}
 	cl.invited.connect(_on_invited)
 	cl.invite_answered.connect(_on_answered)
 	cl.invite_cancelled.connect(_on_their_challenge_gone)
@@ -827,7 +833,7 @@ func _on_rematch() -> void:
 	if _starting or _rematch.disabled:
 		return
 	var cl := Game.cloud_service()
-	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
+	if cl.has_invite() and is_rematch_invite(cl.invite_from(), _peer_id, _again_team if _team_again else {}):
 		_take_challenge()                # their fresh challenge is here already: this tap takes it
 		return
 	_want = true
@@ -890,7 +896,7 @@ func _agree() -> void:
 	else:
 		_await_ms = Time.get_ticks_msec() + AWAIT_MS
 		var cl := Game.cloud_service()
-		if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
+		if cl.has_invite() and is_rematch_invite(cl.invite_from(), _peer_id, _again_team if _team_again else {}):
 			_take_challenge()
 
 
@@ -941,8 +947,7 @@ func _give_up(why: String) -> void:
 	_want = false
 	_invite_ms = 0
 	_await_ms = 0
-	_forget_play_again()
-	_say(why, UI.BAD)
+	_say(why, UI.BAD)                    # (Cloud.play_again stays: their next invite still comes here)
 	_set_rematch(_caption(), true)
 
 
@@ -953,7 +958,8 @@ func _stop_wanting() -> void:
 	_forget_play_again()
 
 
-## Cloud stops showing that player's team invite here (Cloud.play_again: set by this screen's tap).
+## Cloud stops showing that player's team invite here (Cloud.play_again: set while the screen offers
+## PLAY AGAIN TOGETHER / REMATCH).
 func _forget_play_again() -> void:
 	if _team_again and Game.cloud != null and String(Game.cloud.play_again.get("id", "")) == _peer_id:
 		Game.cloud.play_again = {}
@@ -1017,6 +1023,10 @@ func _on_session(_host: bool) -> void:
 			_give_up("COULD NOT START %s" % _what())
 			return
 		Game.team_match = tm
+	elif not cl.session_team.is_empty():
+		cl.end_session("left")             # (a team session on a 1 vs 1's results never loads as a duel)
+		_give_up("COULD NOT START %s" % _what())
+		return
 	_loading = true
 	_invite_ms = 0
 	_await_ms = 0

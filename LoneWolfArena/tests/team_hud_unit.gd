@@ -286,6 +286,8 @@ func _test_results() -> void:
 	# The tap tells Cloud whose team invite to take (play_again) until the screen closes. (No session
 	# here: the fresh invite would go out on a later frame; none comes in this test.)
 	var tap := _results(_team_result(true, String(them.id)))
+	_check(Game.cloud_service().play_again == {"id": String(them.id), "size": 2, "coop": false},
+		"the team results let that player's team invite through as soon as they offer REMATCH (before any tap)")
 	(tap.find_child("Rematch", true, false) as Button).pressed.emit()
 	_check(Game.cloud_service().play_again == {"id": String(them.id), "size": 2, "coop": false},
 		"REMATCH tells Cloud the player, size and coop whose team invite to take")

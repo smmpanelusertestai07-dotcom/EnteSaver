@@ -215,7 +215,7 @@ listed here. If a part needs something new from the core, add it in its own file
   (`ResultsScreen.other_player(Game.team_match)`; offered when `ResultsScreen.team_again_offered`:
   not after a forfeit, a row LEFT, ended / left): `PlayAgainTogether` (co-op, "<NAME> WANTS TO PLAY
   AGAIN") or `Rematch` (against them, "<NAME> WANTS A REMATCH"), with `RematchStatus`; "rm" goes
-  through TeamArenaNet; the tap sets `Cloud.play_again`; once both want it only the old host sends
+  through TeamArenaNet; the results set `Cloud.play_again` while they offer the button; once both want it only the old host sends
   `Cloud.team_invite(id, size, coop)` (not quick: the same roles and sides), and `session_started`
   sets `Game.team_match = LobbyFriends.session_team_match(cloud)` before the load (team_arena_net).
 - `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
@@ -648,11 +648,12 @@ listed here. If a part needs something new from the core, add it in its own file
     CHALLENGES FROM lets through (`NetMatch.allowed`) and while `invited` has a listener (the
     lobby); else "dec". Shown through `invited` like a duel; `invite_from()` now also returns
     "team": {} for a duel, {"size", "coop"} for a TEAM INVITE.
-  - `play_again`: {"id", "size", "coop"} while this phone's results want another team match with
-    that player (set on the PLAY AGAIN TOGETHER / REMATCH tap, cleared when the results give up,
-    load it or close), else {}. Then that player's non-quick "tinv" with that size and coop
-    (`play_again_wanted(from, team)`) is shown through `invited` (the results take it) even from a
-    non-friend; every other check above still applies.
+  - `play_again`: {"id", "size", "coop"} while this phone's results offer another team match with
+    that player (set when they show PLAY AGAIN TOGETHER / REMATCH, cleared when they load it, close
+    or say it cannot be), else {}. Then that player's non-quick "tinv" with that size and coop
+    (`play_again_wanted(from, team)`) is shown through `invited` (the results show ACCEPT, or take
+    it after the tap) even from a non-friend; every other check above still applies. The results
+    take an invite only by `ResultsScreen.is_rematch_invite` (after a 1 vs 1: a duel only).
   - `session_team`: {"size", "coop"} on both phones of a session a "tinv" started (set when it
     goes out / is accepted, so it is there on `session_started`); {} for a duel; cleared by
     `cancel_invite` (before the session), `invite()` and `end_session`.
