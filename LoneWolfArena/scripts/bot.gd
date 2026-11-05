@@ -4,6 +4,8 @@ extends Fighter
 ## reaction time and tracking error, strafing, cover, healing and shield walls.
 
 enum S { SEARCH, ENGAGE, CHASE, COVER, HEAL }
+## How long a bot walks its sidestep when it gets stuck on cover (_start_detour).
+const DETOUR_S := 0.8
 
 const DIFF := [
 	{"reaction": 0.85, "error": 6.5, "head": 0.06, "burst_min": 3, "burst_max": 5, "pause": 0.75, "turn": 150.0, "strafe": 0.55, "shield": 0.2, "crouch": 0.0, "hear": 30.0, "sg_range": 5.0, "jump": 0.0, "grenade": 0.0},
@@ -38,6 +40,9 @@ var cover_point := Vector3.INF
 var wander_point := Vector3.INF
 var _stuck_timer := 0.0
 var _last_pos := Vector3.ZERO
+## A short sidestep around whatever snagged the bot (see _check_stuck): the point and the time left.
+var _detour := Vector3.INF
+var _detour_t := 0.0
 var _shield_cooldown := 0.0
 var _decision_timer := 0.0
 var _grenade_timer := 0.0
@@ -83,6 +88,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_grenade_timer = 0.0
 	_zone_goal = Vector3.INF
 	_zone_goal_timer = 0.0
+	_detour_t = 0.0
 
 
 # ---------------------------------------------------------------- perception
@@ -440,7 +446,10 @@ func _find_cover() -> Vector3:
 	return best
 
 
-func _move_to(point: Vector3, _delta: float) -> void:
+func _move_to(point: Vector3, delta: float) -> void:
+	if _detour_t > 0.0:
+		_detour_t -= delta
+		point = _detour
 	# Sprint when the destination is far and nothing is in sight (like players running in).
 	sprinting = not see_target and global_position.distance_to(point) > 8.0 and stance == Stance.STAND and not healing
 	if not nav_ready:
@@ -478,6 +487,23 @@ func _blocked(dir: Vector3) -> bool:
 	return not res.is_empty()
 
 
+## Sets a detour point about 2.5 m to the side of the way the bot was trying to go (the side
+## flips each time it gets stuck), walked to for DETOUR_S before the path is asked again.
+func _start_detour() -> void:
+	if arena == null:
+		return
+	var ahead := Vector3.ZERO
+	if nav_ready and not agent.is_navigation_finished():
+		ahead = agent.get_next_path_position() - global_position
+	ahead.y = 0.0
+	if ahead.length() < 0.1:
+		ahead = Basis(Vector3.UP, aim_yaw) * Vector3.FORWARD
+	ahead = ahead.normalized()
+	var side := Vector3(-ahead.z, 0.0, ahead.x) * (1.0 if float(strafe_dir) >= 0.0 else -1.0)
+	_detour = arena.closest_nav_point(global_position + side * 2.5 - ahead * 0.5)
+	_detour_t = DETOUR_S
+
+
 func _check_stuck(delta: float) -> void:
 	if move_dir.length() < 0.2:
 		_stuck_timer = 0.0
@@ -488,7 +514,11 @@ func _check_stuck(delta: float) -> void:
 		if global_position.distance_to(_last_pos) < 0.5:
 			strafe_dir = -strafe_dir
 			wander_point = arena.random_nav_point() if arena else wander_point
-			if is_on_floor() and rng.randf() < 0.3:
+			# Step sideways around the snag for a moment instead of pushing into the same corner,
+			# and hop it at once while the zone is closing (a stuck bot there loses HP every second).
+			_start_detour()
+			if is_on_floor() and (_zone_goal != Vector3.INF or rng.randf() < 0.3):
 				want_jump = true
+			_zone_goal_timer = 0.0      # and pick a fresh spot inside the zone
 		_stuck_timer = 0.0
 		_last_pos = global_position
