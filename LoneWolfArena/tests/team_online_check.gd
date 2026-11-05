@@ -294,7 +294,7 @@ func _play_again_together(first: TeamArenaNet) -> void:
 	at.log_line("HISTORY after PLAY AGAIN TOGETHER: %d entries (%d before), %d co-op rows on top" % [hist.size(), _history_before, coop_rows])
 	if hist.size() != _history_before + 2 or coop_rows != 2:
 		_fail("HISTORY does not keep the two co-op matches")
-	await at.wait(1.0)                   # (the other copy checks its results too before both go back)
+	await _barrier("again")              # (the other copy checks its results too before both go back)
 
 
 ## The results table as both phones must show it: each row's numbers by slot.
