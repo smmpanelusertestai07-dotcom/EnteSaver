@@ -216,6 +216,15 @@ func die(killer: Fighter, headshot := false) -> void:
 	super(killer, headshot)
 
 
+## Team modes: knocked down (Fighter.knock): the item in hand goes away, FIRE lets go.
+func knock(by: Fighter, headshot := false) -> void:
+	put_away_item()
+	firing = false
+	_shot_wait = -1.0
+	_scope_hold = false
+	super(by, headshot)
+
+
 ## The aim was set directly (not dragged): firing decides afresh what to hold.
 func forget_aim_hold() -> void:
 	_anchor = ""
@@ -378,8 +387,10 @@ func set_firing(on: bool) -> void:
 			_item_held = false
 			_use_ready_item()
 		return
+	if on and reviving != null and arena and arena.has_method("cancel_revive"):
+		arena.cancel_revive(self)        # firing cancels a revive
 	var was := firing
-	firing = on and alive
+	firing = on and alive and not knocked
 	if firing and not was and scope_type() != "sniper" and not Weapons.is_melee(weapon().def):
 		_shot_wait = 0.0
 	elif not firing and was and _shot_wait >= 0.0:
@@ -409,7 +420,7 @@ func _fire_once() -> void:
 
 
 func toggle_ads() -> void:
-	if not alive or healing or ready_item != "" or Weapons.is_melee(weapon().def):
+	if not alive or healing or knocked or ready_item != "" or Weapons.is_melee(weapon().def):
 		return
 	ads = not ads
 	sprinting = false
@@ -418,7 +429,7 @@ func toggle_ads() -> void:
 
 
 func do_jump() -> void:
-	want_jump = true
+	want_jump = not knocked
 
 
 ## Crouch button: toggles stand <-> crouch (from prone it goes to crouch), like the reference mode.
@@ -470,7 +481,7 @@ func _take_item(item: String) -> void:
 	if ready_item == item:
 		put_away_item()
 		return
-	if not alive or hold_fire or _item_count(item) <= 0 or (item == "grenade" and _throwing):
+	if not alive or hold_fire or knocked or reviving != null or _item_count(item) <= 0 or (item == "grenade" and _throwing):
 		return
 	if healing:
 		cancel_heal()
@@ -629,7 +640,9 @@ func _try_fire() -> void:
 	var fwd := _magnet_dir(start, ray[1])
 	if perform_shot(start, fwd):
 		Game.mark("player fired")
-		if arena and arena.has_method("net_shot"):
+		if net_local and arena and arena.has_method("net_shot_by"):
+			arena.net_shot_by(self, start, fwd)
+		elif arena and arena.has_method("net_shot"):
 			arena.net_shot(start, fwd)
 		_apply_recoil(w)
 		if scope_type() == "sniper" and ads and not _scope_hold:
@@ -743,8 +756,8 @@ func _update_aim_assist(delta: float) -> void:
 	var best_score := INF
 	var best_miss := PI
 	for f: Fighter in arena.fighters:
-		if f == self or not f.alive:
-			continue
+		if f == self or not f.alive or ally_of(f):
+			continue                     # (teammates: no assist, no red crosshair, no magnet)
 		var chest := f.chest_position()
 		var dist := xf.origin.distance_to(chest)
 		var miss := _body_miss_angle(f)

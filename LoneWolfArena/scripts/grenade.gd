@@ -81,7 +81,7 @@ func _explode() -> void:
 		if thrower and is_instance_valid(thrower) and f != thrower and dealt > 0.0:
 			thrower.stats.damage += dealt
 			thrower.hit_landed.emit(f, dealt, false, target, not f.alive)
-			if not f.alive:
+			if not f.alive and thrower.team < 0:      # (team modes: TeamArena counts the referee's eliminations)
 				thrower.stats.kills += 1
 	for w in get_tree().get_nodes_in_group("shield_walls"):
 		if (w as Node3D).global_position.distance_to(pos) < RADIUS:

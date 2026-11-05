@@ -18,6 +18,9 @@ signal stance_changed(stance: int)
 signal knocked_down(victim: Fighter, killer: Fighter, headshot: bool)
 @warning_ignore("unused_signal")
 signal revived(victim: Fighter, by: Fighter)
+## Team modes: a KNOCKED fighter's knock HP ran out (finished off by a hit or the zone, or bled out:
+## killer null, last_hit_cause "bleed"). It stays down until the referee's word (TeamArena).
+signal knock_finished(victim: Fighter, killer: Fighter, headshot: bool)
 
 enum Stance { STAND, CROUCH, PRONE }
 
@@ -133,6 +136,8 @@ var revive_t := 0.0              # s of that revive done so far
 ## fighter the other phone runs (RemoteFighter) are sent there, and its shots, frags and walls go
 ## through arena.net_shot_by / net_grenade_by / net_wall_by (TeamArena) instead of the 1 vs 1 calls.
 var net_local := false
+var revived_by: Fighter          # the teammate reviving this knocked fighter now (null: nobody; it bleeds)
+var last_attacker: Fighter       # the last enemy whose damage landed (bots in teams turn to it)
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
@@ -318,6 +323,10 @@ func gun() -> WeaponState:
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
 	if not alive or round_over or (invulnerable and not OS.has_feature("template")):     # invulnerable: a test switch only
 		return 0.0
+	if attacker != null and ally_of(attacker):
+		return 0.0                       # friendly fire is off (a fighter's own frag still hurts it)
+	if knocked:
+		return _take_knock_damage(amount, zone, attacker, from_pos, cause)
 	last_hit_cause = cause
 	var dmg := clampf(hit_points(amount, zone), 0.0, INF if endless_hp else hp)
 	if endless_hp:
@@ -332,15 +341,99 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	last_damage_time = _now()
 	if attacker != null:
 		last_attacked_time = last_damage_time
+		if attacker != self:
+			last_attacker = attacker
 	if healing and zone != "zone":
 		cancel_heal()
 	damaged.emit(dmg, from_pos, zone == "head", attacker)
 	if hp <= 0.001:
 		hp = 0.0
-		die(attacker, zone == "head")
+		if team >= 0:
+			knock(attacker, zone == "head")       # team modes: down first, the referee decides (TeamArena)
+		else:
+			die(attacker, zone == "head")
 	elif attacker != null and dmg > 0.0 and model:
 		model.play_hit()
 	return dmg
+
+
+## A hit on a KNOCKED fighter takes its knock HP; at 0 it is finished (knock_finished), and stays
+## down until the referee's word.
+func _take_knock_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause: String) -> float:
+	if knock_hp <= 0.0:
+		return 0.0
+	last_hit_cause = cause
+	var dmg := clampf(hit_points(amount, zone), 0.0, knock_hp)
+	knock_hp -= dmg
+	stats.taken += dmg
+	last_damage_time = _now()
+	damaged.emit(dmg, from_pos, zone == "head", attacker)
+	if knock_hp <= 0.001:
+		knock_hp = 0.0
+		knock_finished.emit(self, attacker, zone == "head")
+	return dmg
+
+
+## Team modes: HP gone, down on the floor (prone, crawling at KNOCK_SPEED, no gun, items, jump or
+## stance change) with KNOCK_HP that bleeds out over BLEED_S unless a teammate revives it.
+## knocked_down tells the arena (which reports it to the referee). Also applied to the other phone's
+## fighters by the referee's "ko" (TeamArena._apply_decision).
+func knock(by: Fighter, headshot := false) -> void:
+	if knocked or not alive:
+		return
+	hp = 0.0
+	cancel_heal()
+	ads = false
+	sprinting = false
+	want_jump = false
+	_throwing = false
+	if not weapons.is_empty():
+		weapon().cancel_reload()
+	if _capsule != null:
+		set_stance(Stance.PRONE, true)
+	else:
+		stance = Stance.PRONE
+	knocked = true
+	knock_hp = KNOCK_HP
+	knocked_by = by if by != self else null
+	_stop_reviving()
+	revived_by = null
+	knocked_down.emit(self, by, headshot)
+
+
+## Stops the revive this fighter was doing (knocked, out): the teammate bleeds again.
+func _stop_reviving() -> void:
+	if reviving != null and is_instance_valid(reviving) and reviving.revived_by == self:
+		reviving.revived_by = null
+	if reviving != null and model and not healing:
+		model.play_heal(false)
+	reviving = null
+	revive_t = 0.0
+
+
+## Revived: up again with `with_hp` HP (Fighter.REVIVE_HP), crouched (a stand needs head room).
+func stand_up(with_hp: float, by: Fighter) -> void:
+	if not knocked or not alive:
+		return
+	knocked = false
+	knock_hp = 0.0
+	knocked_by = null
+	revived_by = null
+	hp = clampf(with_hp, 1.0, MAX_HP)
+	last_hit_cause = ""
+	if _capsule != null and not set_stance(Stance.STAND, true):
+		set_stance(Stance.CROUCH, true)
+	revived.emit(self, by)
+
+
+## Team modes: bullets and sight lines pass through these (teammates).
+func ignore_fighters(others: Array) -> void:
+	for o: Fighter in others:
+		if o == null or o == self:
+			continue
+		for rid: RID in [o.get_rid()] + o.hitboxes.map(func(hb: Area3D) -> RID: return hb.get_rid()):
+			if not rid in _exclude:
+				_exclude.append(rid)
 
 
 ## What a hit of `amount` (before armour) takes in this zone: after the armour (armor_mult), and a
@@ -373,6 +466,10 @@ func die(killer: Fighter, headshot := false) -> void:
 	set_deferred("collision_mask", LAYER_WORLD)
 	for hb in hitboxes:
 		hb.collision_layer = 0
+	knocked = false
+	knock_hp = 0.0
+	_stop_reviving()
+	revived_by = null
 	if model:
 		model.play_death()
 	died.emit(self, killer, headshot)
@@ -383,6 +480,12 @@ func die(killer: Fighter, headshot := false) -> void:
 func reset_for_round(pos: Vector3, yaw: float) -> void:
 	alive = true
 	round_over = false
+	knocked = false                  # (before the stance: a knocked fighter may not change it)
+	knock_hp = 0.0
+	knocked_by = null
+	_stop_reviving()
+	revived_by = null
+	last_attacker = null
 	cancel_heal()
 	_stop_heal_sound()
 	healing = false
@@ -465,7 +568,7 @@ func is_firing_recently() -> bool:
 ## (camera-aligned for the player, eyes for bots). Returns true if a shot happened.
 func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	var w := weapon()
-	if not w.can_fire() or healing or not alive or stance_lock > 0.0 or hold_fire or round_over:
+	if not w.can_fire() or healing or not alive or stance_lock > 0.0 or hold_fire or round_over or knocked or reviving != null:
 		return false
 	if sprinting:
 		sprinting = false
@@ -570,8 +673,8 @@ func _after_shot(w: WeaponState, tally: Dictionary) -> void:
 		stats.damage += body + head
 		if head > 0.0:
 			stats.headshots += 1
-		if killed:
-			stats.kills += 1
+		if killed and team < 0:
+			stats.kills += 1             # (team modes: TeamArena counts the referee's eliminations)
 		if head > 0.0:
 			hit_landed.emit(target, head, true, tally.head_pos, killed and body <= 0.0)
 		if body > 0.0:
@@ -599,7 +702,7 @@ func _melee(w: WeaponState, base_dir: Vector3) -> bool:
 
 
 func start_reload() -> bool:
-	if healing or not alive:
+	if healing or not alive or knocked:
 		return false
 	var w := weapon()
 	if w.start_reload():
@@ -615,7 +718,7 @@ func _on_reload_done() -> void:
 
 
 func switch_weapon(index: int) -> void:
-	if index == current or index < 0 or index >= weapons.size() or not alive:
+	if index == current or index < 0 or index >= weapons.size() or not alive or knocked:
 		return
 	weapon().cancel_reload()
 	current = index
@@ -629,7 +732,7 @@ func switch_weapon(index: int) -> void:
 # ---------------------------------------------------------------- items
 
 func start_heal() -> bool:
-	if healing or medkits <= 0 or hp >= MAX_HP or not alive:
+	if healing or medkits <= 0 or hp >= MAX_HP or not alive or knocked or reviving != null:
 		return false
 	healing = true
 	sprinting = false
@@ -698,7 +801,7 @@ func shield_spot(toward := Vector3.ZERO, dist := 2.0) -> Array:
 
 
 func deploy_shield(toward := Vector3.ZERO, dist := 2.0) -> bool:
-	if shields <= 0 or not alive or hold_fire:
+	if shields <= 0 or not alive or hold_fire or knocked or reviving != null:
 		return false
 	var spot := shield_spot(toward, dist)
 	if spot.is_empty():
@@ -710,14 +813,16 @@ func deploy_shield(toward := Vector3.ZERO, dist := 2.0) -> bool:
 	wall.global_position = pos
 	wall.look_at(pos + fwd, Vector3.UP)
 	shields -= 1
-	if is_player and arena and arena.has_method("net_wall"):
+	if net_local and arena and arena.has_method("net_wall_by"):
+		arena.net_wall_by(self, pos, fwd)
+	elif is_player and arena and arena.has_method("net_wall"):
 		arena.net_wall(pos, fwd)
 	return true
 
 
 ## Throws along the aim; with a target point (bots) the arc is solved to land there.
 func throw_grenade(target := Vector3.INF) -> bool:
-	if grenades <= 0 or not alive or healing or hold_fire or _throwing:
+	if grenades <= 0 or not alive or healing or hold_fire or _throwing or knocked or reviving != null:
 		return false
 	grenades -= 1
 	sprinting = false
@@ -739,7 +844,7 @@ func grenade_launch() -> Array:
 
 func _release_grenade() -> void:
 	_throwing = false
-	if not alive or not is_inside_tree():
+	if not alive or knocked or not is_inside_tree():
 		return
 	var g := Grenade.new()
 	g.thrower = self
@@ -754,7 +859,9 @@ func _release_grenade() -> void:
 		var grav := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)) * g.gravity_scale
 		g.linear_velocity = (to / t + Vector3.UP * 0.5 * grav * t).limit_length(22.0)
 	Audio.play_at("grenade_throw", global_position, -4.0)
-	if is_player and arena and arena.has_method("net_grenade"):
+	if net_local and arena and arena.has_method("net_grenade_by"):
+		arena.net_grenade_by(self, g.global_position, g.linear_velocity)
+	elif is_player and arena and arena.has_method("net_grenade"):
 		arena.net_grenade(g.global_position, g.linear_velocity)
 
 
@@ -763,7 +870,7 @@ func _release_grenade() -> void:
 func set_stance(s: Stance, instant := false) -> bool:
 	if s == stance:
 		return true
-	if not alive:
+	if not alive or knocked:
 		return false
 	# Standing/crouching up needs head room.
 	var h := _stance_height(s)
@@ -802,6 +909,8 @@ func _think(_delta: float) -> void:
 
 
 func move_speed() -> float:
+	if knocked:
+		return KNOCK_SPEED               # crawling, whatever the gun
 	var deflect := clampf(move_dir.length(), 0.0, 1.0)
 	var speed := RUN_SPEED
 	match stance:
@@ -822,6 +931,8 @@ func move_speed() -> float:
 		speed *= float(d.get("fire_move", 0.85))
 	if healing:
 		speed *= HEAL_MULT
+	if reviving != null:
+		speed = 0.0                      # a revive is done standing still (moving cancels it)
 	return speed
 
 
@@ -834,6 +945,12 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 	stance_lock = maxf(stance_lock - delta, 0.0)
+	if knocked and not frozen and revived_by == null and knock_hp > 0.0:
+		# Bleeding out: KNOCK_HP over BLEED_S while nobody revives it.
+		knock_hp = maxf(knock_hp - KNOCK_HP / BLEED_S * delta, 0.0)
+		if knock_hp <= 0.0:
+			last_hit_cause = "bleed"
+			knock_finished.emit(self, null, false)
 	if not frozen:
 		_think(delta)
 	else:
@@ -856,7 +973,7 @@ func _physics_process(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, target_v.x, accel * delta)
 	velocity.z = move_toward(velocity.z, target_v.z, accel * delta)
 	if on_floor:
-		if want_jump and not healing:
+		if want_jump and not healing and not knocked:
 			if stance != Stance.STAND:
 				set_stance(Stance.STAND)
 			else:
