@@ -71,6 +71,11 @@ const AWAY_MS := SILENCE_MS - 1500
 const QUIET_MS := 15000        # nothing at all from the relay this long outside a match: the link is dead
 const KEEP_ALIVE_MS := 60000   # the keep-alive CONNECT asks for: the relay has dropped a phone away longer
 const LOAD_KEEP_MS := 30000    # a new session's keep-alives while its arena loads stop after this
+## A match loading (the scene change, the loading overlay) and the first seconds after its arena
+## listens freeze the game while shaders compile (8 s on a phone's first load): a frame gap then is
+## the load, not this phone away (only an app pause still counts), and the other phone, whose
+## keep-alives said it was loading, is waited for this much longer than SILENCE_MS.
+const LOAD_STALL_MS := 6000
 const PING_S := 5.0            # PINGREQ while connected: the keep-alive and the relay round trip (relay_rtt)
 const PEER_PING_S := 2.0       # encrypted room ping in a match: the round trip to the other phone (peer_rtt)
 const STATE_IDLE_MS := 250     # a state that did not change goes out this often (it is sent twice, then skipped)
@@ -157,6 +162,8 @@ var _paused_unix := 0.0        # wall-clock time the app was paused (the tick cl
 var _away_wall_ms := 0         # how long the last pause lasted by the wall clock, once resumed
 var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
 var _session_ms := 0           # when the session started
+var _listen_ms := -1           # when this session's arena began listening (-1: loading, or none)
+var _peer_ka_ms := -100000     # when the other phone's last loading keep-alive came
 var _keep_t := 0.0             # s until the next keep-alive while the arena loads
 var _pingreq_ms := 0           # when the PINGREQ waiting for its PINGRESP went out (0: none)
 var _peer_ping_t := 0.0        # s until the next room ping
@@ -302,6 +309,8 @@ func _reconnect() -> void:
 ## other's "bye") must not say otherwise. Away longer than the keep-alive, its link is gone too.
 func _check_away(now: int) -> void:
 	var away := now - _frame_ms if _frame_ms >= 0 else 0
+	if load_stall(_frame_ms if _frame_ms >= 0 else now):
+		away = 0                 # the gap began while the match loaded: the load, not this phone away
 	_frame_ms = now
 	away = maxi(away, _away_wall_ms)
 	_away_wall_ms = 0
@@ -309,6 +318,20 @@ func _check_away(now: int) -> void:
 		end_session("connection lost")
 	if away > KEEP_ALIVE_MS and _ws != null:
 		_reconnect()
+
+
+## Whether a frame gap that began at `since` (the tick clock) is a match loading (LOAD_STALL_MS):
+## in a session whose arena did not listen yet, or began listening at most LOAD_STALL_MS before.
+func load_stall(since: int) -> bool:
+	if not in_session:
+		_listen_ms = -1
+		return false
+	if event_received.get_connections().is_empty():
+		_listen_ms = -1
+		return true
+	if _listen_ms < 0:
+		_listen_ms = since           # (it began listening during the frame the gap began after)
+	return since - _listen_ms <= LOAD_STALL_MS
 
 
 func _notification(what: int) -> void:
@@ -416,7 +439,10 @@ func _process(delta: float) -> void:
 		peers.erase(id)
 	if not gone.is_empty():
 		peers_changed.emit()
-	if in_session and now - _last_heard > SILENCE_MS:
+	# (the other phone said it was loading LOAD_STALL_MS + SILENCE_MS ago at most: its arena's
+	# first frames may stall a while longer)
+	var wait_ms := SILENCE_MS + (LOAD_STALL_MS if now - _peer_ka_ms < SILENCE_MS + LOAD_STALL_MS else 0)
+	if in_session and now - _last_heard > wait_ms:
 		end_session("left")
 	if not _outgoing.is_empty() and not in_session and now - int(_outgoing.t) > INVITE_TIMEOUT_MS:
 		var who := String(_outgoing.name)
@@ -1501,6 +1527,8 @@ func _on_room(msg: PackedByteArray) -> void:
 				var t: Variant = (d as Dictionary).get("t")
 				last_state_sent_ms = int(t) if (t is float or t is int) and is_finite(float(t)) else -1
 				state_received.emit(out)
+		"ka":
+			_peer_ka_ms = _last_heard
 		"pi":
 			# The other phone measures its round trip: answered at once (not a flood of answers).
 			var i: Variant = (d as Dictionary).get("i")

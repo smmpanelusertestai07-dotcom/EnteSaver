@@ -84,6 +84,13 @@ const ROOM_SPAWN_CAP := 30
 var _net_buckets := {}           # kind of message from the other phone -> [tokens, ms] (_net_rate_ok)
 var _net_spawns := {}            # "wall" / "grenade" -> how many the other phone's player used this round
 var _my_spawns := {}             # the same for this phone's player (online, held to spawn_cap)
+## Online the host decides each round (_net_decide): the deaths it learned of this round
+## ("player" / "bot" as the host sees them -> [killer, headshot]), decided DEATH_SETTLE_S after
+## the first, so two deaths that close are one draw on both phones; the guest reports its own
+## death ("died", with its cause) and applies the host's word ("rend": winner, score, round).
+const DEATH_SETTLE_S := 0.35
+var _round_deaths := {}
+var _settle_t := -1.0
 
 
 func _ready() -> void:
@@ -201,6 +208,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 		"begin":
 			if not Game.session.is_host:
 				_net_begin()
+				_follow_host_clock()
 		"pick":
 			# Its pick for this round (late ones still count: both must hold the same gun).
 			if data.size() == 2 and Weapons.PICKABLE.has(String(data[0])) and int(data[1]) == round_index \
@@ -229,10 +237,18 @@ func _on_net_event(kind: String, data: Array) -> void:
 				var frag := zone == "body" and hit_from.distance_to(remote.global_position) > 2.5
 				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote, hit_from, "frag" if frag else "")
 		"died":
-			if remote.alive and data.size() == 1:
-				player.stats.kills += 1
-				remote.die(player, bool(data[0]))
-				hud.confirm_kill(remote.chest_position())     # the kill's sound and buzz, as against the bot
+			# Its player went down: [headshot, cause, round]. Only a hit of this phone's player
+			# ("gun", "frag") is a kill; the zone, a fall or leaving credit nobody.
+			if remote.alive and (data.size() == 1 or (data.size() == 3 and int(data[2]) == round_index)) \
+					and (phase == Phase.FIGHT or phase == Phase.BREAK):
+				var cause := String(data[1]) if data.size() == 3 else "gun"      # (1.1.0 sent only the headshot)
+				var by_me := cause in ["gun", "frag"]
+				remote.last_hit_cause = cause if cause in ["frag", "zone", "fall", "left"] else ""
+				if by_me:
+					player.stats.kills += 1
+				remote.die(player if by_me else null, bool(data[0]) and by_me)
+				if by_me:
+					hud.confirm_kill(remote.chest_position())     # the kill's sound and buzz, as against the bot
 		"grenade":
 			if data.size() == 6:
 				var at := _net_vec(data, 0)
@@ -253,15 +269,24 @@ func _on_net_event(kind: String, data: Array) -> void:
 					add_child(wall)
 					wall.global_position = pos
 					wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
-		"timeup":
-			if data.size() == 3 and not Game.session.is_host and int(data[2]) == round_index:
-				_timeout(float(data[0]), float(data[1]))
+		"rend":
+			# The host's word on this round: [round, winner (1 the host, -1 this phone, 0 a draw),
+			# host's score, this phone's score, timed out, headshot, killer (1 / -1 / 0)].
+			if data.size() == 7 and not Game.session.is_host and int(data[0]) == round_index \
+					and (phase == Phase.FIGHT or phase == Phase.PREP):
+				var w := int(data[1])
+				var k := int(data[6])
+				score.player = maxi(int(data[3]), 0)
+				score.bot = maxi(int(data[2]), 0)
+				_end_round((bot as Fighter) if w == 1 else ((player as Fighter) if w == -1 else null), bool(data[5]), bool(data[4]),
+					(bot as Fighter) if k == 1 else ((player as Fighter) if k == -1 else null), true)
 		"round":
 			# The host starts each next round and sends the score as it counts it.
 			if data.size() == 3 and not Game.session.is_host and phase == Phase.BREAK and int(data[0]) == round_index + 1:
 				score.player = int(data[2])
 				score.bot = int(data[1])
 				_next_round()
+				_follow_host_clock()
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
@@ -277,6 +302,7 @@ func _on_net_ended(reason: String) -> void:
 		_forfeit = true
 		var remote := bot as RemoteFighter
 		if remote.alive and phase != Phase.BREAK:
+			remote.last_hit_cause = "left"          # the kill feed says LEFT, nobody's kill
 			remote.die(null, false)
 		else:
 			_end_round(null)
@@ -284,6 +310,7 @@ func _on_net_ended(reason: String) -> void:
 		return
 	var lost := reason != "left"
 	var counts := _counted and not _invalid
+	close_pause()
 	record_left()
 	_called_off = true
 	phase = Phase.END
@@ -580,6 +607,8 @@ func _apply_room_rules() -> void:
 
 
 func _start_prep() -> void:
+	_round_deaths.clear()
+	_settle_t = -1.0
 	_net_spawns.clear()
 	_my_spawns.clear()
 	_apply_room_rules()
@@ -699,11 +728,16 @@ func _physics_process(delta: float) -> void:
 			else:
 				time_left -= delta
 				_update_zone(delta)
-				if time_left <= 0.0:
+				if _settle_t >= 0.0:
+					_settle_t -= delta
+					if _settle_t <= 0.0:
+						_net_decide()
+				elif time_left <= 0.0:
 					if online and not Game.session.is_host:
-						# The host's clock decides a time-out; decide alone if its word never comes.
+						# The host's clock decides a time-out ("rend"); decide alone only if its word
+						# never comes (the session ends long before, normally).
 						_net_timeup_t = maxf(_net_timeup_t, 0.0) + delta
-						if _net_timeup_t > 3.0:
+						if _net_timeup_t > 10.0:
 							_timeout()
 					else:
 						_timeout()
@@ -723,7 +757,7 @@ func _physics_process(delta: float) -> void:
 				Engine.time_scale = 1.0
 			# Online the host starts the next round; the guest goes on alone if that never comes.
 			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
-			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 3.0:
+			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 8.0:
 				_next_round()
 
 
@@ -790,7 +824,7 @@ func _update_zone(delta: float) -> void:
 			_outside[f] = float(_outside[f]) + delta
 			var o: float = _outside[f]
 			var dps := 5.0 if o < 10.0 else (10.0 if o < 20.0 else 20.0)
-			f.take_damage(dps * delta, "zone", null, f.global_position)
+			f.take_damage(dps * delta, "zone", null, f.global_position, "zone")
 
 
 func _update_zone_mesh() -> void:
@@ -805,11 +839,12 @@ func in_zone(p: Vector3) -> bool:
 func _timeout(my_hp := -1.0, their_hp := -1.0) -> void:
 	if phase != Phase.FIGHT:
 		return
+	if online and Game.session.is_host and not _forfeit:
+		_net_decide(true)
+		return
 	if my_hp < 0.0:
 		my_hp = player.hp
 		their_hp = bot.hp
-		if online and Game.session.is_host:
-			Game.session.send_event("timeup", [their_hp, my_hp, round_index])     # as the guest sees it: its HP first
 	var winner: Fighter = null
 	if absf(my_hp - their_hp) >= 0.5:
 		winner = (player as Fighter) if my_hp > their_hp else (bot as Fighter)
@@ -829,28 +864,85 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	Game.mark("%s eliminated" % ("player" if victim == player else "bot"))
 	if victim == player:
 		_deaths += 1
+	var cause := death_cause(victim, killer)
 	if online and victim == player:
-		Game.session.send_event("died", [headshot])
-	var weapon_icon := ""
-	var weapon_name := "ZONE"
-	if killer and is_instance_valid(killer) and victim.last_hit_cause == "frag":
-		weapon_icon = "item_grenade"
-		weapon_name = "FRAG"
-	elif killer and is_instance_valid(killer):
-		weapon_icon = String(killer.weapon().def.icon)
-		weapon_name = String(killer.weapon().def.name)
-	hud.add_kill_feed(killer.display_name if killer else "ZONE", victim.display_name, weapon_name, weapon_icon, headshot, killer == player)
+		Game.session.send_event("died", [headshot and cause == "gun", cause, round_index])
+	if cause == "left":
+		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "LEFT")
+	elif cause == "zone" or cause == "fall":
+		hud.add_kill_feed(cause.to_upper(), victim.display_name, cause.to_upper(), "", false, false)
+	else:
+		var frag := cause == "frag"
+		hud.add_kill_feed(killer.display_name, victim.display_name, "FRAG" if frag else String(killer.weapon().def.name),
+			"item_grenade" if frag else String(killer.weapon().def.icon), headshot, killer == player)
 	if phase == Phase.END or phase == Phase.BREAK:
 		return
-	var winner := killer if killer and killer != victim else ((player as Fighter) if victim == bot else (bot as Fighter))
+	if not (killer and is_instance_valid(killer) and killer != victim):
+		killer = null
+	if online and not _forfeit:
+		# The host decides the round (a moment later: a second death that close makes it a draw);
+		# the guest waits for its word.
+		if Game.session.is_host:
+			_round_deaths["player" if victim == player else "bot"] = [killer, headshot]
+			if _settle_t < 0.0:
+				_settle_t = DEATH_SETTLE_S
+		return
+	var winner := killer if killer else ((player as Fighter) if victim == bot else (bot as Fighter))
 	_end_round(winner, headshot, false, killer)
+
+
+## What took a fighter out: "gun" (or fists) and "frag" are the other fighter's kill; "zone",
+## "fall" and "left" (it left the match) are nobody's.
+static func death_cause(victim: Fighter, killer: Fighter) -> String:
+	var c := victim.last_hit_cause
+	if c in ["left", "zone", "fall"]:
+		return c
+	if killer == null or not is_instance_valid(killer) or killer == victim:
+		return "zone"
+	return "frag" if c == "frag" else "gun"
+
+
+## Online, the host: the round as it stands now (the deaths it learned of; at the time-out the
+## higher HP), decided here and sent to the guest ("rend"), which shows exactly this.
+func _net_decide(timed_out := false) -> void:
+	if phase != Phase.FIGHT:
+		return
+	_settle_t = -1.0
+	var me_dead := _round_deaths.has("player")
+	var they_dead := _round_deaths.has("bot")
+	var winner: Fighter = null
+	var info: Array = [null, false]
+	if me_dead != they_dead:
+		winner = (bot as Fighter) if me_dead else (player as Fighter)
+		info = _round_deaths["player" if me_dead else "bot"]
+		timed_out = false
+	elif me_dead:
+		timed_out = false                # both went down that close: a draw
+	elif absf(player.hp - bot.hp) >= 0.5:
+		winner = (player as Fighter) if player.hp > bot.hp else (bot as Fighter)
+	var killer: Fighter = info[0]
+	var hs := bool(info[1])
+	if timed_out:
+		Game.mark("time up")
+	_end_round(winner, hs, timed_out, killer)
+	Game.session.send_event("rend", [round_index, 1 if winner == player else (-1 if winner == bot else 0),
+		int(score.player), int(score.bot), timed_out, hs, 1 if killer == player else (-1 if killer == bot else 0)])
+
+
+## The guest's prep starts when the host's "begin" / "round" arrives, the one-way trip late: it is
+## shortened by that, so both fights (and their zones) start about together, on the host's clock.
+func _follow_host_clock() -> void:
+	if Game.session.peer_rtt > 0 and phase == Phase.PREP:
+		prep_left = maxf(prep_left - clampf(float(Game.session.peer_rtt) / 2000.0, 0.0, 1.0), 0.5)
 
 
 ## A round is decided (an elimination, or the time-out: winner null = a draw). The score goes up;
 ## the match is over at rounds_to_win wins, after the last round of the best-of (2 x rounds_to_win
 ## - 1, drawn rounds count) or when the other phone left; otherwise the next round follows a break.
-func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: Fighter = null) -> void:
-	if winner != null:
+func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: Fighter = null, synced := false) -> void:
+	_settle_t = -1.0
+	close_pause()                        # (online the menu is an overlay: the round's end closes it)
+	if winner != null and not synced and not _forfeit:      # (a forfeit keeps the real score)
 		score["player" if winner == player else "bot"] += 1
 	var mine := int(score.player)
 	var theirs := int(score.bot)
@@ -937,6 +1029,7 @@ func scoreboard_rows() -> Array:
 # ---------------------------------------------------------------- results / pause
 
 func _show_results() -> void:
+	close_pause()
 	Engine.time_scale = 1.0
 	result = _final_result()
 	if not _invalid and _counted:          # (a match is counted when its first fight begins)
@@ -1015,6 +1108,15 @@ func open_pause() -> void:
 			get_tree().paused = false
 		Game.mark("pause closed")
 		hud.reload_layout())
+
+
+## Closes an open pause menu (online it is an overlay: the end of a round or of the match closes it).
+func close_pause() -> void:
+	if pause_layer == null:
+		return
+	for c in pause_layer.get_children():
+		if c is PauseMenu and not c.is_queued_for_deletion():
+			c.call("_close")
 
 
 func _notification(what: int) -> void:

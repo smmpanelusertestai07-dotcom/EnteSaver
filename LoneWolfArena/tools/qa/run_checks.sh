@@ -31,7 +31,10 @@
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 #   tests/drop_check.gd    online matches that end early: a slow load is waited for, a quit before
 #                          the first fight counts nowhere, the phone that was away gets LEFT and
-#                          the other the win
+#                          the other the win; a load that freezes 8 s is no disconnect
+#   tests/sync_check.gd    online rounds decided once, by the host, under a 600 ms round trip: both
+#                          dying in the zone together, no kill credit for the zone, the match
+#                          clock running under the online pause menu; both copies end alike
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -85,6 +88,12 @@ if [ "${1:-}" != "quick" ]; then
     LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd > "$0" 2>&1 &
     h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/drop_host.txt"
+  step sync bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47816 300 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47816 LW_ROUNDS_TO_WIN=2
+    LW_NET_ROLE=host LW_SYNC_OUT="$0.host" timeout 170 godot --headless --path . -- --autotest=script:res://tests/sync_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest LW_SYNC_OUT="$0.guest" timeout 170 godot --headless --path . -- --autotest=script:res://tests/sync_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- as each saw it:"; cat "$0.host" "$0.guest"
+    [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest"' "$LOGS/sync_host.txt"
 fi
 # A script error anywhere fails the run even when the check itself exited 0.
 if grep -l "SCRIPT ERROR" "$LOGS"/*.log >/dev/null 2>&1; then

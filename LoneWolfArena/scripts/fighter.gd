@@ -854,7 +854,7 @@ func _land() -> void:
 	var drop := _peak_y - global_position.y
 	Audio.play_at("land", global_position, -9.0)
 	if drop > FALL_SAFE:
-		take_damage((drop - FALL_SAFE) * FALL_DMG_PER_M, "fall", null, global_position)
+		take_damage((drop - FALL_SAFE) * FALL_DMG_PER_M, "fall", null, global_position, "fall")
 
 
 func _process(_delta: float) -> void:

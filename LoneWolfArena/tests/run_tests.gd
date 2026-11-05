@@ -59,6 +59,7 @@ func _ready() -> void:
 	_test_net_limits()
 	NetFeatureCheck.run(self)     # ping, smoothing, chat, card v3, voice codec (tests/net_feature_check.gd)
 	_test_session_ends()
+	_test_release_fixes()
 	_test_safe_saves()
 	_test_clear_cache()
 	_test_no_sprint_firing()
@@ -1584,8 +1585,10 @@ func _test_online_status() -> void:
 	var blocked_only := [lf._net_status.text, lf._net_list.get_child_count()]
 	Game.unblock(x)
 	lf._refresh_friends()
-	_check(blocked_only == ["LOOKING FOR PLAYERS ONLINE...", 0] and lf._net_status.text == "PLAYERS ONLINE"
-		and lf._net_list.get_child_count() == 1, "the ONLINE status counts only the players it lists, not blocked ones (%s)" % str(blocked_only))
+	_check(blocked_only == ["LOOKING FOR PLAYERS ONLINE...", 1] and lf._net_status.text == "PLAYERS ONLINE"
+		and lf._net_list.get_child_count() == 2, "the ONLINE status counts only the players it lists, not blocked ones (%s)" % str(blocked_only))
+	_check(not lf._net_status.visible and lf._net_list.get_child(0).name == "OnlineHead"
+		and (lf._net_list.get_child(0) as Label).text == "PLAYERS ONLINE", "the PLAYERS ONLINE heading is the list's first row: it scrolls with its section")
 	lf._net_scroll.free()
 	lf._net_status.free()
 	cl.free()
@@ -1688,7 +1691,17 @@ func _test_session_ends() -> void:
 	_check(is_equal_approx(cl._keep_t, 1.0), "a session whose arena still loads sends keep-alives")
 	cl._process(0.016)
 	_check(cl.in_session, "a normal frame keeps the session")
+	cl._check_away(cl._frame_ms + Cloud.AWAY_MS + 2000)
+	_check(cl.in_session and heard.ended.is_empty(), "a frame gap while the match loads (shaders compile) is not being away")
+	var arena_up := func(_k: String, _d: Array) -> void: pass
+	cl.event_received.connect(arena_up)
+	cl._check_away(cl._frame_ms + 16)
+	cl._check_away(cl._frame_ms + Cloud.AWAY_MS + 2000)
+	_check(cl.in_session and heard.ended.is_empty(), "nor is one in the first seconds after the arena appears")
+	cl._check_away(cl._frame_ms + Cloud.LOAD_STALL_MS)
+	_check(cl.in_session, "a frame gap shorter than the other phone waits keeps the session")
 	cl._check_away(cl._frame_ms + Cloud.AWAY_MS + 500)
+	cl.event_received.disconnect(arena_up)
 	_check(not cl.in_session and heard.ended == ["connection lost"] and cl.last_end_reason == "connection lost",
 		"a phone away about as long as the other one waits ends its match as connection lost (%s)" % str(heard.ended))
 	cl._incoming = invite.duplicate()
@@ -1717,6 +1730,28 @@ func _test_session_ends() -> void:
 	them.free()
 	Game.profile = saved_profile
 	Game.autotest = at
+
+
+## The 1.2.0 fixes: a dark clear colour (a scene change never flashes light blue), the version the
+## game shows from the project, QUIT MATCH's second tap not rushed, and what a death credits.
+func _test_release_fixes() -> void:
+	var clear: Color = ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color")
+	_check(clear.get_luminance() < 0.05, "scene changes never flash a light clear colour (%s)" % str(clear))
+	var ver := String(ProjectSettings.get_setting("application/config/version", ""))
+	_check(ver == "1.2.0", "the version shown (loading, login, lobby) is the project's 1.2.0 (%s)" % ver)
+	for path: String in ["res://scripts/loading.gd", "res://scripts/lobby.gd", "res://scripts/login.gd"]:
+		_check(FileAccess.get_file_as_string(path).contains("application/config/version"), "%s shows the project's version" % path)
+	_check(PauseMenu.QUIT_CONFIRM_S >= 5.0, "QUIT MATCH's second tap may come a while later")
+	var arena_script: GDScript = load("res://scripts/arena.gd")
+	var v := Bot.new()
+	var k := Bot.new()
+	for c: Array in [["zone", null, "zone"], ["fall", null, "fall"], ["left", null, "left"], ["frag", k, "frag"], ["", k, "gun"],
+			["", null, "zone"], ["", v, "zone"]]:
+		v.last_hit_cause = String(c[0])
+		var got := String(arena_script.call("death_cause", v, c[1]))
+		_check(got == String(c[2]), "a death by %s is a %s death (%s)" % [str(c[0]), str(c[2]), got])
+	v.free()
+	k.free()
 
 
 ## Saves survive a write cut short (Game.write_json / read_json, behind profile.json, settings.json

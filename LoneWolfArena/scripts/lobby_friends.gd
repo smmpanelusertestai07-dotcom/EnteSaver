@@ -36,6 +36,8 @@ var _scroll_back := -1                 # open(kind, true) scrolls the new list b
 var _scroll_wait := 0
 var _badge_n := -1                     # the unread count the ONLINE 1 VS 1 row shows
 var _badge_t := 0.0
+var _kb_field: LineEdit = null         # the text field the popup is lifted for (_lift_for_keyboard)
+var _kb_seen := false                  # the on-screen keyboard was up for it (_follow_keyboard)
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -74,6 +76,7 @@ func on_lobby_exit() -> void:
 
 ## Every frame: the open list follows the service (players, requests, invites); the unread badge.
 func process(delta: float) -> void:
+	_follow_keyboard()
 	_badge_t -= delta
 	if _badge_t <= 0.0:
 		_badge_t = 0.5
@@ -365,6 +368,46 @@ func _lift_for_keyboard(le: LineEdit, on: bool) -> void:
 		frame.offset_top -= lift
 		frame.offset_bottom -= lift
 		frame.set_meta("lifted", lift)
+	_kb_field = le if on else null
+	_kb_seen = false
+
+
+## While a field is lifted for typing, the on-screen keyboard's real height (DisplayServer, on a
+## phone): the popup sits just above the keyboard (a chat's history stays in view when there is
+## room), and comes back down when the keyboard goes away while the field keeps its focus (Android's
+## back closes only the keyboard). Desktop reports no keyboard: the lift stays as typing began.
+func _follow_keyboard() -> void:
+	if _kb_field == null:
+		return
+	if not is_instance_valid(_kb_field) or not _kb_field.is_inside_tree():
+		_kb_field = null
+		return
+	var kb := DisplayServer.virtual_keyboard_get_height()
+	if kb > 0:
+		_kb_seen = true
+		_place_above_keyboard(_kb_field, kb)
+	elif _kb_seen:
+		var le := _kb_field
+		_lift_for_keyboard(le, false)
+		le.release_focus()
+
+
+## Lifts the popup just enough that the field clears a keyboard kb_px (screen pixels) high, at most
+## until the field is near the top of the screen.
+func _place_above_keyboard(le: LineEdit, kb_px: int) -> void:
+	var modal := lobby.dialogs.modal
+	var frame := modal.get_node_or_null("Frame") as Control if modal and is_instance_valid(modal) else null
+	if frame == null:
+		return
+	var vh := lobby.get_viewport().get_visible_rect().size.y
+	var kb_top := vh - float(kb_px) * vh / maxf(float(DisplayServer.window_get_size().y), 1.0)
+	var lifted := float(frame.get_meta("lifted", 0.0))
+	var r := le.get_global_rect()
+	var lift := clampf(r.end.y + lifted + 12.0 - kb_top, 0.0, maxf(r.position.y + lifted - vh * 0.06, 0.0))
+	if absf(lift - lifted) > 1.0:
+		frame.offset_top += lifted - lift
+		frame.offset_bottom += lifted - lift
+		frame.set_meta("lifted", lift)
 
 
 func _refresh_friends() -> void:
@@ -396,6 +439,10 @@ func _refresh_friends() -> void:
 		_net_status.text = "LOOKING FOR PLAYERS ONLINE..."
 	else:
 		_net_status.text = "PLAYERS ONLINE"
+	# ONLINE: the players-online heading is the list's first row, so it scrolls away with its
+	# section (ALL PLAYERS below has its own); the line above the list keeps the passing states.
+	var heading := _net_kind == "online" and _net_status.text in ["PLAYERS ONLINE", "LOOKING FOR PLAYERS ONLINE..."]
+	_net_status.visible = not heading
 	if _net_kind == "room":
 		return
 	if _net_kind == "friends" and lobby.dialogs.modal and cloud.my_id != "":
@@ -410,6 +457,7 @@ func _refresh_friends() -> void:
 	for id in peers:
 		sig += ",a" if cloud.friend_asked(String(id)) else ""
 	sig += "|u" + NetChat.unread_key()          # a friend's CHAT button shows the unread messages
+	sig += "|h" + (_net_status.text if heading else "")
 	if sig == _net_sig:
 		return
 	_net_sig = sig
@@ -419,6 +467,10 @@ func _refresh_friends() -> void:
 	if _net_kind == "friends":
 		_fill_friends(cloud, waiting)
 	else:
+		if heading:
+			var online_head := UI.label(_net_status.text, 20, UI.ACCENT, "bold")
+			online_head.name = "OnlineHead"
+			_net_list.add_child(online_head)
 		for id: String in listed:
 			_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
 		if _net_kind == "online":
