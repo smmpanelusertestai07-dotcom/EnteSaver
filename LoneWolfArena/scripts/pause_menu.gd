@@ -110,11 +110,11 @@ func _ready() -> void:
 	resume.name = "Resume"
 	resume.pressed.connect(_close)
 	acts.add_child(resume)
-	var settings := UI.button("SETTINGS", 22, "light", Vector2(320, 50))
+	var settings := UI.button("SETTINGS", 22, "light", Vector2(320, UI.TOUCH_MIN))
 	settings.name = "Settings"
 	settings.pressed.connect(_open_settings)
 	acts.add_child(settings)
-	_quit = UI.button("QUIT MATCH", 20, "dark", Vector2(320, 48))
+	_quit = UI.button("QUIT MATCH", 20, "dark", Vector2(320, UI.TOUCH_MIN))
 	_quit.name = "Quit"
 	_quit.add_theme_color_override("font_color", Color(1.0, 0.55, 0.5))
 	_quit.add_theme_color_override("font_hover_color", Color(1.0, 0.65, 0.6))

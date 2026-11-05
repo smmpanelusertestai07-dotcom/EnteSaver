@@ -621,13 +621,28 @@ func clean_name(t: String) -> String:
 
 
 ## Text a player types for others to see (a name, the profile signature): upper-case A-Z, 0-9,
-## space, _ - . and at most max_len characters.
+## space, _ - . and at most max_len characters. Accented Latin letters become their plain letter
+## (JOSÉ -> JOSE, MÜLLER -> MULLER, ß -> SS); anything else (other scripts, symbols) is dropped.
 func clean_text(t: String, max_len: int) -> String:
 	var out := ""
 	for ch in t.strip_edges().to_upper():
 		if (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch in [" ", "_", "-", "."]:
 			out += ch
+		elif ch >= "À":
+			out += _fold_letter(ch)
 	return out.strip_edges().substr(0, max_len)
+
+
+## A plain letter for an accented capital (Latin-1 and Latin Extended-A), "" for anything else.
+const FOLD := {"A": "ÀÁÂÃÄÅĀĂĄ", "C": "ÇĆĈĊČ", "D": "ÐĎĐ", "E": "ÈÉÊËĒĔĖĘĚ", "G": "ĜĞĠĢ", "H": "ĤĦ",
+	"I": "ÌÍÎÏĨĪĬĮİ", "J": "Ĵ", "K": "Ķ", "L": "ĹĻĽĿŁ", "N": "ÑŃŅŇ", "O": "ÒÓÔÕÖØŌŎŐ", "R": "ŔŖŘ",
+	"S": "ŚŜŞŠ", "T": "ŢŤŦ", "U": "ÙÚÛÜŨŪŬŮŰŲ", "W": "Ŵ", "Y": "ÝŶŸ", "Z": "ŹŻŽ", "AE": "Æ", "OE": "Œ",
+	"SS": "ß", "TH": "Þ"}
+static func _fold_letter(ch: String) -> String:
+	for plain: String in FOLD:
+		if String(FOLD[plain]).contains(ch):
+			return plain
+	return ""
 
 
 ## Saves the signed profile; its first save stamps "created".

@@ -39,6 +39,7 @@ func _init(owner_lobby: Lobby) -> void:
 ## off (Game.match_notice) is explained once.
 func on_lobby_ready() -> void:
 	_connect_net(Game.cloud_service())
+	lobby.dialogs.modal_closed.connect(_on_modal_closed, CONNECT_DEFERRED)
 	# Online presence starts with the lobby, so friends and other players see this phone online
 	# as soon as the game is open.
 	Game.cloud_service().start_lobby()
@@ -322,6 +323,7 @@ func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEd
 	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
 	le.add_theme_color_override("font_color", UI.TEXT)
 	le.add_theme_color_override("caret_color", UI.ACCENT)
+	le.editing_toggled.connect(func(on: bool) -> void: _lift_for_keyboard(le, on))
 	if digits_only:
 		le.text_changed.connect(func(t: String) -> void:
 			var d := ""
@@ -332,6 +334,25 @@ func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEd
 				le.text = d
 				le.caret_column = d.length())
 	return le
+
+
+## The on-screen keyboard covers about the lower half of a landscape screen and the immersive
+## window is not resized for it: while a text field is being typed in, the popup moves up until the
+## field sits in the top fifth of the screen (and back down when the typing ends).
+func _lift_for_keyboard(le: LineEdit, on: bool) -> void:
+	var modal := lobby.dialogs.modal
+	var frame := modal.get_node_or_null("Frame") as Control if modal and is_instance_valid(modal) else null
+	if frame == null or not le.is_inside_tree():
+		return
+	var lifted := float(frame.get_meta("lifted", 0.0))
+	frame.offset_top += lifted
+	frame.offset_bottom += lifted
+	frame.set_meta("lifted", 0.0)
+	if on:
+		var lift := maxf(le.get_global_rect().position.y + lifted - lobby.get_viewport().get_visible_rect().size.y * 0.2, 0.0)
+		frame.offset_top -= lift
+		frame.offset_bottom -= lift
+		frame.set_meta("lifted", lift)
 
 
 func _refresh_friends() -> void:
@@ -369,7 +390,7 @@ func _refresh_friends() -> void:
 		var my := lobby.dialogs.modal.find_child("MyId", true, false) as Label
 		if my:
 			my.text = "YOUR ID:  %s" % Cloud.friend_code(cloud.my_id)     # the key may be made after the tab opened
-	var sig := waiting + "|" + _net_kind + "|" + _friend_query
+	var sig := waiting + "|" + _net_kind + "|" + _friend_query + "|" + cloud.status
 	for id in peers:
 		sig += "|%s:%s" % [id, peers[id].name]
 	sig += "|f%d|r%s|o%d|d%d|b%s" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
@@ -514,6 +535,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 			var yes := bool(a[1])
 			var b := UI.button(String(a[0]), 18, String(a[2]), Vector2(150, 56))
 			b.name = "Friend" + String(a[0]).capitalize()
+			b.disabled = cloud.status != "online"     # an answer goes through the relay (offline it would come back)
 			b.pressed.connect(func() -> void:
 				Game.cloud_service().answer_friend(id, yes)
 				_net_sig = "-"
@@ -543,41 +565,102 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen)
 		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 56))
+		rm.name = "FriendRemove"
 		rm.pressed.connect(func() -> void:
-			Game.remove_friend(id)
-			_net_sig = "-"
-			_refresh_friends())
+			# Asked first, as on the player card (it sits right beside DUEL 1 VS 1).
+			var back := open.bind("friends", true)
+			_place = {"kind": "friends", "scroll": _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0}
+			lobby.dialogs.confirm("REMOVE FRIEND", "Remove %s from your friends? You can send a new friend request later." % who, "REMOVE",
+				func() -> void:
+					Game.remove_friend(id)
+					back.call(), back, true))
 		row.add_child(rm)
 		_net_list.add_child(row)
 
 
 # ---------------------------------------------------------------- net signals
 
+## A challenge came in: the popup at once, unless the open one is busy (a question waiting for its
+## answer, a text being typed): then it shows as soon as that one closes (the challenge waits 25 s
+## for an answer, Cloud.INVITE_TIMEOUT_MS).
 func _on_net_invited(who: String) -> void:
-	_net_list = null
 	Audio.play("ui_select", 0.0)
 	if bool(Game.settings.get("vibration", true)):
 		Input.vibrate_handheld(250)
-	var v := lobby.dialogs.open_modal("DUEL CHALLENGE", 640.0)
+	if _popup_busy():
+		return
+	_show_challenge(who)
+
+
+## The open popup must not be replaced: a confirmation (BLOCK, REMOVE...) or a text field in use.
+func _popup_busy() -> bool:
+	var m := lobby.dialogs.modal
+	if m == null or not is_instance_valid(m):
+		return false
+	if m.find_child("ConfirmOk", true, false):
+		return true
+	for le in m.find_children("*", "LineEdit", true, false):
+		if (le as LineEdit).has_focus() or String(le.name) in ["NameEdit", "SignatureEdit"]:
+			return true
+	return false
+
+
+## A popup closed: a challenge that waited behind it shows now.
+func _on_modal_closed() -> void:
+	var cloud := Game.cloud_service()
+	if cloud.has_invite() and not lobby.start_btn.disabled and (lobby.dialogs.modal == null or not is_instance_valid(lobby.dialogs.modal)):
+		_show_challenge(String(cloud.invite_from().get("name", "PLAYER")))
+
+
+## DUEL CHALLENGE: DECLINE, ACCEPT, and BLOCK for someone who keeps challenging (asked first). X
+## and Android back decline too, so the challenger hears at once.
+func _show_challenge(who: String) -> void:
+	_net_list = null
+	var v := lobby.dialogs.open_modal("DUEL CHALLENGE", 680.0)
+	var decline := func() -> void:
+		Game.cloud_service().answer(false)
+		lobby.dialogs.close_modal()
+	lobby.dialogs.modal.set_meta("on_back", decline)
 	var t := UI.label("%s challenges you to a 1 vs 1 duel" % who, 26, UI.TEXT, "heavy")
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(t)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 12)
+	var block := UI.button("BLOCK", 18, "dark", Vector2(140, 56))
+	block.name = "ChallengeBlock"
+	block.pressed.connect(_ask_block_challenger.bind(who))
 	var no := UI.button("DECLINE", 20, "light", Vector2(190, 56))
-	no.pressed.connect(func() -> void:
-		Game.cloud_service().answer(false)
-		lobby.dialogs.close_modal())
+	no.name = "DeclineButton"
+	no.pressed.connect(decline)
 	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 56))
 	yes.name = "AcceptButton"
 	yes.pressed.connect(func() -> void:
 		yes.disabled = true
 		UI.set_caption(yes, "CONNECTING")
 		Game.cloud_service().answer(true))
+	row.add_child(block)
 	row.add_child(no)
 	row.add_child(yes)
 	v.add_child(row)
+
+
+## BLOCK on a challenge, asked first: the challenge is dropped unanswered and the player blocked
+## (Cloud.drop_player, Game.block); CANCEL goes back to the challenge while it still waits.
+func _ask_block_challenger(who: String) -> void:
+	var cloud := Game.cloud_service()
+	var id := String(cloud.invite_from().get("id", ""))
+	if id == "":
+		lobby.dialogs.close_modal()
+		return
+	var back := func() -> void:
+		if Game.cloud_service().has_invite():
+			_show_challenge(who)
+		else:
+			lobby.dialogs.close_modal()
+	lobby.dialogs.confirm("BLOCK PLAYER", LobbyProfile.block_question(who), "BLOCK", func() -> void:
+		Game.cloud_service().drop_player(id)
+		Game.block(id, who), back, true)
 
 
 var _seen_requests := {}

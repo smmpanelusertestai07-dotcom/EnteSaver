@@ -11,7 +11,8 @@ extends Node
 ## PROFILE. Then other players' cards from the ONLINE window: a friend who is online (FRIENDS tab:
 ## DUEL 1 VS 1, REMOVE FRIEND) and a stranger who is offline (ALL PLAYERS: ADD FRIEND, no duel),
 ## BLOCK asked first, after which the stranger is gone from the list; a swipe on a name scrolls
-## the long ALL PLAYERS list without opening a card. Every button on these screens is checked for
+## the long ALL PLAYERS list without opening a card. A challenge that comes in over an open
+## question waits for it, then shows with BLOCK; back declines it. Every button on these screens is checked for
 ## a 56 px touch target, and nothing in a scrolling list may keep a finger's touch from the
 ## scroll. The online service is pointed at a local port nobody listens on, so no public relay is
 ## reached and every other player shown is made up here. Returns the number of failed checks.
@@ -240,7 +241,33 @@ func run(at: Node) -> int:
 	await _settle(0.5)
 	_check(lobby.find_child("Profile", true, false) == null and (lobby.get("_main_ui") as Control).visible, "back closes PROFILE")
 	await _tour_cards(lobby, cloud)
+	await _tour_challenge(lobby, cloud)
 	return _done(saved_profile)
+
+
+## A challenge that comes in while a question is open waits for it (it would swallow the answer);
+## its popup has BLOCK, and X / Android back decline it (the challenger hears at once).
+func _tour_challenge(lobby: Node, cloud: Cloud) -> void:
+	var dialogs: LobbyDialogs = lobby.get("dialogs")
+	var keys := Crypto.new()
+	var who := _id("tour-challenger")
+	dialogs.confirm("REMOVE FRIEND", "A question that is open when the challenge comes in.", "REMOVE", func() -> void: pass)
+	await _settle(0.2)
+	cloud._incoming = {"id": who, "name": "QUICKDRAW", "bundle": "default", "room": keys.generate_random_bytes(16).hex_encode(),
+		"aes": keys.generate_random_bytes(32), "mac": keys.generate_random_bytes(32), "t": Time.get_ticks_msec()}
+	cloud.invited.emit("QUICKDRAW")
+	await _settle(0.2)
+	_check(lobby.find_child("ConfirmOk", true, false) != null and lobby.find_child("AcceptButton", true, false) == null,
+		"a challenge does not replace an open question")
+	_back()
+	await _settle(0.4)
+	var accept := lobby.find_child("AcceptButton", true, false)
+	_check(accept != null and lobby.find_child("ChallengeBlock", true, false) != null,
+		"the challenge shows once the question closed, with BLOCK")
+	await _at.shot("p13_challenge")
+	_back()
+	await _settle(0.3)
+	_check(not cloud.has_invite() and lobby.get("_modal") == null, "Android back on a challenge declines it")
 
 
 ## Other players' cards from the ONLINE window: a friend online (FRIENDS tab) and a stranger

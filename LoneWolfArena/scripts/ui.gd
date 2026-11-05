@@ -25,6 +25,8 @@ const FONT_FILES := {
 	"number": "res://assets/fonts/number",
 }
 const ICON_DIR := "res://assets/ui/icons/"
+## The smallest touch target (canvas px on the 720 px tall canvas: about 9 mm on a phone).
+const TOUCH_MIN := 56.0
 const ART_DIR := "res://assets/ui/"
 
 static var _fonts := {}
@@ -352,7 +354,7 @@ static func segmented(options: Array, selected: int, on_change: Callable, size :
 		b.button_group = group
 		b.button_pressed = i == selected
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(min_w, 42)
+		b.custom_minimum_size = Vector2(min_w, TOUCH_MIN)
 		b.clip_text = true
 		b.add_theme_font_override("font", font("bold"))
 		b.add_theme_font_size_override("font_size", size)
@@ -451,7 +453,7 @@ static func _step_button(t: String) -> Button:
 	var b := Button.new()
 	b.text = t
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(40, 36)
+	b.custom_minimum_size = Vector2(TOUCH_MIN, TOUCH_MIN)
 	b.add_theme_font_override("font", font("bold"))
 	b.add_theme_font_size_override("font_size", 26)
 	var st := box(Color(0.88, 0.88, 0.87), 2, 0, Color.TRANSPARENT, 0.0)

@@ -439,6 +439,14 @@ func _tour_online_card(lobby: Node) -> Node:
 	_check(next != null and not Game.online, "without a session the arena hands back to the lobby")
 	cloud.opponent = saved_opponent
 	await _settle(1.0)
+	# The lobby says why the online match did not start (never a bot match instead), once.
+	var modal: Node = next.get("_modal") if next else null
+	var notice := modal.find_child("NoticeText", true, false) as Label if modal else null
+	_check(notice != null and notice.text.contains("before the match began"), "the lobby says the online match did not start")
+	if notice:
+		await _at.shot("m13c_online_called_off")
+		await _tap(modal.find_child("NoticeOk", true, false) as Control)
+		await _settle(0.3)
 	return next
 
 

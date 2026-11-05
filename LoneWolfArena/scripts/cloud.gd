@@ -570,12 +570,16 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 				_on_waiting(topic.get_slice("/", 2) == "fr", topic.get_slice("/", 4), w)
 		return
 	if topic == ROOT + "/lobby" or topic == ROOT + "/u/" + my_id:
-		var d: Variant = JSON.parse_string(payload.get_string_from_utf8())
-		if d is Dictionary and typeof(d.get("id", d.get("from"))) == TYPE_STRING:
-			if topic == ROOT + "/lobby":
+		# Anyone can publish there: a lobby announcement needs its "id", an inbox message its "from".
+		var json := JSON.new()
+		if json.parse(payload.get_string_from_utf8()) != OK or not json.data is Dictionary:
+			return
+		var d: Dictionary = json.data
+		if topic == ROOT + "/lobby":
+			if typeof(d.get("id")) == TYPE_STRING:
 				_on_lobby(d)
-			else:
-				_on_inbox(d)
+		elif typeof(d.get("from")) == TYPE_STRING:
+			_on_inbox(d)
 	elif _room != "" and topic == ROOT + "/r/" + _room:
 		_on_room(payload)
 	elif room_code != "" and topic == ROOT + "/c/" + room_code:
@@ -723,6 +727,11 @@ func has_invite() -> bool:
 	return not _incoming.is_empty()
 
 
+## Who the challenge waiting for an answer here comes from: {"id", "name"} ({} when none).
+func invite_from() -> Dictionary:
+	return {} if _incoming.is_empty() else {"id": String(_incoming.id), "name": String(_incoming.name)}
+
+
 func waiting_for() -> String:
 	return String(_outgoing.get("name", ""))
 
@@ -843,8 +852,11 @@ func _send_withdrawals() -> void:
 	owed.clear()
 
 
+## ACCEPT / DECLINE of a friend request: online only (the FRIENDS tab greys them out otherwise),
+## as the answer deletes the waiting request on the relay; offline that delete would be lost and
+## a declined request would come back with the next connection.
 func answer_friend(peer_id: String, accept: bool) -> void:
-	if not friend_requests.has(peer_id):
+	if not friend_requests.has(peer_id) or not _connected:
 		return
 	var req: Dictionary = friend_requests[peer_id]
 	friend_requests.erase(peer_id)

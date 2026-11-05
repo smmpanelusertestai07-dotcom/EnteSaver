@@ -52,6 +52,7 @@ func _ready() -> void:
 	_test_session_ends()
 	_test_safe_saves()
 	_test_no_sprint_firing()
+	_test_lobby_ui_rules()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -1613,3 +1614,40 @@ func _test_no_sprint_firing() -> void:
 	p.set_sprint(true)
 	_check(not while_firing and p.sprinting, "no sprint while firing, back once FIRE is let go")
 	p.free()
+
+
+## Names keep accented Latin letters as plain ones and say when nothing can be shown; a lobby
+## message without its "id" (anyone can publish there) is dropped quietly; a friend request is not
+## answered while offline (the relay's copy would bring it back); the settings panel leaves Android
+## back to a popup that came in over it.
+func _test_lobby_ui_rules() -> void:
+	_check(Game.clean_name("José Müller") == "JOSE MULLER" and Game.clean_name("Straße") == "STRASSE"
+		and Game.clean_name("Иван") == "" and Game.clean_name("Łukasz-7") == "LUKASZ-7",
+		"accented letters become plain letters, other scripts are left out (%s)" % Game.clean_name("José Müller"))
+	var saved_profile := Game.profile.duplicate(true)
+	var at := Game.autotest
+	Game.autotest = "unit"
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var cl := Cloud.new()
+	cl.my_id = "me".sha256_text().left(32)
+	cl._on_publish(Cloud.ROOT + "/lobby", "{\"t\": \"hi\", \"from\": \"abc\"}".to_utf8_buffer())
+	cl._on_publish(Cloud.ROOT + "/u/" + cl.my_id, "{\"t\": \"frq\", \"id\": \"abc\"}".to_utf8_buffer())
+	cl._on_publish(Cloud.ROOT + "/lobby", "[1, 2]".to_utf8_buffer())
+	_check(cl.peers.is_empty() and cl.friend_requests.is_empty(), "lobby and inbox messages without their id are dropped")
+	var x := "asker-x".sha256_text().left(32)
+	cl.friend_requests[x] = {"name": "XENA", "t": 1}
+	cl.answer_friend(x, false)
+	_check(cl.friend_requests.has(x), "a friend request is not answered while the relay is not connected")
+	cl.free()
+	Game.profile = saved_profile
+	Game.autotest = at
+	var root := Control.new()
+	var sp := SettingsPanel.new()
+	root.add_child(sp)
+	var alone := sp.covered()
+	var popup := Control.new()
+	root.add_child(popup)
+	var under := sp.covered()
+	popup.visible = false
+	_check(not alone and under and not sp.covered(), "the settings panel leaves back to a popup shown over it")
+	root.free()

@@ -114,7 +114,7 @@ func _ready() -> void:
 		var b := _menu_button(TABS[i], i)
 		_menu.add_child(b)
 		_menu_buttons[i] = b
-	var reset := UI.button("RESET", 18, "ghost", Vector2(150, 46))
+	var reset := UI.button("RESET", 18, "ghost", Vector2(150, UI.TOUCH_MIN))
 	reset.name = "Reset"
 	reset.icon = UI.icon_texture("v_reload")
 	reset.expand_icon = true
@@ -132,7 +132,7 @@ func _ready() -> void:
 	title.offset_top = 16
 	title.offset_bottom = 60
 	add_child(title)
-	var close := UI.close_button(54)
+	var close := UI.close_button(UI.TOUCH_MIN)
 	close.name = "Close"
 	close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	close.offset_left = -66
@@ -251,6 +251,11 @@ func _show_tab(i: int) -> void:
 			_build_controls()
 		3:
 			_build_sound()
+	# A finger drag that starts on a row scrolls the tab (a tap still presses); a slider keeps its
+	# own drag, so moving one never scrolls the list.
+	UI.drag_scroll(_scroll, _body)
+	for s in _body.find_children("*", "Slider", true, false):
+		(s as Control).mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 # ---------------------------------------------------------------- BASIC
@@ -622,9 +627,26 @@ func _close() -> void:
 	queue_free()
 
 
+## Android back: answers an open question first, else closes the panel; never while something was
+## opened on top of it (a challenge popup in the lobby: that one takes the back).
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST and is_inside_tree():
+		if covered():
+			return
 		if _ask_layer and is_instance_valid(_ask_layer):
 			_close_ask()            # back answers an open question first
 		else:
 			_close()
+
+
+## True while a visible Control was put on top of this panel (a later sibling: the lobby's popup
+## for a challenge or a friend request that came in meanwhile).
+func covered() -> bool:
+	var p := get_parent()
+	if p == null:
+		return false
+	for i in range(get_index() + 1, p.get_child_count()):
+		var c := p.get_child(i) as Control
+		if c != null and c.visible and not c.is_queued_for_deletion():
+			return true
+	return false

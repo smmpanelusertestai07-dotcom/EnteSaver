@@ -654,15 +654,15 @@ func _build_top_bar(root: Control) -> void:
 	top_right.offset_left = -200
 	top_right.offset_right = -10
 	top_right.offset_top = 6
-	top_right.offset_bottom = 56
+	top_right.offset_bottom = 6 + UI.TOUCH_MIN
 	top_right.alignment = BoxContainer.ALIGNMENT_END
 	top_right.add_theme_constant_override("separation", 8)
 	root.add_child(top_right)
-	var info := UI.glyph_button("v_info", 46, "?")
+	var info := UI.glyph_button("v_info", UI.TOUCH_MIN, "?")
 	info.name = "HelpButton"
 	info.pressed.connect(_how_to_play)
 	top_right.add_child(info)
-	var gear := UI.glyph_button("v_settings", 46, "SET")
+	var gear := UI.glyph_button("v_settings", UI.TOUCH_MIN, "SET")
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
 	top_right.add_child(gear)
@@ -726,7 +726,7 @@ func _menu_row(text: String, icon_name: String, node_name: String, action: Calla
 	var b := Button.new()
 	b.name = node_name
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(262, 50)
+	b.custom_minimum_size = Vector2(262, UI.TOUCH_MIN)
 	b.text = text
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.icon = UI.icon_texture(icon_name)
@@ -827,7 +827,7 @@ func _build_right_column(root: Control) -> void:
 	_diff_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	_diff_row.offset_left = -430
 	_diff_row.offset_right = -12
-	_diff_row.offset_top = -214
+	_diff_row.offset_top = -234
 	_diff_row.offset_bottom = -178
 	_diff_row.add_theme_constant_override("separation", 6)
 	_diff_row.alignment = BoxContainer.ALIGNMENT_END
@@ -842,8 +842,8 @@ func _build_right_column(root: Control) -> void:
 	stats.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	stats.offset_left = -430
 	stats.offset_right = -12
-	stats.offset_top = -258
-	stats.offset_bottom = -222
+	stats.offset_top = -278
+	stats.offset_bottom = -242
 	stats.add_theme_constant_override("separation", 6)
 	stats.alignment = BoxContainer.ALIGNMENT_END
 	root.add_child(stats)
@@ -914,7 +914,7 @@ func _refresh_mode() -> void:
 	else:
 		_mode_sub.text = "1 VS BOT  ·  FIRST TO %d" % Game.rounds_to_win()
 	_diff_row.visible = training
-	_stats_row.offset_top = -258.0 if training else -214.0
+	_stats_row.offset_top = -278.0 if training else -214.0
 	_stats_row.offset_bottom = _stats_row.offset_top + 36.0
 	mode_card.queue_redraw()
 
@@ -929,7 +929,7 @@ func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
 	b.button_pressed = Game.practice if idx < 0 else (not Game.practice and idx == int(Game.settings.difficulty))
 	b.focus_mode = Control.FOCUS_NONE
 	b.text = text
-	b.custom_minimum_size = Vector2(100, 36)
+	b.custom_minimum_size = Vector2(100, 56)      # a 56 px touch target: the chips sit close together
 	b.add_theme_font_override("font", UI.font("bold"))
 	b.add_theme_font_size_override("font_size", 17)
 	var off := UI.chamfer(Color(0, 0, 0, 0.55), 8, 1, Color(1, 1, 1, 0.2), 8.0, ["tl", "br"], 0.0)
@@ -1126,7 +1126,8 @@ func _process(delta: float) -> void:
 		var feet := Vector3(model.global_position.x, PODIUM_TOP, 0.55)
 		if not camera.is_position_behind(feet):
 			var p := camera.unproject_position(feet)
-			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5, 0)).round()
+			# (in _main_ui, which a camera cutout may move in from the screen's left edge)
+			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5 + _main_ui.offset_left, 0)).round()
 
 
 ## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the
@@ -1137,9 +1138,10 @@ func _notification(what: int) -> void:
 		return
 	if start_btn and start_btn.disabled:
 		return                      # the match is loading
-	if _find_settings():
+	var sp := _find_settings()
+	if sp and not sp.covered():
 		return                      # the panel closes itself
-	if _modal:
+	if _modal:                      # (also a popup that came in over the settings panel)
 		dialogs.back()
 	elif profile_ui.layer:
 		profile_ui.close()

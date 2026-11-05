@@ -6,8 +6,9 @@ extends RefCounted
 ## (confirm()), a message with one OK (notice()) and the "Quit the game?" dialog. The lobby makes
 ## it (Lobby.dialogs) and its parts open popups through it; everything is built under the lobby's
 ## UI layer.
-## Node names: Modal (or QuitDialog), Close, Mode_<training|lonewolf>, NameEdit, NameRandom,
-## NameOk, ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt" and
+## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, NameEdit,
+## NameRandom, NamePreview, NameOk, ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel,
+## QuitConfirm. Markers: "name prompt" and
 ## "ui name_ok" (the emulator test taps OK there).
 
 ## SELECT MODE: what each mode's card says under its name ({rounds}: Game.ROUNDS_TO_WIN).
@@ -42,6 +43,9 @@ const HOW_TO := [
 	]],
 ]
 
+## A popup closed (also when another one replaces it): a challenge that waited shows then.
+signal modal_closed
+
 var lobby: Lobby
 ## The open popup (node "Modal", or "QuitDialog"); null when none is open.
 var modal: Control
@@ -68,6 +72,7 @@ func open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
 	UI.full_rect(shade)
 	modal.add_child(shade)
 	var frame := VBoxContainer.new()
+	frame.name = "Frame"
 	frame.add_theme_constant_override("separation", 0)
 	frame.anchor_left = 0.5
 	frame.anchor_right = 0.5
@@ -96,6 +101,7 @@ func close_modal() -> void:
 		modal.queue_free()
 		modal = null
 		DisplayServer.virtual_keyboard_hide()     # a text field in it may have opened the keyboard
+		modal_closed.emit()
 
 
 ## The popup's X and Android back: its own way back when it set one (meta "on_back", a Callable:
@@ -276,6 +282,7 @@ func how_to_play() -> void:
 		col.add_child(UI.section(String(g[0]), 18))
 		for it in g[1]:
 			col.add_child(_howto_item(String(it[0]), _rounds_text(String(it[1])), _rounds_text(String(it[2]))))
+	UI.drag_scroll(scroll, page)          # a finger drag that starts on an item scrolls the page
 
 
 ## A HOW TO PLAY text with {rounds} filled in (the rounds a match is played to).
@@ -345,6 +352,17 @@ func edit_name(first := false) -> void:
 		Audio.play("ui_click", -4.0))
 	line.add_child(dice)
 	v.add_child(line)
+	# What other players will see, as it is typed (accents become plain letters, other scripts
+	# and symbols are left out, Game.clean_name).
+	var preview := UI.label("", 18, UI.TEXT_DIM, "bold")
+	preview.name = "NamePreview"
+	v.add_child(preview)
+	var show_preview := func(t: String) -> void:
+		var shown := Game.clean_name(t)
+		preview.text = "SHOWN AS:  " + shown if shown != "" else "USE LETTERS A-Z OR DIGITS: NOTHING HERE CAN BE SHOWN"
+		preview.add_theme_color_override("font_color", UI.TEXT_DIM if shown != "" else UI.BAD)
+	le.text_changed.connect(show_preview)
+	show_preview.call(le.text)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 12)
@@ -359,10 +377,12 @@ func edit_name(first := false) -> void:
 	ok.name = "NameOk"
 	var apply := func() -> void:
 		var n := Game.clean_name(le.text)
-		if n != "":
-			Game.profile.name = n
-			lobby._name_label.text = n
-			lobby._plate_label.text = n
+		if n == "":
+			show_preview.call(le.text)     # nothing that can be shown: the editor stays open and says so
+			return
+		Game.profile.name = n
+		lobby._name_label.text = n
+		lobby._plate_label.text = n
 		Game.profile.name_set = true
 		Game.save_profile()
 		close_modal()

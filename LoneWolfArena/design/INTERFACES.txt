@@ -153,14 +153,20 @@ listed here. If a part needs something new from the core, add it in its own file
 - `PauseMenu.new()` (Control, works while paused): signal `closed`. Hides `arena.hud` while open
   (restored on close and exit). It ignores a back request in the frame it opens (the engine hands
   the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with
-  `in_match = true`.
+  `in_match = true`. `Arena.open_pause()` opens one at most (online the tree is not paused, so
+  an open menu is what blocks a second one).
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
   once. `TAB_KEYS` lists each tab's settings (its RESET), `NOT_SHOWN` the rest; RESET and EXTREME
   ask first in a `Confirm` layer (`ConfirmOk`, `ConfirmCancel`; back closes it). With
   `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
-  note (`EditHudNote`): leaving for the editor would abandon the match.
+  note (`EditHudNote`): leaving for the editor would abandon the match. A finger drag that starts
+  on a row scrolls a tab (its sliders keep their own drags). `covered()`: a visible Control was
+  put on top of it (a lobby popup that came in meanwhile), which then takes Android back.
+- Touch targets are `UI.TOUCH_MIN` (56 canvas px) at least: buttons, the settings' segmented
+  choices and -/+ steppers, the lobby's opponent chips and menu rows, the pause and results
+  buttons, the login's links.
 - Camera cutout: `UI.safe_margins(viewport)` is the screen's left and right sides a cutout covers
   (canvas px; zero on desktop builds; `UI.margins_for_test` stands in for one in checks);
   `UI.keep_clear_of_cutout(control)` keeps a full-screen Control's content clear of it (the
@@ -182,15 +188,22 @@ listed here. If a part needs something new from the core, add it in its own file
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, menus, mode card, START, settings,
   input) makes four helpers that build under its `ui` and reach it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
-  open popup, `back()` (its X and Android back: the popup's meta "on_back" Callable, else close),
+  open popup (its column `Frame`), signal `modal_closed`, `back()` (its X and Android back: the
+  popup's meta "on_back" Callable, else close),
   `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`),
   `notice(title, text)` (one OK: `NoticeText`, `NoticeOk`); SELECT
   MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog), `friends`
   (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind, back)` with its list in `NetScroll`
   (back: reopened under a closing player card, the list scrolls back to where it was), custom
-  rooms, the online service's signals; `challenge(id)`, `add_friend(id)`), `wardrobe_ui`
+  rooms, the online service's signals; `challenge(id)`, `add_friend(id)`; DUEL CHALLENGE has
+  BLOCK (`ChallengeBlock`, asked first), DECLINE (`DeclineButton`, also its X and back) and
+  ACCEPT (`AcceptButton`), and waits while the open popup is busy (a question, a text being typed)
+  until `modal_closed`; a friend's REMOVE (`FriendRemove`) asks first; ACCEPT / DECLINE of a
+  friend request need the relay; a text field being typed in lifts the popup into the top fifth,
+  clear of the on-screen keyboard), `wardrobe_ui`
   (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`) and
-  `profile_ui` (`LobbyProfile`, below). Their scrolling lists (PROFILE's tabs, `NetScroll`) go
+  `profile_ui` (`LobbyProfile`, below). Their scrolling lists (PROFILE's tabs, `NetScroll`, HOW TO PLAY,
+  WARDROBE's outfits) go
   through `UI.drag_scroll(scroll, content)` each time their rows are built: a finger drag that
   starts on a row scrolls them (rows and their buttons pass the touch on; a tap still presses).
   Tours read `model`, `ui`, `start_btn`, `mode_card`,
@@ -264,7 +277,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - `Login` (scripts/login.gd): GUEST LOGIN (PLAY AS GUEST, the Terms of Use and Privacy Notice as
   in-game popups, Android back = quit dialog) then CREATE PROFILE (name, picture, name card,
   preview, player ID; back returns to the guest login). CONFIRM = `Login.create_profile(name,
-  avatar, banner)`: name (clean_name), `name_set`, `guest_ok`, `avatar`, `banner`, then
+  avatar, banner)`: name (`Game.clean_name`: A-Z, 0-9, space, _ - . with accented Latin letters
+  as plain ones, the rest left out; the lobby's name editor shows the result as it is typed in
+  `NamePreview` and keeps an empty one open), `name_set`, `guest_ok`, `avatar`, `banner`, then
   `Game.save_profile()`; WELCOME, then `Game.goto_lobby()`. Shared art helpers:
   `Login.avatar_texture(id)` (the emblem or an outfit portrait's head) and
   `Login.banner_texture(id)` (`Game.BANNERS[i]` = assets/ui/banners/banner_<i+1>.png). The

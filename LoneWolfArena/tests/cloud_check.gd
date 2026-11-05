@@ -3,7 +3,9 @@ extends Node
 ## (tools/qa/run_checks.sh starts both, LW_MQTT_URL points Cloud at it): LW_NET_ROLE=host sees
 ## the guest's announcement in the lobby, challenges it; the guest
 ## accepts; both load the arena, exchange their players' state, the host floods the guest with
-## walls, frags and shots (the guest makes only one round's items), the host lands a lethal hit on
+## walls, frags and shots (the guest makes only one round's items), the guest opens its pause menu
+## (back closes it, a switch of apps does not stack a second one) and runs (the host sees its
+## footprints), the host lands a lethal hit on
 ## its copy of the guest, the guest's phone applies it and reports its death, and both show the
 ## result (host VICTORY, guest DEFEAT), which each one's profile keeps: a LONE WOLF entry in
 ## HISTORY with the other phone's id and name (its row opens their card), the deaths and rounds in
@@ -78,6 +80,18 @@ func run(autotest: Node) -> int:
 		if footprints == 0:
 			_fail("the other phone's player ran without a step heard or seen")
 	else:
+		# Online the tree is not paused: Android back still closes the pause menu, and switching
+		# apps with it open does not stack a second one.
+		arena.call("open_pause")
+		await at.wait(0.1)
+		arena.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+		await at.wait(0.1)
+		var menus := _pause_menus(arena)
+		get_tree().root.propagate_notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+		await at.wait(0.2)
+		at.log_line("pause menus: %d open, %d after back" % [menus, _pause_menus(arena)])
+		if menus != 1 or _pause_menus(arena) != 0:
+			_fail("online, back did not close the one pause menu")
 		var hud: HUD = arena.get("hud")
 		hud.process_mode = Node.PROCESS_MODE_DISABLED     # (its joystick would stop the run)
 		for i in 24:
@@ -140,6 +154,13 @@ func run(autotest: Node) -> int:
 		_fail("the opponent is not among the recent players")
 	await at.wait(1.0)
 	return _done("")
+
+
+func _pause_menus(arena: Node) -> int:
+	var n := 0
+	for c in (arena.get("pause_layer") as Node).get_children():
+		n += 1 if c is PauseMenu and not c.is_queued_for_deletion() else 0
+	return n
 
 
 func _fail(what: String) -> void:

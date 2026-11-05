@@ -325,17 +325,17 @@ func _guest_button() -> Button:
 func _plain(text: String) -> Label:
 	var l := UI.shadowed(UI.label(text, 18, Color(1, 1, 1, 0.8), "semi"), Vector2(0, 2), Color(0, 0, 0, 0.7))
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l.custom_minimum_size = Vector2(0, 48)
+	l.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
 	return l
 
 
-## A link in the consent line: accent text with an underline, 48 px tall to be easy to hit.
+## A link in the consent line: accent text with an underline, a full touch target tall.
 func _link(text: String, node_name: String, open: Callable) -> Button:
 	var b := Button.new()
 	b.name = node_name
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(0, 48)
+	b.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
 	var font := UI.font("bold")
 	b.add_theme_font_override("font", font)
 	b.add_theme_font_size_override("font_size", 18)

@@ -996,9 +996,14 @@ func record_left() -> void:
 	Game.mark("match left")
 
 
+## The pause menu, once: online the tree is not paused, so an open menu is what says it is open (a
+## back press reaches it, and it closes; switching apps with it open does not stack a second one).
 func open_pause() -> void:
 	if phase == Phase.END or get_tree().paused:
 		return
+	for c in pause_layer.get_children():
+		if c is PauseMenu and not c.is_queued_for_deletion():
+			return
 	hud.release_all()
 	if not online:                      # an online match keeps running on the other phone
 		get_tree().paused = true

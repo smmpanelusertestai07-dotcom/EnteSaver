@@ -11,7 +11,7 @@ extends Control
 ## row in blue and, when the arena offers scoreboard_rows(), the opponent's row in orange; an
 ## honour tag (x ~0.18-0.37 W, y 0.83-0.88 H); XP gained with an animated level bar in the
 ## bottom-left band; PLAY AGAIN (yellow, node PlayAgain, 0.661-0.819 W) and LOBBY (grey, node
-## Lobby, 0.836-0.992 W) in the 0.894-0.959 H band. Works unpaused at time scale 1. Android back
+## Lobby, 0.836-0.992 W) in the 0.88-0.96 H band. Works unpaused at time scale 1. Android back
 ## = LOBBY (ignored while PLAY AGAIN's match loading runs).
 
 const COLUMNS := ["ELIMINATIONS", "DAMAGE", "HEADSHOTS", "ACCURACY", "TIME", "HP LEFT"]
@@ -414,8 +414,8 @@ func _build_footer() -> void:
 	xr.name = "XpRow"
 	xr.anchor_left = 0.026
 	xr.anchor_right = 0.37
-	xr.anchor_top = 0.894
-	xr.anchor_bottom = 0.959
+	xr.anchor_top = 0.88
+	xr.anchor_bottom = 0.96
 	xr.add_theme_constant_override("separation", 14)
 	xr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(xr)
@@ -462,8 +462,8 @@ func _build_footer() -> void:
 func _place(c: Control, x0: float, x1: float) -> void:
 	c.anchor_left = x0
 	c.anchor_right = x1
-	c.anchor_top = 0.894
-	c.anchor_bottom = 0.959
+	c.anchor_top = 0.88                # 58 px on the 720 px canvas: a full touch target
+	c.anchor_bottom = 0.96
 	c.offset_left = 0
 	c.offset_right = 0
 	c.offset_top = 0

@@ -14,7 +14,8 @@
 #   tests/shots_profile.gd PROFILE and other players' cards with real taps and swipes: CAREER,
 #                          HISTORY (a row opens the opponent's card), BLOCKED (UNBLOCK, BLOCK asked
 #                          first, kept by name, follows changes), lists that scroll from any row,
-#                          56 px touch targets (headless: every check, no pictures)
+#                          56 px touch targets, a challenge that waits behind an open question
+#                          and is declined by back (headless: every check, no pictures)
 #   tests/anim_check.gd    every clip merged, toe fix, swap timing, flinch limit, grenade release
 #   tests/bot_check.gd     grenade arc accuracy, the bot survives the closing zone
 #   tests/flow_soak.gd     several matches in one process: no leaks, corpses stay on the floor
@@ -24,8 +25,9 @@
 #   tests/cloud_check.gd   online 1 vs 1 with two copies of the game (LW_NET_ROLE host / guest)
 #                          through tests/mqtt_mock.gd: find, challenge, accept, two rounds
 #                          (end-to-end encrypted), a flood of walls and frags held to one round's
-#                          items, lethal hits and the result on both, which each one's HISTORY
-#                          keeps with the other's id
+#                          items, back closing the online pause menu, the opponent's footprints,
+#                          lethal hits and the result on both, which each one's HISTORY keeps
+#                          with the other's id
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 #   tests/drop_check.gd    online matches that end early: a slow load is waited for, a quit before
 #                          the first fight counts nowhere, the phone that was away gets LEFT and

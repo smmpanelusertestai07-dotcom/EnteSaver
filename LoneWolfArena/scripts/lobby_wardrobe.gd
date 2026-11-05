@@ -24,6 +24,7 @@ var layer: Control
 ## The outfit on the podium while the wardrobe is open (the selected card's).
 var preview_bundle := ""
 var _ward_grid: GridContainer
+var _ward_scroll: ScrollContainer
 var _ward_info_name: Label
 var _ward_info_state: Label
 var _ward_info_desc: Label
@@ -79,6 +80,7 @@ func open() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	col.add_child(scroll)
+	_ward_scroll = scroll
 	_ward_grid = GridContainer.new()
 	_ward_grid.columns = 3
 	_ward_grid.add_theme_constant_override("h_separation", 10)
@@ -145,6 +147,7 @@ func _fill_wardrobe() -> void:
 	var group := ButtonGroup.new()
 	for b: Dictionary in CharacterModel.BUNDLE_INFO:
 		_ward_grid.add_child(_bundle_card(b, group))
+	UI.drag_scroll(_ward_scroll, _ward_grid)        # a drag that starts on a card scrolls the outfits
 	_update_ward_info()
 
 
@@ -225,6 +228,7 @@ func close() -> void:
 		layer.queue_free()
 		layer = null
 		_ward_grid = null
+		_ward_scroll = null
 		_ward_info_name = null
 		_ward_equip = null
 	lobby._main_ui.visible = true
