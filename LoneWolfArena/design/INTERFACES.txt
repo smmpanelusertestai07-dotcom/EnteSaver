@@ -464,7 +464,67 @@ listed here. If a part needs something new from the core, add it in its own file
 - (WP-B2 writes its notes here)
 
 ## DUO / SQUAD: gameplay (WP-C: team_arena, team_referee, fighter knock/revive, bots in teams)
-- (WP-C writes its notes here)
+- Rules: TeamReferee (scripts/team_referee.gd) is pure logic: down() / revive() / leave() return
+  the decisions, winner() / timeout_winner() the round. TeamArena (scripts/team_arena.gd) applies
+  them; its header lists the rules (knock, bleed, revive, friendly fire off, rounds, picks).
+- Round flow: PREP (PREP_TIME, every fighter picks its own gun: the player's panel, bots after
+  1.5-3.5 s where they run here) -> FIGHT (round_time(): DUO 90 s, SQUAD 120 s; zone_hold() /
+  zone_shrink()) -> the referee: a team with nobody UP, DEATH_SETTLE_S later "rend" (or the
+  time-out's HP sums) -> BREAK -> the referee's "round" -> PREP, or END (first to
+  team_rounds_to_win(): 4, LW_ROUNDS_TO_WIN in tests). open_pause() is the base's (offline it
+  pauses the tree; TeamArenaNet has online = true, so it never does).
+- SEAMS as TeamArena calls them (TeamArenaNet overrides them):
+  - _fighter_for(entry): once per roster entry from _spawn_fighters, after roster, my_slot, mode
+    and rounds_to_win are set. The arena then sets team, slot, name, display_name, arena, adds it to
+    the tree, places it in its alcove (spawn_spot), setup_fighter(bundle, last_pick), aim_yaw,
+    hold_fire; every Bot (RemoteFighter too) gets configure(diff, first enemy), enemies / allies
+    and frozen. Each fighter's died -> _on_team_died (bookkeeping only), knocked_down -> _on_knocked,
+    knock_finished -> _on_knock_finished. The 1 vs 1's _on_fighter_died is not connected.
+  - _net_tick(delta): first thing in _physics_process, in every phase.
+  - runs_here(f): only these take the zone's damage here, run revives, pick guns as bots, and
+    report downs. (A Fighter bleeds in its own _physics_process; RemoteFighter overrides that.)
+  - _report_down(f, killer, headshot, cause, finished): from knocked_down (HP gone, finished
+    false) and knock_finished (knock HP gone, finished true; cause "bleed" for bleeding out) of
+    fighters that run here, only during FIGHT and never while a decision is being applied. Base:
+    if is_referee(): referee_down(slot, killer slot or -1, ...). The host calls referee_down() for
+    a checked "dn" too.
+  - _report_revive(reviver, target): a revive by a fighter that runs here reached REVIVE_S. Base:
+    if is_referee(): referee_revive(reviver slot, target slot). The host calls referee_revive()
+    for a checked "rvd". referee_leave(slot): a member left (OUT now and every later round).
+  - _announce(kind, data): every referee decision ("ko", "el", "rv", "rend", "round") right before
+    _apply_decision applies it; every pick of a fighter that runs here ("pick" [slot, gun,
+    round]: the player's, and the bots' on the referee); revive start / stop by a fighter that runs
+    here ("rvs" [reviver, target], "rvx" [reviver]: shown only; the receiver sets
+    puppet.reviving / revive_t and target.revived_by, or calls _end_revive(puppet)).
+  - _apply_decision(kind, data): "ko" / "el" / "rv" / "rend" / "round" / "pick" with the layouts in
+    the seams' comment. Repeats are harmless: ko / el / rv skip fighters already in that state,
+    "rend" only for the current round during FIGHT, "round" only when it is newer, "pick" only for
+    the current round. It knocks (Fighter.knock), takes out (Fighter.die) and stands up
+    (Fighter.stand_up) the fighters the other phone runs too.
+  - Rounds, time-outs and next rounds are gated on is_referee(); the guest moves on alone 8 s
+    after a break should have ended, as the 1 vs 1.
+- Stats: kills are counted when the referee takes a fighter out ("el": the killer, if an enemy);
+  Fighter._after_shot and Grenade count kills only in the 1 vs 1 (team -1). "knocks" at "ko",
+  "revives" at "rv", "deaths" at died. final_stats[slot] (filled by WP-N from "fin": kills,
+  knocks, revives, damage, headshots, shots, hits, deaths) wins over a fighter's own stats in
+  slot_stats() and scoreboard_rows().
+- Fighter (team >= 0 only): knock(by, headshot) (prone, KNOCK_HP, no gun / items / jump / stance
+  change, crawl at KNOCK_SPEED), stand_up(hp, by), signal knock_finished(victim, killer, headshot),
+  revived_by (the teammate reviving it: no bleeding meanwhile), last_attacker, ignore_fighters()
+  (bullets and sight pass through teammates; take_damage from an ally does nothing). net_local
+  fighters call arena.net_shot_by / net_grenade_by / net_wall_by (bots' shots too) when the arena
+  has them, else the 1 vs 1's net_shot / net_grenade / net_wall for the player.
+- Bots (team modes, Bot.enemies / allies set by TeamArena): retarget every 0.5 s (UP enemies in
+  sight, nearest first; else who hit it in the last 3 s; else a knocked enemy in sight; else the
+  nearest left), revive a knocked teammate within 15 m after 1.5 s without an enemy in sight
+  (never while the zone presses), keep near a human teammate (go 3 m behind when over 7 m away),
+  crawl toward a teammate when knocked.
+- HUD / results API (WP-B2): members(), slot_fighter(), status_of(), revive_candidate(),
+  start_revive(), cancel_revive(), revive_progress(), spectate_next(), spectated(),
+  slot_stats(), scoreboard_rows() (my team first, me first; keys "team", "ally", "slot", "status",
+  "knocks", "revives", "bot" added), round_time(), team_score; the result adds "team", "team_size",
+  "rows", "knocks", "revives", "bots", mode_id "training" / "duo" / "squad", enemy "ORANGE TEAM" (vs:
+  the other player's name) and enemy_id.
 
 ## DUO / SQUAD: between two phones (WP-N: team_arena_net, Cloud team invites and seeks, RemoteFighter)
 - Cloud (additive; the 1 vs 1 paths are unchanged):
