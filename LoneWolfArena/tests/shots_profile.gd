@@ -2,14 +2,16 @@ extends Node
 ## PROFILE screenshot tour, with real taps and checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_profile.gd
 ## A played-in profile (made up here). The lobby's player card shows its picture and opens PROFILE
-## on CAREER (rates, averages, the row per mode); HISTORY with its matches (and scrolled), NAME
-## CARD (a banner and a picture picked by taps: the name card follows at once), the signature
-## editor, COPY (the whole player ID on the clipboard), BLOCKED (UNBLOCK asks first; a blocked
-## player's card offers UNBLOCK), HISTORY empty; back closes PROFILE. Then other players' cards
-## from the ONLINE window: a friend who is online (FRIENDS tab: DUEL 1 VS 1, REMOVE FRIEND) and a
-## stranger who is offline (ALL PLAYERS: ADD FRIEND, no duel), BLOCK asked first, after which the
-## stranger is gone from the list. Every button on these screens is checked for a 56 px touch
-## target. The online service is pointed at a local port nobody listens on, so no public relay is
+## on CAREER (rates, averages, the row per mode); HISTORY with its matches (scrolled by a finger
+## swipe that starts on a row), NAME CARD (a banner and a picture picked by taps: the name card
+## follows at once), the signature editor, COPY (the whole player ID on the clipboard), BLOCKED
+## (UNBLOCK asks first; a blocked player's card offers UNBLOCK), HISTORY empty; back closes
+## PROFILE. Then other players' cards from the ONLINE window: a friend who is online (FRIENDS tab:
+## DUEL 1 VS 1, REMOVE FRIEND) and a stranger who is offline (ALL PLAYERS: ADD FRIEND, no duel),
+## BLOCK asked first, after which the stranger is gone from the list; a swipe on a name scrolls
+## the long ALL PLAYERS list without opening a card. Every button on these screens is checked for
+## a 56 px touch target, and nothing in a scrolling list may keep a finger's touch from the
+## scroll. The online service is pointed at a local port nobody listens on, so no public relay is
 ## reached and every other player shown is made up here. Returns the number of failed checks.
 
 ## The made-up players: [id seed, name, outfit, picture, banner, level, signature, seconds since seen].
@@ -17,6 +19,12 @@ const FRIEND := ["tour-friend", "NIGHTFOX21", "shadow", "shadow", "gold_rush", 2
 const STRANGER := ["tour-stranger", "IRONFALCON07", "desert", "desert", "shards", 7, "NO CAMPING PLEASE", 3 * 3600 + 600]
 const BLOCKED_KNOWN := ["tour-blocked-1", "TOXICTOM", "default", "emblem", "default", 2, "", 2 * 86400]
 const BLOCKED_UNKNOWN := "tour-blocked-2"
+## More players under ALL PLAYERS (offline, seen days ago), so the list is longer than the
+## screen: [name, days since seen].
+const CROWD := [["SWIFTRAVEN11", 1], ["NEONLYNX42", 2], ["IRONBISON07", 2], ["GOLDVIPER88", 3], ["FROSTPUMA19", 4],
+	["WILDHAWK03", 5], ["STEELCOBRA61", 6], ["DUSTYSHARK25", 8], ["NIGHTTIGER14", 9], ["ROGUEEAGLE70", 11],
+	["LUCKYFALCON5", 13], ["STORMJACKAL9", 15], ["TURBOBEAR33", 18], ["SILENTFOX46", 21], ["BLAZERHINO12", 26],
+	["GHOSTWOLF77", 30]]
 
 var _fails := 0
 var _at: Node
@@ -87,11 +95,12 @@ func run(at: Node) -> int:
 		"HISTORY lists every match, newest first (%d rows)" % rows)
 	_touch_targets(layer, "HISTORY")
 	await _at.shot("p02_history")
+	# A finger swipe that starts on a row (not in a gap between rows) scrolls the list.
 	var body := layer.find_child("ProfileBody", true, false) as ScrollContainer
-	if body:
-		body.scroll_vertical = 100000
-		await _settle(0.3)
-		_check(body.scroll_vertical > 0, "a long HISTORY scrolls")
+	var row2 := layer.find_child("HistoryRow_2", true, false) as Control
+	if body and row2:
+		await _swipe(row2.get_global_rect().get_center(), -300.0)
+		_check(body.scroll_vertical > 0, "a finger swipe that starts on a HISTORY row scrolls the list (%d px)" % body.scroll_vertical)
 	await _at.shot("p02b_history_scrolled")
 	# NAME CARD: a banner and a picture by taps; the name card and the lobby's card follow.
 	await _tap(layer.find_child("ProfileTab_namecard", true, false) as Control)
@@ -185,6 +194,9 @@ func _tour_cards(lobby: Node, cloud: Cloud) -> void:
 	for p: Array in [FRIEND, STRANGER, BLOCKED_KNOWN]:
 		cloud.directory[_id(p[0])] = {"name": p[1], "bundle": p[2], "pk": "", "ts": now - int(p[7]), "v": 2, "avatar": p[3],
 			"banner": p[4], "level": p[5], "signature": p[6]}
+	for i in CROWD.size():
+		cloud.directory[_id("tour-crowd-%d" % i)] = {"name": CROWD[i][0], "bundle": "default", "pk": "",
+			"ts": now - int(CROWD[i][1]) * 86400 - i * 600, "v": 2, "avatar": "emblem", "banner": "default", "level": 3 + i, "signature": ""}
 	cloud.peers[friend_id] = {"name": FRIEND[1], "bundle": FRIEND[2], "pk": "", "seen": Time.get_ticks_msec()}
 	await _tap(lobby.find_child("FriendsButton", true, false) as Control)
 	await _settle(0.5)
@@ -246,6 +258,19 @@ func _tour_cards(lobby: Node, cloud: Cloud) -> void:
 		and win.find_child("Player_" + Cloud.friend_code(stranger_id), true, false) == null,
 		"BLOCK hides the player: back on the ONLINE tab without them")
 	await _at.shot("p09_online_after_block")
+	# ALL PLAYERS is longer than the screen: a finger swipe that starts on a player's name scrolls
+	# it and opens no card.
+	var ns: ScrollContainer = win.find_child("NetScroll", true, false) as ScrollContainer if win else null
+	var crowd_btn: Control = win.find_child("Player_" + Cloud.friend_code(_id("tour-crowd-1")), true, false) as Control if win else null
+	_check(ns != null and crowd_btn != null, "ALL PLAYERS lists the crowd")
+	if ns and crowd_btn:
+		var before := ns.scroll_vertical
+		await _swipe(crowd_btn.get_global_rect().get_center(), -240.0, 0.3)
+		var still := lobby.get("_modal") as Control
+		_check(ns.scroll_vertical > before + 100 and still != null and still.find_child("NetScroll", true, false) == ns
+			and still.find_child("PlayerCardPopup", true, false) == null,
+			"a finger swipe on a player's name scrolls the ONLINE list (%d px) and opens no card" % (ns.scroll_vertical - before))
+		await _at.shot("p09b_online_scrolled")
 	_back()
 	await _settle(0.4)
 
@@ -291,6 +316,41 @@ func _touch_targets(root: Node, where: String) -> void:
 		if c.is_visible_in_tree() and (c.size.y < 55.5 or c.size.x < 55.5):
 			small.append("%s %dx%d" % [c.name, roundi(c.size.x), roundi(c.size.y)])
 	_check(small.is_empty(), "touch targets of 56 px at least in %s %s" % [where, ", ".join(small)])
+	var sc := root.find_child("ProfileBody", true, false) as ScrollContainer
+	if sc == null:
+		sc = root.find_child("NetScroll", true, false) as ScrollContainer
+	if sc and sc.get_child_count() > 0:
+		var keepers := _touch_keepers(sc.get_child(0))
+		_check(keepers.is_empty(), "nothing in the list of %s keeps a finger's touch from scrolling it %s" % [where, ", ".join(keepers)])
+
+
+## Controls under a scrolling list's content that keep a touch to themselves (MOUSE_FILTER_STOP:
+## buttons, plates): a drag that starts on one of them could not scroll the list (UI.drag_scroll).
+func _touch_keepers(content: Node) -> PackedStringArray:
+	var out := PackedStringArray()
+	for n in content.find_children("*", "Control", true, false):
+		if (n as Control).mouse_filter == Control.MOUSE_FILTER_STOP:
+			out.append(String(n.name))
+	return out
+
+
+## A finger swipe that starts at `p` (canvas) and moves `dy` px in 10 steps, as a phone sends it
+## (touch, drags, release). hold: the finger rests that long before it lifts, so the list stops
+## where the finger stopped (no fling).
+func _swipe(p: Vector2, dy: float, hold := 0.0) -> void:
+	var fx: Transform2D = get_tree().root.get_final_transform()
+	var w := fx * p
+	var step := fx.basis_xform(Vector2(0, dy / 10.0))
+	_at.touch(0, w, true)
+	await get_tree().process_frame
+	for k in 10:
+		w += step
+		_at.drag(0, w, step)
+		await get_tree().process_frame
+	if hold > 0.0:
+		await _at.wait(hold)
+	_at.touch(0, w, false)
+	await _settle(0.6)
 
 
 func _done(saved_profile: Dictionary) -> int:

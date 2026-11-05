@@ -545,6 +545,25 @@ static func style_scroll(sc: ScrollContainer) -> void:
 	bar.custom_minimum_size = Vector2(8, 0)
 
 
+## How far (canvas px) a finger moves on a scrolling list before the touch becomes a scroll: a
+## smaller wobble is still a tap on the button under it (with no dead zone a 3 px wobble turned a
+## tap into a fling).
+const SCROLL_DEADZONE := 12
+
+
+## A finger drag scrolls `sc` wherever it starts on its rows. Buttons and plates keep a touch to
+## themselves (MOUSE_FILTER_STOP), so only the gaps between rows would scroll: every such control
+## under `content` passes the touch on to `sc` too. A tap still presses the button under it; once
+## the finger moves SCROLL_DEADZONE px the list scrolls and that press is dropped. Call it again
+## whenever the rows are built again.
+static func drag_scroll(sc: ScrollContainer, content: Control) -> void:
+	sc.scroll_deadzone = SCROLL_DEADZONE
+	for n in content.find_children("*", "Control", true, false):
+		var c := n as Control
+		if c.mouse_filter == Control.MOUSE_FILTER_STOP:
+			c.mouse_filter = Control.MOUSE_FILTER_PASS
+
+
 ## A white glyph from assets/ui/icons/ (tinted), fitted into `size` px.
 static func icon(icon_name: String, size := 28.0, tint := TEXT) -> TextureRect:
 	var t := TextureRect.new()

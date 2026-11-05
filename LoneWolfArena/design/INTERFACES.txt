@@ -157,7 +157,10 @@ listed here. If a part needs something new from the core, add it in its own file
   (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind)` with its list in `NetScroll`, custom
   rooms, the online service's signals; `challenge(id)`, `add_friend(id)`), `wardrobe_ui`
   (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`) and
-  `profile_ui` (`LobbyProfile`, below). Tours read `model`, `ui`, `start_btn`, `mode_card`,
+  `profile_ui` (`LobbyProfile`, below). Their scrolling lists (PROFILE's tabs, `NetScroll`) go
+  through `UI.drag_scroll(scroll, content)` each time their rows are built: a finger drag that
+  starts on a row scrolls them (rows and their buttons pass the touch on; a tap still presses).
+  Tours read `model`, `ui`, `start_btn`, `mode_card`,
   `_modal`, `wardrobe`, `_preview_bundle` and `profile_ui` from the lobby and call its
   `_open_wardrobe()`, `_close_wardrobe()`, `_open_profile()` and `_open_settings()`;
   `refresh_player_card()` redraws the player card top-left (name, profile picture).

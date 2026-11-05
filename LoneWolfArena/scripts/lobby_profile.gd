@@ -435,6 +435,7 @@ func _show_tab(key: String) -> void:
 			_fill_blocked()
 		_:
 			_fill_career()
+	UI.drag_scroll(_scroll, _list)          # a finger drag on a row scrolls the tab
 
 
 ## A section title with a dim note after it.

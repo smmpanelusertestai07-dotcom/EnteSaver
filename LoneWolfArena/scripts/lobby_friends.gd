@@ -362,18 +362,19 @@ func _refresh_friends() -> void:
 		c.queue_free()
 	if _net_kind == "friends":
 		_fill_friends(cloud, waiting)
-		return
-	for id: String in peers:
-		if not Game.is_blocked(id):
-			_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
-	if _net_kind == "online":
-		var offline := _offline_players(cloud, "")
-		if not offline.is_empty():
-			var head := UI.label("ALL PLAYERS  ·  %d" % offline.size(), 19, UI.TEXT_DIM, "bold")
-			head.name = "AllPlayersHead"
-			_net_list.add_child(head)
-		for id: String in offline:
-			_net_list.add_child(_player_row(cloud, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
+	else:
+		for id: String in peers:
+			if not Game.is_blocked(id):
+				_net_list.add_child(_player_row(cloud, id, String(peers[id].name), waiting, "  ·  ONLINE"))
+		if _net_kind == "online":
+			var offline := _offline_players(cloud, "")
+			if not offline.is_empty():
+				var head := UI.label("ALL PLAYERS  ·  %d" % offline.size(), 19, UI.TEXT_DIM, "bold")
+				head.name = "AllPlayersHead"
+				_net_list.add_child(head)
+			for id: String in offline:
+				_net_list.add_child(_player_row(cloud, id, String(cloud.directory[id].name), waiting, "  ·  " + _ago(int(cloud.directory[id].ts))))
+	UI.drag_scroll(_net_scroll, _net_list)          # a finger drag on a row scrolls the list
 
 
 ## The list's height: all of it while the window fits the screen, else as much as fits, scrolling
