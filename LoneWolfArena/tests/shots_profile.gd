@@ -95,12 +95,25 @@ func run(at: Node) -> int:
 		"HISTORY lists every match, newest first (%d rows)" % rows)
 	_touch_targets(layer, "HISTORY")
 	await _at.shot("p02_history")
-	# A finger swipe that starts on a row (not in a gap between rows) scrolls the list.
+	# A match against another player opens their card (a bot match is a plain row); back returns.
+	_check(row0 is BaseButton and not (layer.find_child("HistoryRow_2", true, false) is BaseButton),
+		"HISTORY: a row against another player is a button, a bot match is not")
+	await _tap(row0 as Control)
+	await _settle(0.6)
+	var opp := lobby.get("_modal") as Control
+	_check(opp != null and _text(opp, "CardName") == FRIEND[1] and opp.find_child("PlayerBlock", true, false) != null,
+		"a HISTORY row opens the opponent's card (to add, challenge or block them)")
+	await _at.shot("p02c_history_card")
+	_back()
+	await _settle(0.4)
+	_check(lobby.get("_modal") == null and _tab_of(lobby) == "history", "back closes the card, HISTORY is still open")
+	# A finger swipe that starts on a row (here the button row) scrolls the list and opens nothing.
 	var body := layer.find_child("ProfileBody", true, false) as ScrollContainer
-	var row2 := layer.find_child("HistoryRow_2", true, false) as Control
-	if body and row2:
-		await _swipe(row2.get_global_rect().get_center(), -300.0)
-		_check(body.scroll_vertical > 0, "a finger swipe that starts on a HISTORY row scrolls the list (%d px)" % body.scroll_vertical)
+	row0 = layer.find_child("HistoryRow_0", true, false)
+	if body and row0:
+		await _swipe((row0 as Control).get_global_rect().get_center(), -300.0)
+		_check(body.scroll_vertical > 0 and lobby.get("_modal") == null,
+			"a finger swipe that starts on a HISTORY row scrolls the list (%d px) and opens no card" % body.scroll_vertical)
 	await _at.shot("p02b_history_scrolled")
 	# NAME CARD: a banner and a picture by taps; the name card and the lobby's card follow.
 	await _tap(layer.find_child("ProfileTab_namecard", true, false) as Control)
@@ -328,12 +341,16 @@ func _sample_profile() -> Dictionary:
 	var matches := [["won", "lonewolf", FRIEND[1], 5, 3, 5, 1214, 3, 25], ["lost", "lonewolf", "VIPERQUEEN", 2, 5, 2, 640, 1, 130],
 		["won", "training", "BOT VIPER", 5, 2, 5, 1176, 3, 190], ["draw", "training", "BOT ONYX", 4, 4, 4, 912, 1, 300],
 		["won", "training", "BOT KAI", 5, 0, 5, 1003, 6, 1500], ["lost", "training", "BOT TITAN", 3, 5, 3, 801, 0, 1600],
+		["left", "training", "BOT ONYX", 1, 2, 1, 356, 0, 1700],
 		["won", "lonewolf", STRANGER[1], 5, 4, 5, 1390, 2, 2900], ["won", "training", "BOT REX", 5, 1, 5, 1120, 4, 4400],
 		["lost", "lonewolf", "SILENTLYNX12", 1, 5, 1, 420, 0, 5800], ["won", "training", "BOT NOVA", 5, 3, 5, 1085, 2, 7300],
 		["won", "training", "BOT ZED", 5, 2, 5, 990, 1, 8700], ["draw", "lonewolf", "GHOSTRAVEN", 3, 3, 3, 777, 1, 11600]]
 	var history := []
+	var ids := {FRIEND[1]: _id(FRIEND[0]), STRANGER[1]: _id(STRANGER[0])}
 	for m: Array in matches:
-		history.append({"result": m[0], "mode": m[1], "enemy": m[2], "id": _id(FRIEND[0]) if m[2] == FRIEND[1] else "",
+		# an online opponent's id is kept (a row that opens their card), a bot has none
+		var opp_id := "" if m[1] == "training" else String(ids.get(m[2], _id("tour-" + String(m[2]).to_lower())))
+		history.append({"result": m[0], "mode": m[1], "enemy": m[2], "id": opp_id,
 			"score": m[3], "enemy_score": m[4], "kills": m[5], "damage": m[6], "headshots": m[7], "t": now - int(m[8]) * 60})
 	p.history = history
 	return p
@@ -394,6 +411,12 @@ func _done(saved_profile: Dictionary) -> int:
 	Game.profile = saved_profile
 	_at.log_line("PROFILE TOUR DONE fails=%d" % _fails)
 	return _fails
+
+
+## The open PROFILE tab ("" when PROFILE is closed).
+func _tab_of(lobby: Node) -> String:
+	var pui: Object = lobby.get("profile_ui")
+	return String(pui.get("tab")) if pui and pui.get("layer") != null else ""
 
 
 ## Whether a Label under `root` says exactly `text`.

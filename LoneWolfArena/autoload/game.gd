@@ -112,7 +112,8 @@ const DEFAULT_PROFILE := {
 	# friend requests are ignored (see block())
 	"blocked": [],
 	# The last counted matches, newest first (record_match, MAX_HISTORY at most): [{"result" (won,
-	# lost or draw), "mode", "enemy" (name), "id" (an online opponent's id, else ""), "score" and
+	# lost, draw, or left: quit with QUIT MATCH, a defeat), "mode", "enemy" (name), "id" (an online
+	# opponent's id, else ""), "score" and
 	# "enemy_score" (rounds), "kills", "damage", "headshots", "t" (unix time)}].
 	"history": [],
 }
@@ -129,7 +130,7 @@ const MAX_REQUESTS := 50            # each of friend_in and friend_out
 const MAX_RECENT := 20
 const MAX_BLOCKED := 50
 const MAX_HISTORY := 20
-const HISTORY_RESULTS := ["won", "lost", "draw"]
+const HISTORY_RESULTS := ["won", "lost", "draw", "left"]
 ## The name card backgrounds, in the order of their art assets/ui/banners/banner_<n>.png
 ## (tools/media/make_banners.py: EMBER RIDGE, GOLD RUSH, HIVE, CONTOUR, SHARDS, SCOPE; see
 ## Login.banner_texture).
@@ -713,8 +714,9 @@ func vibrate(ms: int) -> void:
 
 
 ## A fight counts as played once it starts, so leaving mid-fight (QUIT MATCH, closing the app)
-## still records it, as a loss. `m` is the mode it is played in (a key of MODE_NAMES): it counts
-## in the totals and in that mode's numbers (profile.modes).
+## still records it, as a loss (QUIT MATCH also puts it into HISTORY as LEFT: Arena.record_left).
+## `m` is the mode it is played in (a key of MODE_NAMES): it counts in the totals and in that
+## mode's numbers (profile.modes).
 func count_match(m := DEFAULT_MODE) -> void:
 	profile.matches = int(profile.matches) + 1
 	var c := _mode_counts(m)
@@ -724,12 +726,15 @@ func count_match(m := DEFAULT_MODE) -> void:
 
 ## The end of a counted fight: wins, kills and XP, in the totals and in the numbers of the
 ## result's mode ("mode_id", see ResultsScreen); the profile page's CAREER counters, a HISTORY
-## entry and, online, the opponent among the recent players.
+## entry and, online, the opponent among the recent players. "left": the match was quit before
+## its end (HISTORY says LEFT; no win, whatever "won" says).
 func record_match(result: Dictionary) -> void:
 	last_result = result
 	var c := _mode_counts(String(result.get("mode_id", DEFAULT_MODE)))
 	var kills := int(result.get("kills", 0))
-	if result.get("won", false):
+	var left := bool(result.get("left", false))
+	var won := bool(result.get("won", false)) and not left
+	if won:
 		profile.wins = int(profile.wins) + 1
 		c.wins = int(c.wins) + 1
 	profile.kills = int(profile.kills) + kills
@@ -741,7 +746,8 @@ func record_match(result: Dictionary) -> void:
 		profile[k[0]] = mini(int(profile[k[0]]) + _count(result.get(k[1])), COUNTER_MAX)
 	profile.hits = mini(int(profile.hits), int(profile.shots))
 	profile.headshots = mini(int(profile.headshots), int(profile.hits))
-	var entry := _history_entry({"result": "draw" if result.get("draw", false) else ("won" if result.get("won", false) else "lost"),
+	var outcome := "left" if left else ("draw" if result.get("draw", false) else ("won" if won else "lost"))
+	var entry := _history_entry({"result": outcome,
 		"mode": result.get("mode_id"), "enemy": result.get("enemy"), "id": result.get("enemy_id"),
 		"score": result.get("score_player"), "enemy_score": result.get("score_bot"), "kills": result.get("kills"),
 		"damage": result.get("damage"), "headshots": result.get("headshots"), "t": int(Time.get_unix_time_from_system())})

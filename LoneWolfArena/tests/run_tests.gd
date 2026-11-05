@@ -1009,6 +1009,17 @@ func _test_history() -> void:
 	_check(p.deaths == 6 and p.headshots == 4 and p.damage == 2088 and p.shots == 110 and p.hits == 48 and p.rounds_won == 9
 		and p.rounds_lost == 6 and p.time_played == 792 and p.wins == 1 and p.kills == 9, "record_match counts the CAREER numbers")
 	_check(p.recent.size() == 1 and p.recent[0].id == rival and p.recent[0].name == "NIGHT FOX", "an online opponent becomes a recent player")
+	# QUIT MATCH (Arena.record_left): HISTORY says LEFT, never a win; what was played counts.
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	Game.record_match({"won": true, "left": true, "kills": 1, "damage": 240, "xp": 0, "mode_id": "training", "enemy": "BOT ONYX",
+		"score_player": 1, "score_bot": 0, "time": 95.0, "shots": 12, "hits": 6, "deaths": 0, "enemy_id": ""})
+	h = Game.profile.history
+	_check(h.size() == 1 and h[0].result == "left" and h[0].score == 1 and h[0].kills == 1 and Game.profile.wins == 0
+		and Game.profile.modes.training.wins == 0 and Game.profile.kills == 1 and Game.profile.rounds_won == 1 and Game.profile.time_played == 95,
+		"a match left with QUIT MATCH: HISTORY says LEFT, no win, what was played counts")
+	Game.profile.history = [{"result": "left", "mode": "lonewolf", "enemy": "RIVAL"}]
+	Game._sanitize_profile()
+	_check(Game.profile.history.size() == 1 and Game.profile.history[0].result == "left", "a saved LEFT entry is kept")
 	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
 	Game.record_match({"won": false, "kills": 0, "mode_id": "training", "enemy": "BOT KAI", "shots": 5, "hits": 9, "headshots": 30})
 	p = Game.profile

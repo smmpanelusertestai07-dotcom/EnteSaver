@@ -2,7 +2,9 @@ extends Node
 ## A match over several rounds against the bot (run with LW_ROUNDS_TO_WIN=2): each round ends
 ## with an elimination; the next one puts both back at their spawns with full HP, items and
 ## collisions; the gun is picked every two rounds by alternating sides (round 3 is the bot's
-## pick, and both hold that gun); the match ends at 2 wins with the right result.
+## pick, and both hold that gun); the match ends at 2 wins with the right result, which the
+## profile's HISTORY and CAREER hold as played. Then a second match, quit with QUIT MATCH in
+## round 2: HISTORY says LEFT (a defeat) with the round won before, CAREER counts it, no win.
 ## Prints one line per round and "ROUNDS CHECK DONE bad=N".
 
 var bad := 0
@@ -58,7 +60,61 @@ func run(autotest: Node) -> int:
 		return _done("results never shown")
 	if int(sc.player) != 2 or int(sc.bot) != 1 or arena.get("_winner") != p or not bool(Game.last_result.get("won", false)):
 		_fail("the match result is wrong")
+	# The profile (an automated run starts from a new one): the match in HISTORY, and CAREER with
+	# the player's one death (round 2) and the numbers of their stats (the kills here are scripted,
+	# not shot: their stats count none).
+	var kills := int(p.stats.kills)
+	var h := _last_match()
+	var prof: Dictionary = Game.profile
+	at.log_line("history: %s; matches %d, wins %d, deaths %d, rounds %d-%d" % [str(h), prof.matches, prof.wins, prof.deaths,
+		prof.rounds_won, prof.rounds_lost])
+	if (h.get("result") != "won" or h.get("mode") != "training" or h.get("enemy") != Game.clean_name(b.display_name) or h.get("id") != ""
+			or h.get("score") != 2 or h.get("enemy_score") != 1 or h.get("kills") != kills):
+		_fail("HISTORY does not hold the match as played")
+	if prof.matches != 1 or prof.wins != 1 or prof.deaths != 1 or prof.kills != kills or prof.rounds_won != 2 or prof.rounds_lost != 1:
+		_fail("CAREER does not count the match as played")
+	# QUIT MATCH in round 2 of the next match (round 1 won).
+	Game.goto_arena()
+	await at.wait(1.0)
+	arena = get_tree().current_scene
+	p = arena.get("player")
+	b = arena.get("bot")
+	Engine.time_scale = 3.0
+	await at.wait_for_phase(arena, 1, 60.0)
+	await at.wait(0.6)
+	b.take_damage(9999.0, "head", p, p.global_position)
+	t = 0.0
+	while not (arena.get("phase") == 1 and int(arena.get("round_index")) == 2) and t < 60.0:
+		await at.wait(0.25)
+		t += 0.25
+	Engine.time_scale = 1.0
+	if int(arena.get("round_index")) != 2:
+		return _done("the second match never reached round 2")
+	kills += int(p.stats.kills)
+	arena.call("open_pause")
+	await at.wait(0.3)
+	var pm := arena.find_child("PauseMenu", true, false)
+	if pm == null:
+		return _done("no pause menu")
+	pm.call("_on_quit")                    # TAP AGAIN TO QUIT
+	pm.call("_on_quit")
+	t = 0.0
+	while (get_tree().current_scene == arena or get_tree().current_scene == null or get_tree().current_scene.name != "Lobby") and t < 20.0:
+		await at.wait(0.25)
+		t += 0.25
+	h = _last_match()
+	at.log_line("after QUIT MATCH: %s; matches %d, wins %d" % [str(h), prof.matches, prof.wins])
+	if h.get("result") != "left" or h.get("score") != 1 or h.get("enemy_score") != 0:
+		_fail("a match left with QUIT MATCH is not in HISTORY as LEFT")
+	if prof.matches != 2 or prof.wins != 1 or prof.kills != kills or prof.rounds_won != 3 or (prof.history as Array).size() != 2:
+		_fail("CAREER and HISTORY disagree about the match left")
 	return _done("")
+
+
+## The profile's newest HISTORY entry ({} when there is none).
+func _last_match() -> Dictionary:
+	var history: Array = Game.profile.history
+	return history[0] if not history.is_empty() else {}
 
 
 func _fail(what: String) -> void:

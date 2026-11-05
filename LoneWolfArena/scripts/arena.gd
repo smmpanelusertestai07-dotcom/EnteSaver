@@ -75,6 +75,7 @@ var _bot_pick_t := -1.0
 var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
+var _counted := false            # Game.count_match counted this match (its first fight began)
 
 
 func _ready() -> void:
@@ -523,6 +524,7 @@ func _start_fight() -> void:
 	_net_timeup_t = -1.0
 	if not practice and round_index == 1:
 		Game.count_match(mode)
+		_counted = true
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
@@ -808,19 +810,36 @@ func scoreboard_rows() -> Array:
 # ---------------------------------------------------------------- results / pause
 
 func _show_results() -> void:
+	Engine.time_scale = 1.0
+	result = _final_result()
+	if not _invalid:
+		Game.record_match(result)
+	var screen := ResultsScreen.new()
+	pause_layer.add_child(screen)
+	screen.setup(result)
+	Game.mark("results shown")
+
+
+## The decided match's result (phase END); from here on it counts as shown (_result_shown).
+func _final_result() -> Dictionary:
 	# Read the masked values first: a tamper flag raised by that read still voids the match.
 	var hp_left := roundi(player.hp)
 	_result_shown = true
-	Engine.time_scale = 1.0
 	var won := _winner == player and not _draw and not _invalid
 	var st := player.stats
-	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
 	var xp := 0
 	if not _invalid:
 		# capped: one opponent, at most one kill per round
 		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * Game.ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
-	# "difficulty" is the bot's level, or ONLINE when the opponent is another player.
-	result = {
+	return _match_result(won, xp, hp_left)
+
+
+## The match as the results screen and Game.record_match read it (ResultsScreen.setup). "difficulty"
+## is the bot's level, or ONLINE when the opponent is another player.
+func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
+	var st := player.stats
+	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
+	return {
 		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": int(st.damage),
 		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
 		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
@@ -828,12 +847,26 @@ func _show_results() -> void:
 		"difficulty": "ONLINE" if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
 		"shots": int(st.shots), "hits": int(st.hits), "deaths": _deaths, "enemy_id": _enemy_id,
 	}
-	if not _invalid:
-		Game.record_match(result)
-	var screen := ResultsScreen.new()
-	pause_layer.add_child(screen)
-	screen.setup(result)
-	Game.mark("results shown")
+
+
+## QUIT MATCH (the pause menu) leaves a counted match before its results: Game.count_match counted
+## it when its first fight began, so it goes into the profile now as LEFT, a defeat, with what was
+## played so far (rounds, kills, damage, time; no XP): HISTORY then shows the match that CAREER
+## counts. A match already decided (online the fight goes on under the pause menu) keeps its own
+## result. Not the target dummy (never counted), a voided match or one whose result is in.
+func record_left() -> void:
+	if not _counted or _result_shown or _invalid:
+		return
+	if phase == Phase.END:
+		result = _final_result()
+		if not _invalid:
+			Game.record_match(result)
+		return
+	_result_shown = true
+	var r := _match_result(false, 0, roundi(player.hp))
+	r.left = true
+	Game.record_match(r)
+	Game.mark("match left")
 
 
 func open_pause() -> void:

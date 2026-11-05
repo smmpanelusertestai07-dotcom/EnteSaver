@@ -7,7 +7,8 @@ extends RefCounted
 ## words: vertical tabs on the left, the open tab in the middle, this player's name card on the
 ## right. CAREER: the lifetime numbers with their rates and averages ("-" while there is nothing to
 ## divide by), then one row per mode. HISTORY: the last Game.MAX_HISTORY counted matches, newest
-## first (profile "history", Game.record_match). NAME CARD: the banner and the profile picture,
+## first (profile "history", Game.record_match; a match quit with QUIT MATCH shows as LEFT); a row
+## against another player opens their card. NAME CARD: the banner and the profile picture,
 ## saved at once; the name card shows them live. BLOCKED: the blocked players with UNBLOCK, by the
 ## name known for them (kept with the block) else their short ID; it follows blocks made elsewhere,
 ## and while it shows, the player cards are listened to (Cloud.start_directory), so names and cards
@@ -37,7 +38,7 @@ const TABS := [["career", "CAREER"], ["history", "HISTORY"], ["namecard", "NAME 
 ## tools/media/make_banners.py).
 const BANNER_NAMES := {"default": "EMBER RIDGE", "gold_rush": "GOLD RUSH", "hive": "HIVE", "contour": "CONTOUR",
 	"shards": "SHARDS", "scope": "SCOPE"}
-const RESULT_WORDS := {"won": "VICTORY", "lost": "DEFEAT", "draw": "DRAW"}
+const RESULT_WORDS := {"won": "VICTORY", "lost": "DEFEAT", "draw": "DRAW", "left": "LEFT"}
 const MONTHS := ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 const MARGIN := 26.0
 const TOP := 88.0                  # the tabs, the open tab and the name card start here
@@ -272,12 +273,16 @@ static func player_button(id: String, text: String) -> Button:
 	b.add_theme_stylebox_override("pressed", down)
 	b.add_theme_stylebox_override("hover_pressed", down)
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.draw.connect(func() -> void:
-		var c := Vector2(b.size.x - 20, b.size.y * 0.5)
-		b.draw_polyline(PackedVector2Array([c + Vector2(-4, -8), c + Vector2(4, 0), c + Vector2(-4, 8)]),
-			UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.55), 2.5, true))
+	b.draw.connect(_draw_chevron.bind(b))
 	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
 	return b
+
+
+## The ">" at the right end of a row that opens a player's card (yellow while touched).
+static func _draw_chevron(b: Button) -> void:
+	var c := Vector2(b.size.x - 20, b.size.y * 0.5)
+	b.draw_polyline(PackedVector2Array([c + Vector2(-4, -8), c + Vector2(4, 0), c + Vector2(-4, 8)]),
+		UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.55), 2.5, true)
 
 
 static func _result_color(r: String) -> Color:
@@ -592,27 +597,64 @@ func _fill_history() -> void:
 	_list.add_child(_head_row("LAST MATCHES", "NEWEST FIRST  ·  THE LAST %d" % Game.MAX_HISTORY))
 	if history.is_empty():
 		_list.add_child(_empty_plate("HistoryEmpty", "NO MATCHES YET",
-			"Your last %d matches show up here: TRAINING GROUND against the bot and LONE WOLF online. The target dummy is not counted." % Game.MAX_HISTORY))
+			"Your last %d matches show up here: TRAINING GROUND against the bot and LONE WOLF online. A match you quit counts as LEFT, a defeat. The target dummy is not counted." % Game.MAX_HISTORY))
 		return
 	var now := int(Time.get_unix_time_from_system())
 	for i in history.size():
 		_list.add_child(_history_row(history[i], i, now))
 
 
-func _history_row(e: Dictionary, i: int, now: int) -> PanelContainer:
-	var r := String(e.get("result", "lost"))
-	var col := _result_color(r)
-	var row := PanelContainer.new()
-	row.name = "HistoryRow_%d" % i
+## One HISTORY row (node HistoryRow_<n>). A match against another player (LONE WOLF: the entry
+## keeps their id) is a button with a ">" that opens their card (open_player: ADD FRIEND, DUEL 1 VS
+## 1, BLOCK); a match against the bot is a plain plate.
+func _history_row(e: Dictionary, i: int, now: int) -> Control:
+	var hb := _history_content(e, now)
 	var st := UI.chamfer(Color(1, 1, 1, 0.05), 8, 0, Color.TRANSPARENT, 12.0, ["br"])
 	st.content_margin_left = 0
 	st.content_margin_top = 0
 	st.content_margin_bottom = 0
-	row.add_theme_stylebox_override("panel", st)
-	row.custom_minimum_size = Vector2(0, 64)
+	st.content_margin_right = 40               # every row keeps the ">" room: the columns line up
+	var id := String(e.get("id", ""))
+	if not Game.is_player_id(id):
+		var plate := PanelContainer.new()
+		plate.name = "HistoryRow_%d" % i
+		plate.add_theme_stylebox_override("panel", st)
+		plate.custom_minimum_size = Vector2(0, 64)
+		plate.add_child(hb)
+		return plate
+	var b := Button.new()
+	b.name = "HistoryRow_%d" % i
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 64)
+	var hover := st.duplicate() as StyleBoxFlat
+	hover.bg_color = Color(1, 1, 1, 0.1)
+	var down := st.duplicate() as StyleBoxFlat
+	down.bg_color = Color(UI.ACCENT, 0.25)
+	b.add_theme_stylebox_override("normal", st)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", down)
+	b.add_theme_stylebox_override("hover_pressed", down)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	hb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hb.offset_right = -st.content_margin_right       # room for the ">"
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for n in hb.find_children("*", "Control", true, false):
+		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE      # the touch is the row button's
+	b.add_child(hb)
+	b.draw.connect(_draw_chevron.bind(b))
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		open_player(id, ""))
+	return b
+
+
+## A HISTORY row's content: the result slab (word, rounds), VS the opponent, the mode and how long
+## ago, then kills, damage and headshots.
+func _history_content(e: Dictionary, now: int) -> HBoxContainer:
+	var r := String(e.get("result", "lost"))
+	var col := _result_color(r)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
-	row.add_child(hb)
 	var slab := PanelContainer.new()
 	var ss := UI.box(Color(col, 0.17), 0, 0, Color.TRANSPARENT, 12.0)
 	ss.border_width_left = 5
@@ -658,7 +700,7 @@ func _history_row(e: Dictionary, i: int, now: int) -> PanelContainer:
 		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		c.add_child(cap)
 		hb.add_child(c)
-	return row
+	return hb
 
 
 # ---------------------------------------------------------------- NAME CARD

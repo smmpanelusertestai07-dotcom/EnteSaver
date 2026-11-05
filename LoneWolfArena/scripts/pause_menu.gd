@@ -167,6 +167,9 @@ func _restore_match_hud() -> void:
 
 func _on_quit() -> void:
 	if _quit_armed > 0.0:
+		var arena := get_tree().current_scene
+		if arena and arena.has_method("record_left"):
+			arena.call("record_left")        # a counted match goes into HISTORY as LEFT, a defeat
 		get_tree().paused = false
 		Game.goto_lobby()
 		return
