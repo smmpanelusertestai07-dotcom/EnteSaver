@@ -198,8 +198,14 @@ func _build() -> void:
 	colon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	score.add_child(colon)
 	score.add_child(_score_plate(String(r.get("enemy", "BOT")).to_upper(), int(r.get("score_bot", 0)), UI.ORANGE, false))
+	var note := ""
 	if _kind == "invalid":
-		var why := UI.outlined(UI.label("INTEGRITY CHECK FAILED  -  THIS MATCH DOES NOT COUNT", 18, Color(1, 0.6, 0.55), "bold"), 4)
+		note = "INTEGRITY CHECK FAILED  -  THIS MATCH DOES NOT COUNT"
+	elif bool(r.get("opponent_left", false)):
+		note = "%s LEFT THE MATCH  -  THE WIN IS YOURS" % String(r.get("enemy", "THE OPPONENT")).to_upper()
+	if note != "":
+		var why := UI.outlined(UI.label(note, 18, Color(1, 0.6, 0.55) if _kind == "invalid" else Color(1.0, 0.86, 0.45), "bold"), 4)
+		why.name = "InvalidNote" if _kind == "invalid" else "OpponentLeft"
 		why.anchor_left = 0.0
 		why.anchor_right = 1.0
 		why.offset_top = 438
@@ -276,10 +282,12 @@ func _build_table() -> void:
 	], true))
 	if not _enemy.is_empty():
 		var e := _enemy
-		# Under the opponent's name: ONLINE (LOCAL without internet) for another player, else BOT and its level.
+		# Under the opponent's name: ONLINE (LOCAL without internet) for another player (LEFT once they
+		# left the match), else BOT and its level.
 		var online := String(r.get("mode_id", "")) == "lonewolf"
+		var tag := "LEFT" if r.get("opponent_left", false) == true else ("LOCAL" if r.get("local", false) == true else "ONLINE")
 		table.add_child(_stat_row("EnemyRow", String(e.get("name", r.get("enemy", "BOT"))).to_upper(),
-			("LOCAL" if r.get("local", false) == true else "ONLINE") if online else "BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
+			tag if online else "BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
 			[float(e.get("kills", 0)), "%d"], [float(e.get("damage", 0)), "%d"], [float(e.get("headshots", 0)), "%d"],
 			[float(e.get("accuracy", 0)), "%d%%"], [t, "time"], [float(e.get("hp", 0)), "%d"],
 		], false))

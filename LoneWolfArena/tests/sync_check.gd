@@ -7,9 +7,12 @@ extends Node
 ##   no kill credit for either; the round ends the same way on both;
 ## - round 2: the guest opens its pause menu: online the match runs on under it (its clock does not
 ##   stop); the host shoots the guest down (a real kill, credited), which closes the guest's menu;
-## - round 3 (if one is still needed): the guest dies in the zone, nobody's kill.
-## Each copy writes the match as the host sees it (score, winner, rounds, kills) to LW_SYNC_OUT;
-## the step compares the two files. Prints "SYNC CHECK DONE bad=N".
+## - round 3 (if one is still needed): the guest dies in the zone, nobody's kill: the host shows the
+##   zone's line, not the elimination badge (that only for its real kill in round 2).
+## The guest is made to believe the match lasts a round longer: the host's word ("fin") ends it.
+## Each copy writes the match as the host sees it (score, winner, rounds, kills, and both rows of
+## its results table: the guest shows the host's time and HP, each row the numbers of that
+## player's own phone) to LW_SYNC_OUT; the step compares the two files. Prints "SYNC CHECK DONE bad=N".
 
 var bad := 0
 var at: Node
@@ -37,11 +40,17 @@ func run(autotest: Node) -> int:
 	var arena: Node = get_tree().current_scene
 	var p: Fighter = arena.get("player")
 	var b: Fighter = arena.get("bot")
+	if not host:
+		# The guest believes the match lasts longer than the host does: the host still decides when
+		# it ends (its "fin"), and both phones end it alike.
+		arena.set("rounds_to_win", int(arena.get("rounds_to_win")) + 1)
 	var outcomes := []
 	var r := 1
 	while is_instance_valid(arena) and not bool(arena.get("_result_shown")):
-		if not await _until(func() -> bool: return int(arena.get("round_index")) == r and arena.get("phase") == 1, 40.0):
+		if not await _until(func() -> bool: return (int(arena.get("round_index")) == r and arena.get("phase") == 1) or arena.get("phase") == 2, 40.0):
 			return _done("round %d never began its fight" % r)
+		if arena.get("phase") == 2:
+			break
 		if r == 1:
 			await at.wait(2.0)
 			p.take_damage(999.0, "zone", null, p.global_position, "zone")      # both in the zone, ~together
@@ -65,7 +74,16 @@ func run(autotest: Node) -> int:
 		var rsc: Dictionary = arena.get("score")
 		var line := "r%d %d:%d" % [r, int(rsc.player if host else rsc.bot), int(rsc.bot if host else rsc.player)]
 		outcomes.append(line)
-		at.log_line("round %d over: %s, kills me %d, phase %d" % [r, line, int(p.stats.kills), int(arena.get("phase"))])
+		var banner := (arena.get("hud") as HUD).banner_kind()
+		at.log_line("round %d over: %s, kills me %d, phase %d, banner \"%s\"" % [r, line, int(p.stats.kills), int(arena.get("phase")), banner])
+		# The winner's banner: the elimination badge only for a real kill (round 2, the host's); the
+		# guest down in the zone (round 3) is nobody's kill: the zone's own line, never ELIMINATED.
+		if host and r == 2 and banner != "kill":
+			_fail("the host's kill in round 2 did not show the elimination badge")
+		if host and r == 3 and banner != "zone":
+			_fail("the guest down in the zone showed \"%s\", not the zone's line" % banner)
+		if not host and r >= 2 and banner != "":
+			_fail("the guest, down in round %d, shows a banner \"%s\"" % [r, banner])
 		if r == 2 and not host:
 			await at.wait(0.3)
 			if _pause_menus(arena) != 0:
@@ -90,8 +108,23 @@ func run(autotest: Node) -> int:
 		_fail("the guest got kill credit (%d) for deaths in the zone" % guest_kills)
 	if int(res.get("score_player", -1)) != int(sc.player) or int(res.get("score_bot", -1)) != int(sc.bot):
 		_fail("the results screen shows another score than the match")
-	var summary := "rounds %d; %s; final %d:%d; winner %s\n" % [int(arena.get("round_index")), " ".join(outcomes),
-		int(sc.player if host else sc.bot), int(sc.bot if host else sc.player), winner]
+	# The results table as each phone shows it, the host's row first: both must read the same (the
+	# guest takes the time and the HP from the host, each row's numbers come from that player's phone).
+	var screen: Node = (arena.get("pause_layer") as Node).find_child("Stats", true, false)
+	var mine := _row_text(screen, "YourRow")
+	var theirs := _row_text(screen, "EnemyRow")
+	var summary := "rounds %d; %s; final %d:%d; winner %s; host row %s; guest row %s\n" % [int(arena.get("round_index")), " ".join(outcomes),
+		int(sc.player if host else sc.bot), int(sc.bot if host else sc.player), winner, mine if host else theirs, theirs if host else mine]
+	if mine == "" or theirs == "":
+		_fail("the results table is missing a row")
+	var fin: Dictionary = arena.get("_their_final")
+	if fin.is_empty() or (not host and float(fin.get("time", -1.0)) < 0.0):
+		_fail("the other phone's end-of-match numbers (\"fin\") never came")
+	if not host:
+		var goal := int(arena.get("rounds_to_win"))
+		var own_rule := int(sc.player) >= goal or int(sc.bot) >= goal or int(arena.get("round_index")) >= mini(2 * goal - 1, 9)
+		at.log_line("the guest's own count (first to %d) %s the match over: %s" % [goal, "said" if own_rule else "did not say",
+			"its own rule" if own_rule else "the host's word ended it"])
 	var out := OS.get_environment("LW_SYNC_OUT")
 	if out != "":
 		var f := FileAccess.open(out, FileAccess.WRITE)
@@ -101,6 +134,18 @@ func run(autotest: Node) -> int:
 	at.log_line("as the host sees it: " + summary.strip_edges())
 	await at.wait(1.5)
 	return _done("")
+
+
+## A results table row's numbers as shown (ELIMINATIONS .. HP LEFT), "" without the row.
+func _row_text(table: Node, row_name: String) -> String:
+	var row := table.find_child(row_name, true, false) if table else null
+	if row == null:
+		return ""
+	var parts := PackedStringArray()
+	for c in ResultsScreen.COLUMNS:
+		var l := row.find_child("Value_" + String(c).replace(" ", "_"), true, false) as Label
+		parts.append(l.text if l else "?")
+	return " ".join(parts)
 
 
 func _pause_menus(arena: Node) -> int:

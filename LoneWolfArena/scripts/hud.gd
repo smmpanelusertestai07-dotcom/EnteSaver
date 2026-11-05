@@ -42,6 +42,9 @@ const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint loc
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
 const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
+## An opponent who went down by itself (nobody's kill): what out_banner says took them out.
+const OUT_LINES := {"zone": "CAUGHT IN THE ZONE", "fall": "DOWN FROM A FALL", "self": "HIT BY THEIR OWN FRAG"}
+const OUT_ICONS := {"zone": "v_zone", "fall": "v_skull", "self": "item_grenade"}
 
 var player: Player
 var arena: Node
@@ -184,12 +187,29 @@ func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_i
 
 ## Big elimination feedback when the player takes someone out: a red X on them and the badge.
 func kill_banner(victim_name: String, headshot: bool) -> void:
-	_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot}
+	_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot, "cause": ""}
 	if arena != null:
 		for f: Fighter in arena.get("fighters"):
 			if f.display_name == victim_name:
 				_kill_x_pos = f.chest_position()
 				_kill_x_t = KILL_X_TIME
+
+
+## The opponent went down by itself (the zone, a fall, their own frag: a cause in OUT_LINES). It is
+## nobody's kill: no elimination badge and no red X, a plate in the badge's place says what took
+## them out.
+func out_banner(victim_name: String, cause: String) -> void:
+	if OUT_LINES.has(cause):
+		_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": false, "cause": cause}
+
+
+## What the banner in the elimination badge's place shows now: "" none, "kill" (ELIMINATED /
+## HEADSHOT) or the cause of an out_banner (the checks read it).
+func banner_kind() -> String:
+	if float(_kill_banner.t) <= 0.0:
+		return ""
+	var cause := String(_kill_banner.get("cause", ""))
+	return cause if cause != "" else "kill"
 
 
 func reveal(f: Fighter, seconds := 2.5) -> void:
@@ -1600,6 +1620,10 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var a := clampf(age / 0.1, 0.0, 1.0) * clampf(t / 0.45, 0.0, 1.0)
 	var pop := 1.0 + 0.45 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
 	var c := Vector2(vs.x * 0.5, vs.y * 0.19)
+	var cause := String(_kill_banner.get("cause", ""))
+	if cause != "":
+		_draw_out_banner(c, u, a, cause)
+		return
 	var bs := 0.19 * u * pop
 	var head := bool(_kill_banner.head)
 	HudDraw.disk(self, c, bs * 0.42, Color(0.9, 0.2, 0.15, (0.32 if head else 0.18) * a * (1.0 - clampf(age / 0.6, 0.0, 1.0))))
@@ -1624,6 +1648,25 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var line_y := ty + 0.026 * u
 	draw_rect(Rect2(c.x - pw * 0.3, line_y, pw * 0.6, maxf(1.5, 0.003 * u)), Color(HudDraw.KILL_RED, a))
 	HudDraw.text(self, nm, Vector2(c.x, line_y + 0.025 * u), fs, Color(1, 1, 1, a), 1, 2, "bold")
+
+
+## out_banner's plate: a small disk with what took them out (the zone's blue for the zone) and one
+## line, "<NAME>" over "CAUGHT IN THE ZONE" (OUT_LINES), smaller and calmer than a kill's badge.
+func _draw_out_banner(c: Vector2, u: float, a: float, cause: String) -> void:
+	var tint := Color(0.45, 0.72, 1.0) if cause == "zone" else Color(0.86, 0.86, 0.88)
+	var r := 0.042 * u
+	HudDraw.disk(self, c, r, Color(0.04, 0.06, 0.1, 0.72 * a))
+	HudDraw.ring(self, c, r, Color(tint, 0.9 * a), maxf(2.0, 0.005 * u))
+	HudDraw.icon(self, HudDraw.tex(String(OUT_ICONS.get(cause, "v_zone"))), c, Vector2(r, r) * 1.15, Color(tint, a))
+	var line := String(OUT_LINES.get(cause, ""))
+	var nm := String(_kill_banner.name).to_upper()
+	var fs := int(0.03 * u)
+	var lfs := int(0.026 * u)
+	var ty := c.y + r + 0.03 * u
+	var pw := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width(line, lfs, "bold")) + 0.14 * u
+	HudDraw.plate(self, Rect2(c.x - pw * 0.5, ty - 0.024 * u, pw, 0.082 * u), 0.66 * a)
+	HudDraw.text(self, nm, Vector2(c.x, ty), fs, Color(1, 1, 1, a), 1, 2, "bold")
+	HudDraw.text(self, line, Vector2(c.x, ty + 0.035 * u), lfs, Color(tint, a), 1, 2, "bold")
 
 
 func _draw_center_text(vs: Vector2, u: float) -> void:

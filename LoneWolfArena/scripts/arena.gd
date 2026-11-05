@@ -17,6 +17,11 @@ const ROUND_TIME := 90.0
 const ZONE_HOLD := 25.0
 const ZONE_SHRINK := 40.0
 const ZONE_MIN := 4.0
+## The most rounds a match lasts (the best-of, 2 x rounds_to_win - 1, is never longer): rounds that
+## keep ending in draws still end the match, which the most rounds won wins (level: a DRAW).
+const MAX_ROUNDS := 9
+## Online the results wait this long (real seconds) at most for the other phone's own numbers.
+const FINAL_WAIT_S := 3.0
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
 const DUMMY_NAME := "TARGET DUMMY"
 
@@ -93,6 +98,14 @@ var _my_spawns := {}             # the same for this phone's player (online, hel
 const DEATH_SETTLE_S := 0.35
 var _round_deaths := {}
 var _settle_t := -1.0
+var _down_cause := {}            # fighter -> what took them out this round (death_cause)
+## Online, once the match is over each phone sends its own player's numbers ("fin": kills, damage,
+## headshots, shots, hits; the host adds the match time and both players' HP as it decided with),
+## so both results show the same table: the guest takes the time and the HP from the host.
+var _their_final := {}
+var _final_sent := false
+var _net_host := false           # this phone hosts the online match (Game.session.is_host at its start)
+var _net_left := false           # this arena is done with its session (leave_session / _exit_tree)
 
 
 func _ready() -> void:
@@ -159,12 +172,23 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	Audio.stop_ambience()
-	if online:
-		Game.online = false
-		Game.session.event_received.disconnect(_on_net_event)
-		Game.session.state_received.disconnect(_on_net_state)
-		Game.session.session_ended.disconnect(_on_net_ended)
-		Game.session.end_session("left")
+	leave_session()
+
+
+## This match's session is over for this arena: its handlers go and the other phone hears "bye".
+## The results' REMATCH calls it before a fresh challenge (or before accepting one): the session
+## that challenge starts is not this one, so leaving the tree later must not end it, and the next
+## arena reads Game.online from that challenge (set again when it starts).
+func leave_session() -> void:
+	if not online or _net_left:
+		return
+	_net_left = true
+	Game.online = false
+	for sig: String in ["event_received", "state_received", "session_ended"]:
+		for c: Dictionary in Game.session.get_signal_connection_list(sig):
+			if (c.callable as Callable).get_object() == self:
+				Game.session.disconnect(sig, c.callable)
+	Game.session.end_session("left")
 
 
 # ---------------------------------------------------------------- match against another phone (Cloud)
@@ -172,6 +196,7 @@ func _exit_tree() -> void:
 ## Both phones load the arena at their own pace: each says "ready", and the host starts the prep
 ## on both once it has heard the guest.
 func _net_setup() -> void:
+	_net_host = Game.session.is_host
 	Game.session.event_received.connect(_on_net_event)
 	Game.session.state_received.connect(_on_net_state)
 	Game.session.session_ended.connect(_on_net_ended)
@@ -248,6 +273,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 				remote.last_hit_cause = cause if cause in ["frag", "zone", "fall", "left", "self"] else ""
 				if by_me:
 					player.stats.kills += 1
+				remote.hp = 0.0                  # (its last state may still carry the HP before the final blow)
 				remote.die(player if by_me else null, bool(data[0]) and by_me)
 				if by_me:
 					hud.confirm_kill(remote.chest_position())     # the kill's sound and buzz, as against the bot
@@ -282,6 +308,18 @@ func _on_net_event(kind: String, data: Array) -> void:
 				score.bot = maxi(int(data[2]), 0)
 				_end_round((bot as Fighter) if w == 1 else ((player as Fighter) if w == -1 else null), bool(data[5]), bool(data[4]),
 					(bot as Fighter) if k == 1 else ((player as Fighter) if k == -1 else null), true)
+				if phase == Phase.END:
+					_send_final()
+		"fin":
+			# The match is over on the other phone: its own player's numbers (_send_final). The
+			# host's also end this phone's match with its score if its last round left this one
+			# waiting for a next round (the host decides when the match ends, the round cap too).
+			var f := final_from(data, not _net_host)
+			if not f.is_empty() and _their_final.is_empty() and int(data[0]) == round_index \
+					and phase in [Phase.FIGHT, Phase.BREAK, Phase.END]:
+				_their_final = f
+				if not _net_host and phase != Phase.END:
+					_conclude_from_host()
 		"round":
 			# The host starts each next round and sends the score as it counts it.
 			if data.size() == 3 and not Game.session.is_host and phase == Phase.BREAK and int(data[0]) == round_index + 1:
@@ -610,6 +648,7 @@ func _apply_room_rules() -> void:
 
 func _start_prep() -> void:
 	_round_deaths.clear()
+	_down_cause.clear()
 	_settle_t = -1.0
 	_net_spawns.clear()
 	_my_spawns.clear()
@@ -697,7 +736,8 @@ func _start_fight() -> void:
 		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
 	else:
 		var point := rounds_to_win > 1 and maxi(int(score.player), int(score.bot)) == rounds_to_win - 1
-		hud.show_round_banner(round_index, map_name, "MATCH POINT!" if point else "")
+		var final := rounds_to_win > 1 and round_index >= last_round()
+		hud.show_round_banner(round_index, map_name, "FINAL ROUND" if final else ("MATCH POINT!" if point else ""))
 	Audio.play("countdown_go", 0.0)
 
 
@@ -753,7 +793,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > 2.6 and not _result_shown:
+			elif _end_t > 2.6 and not _result_shown and (not _awaits_final() or _end_t > 2.6 + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -869,6 +909,7 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	if victim == player:
 		_deaths += 1
 	var cause := death_cause(victim, killer)
+	_down_cause[victim] = cause
 	if online and victim == player:
 		Game.session.send_event("died", [headshot and cause == "gun", cause, round_index])
 	if cause == "left":
@@ -944,6 +985,8 @@ func _net_decide(timed_out := false) -> void:
 	_end_round(winner, hs, timed_out, killer)
 	Game.session.send_event("rend", [round_index, 1 if winner == player else (-1 if winner == bot else 0),
 		int(score.player), int(score.bot), timed_out, hs, 1 if killer == player else (-1 if killer == bot else 0)])
+	if phase == Phase.END:
+		_send_final()                    # (after its "rend": the guest ends the match with it, then takes these)
 
 
 ## The time a message takes from one phone to the other (s), at most 0.5 s: half the measured round
@@ -964,9 +1007,21 @@ func _follow_host_clock() -> void:
 		prep_left = maxf(prep_left - _one_way(), 0.5)
 
 
+## Whether the match is over after round `r` at `mine` : `theirs` rounds won, first to `goal`: a
+## side reached it, or that was its last round (the best-of, 2 x goal - 1 rounds, at most
+## MAX_ROUNDS; drawn rounds count, so rounds that keep ending in draws still end it).
+static func match_over_after(r: int, mine: int, theirs: int, goal: int) -> bool:
+	return mine >= goal or theirs >= goal or r >= mini(2 * goal - 1, MAX_ROUNDS)
+
+
+## The round this match ends with at the latest (FINAL ROUND on its banner).
+func last_round() -> int:
+	return mini(2 * rounds_to_win - 1, MAX_ROUNDS)
+
+
 ## A round is decided (an elimination, or the time-out: winner null = a draw). The score goes up;
-## the match is over at rounds_to_win wins, after the last round of the best-of (2 x rounds_to_win
-## - 1, drawn rounds count) or when the other phone left; otherwise the next round follows a break.
+## the match is over once match_over_after says so or when the other phone left; otherwise the next
+## round follows a break. Online the host decides (_net_decide) and the guest shows its word.
 func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: Fighter = null, synced := false) -> void:
 	_settle_t = -1.0
 	close_pause()                        # (online the menu is an overlay: the round's end closes it)
@@ -974,14 +1029,11 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 		score["player" if winner == player else "bot"] += 1
 	var mine := int(score.player)
 	var theirs := int(score.bot)
-	var decided := practice or _forfeit or mine >= rounds_to_win or theirs >= rounds_to_win or round_index >= 2 * rounds_to_win - 1
+	var decided := practice or _forfeit or match_over_after(round_index, mine, theirs, rounds_to_win)
 	var line := "%d  -  %d" % [mine, theirs]
 	_freeze_all()
 	if decided:
-		phase = Phase.END
-		_draw = mine == theirs and not _forfeit
-		_winner = null if _draw else ((player as Fighter) if mine > theirs or _forfeit else (bot as Fighter))
-		Game.mark("match over: " + ("draw" if _draw else ("won" if _winner == player else "lost")))
+		_conclude()
 	else:
 		phase = Phase.BREAK
 		_break_t = 0.0
@@ -990,21 +1042,119 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 		hud.show_round_result("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs)
 	elif timed_out:
 		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line)
-	elif _winner == player:
-		hud.show_center("VICTORY!", 2.5, UI.ACCENT, 110, line)
+	elif winner != player and winner != null and not player.alive:
+		hud.show_center("ELIMINATED", 2.5, UI.BAD, 100, "%s    %s" % [_how_down(player, killer), line])
 	else:
-		hud.show_center("ELIMINATED", 2.5, UI.BAD, 100, "by %s    %s" % [killer.display_name if killer else "the zone", line])
+		_show_match_end()
 	if not timed_out:
 		Engine.time_scale = 0.35
-		if winner == player:
+		if killer == player and winner == player:
 			hud.kill_banner(bot.display_name, headshot)
+		elif winner == player and not bot.alive:
+			# Nobody's kill (the zone, a fall, their own frag): no elimination badge, a line that says
+			# what took them out instead (a player who left: OPPONENT LEFT says it).
+			var cause := String(_down_cause.get(bot, death_cause(bot, killer)))
+			if cause in HUD.OUT_LINES:
+				hud.out_banner(bot.display_name, cause)
 	if winner == player:
 		Audio.play("victory_sting", 0.0)
 	elif winner != null:
 		Audio.play("defeat_sting", 0.0)
-	if decided and _winner == player:
+
+
+## How the player went down, for the ELIMINATED line: by the killer, or in the zone, a fall or by
+## their own frag.
+func _how_down(victim: Fighter, killer: Fighter) -> String:
+	match String(_down_cause.get(victim, death_cause(victim, killer))):
+		"gun", "frag":
+			return "by %s" % (killer.display_name if killer != null and is_instance_valid(killer) else bot.display_name)
+		"fall":
+			return "in a fall"
+		"self":
+			return "by your own frag"
+	return "in the zone"
+
+
+## The match is over (phase END): the most rounds won wins, level is a DRAW, a forfeit is a win.
+func _conclude() -> void:
+	phase = Phase.END
+	_end_t = 0.0
+	var mine := int(score.player)
+	var theirs := int(score.bot)
+	_draw = mine == theirs and not _forfeit
+	_winner = null if _draw else ((player as Fighter) if mine > theirs or _forfeit else (bot as Fighter))
+	Game.mark("match over: " + ("draw" if _draw else ("won" if _winner == player else "lost")))
+	if _winner == player:
 		player.model.play_victory()
 		player.victory_cam = true
+
+
+## The match's end in the middle of the screen: VICTORY!, DEFEAT or DRAW with the rounds.
+func _show_match_end() -> void:
+	var line := "%d  -  %d" % [int(score.player), int(score.bot)]
+	if _draw:
+		hud.show_center("DRAW", 2.5, Color.WHITE, 100, line)
+	elif _winner == player:
+		hud.show_center("VICTORY!", 2.5, UI.ACCENT, 110, line)
+	else:
+		hud.show_center("DEFEAT", 2.5, UI.BAD, 100, line)
+
+
+## Online, the guest: the host's "fin" says the match is over while this phone still waits for a
+## next round (or for the last round's word): it ends here too, with the host's score.
+func _conclude_from_host() -> void:
+	score.player = int(_their_final.guest_score)
+	score.bot = int(_their_final.host_score)
+	close_pause()
+	_freeze_all()
+	_conclude()
+	_show_match_end()
+	_send_final()
+
+
+## Online, once the match is over: this phone's own player's numbers to the other phone ("fin":
+## [round, match time, host's HP, guest's HP, host's rounds, guest's rounds, kills, damage,
+## headshots, shots, hits]; time, HP and rounds only from the host, -1 from the guest), so both
+## results show the same table.
+func _send_final() -> void:
+	if not online or _final_sent or _net_left or not Game.session.in_session:
+		return
+	_final_sent = true
+	var st := player.stats
+	var h := _net_host
+	Game.session.send_event("fin", [round_index, snappedf(match_time, 0.01) if h else -1.0, _shown_hp(player) if h else -1,
+		_shown_hp(bot) if h else -1, int(score.player) if h else -1, int(score.bot) if h else -1,
+		int(st.kills), roundi(st.damage), int(st.headshots), int(st.shots), int(st.hits)])
+
+
+## A "fin" from the other phone, checked: whole numbers in range ({} when anything is off). From the
+## host (`from_host`) the time, both HP and both scores must be there too.
+static func final_from(data: Array, from_host: bool) -> Dictionary:
+	if data.size() != 11:
+		return {}
+	for v: Variant in data:
+		if not (v is int or v is float) or not is_finite(float(v)):
+			return {}
+	var n := func(i: int) -> int: return roundi(float(data[i]))
+	var f := {"time": float(data[1]), "host_hp": n.call(2), "guest_hp": n.call(3), "host_score": n.call(4), "guest_score": n.call(5),
+		"kills": n.call(6), "damage": n.call(7), "headshots": n.call(8), "shots": n.call(9), "hits": n.call(10)}
+	var ok := int(f.kills) >= 0 and int(f.kills) <= 2 * MAX_ROUNDS and int(f.damage) >= 0 and int(f.damage) <= 100000 \
+		and int(f.headshots) >= 0 and int(f.shots) >= 0 and int(f.shots) <= 100000 and int(f.hits) >= 0 \
+		and int(f.hits) <= int(f.shots) and int(f.headshots) <= int(f.hits)
+	if from_host:
+		ok = ok and float(f.time) >= 0.0 and float(f.time) <= 3600.0 and int(f.host_hp) >= 0 and int(f.host_hp) <= int(Fighter.MAX_HP) \
+			and int(f.guest_hp) >= 0 and int(f.guest_hp) <= int(Fighter.MAX_HP) and int(f.host_score) >= 0 \
+			and int(f.host_score) <= MAX_ROUNDS and int(f.guest_score) >= 0 and int(f.guest_score) <= MAX_ROUNDS
+	return f if ok else {}
+
+
+## A fighter's HP as the results show it: 0 once down; online the guest shows the host's numbers
+## (those it decided the rounds with).
+func _shown_hp(f: Fighter) -> int:
+	if online and not _net_host and _their_final.has("host_hp") and int(_their_final.host_hp) >= 0:
+		return int(_their_final.guest_hp if f == player else _their_final.host_hp)
+	return roundi(f.hp) if f.alive else 0
+
 
 
 func _on_tampered(reason: String) -> void:
@@ -1041,13 +1191,23 @@ func shake_camera(pos: Vector3, amount: float) -> void:
 		player.add_shake(amount * clampf(1.0 - d / 25.0, 0.0, 1.0))
 
 
-## Rows for the in-match scoreboard: you first, then the bot.
+## Online the results wait (FINAL_WAIT_S at most) for the other phone's own numbers ("fin"), so
+## both show the same table; not after a forfeit or once the other phone is gone.
+func _awaits_final() -> bool:
+	return online and not _forfeit and not _invalid and _their_final.is_empty() and not _net_left and Game.session.in_session
+
+
+## Rows for the in-match scoreboard and the results: you first, then the opponent. Online, once the
+## match is over, the opponent's row has the numbers its own phone sent ("fin"), and the guest shows
+## the host's HP (_shown_hp).
 func scoreboard_rows() -> Array:
 	var rows := []
 	for f in [player, bot]:
 		var st: Dictionary = f.stats
+		if f == bot and not _their_final.is_empty():
+			st = _their_final
 		var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
-		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": roundi(f.hp),
+		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": _shown_hp(f),
 			"kills": int(st.kills), "damage": roundi(st.damage), "headshots": int(st.headshots),
 			"accuracy": roundi(acc), "rounds": int(score["player" if f == player else "bot"]),
 			"weapon": String(f.gun().def.name)})
@@ -1072,6 +1232,7 @@ func _show_results() -> void:
 func _final_result() -> Dictionary:
 	# Read the masked values first: a tamper flag raised by that read still voids the match.
 	var hp_left := roundi(player.hp)
+	hp_left = _shown_hp(player)          # (0 once down; the guest: the host's number)
 	_result_shown = true
 	var won := _winner == player and not _draw and not _invalid
 	var st := player.stats
@@ -1084,18 +1245,22 @@ func _final_result() -> Dictionary:
 
 ## The match as the results screen and Game.record_match read it (ResultsScreen.setup). "difficulty"
 ## is the bot's level, or ONLINE (LOCAL: PLAY WITHOUT INTERNET) when the opponent is another player;
-## "local" marks a match on the local network (HISTORY shows it).
+## "local" marks a match on the local network (HISTORY shows it); "opponent_left": the other player
+## left during the match (a forfeit win). Online the guest's time is the host's ("fin").
 func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
 	var st := player.stats
 	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
+	var t := match_time
+	if online and not _net_host and float(_their_final.get("time", -1.0)) >= 0.0:
+		t = float(_their_final.time)
 	return {
 		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": roundi(st.damage),
-		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
+		"headshots": int(st.headshots), "accuracy": acc, "time": t, "xp": xp, "enemy": bot.display_name,
 		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
 		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
 		"difficulty": ("LOCAL" if Game.local_match() else "ONLINE") if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)],
 		"taken": int(st.taken), "shots": int(st.shots), "hits": int(st.hits), "deaths": _deaths, "enemy_id": _enemy_id,
-		"local": online and Game.local_match(),
+		"local": online and Game.local_match(), "opponent_left": _forfeit,
 	}
 
 

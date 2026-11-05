@@ -37,7 +37,14 @@ listed here. If a part needs something new from the core, add it in its own file
   that (score, banner, the match's end) and starts each round on the host's "begin" / "round",
   one-way trip earlier (`peer_rtt` / 2, or `relay_rtt` before that is measured). The host takes
   that trip off the guest's death reports, so "first one down" is fair. A forfeit win keeps the
-  real score (no round added).
+  real score (no round added). The match ends when `Arena.match_over_after(round, mine, theirs,
+  goal)` says so: first to `goal`, or after `Arena.MAX_ROUNDS` (9) rounds at most, drawn rounds
+  counted (the most rounds won wins, level is a DRAW). At its end each phone sends "fin" [round,
+  time, host HP, guest HP, host rounds, guest rounds, kills, damage, headshots, shots, hits] (time,
+  HP and rounds from the host only, else -1; `Arena.final_from` checks it): the results wait for
+  it (`FINAL_WAIT_S`), the opponent's row shows its own phone's numbers and the guest the host's
+  TIME and HP LEFT, so both tables match; the host's "fin" also ends a guest match that still
+  waited for a next round.
 - Cloud: a frame gap while a match loads or in the first `Cloud.LOAD_STALL_MS` after its arena
   listens is the load (shader compiles), not this phone away (`Cloud.load_stall`); an app pause
   still counts. The other phone, told by "ka" keep-alives that it loads, waits that much longer.
@@ -52,6 +59,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
   (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
 - `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),
+  `out_banner(victim_name, cause)` (the opponent went down by itself: cause "zone", "fall" or "self"
+  in `HUD.OUT_LINES`; no badge, no red X, a line in its place), `banner_kind()` ("", "kill" or the cause),
   `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
   kill, which the other phone reports as its death)
 - the target dummy (`arena.practice`): the weapon panel's middle slot reads CHANGE GUN and calls
@@ -177,7 +186,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
   damage, headshots, accuracy, time, xp, enemy, mode (the name shown), mode_id ("training" |
   "lonewolf", the profile counts the match there), map, weapon, score_player, score_bot,
-  hp_left, difficulty (the bot's level, or "ONLINE"), taken; shots, hits, deaths and enemy_id (the
+  hp_left, difficulty (the bot's level, or "ONLINE"), taken, opponent_left (the other player left: the
+  VICTORY screen says so, `OpponentLeft`, their row reads LEFT); shots, hits, deaths and enemy_id (the
   online opponent's player id, else "") go to the profile only (`Game.record_match`). Hides the arena's `hud` while
   shown; the opponent's orange row
   (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match

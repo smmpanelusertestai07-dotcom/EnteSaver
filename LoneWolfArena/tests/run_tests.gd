@@ -7,6 +7,7 @@ const GameCode := preload("res://autoload/game.gd")       # (the same for Game's
 const NetFeatureCheck := preload("res://tests/net_feature_check.gd")
 const LanUnitCheck := preload("res://tests/lan_unit_check.gd")
 const DirectCheck := preload("res://tests/direct_check.gd")
+const MatchUnitCheck := preload("res://tests/match_unit_check.gd")
 
 var _fails := 0
 var _passes := 0
@@ -69,6 +70,7 @@ func _ready() -> void:
 	_test_no_sprint_firing()
 	_test_move_speeds()
 	_test_lobby_ui_rules()
+	MatchUnitCheck.run(self)      # round cap, end-of-match numbers, out banner, challenge rows (tests/match_unit_check.gd)
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 

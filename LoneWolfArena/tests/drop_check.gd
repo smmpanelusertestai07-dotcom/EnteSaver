@@ -10,7 +10,8 @@ extends Node
 ## 2. A second challenge; as its arena appears the guest freezes 8 s (a phone's first load compiles
 ##    its shaders): neither phone takes that for leaving, the match begins. 1 s into the first
 ##    fight the guest freezes for 9 s (an app in the background, a phone out of signal). The host
-##    takes the silence for leaving: a forfeit, its VICTORY, with the real score (no round added).
+##    takes the silence for leaving: a forfeit, its VICTORY, with the real score (no round added);
+##    the VICTORY screen says the other player left (their row reads LEFT).
 ##    The guest, back, knows it was the one away: CONNECTION LOST, the match counts as LEFT (a
 ##    defeat), never a second win.
 ## Prints "DROP CHECK DONE bad=N".
@@ -114,6 +115,15 @@ func run(autotest: Node) -> int:
 		var sc: Dictionary = arena.get("score")
 		if int(sc.player) != 0 or int(sc.bot) != 0 or int(h.get("score", -1)) != 0:
 			_fail("the forfeit added a round to the score (%s)" % str(sc))
+		# The VICTORY screen says why: the other player left (and their row reads LEFT).
+		var screen := (arena.get("pause_layer") as Node).find_child("OpponentLeft", true, false) as Label
+		var row := (arena.get("pause_layer") as Node).find_child("EnemyRow", true, false)
+		var tagged := false
+		for l in (row.find_children("*", "Label", true, false) if row else []):
+			tagged = tagged or (l as Label).text == "LEFT"
+		at.log_line("host's results: \"%s\", opponent's row tagged LEFT %s" % [screen.text if screen else "", tagged])
+		if screen == null or not screen.text.contains("LEFT THE MATCH") or not tagged or not bool((arena.get("result") as Dictionary).get("opponent_left", false)):
+			_fail("the forfeit's VICTORY screen does not say that the opponent left")
 		await at.wait(2.0)
 	else:
 		at.log_line("guest: frozen for 9 s")
