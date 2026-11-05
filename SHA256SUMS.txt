@@ -1,2 +1,2 @@
 41fb319808cffa97bca60c7b418a20f6f470e7816e8eea512de4b397e366245b  WolfArena-1.1.0.apk
-1ee13fc9e37fae97a72e7ff07e8de90bfa6ad577983046e95de19427ad5bfd83  WolfArena-1.2.0-pre.apk
+04edfbb4c6e6860fbc527e391f5febdac60f0c786eb2486c4d9dd1f94ea443f2  WolfArena-1.2.0.apk
