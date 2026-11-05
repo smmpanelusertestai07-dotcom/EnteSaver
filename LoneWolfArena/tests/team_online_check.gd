@@ -9,13 +9,16 @@ extends Node
 ##     both, results whose tables match (each copy writes its table to LW_TEAM_OUT; the step compares
 ##     the two files), every state the guest sent arrived (a lossless mock: 100%), the match in each
 ##     HISTORY.
+##  a2. PLAY AGAIN TOGETHER: both copies tap it on those results (each once its own are up, in either
+##     order); a second co-op match loads from the results (team_arena_net, the same slots and sides,
+##     the old host hosting again), plays to its results, and HISTORY keeps two co-op matches.
 ##  d. TEAM INVITE again, and the host quits once the fight began: the guest's match cannot go on
 ##     (the bots ran on the host): THE HOST LEFT, back to the lobby, the match kept as ENDED.
 ##  b. random DUO (the team search): both search ROOT/mm/t2, the lower id challenges ("tinv" quick),
 ##     the other takes it at once: each player with a bot teammate against the other. The guest sees
 ##     the host's bots move, a guest hit on a host bot lands on the host, the guest's pause menu
 ##     keeps its match running for 3 s while the host never hears it go quiet, then the guest quits:
-##     the host wins by forfeit.
+##     the host wins by forfeit: its results offer no REMATCH (a forfeit), ADD FRIEND stays.
 ##  c. a plain duel between the same two copies afterwards is still the 1 vs 1 (arena.tscn, no
 ##     session_team) once the lobby has cleared Game.team_match.
 ## Prints "TEAM ONLINE CHECK DONE bad=N".
@@ -209,8 +212,86 @@ func _coop() -> bool:
 		_fail("HISTORY does not keep the won match (%d entries, %d before)" % [hist.size(), _history_before])
 	else:
 		at.log_line("HISTORY: %s" % str(hist[0]).left(200))
+	await _play_again_together(arena)
 	Game.goto_lobby()
 	return true
+
+
+# ---------------------------------------------------------------- a2. PLAY AGAIN TOGETHER
+
+## Both copies tap PLAY AGAIN TOGETHER on the co-op results (each once its own results are up: no
+## copy needs to be first). The second match must load from the results alone (no _link here: the
+## results build Game.team_match from the new session), with the same two humans on the same side
+## and the old host hosting; it is played to its results like the first, and HISTORY then keeps
+## two co-op matches.
+func _play_again_together(first: TeamArenaNet) -> void:
+	_started = false
+	var layer: Node = first.pause_layer
+	if not await _until(func() -> bool: return layer.find_child("PlayAgainTogether", true, false) != null, 15.0):
+		_fail("the co-op results have no PLAY AGAIN TOGETHER")
+		return
+	var again := layer.find_child("PlayAgainTogether", true, false) as Button
+	var status := layer.find_child("RematchStatus", true, false) as Label
+	if layer.find_child("PlayAgain", true, false) != null or layer.find_child("Rematch", true, false) != null \
+			or layer.find_child("AddFriend", true, false) != null:
+		_fail("the co-op results still offer PLAY AGAIN, REMATCH or ADD FRIEND")
+	if again.disabled:
+		_fail("PLAY AGAIN TOGETHER is off on the co-op results")
+	again.pressed.emit()
+	at.log_line("PLAY AGAIN TOGETHER tapped: \"%s\" / \"%s\"" % [again.text, status.text])
+	var old := first.get_instance_id()
+	var fresh := func() -> bool:
+		var sc := get_tree().current_scene
+		return sc is TeamArenaNet and sc.get_instance_id() != old
+	if not await _until(fresh, 45.0):
+		_fail("PLAY AGAIN TOGETHER never loaded a second match (\"%s\")" % (status.text if is_instance_valid(status) else "?"))
+		return
+	if not _started:
+		_fail("the second match did not come from a new session")
+	var arena := get_tree().current_scene as TeamArenaNet
+	await at.wait_for_phase(arena, 1, 60.0)
+	if arena.phase != 1:
+		_fail("the second co-op match never reached FIGHT")
+		return
+	var mate := arena.slot_fighter(1 if host else 0)
+	at.log_line("second co-op DUO up: host %s, my slot %d, slots %d, session_team %s" % [arena.am_host, arena.my_slot, arena.slots.size(),
+		str(Game.session.session_team)])
+	if arena.am_host != host or arena.my_slot != (0 if host else 1) or not arena.coop or arena.slots.size() != 4 \
+			or not (mate is RemoteFighter) or mate.team != arena.player.team or arena.player.team != 0 or arena.members(1).size() != 2 \
+			or Game.session.session_team != {"size": 2, "coop": true} or not bool(Game.team_match.get("online", false)):
+		_fail("the second co-op match does not have the same roster sides and roles")
+	var foes := arena.members(1)
+	if host:
+		for b in foes:
+			b.frozen = true
+			b.hold_fire = true
+		await at.wait(1.0)
+		var p := arena.player
+		var d: Dictionary = p.gun().def
+		var hit := float(d.damage) * Weapons.zone_mult(d, "head", 0.0) * Weapons.pen_mult(d, "head")
+		for b in foes:
+			for _i in 40:
+				if not b.alive:
+					break
+				b.take_damage(hit, "head", p, p.global_position)
+				await at.wait(0.12)
+	if not await _until(func() -> bool: return arena._result_shown, 40.0):
+		_fail("the second co-op match did not end with results")
+		return
+	var won := arena._winner == arena.player
+	at.log_line("second coop result: won %s, score %d - %d" % [won, arena.team_score[0], arena.team_score[1]])
+	if not won or int(arena.team_score[0]) != 1 or int(arena.team_score[1]) != 0:
+		_fail("the second co-op match should be won 1 - 0 on both")
+	var hist: Array = Game.profile.get("history", [])
+	var coop_rows := 0
+	for i in mini(hist.size(), 2):
+		var h: Dictionary = hist[i]
+		if String(h.get("result", "")) == "won" and int(h.get("size", 0)) == 2 and String(h.get("with", "")) != "":    # (WITH the teammate)
+			coop_rows += 1
+	at.log_line("HISTORY after PLAY AGAIN TOGETHER: %d entries (%d before), %d co-op rows on top" % [hist.size(), _history_before, coop_rows])
+	if hist.size() != _history_before + 2 or coop_rows != 2:
+		_fail("HISTORY does not keep the two co-op matches")
+	await at.wait(1.0)                   # (the other copy checks its results too before both go back)
 
 
 ## The results table as both phones must show it: each row's numbers by slot.
@@ -368,6 +449,12 @@ func _random_duo() -> void:
 			at.log_line("after the guest quit: won %s, forfeit %s" % [arena._winner == arena.player, arena._forfeit])
 			if arena._winner != arena.player or not arena._forfeit:
 				_fail("the host should win by forfeit")
+			var layer: Node = arena.pause_layer
+			if await _until(func() -> bool: return layer.find_child("Lobby", true, false) != null, 10.0):
+				if layer.find_child("Rematch", true, false) != null or layer.find_child("PlayAgainTogether", true, false) != null:
+					_fail("the results after a forfeit offer a REMATCH")
+				else:
+					at.log_line("after the forfeit the results offer no REMATCH (ADD FRIEND %s)" % (layer.find_child("AddFriend", true, false) != null))
 		Game.goto_lobby()
 	cloud.session_ended.disconnect(on_end)
 
