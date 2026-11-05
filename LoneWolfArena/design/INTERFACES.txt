@@ -75,7 +75,9 @@ listed here. If a part needs something new from the core, add it in its own file
   round trip to the other phone under the gear (NetPing), CHAT / MUTE (NetChat) and TALK / SOUND
   (NetVoice) right of the minimap, the chat feed under the score bar (`feed`, `add_line`, `send`),
   the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
-  Its buttons take their touches before the HUD (a child's _input runs first).
+  Its buttons take their touches before the HUD (a child's _input runs first). Every other match
+  (TRAINING GROUND) gets it too with `net` false (`HudNet.attach(hud, false)`): only the ping chip,
+  the relay's round trip while connected (`Cloud.relay_ping()`), else a grey "--", no tag.
 
 ## HUD layout (scripts/hud_layout.gd, version 5)
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
@@ -387,6 +389,15 @@ listed here. If a part needs something new from the core, add it in its own file
   row reads LONE WOLF · LOCAL), the match card reads 1 VS 1 LOCAL, the results' opponent row
   LOCAL. The lobby's tab is `LobbyLan` (scripts/lobby_lan.gd, the ONLINE window's `Tab_local`:
   `LanHost`, `LanJoin`, `LanStop`, `LanCode`, `LanHost_<n>`, `LanCodeField`, `LanConnect`).
+- QUICK MATCH `NetMatch` (scripts/net_match.gd, node "NetMatch" under the lobby; LONE WOLF's START:
+  `NetMatch.open(lobby)`): `Cloud.seek_start()` / `seek_stop()` listen to `Cloud.SEEK_TOPIC`
+  (ROOT/mm/seek), `Cloud.send_seek(saw)` says {t "seek", id, saw} every `NetMatch.SEEK_S` (not
+  retained), `Cloud.seeker_seen(id, saw)` reports another seeker (never this phone or a blocked
+  one; `Cloud.quick_seen`). When the other's `saw` lists this phone, the lower id calls
+  `Cloud.invite(id, {"quick": true})`; a quick challenge is accepted at once only while seeking,
+  from a seeker in `quick_seen`, proven and allowed by DUEL CHALLENGES FROM, else declined at once
+  (never shown). Popup `Modal`: `QuickStatus`, `QuickTimer`, `QuickNote`, `QuickCancel` (X and back
+  cancel too); `NetMatch.GIVE_UP_S` ends it with a note. Test: tests/quick_check.gd.
 - Online extras: ping `NetPing` (colours, bars; `NetPing.lobby_chip()` "PingChip" in the lobby's
   top bar: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
   `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`; `Cloud.match_ping()` is the
