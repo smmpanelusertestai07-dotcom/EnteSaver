@@ -1256,7 +1256,7 @@ func _test_profile_keys() -> void:
 		and d.banner == "default" and d.signature == "" and d.recent.is_empty() and d.blocked.is_empty()
 		and d.friend_in.is_empty() and d.friend_out.is_empty() and d.withdrawn.is_empty(), "the new profile keys start empty")
 	_check(Game.PROFILE_COUNTERS.all(func(k: String) -> bool: return d[k] == 0)
-		and Game.MODE_NAMES.keys().all(func(m: String) -> bool: return d.modes[m] == {"matches": 0, "wins": 0, "kills": 0}),
+		and Game.RECORD_MODES.keys().all(func(m: String) -> bool: return d.modes[m] == {"matches": 0, "wins": 0, "kills": 0}),
 		"every counter starts at 0, per mode too")
 	var avatars := Game.avatar_ids()
 	_check("emblem" in avatars and CharacterModel.BUNDLE_INFO.all(func(b: Dictionary) -> bool: return String(b.id) in avatars),
@@ -1296,7 +1296,7 @@ func _test_profile_keys() -> void:
 	_check(p.deaths == 0 and p.damage == 3 and typeof(p.damage) == TYPE_INT and p.time_played == 0 and p.rounds_won == 4
 		and typeof(p.rounds_won) == TYPE_INT and p.rounds_lost == 2, "profile: counters are whole numbers, never negative")
 	_check(p.hits == 10 and p.headshots == 10, "profile: hits never exceed shots, headshots never exceed hits")
-	_check(p.modes.keys() == Game.MODE_NAMES.keys() and p.modes.training == {"matches": 3, "wins": 3, "kills": 0}
+	_check(p.modes.keys() == Game.RECORD_MODES.keys() and p.modes.training == {"matches": 3, "wins": 3, "kills": 0}
 		and p.modes.lonewolf == {"matches": 0, "wins": 0, "kills": 0}, "profile: one set of numbers per mode, wins never above matches")
 	_check(p.recent.size() == Game.MAX_RECENT and p.recent[0] == {"id": ids[0], "name": "FOE 0", "t": 1700000000}
 		and p.recent[1].id == ids[1] and p.recent[19].id == ids[19], "profile: 20 recent players at most, newest first, each once")
@@ -1381,6 +1381,8 @@ func _test_profile_migration() -> void:
 	var v3: Dictionary = v2.duplicate(true)
 	v3.profile_version = 3
 	v3.history = []
+	# (a profile from before DUO / SQUAD loads their numbers as zeros: Game.RECORD_MODES)
+	v3.modes.merge({"duo": {"matches": 0, "wins": 0, "kills": 0}, "squad": {"matches": 0, "wins": 0, "kills": 0}})
 	v3.blocked = [{"id": "b".sha256_text().left(32), "name": "", "t": 0}]       # a bare id is a block without a name
 	_check(Game.PROFILE_VERSION == 3 and Game.DEFAULT_PROFILE.history == [], "version 3: a new profile has an empty HISTORY")
 	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)

@@ -17,8 +17,8 @@ extends Control
 ##
 ## MATCH: Loading.start_match(host) puts an overlay on top of `host` (the mode + map card
 ## "TRAINING GROUND / CARGO CAGE" or "LONE WOLF / CARGO CAGE" with the match's chips, see
-## match_info(); the map name; the bar), loads the arena scene on a thread for at least
-## MATCH_MIN_S, then Game.goto_arena().
+## match_info(), or for DUO / SQUAD team_info(); the map name; the bar), loads the arena scene
+## (Game.arena_scene()) on a thread for at least MATCH_MIN_S, then Game.goto_arena().
 
 const TIMEOUT_S := 12.0
 const BOOT_MIN_S := 2.4
@@ -262,6 +262,57 @@ static func match_info(online: bool, opponent: String, dummy: bool, difficulty: 
 		"desc": "Win the duel before the zone closes in."}
 
 
+## The rounds a DUO / SQUAD match is played to: TeamArena.TEAM_ROUNDS_TO_WIN, or LW_ROUNDS_TO_WIN
+## in test runs of the editor binary (never an exported game).
+static func team_rounds_to_win() -> int:
+	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
+		return maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)
+	return TeamArena.TEAM_ROUNDS_TO_WIN
+
+
+## What the match card says about a DUO / SQUAD match (`tm`: Game.team_match): "2 VS 2" / "4 VS 4",
+## FIRST TO n, and who plays: "WITH <NAME> VS BOTS" (a TEAM INVITE), "VS <NAME>" (a player found by
+## the team search), "VS BOTS" (on this phone: TRAINING GROUND, or a search that found nobody, which
+## says so: "NO PLAYER FOUND: YOUR TEAM VS BOTS").
+static func team_info(tm: Dictionary, rounds: int) -> Dictionary:
+	var n := int(tm.get("size", 2))
+	var word := "DUO" if n <= 2 else "SQUAD"
+	var mine := int(tm.get("my_slot", 0))
+	var my_team := 0
+	var mate := ""
+	var foe := ""
+	var level := 1
+	for e: Variant in tm.get("roster", []):
+		if e is Dictionary and int((e as Dictionary).get("slot", -1)) == mine:
+			my_team = int((e as Dictionary).get("team", 0))
+	for e: Variant in tm.get("roster", []):
+		if not e is Dictionary:
+			continue
+		var d := e as Dictionary
+		if bool(d.get("bot", true)):
+			level = int(d.get("diff", 1))
+		elif int(d.get("slot", -1)) != mine:
+			if int(d.get("team", 0)) == my_team:
+				mate = String(d.get("name", "PLAYER"))
+			else:
+				foe = String(d.get("name", "PLAYER"))
+	var online := bool(tm.get("online", false))
+	var training := String(tm.get("mode_id", "")) == "training"
+	var chips := ["FIRST TO %d" % rounds, "%d VS %d" % [n, n]]
+	var desc := "Knock the other team down, revive your teammates, win the round together."
+	if online and mate != "":
+		chips.append("WITH %s VS BOTS" % mate)
+	elif online:
+		chips.append("VS %s" % (foe if foe != "" else "PLAYER"))
+	else:
+		chips.append("VS BOTS")
+		chips.append("BOT: " + String(Game.DIFFICULTY_NAMES[clampi(level, 0, Game.DIFFICULTY_NAMES.size() - 1)]))
+		if not training:
+			desc = "NO PLAYER FOUND: YOUR TEAM VS BOTS"
+	return {"mode": Game.mode_name("training" if training else "lonewolf"), "badge": word,
+		"chips": chips, "desc": desc}
+
+
 func _build_match() -> void:
 	_backdrop(1.12)
 	var shade := ColorRect.new()
@@ -272,6 +323,8 @@ func _build_match() -> void:
 	var opponent := String(Game.session.opponent.get("name", "")) if online else ""
 	var info := match_info(online, opponent if opponent != "" else "PLAYER", Game.practice and not online,
 		int(Game.settings.difficulty), Game.rounds_to_win(online), online and Game.session is Lan)
+	if not Game.team_match.is_empty():
+		info = team_info(Game.team_match, team_rounds_to_win())
 	# Mode + map card, top-left.
 	var card := PanelContainer.new()
 	card.name = "MatchCard"
@@ -326,7 +379,9 @@ func _build_match() -> void:
 		cp.add_child(UI.label(c, 15, UI.TEXT, "bold"))
 		chips.add_child(cp)
 	bv.add_child(chips)
-	var desc := UI.label(String(info.desc), 16, UI.TEXT_DIM, "semi")
+	var said := String(info.desc).begins_with("NO PLAYER FOUND")      # the team search found nobody: said plainly
+	var desc := UI.label(String(info.desc), 18 if said else 16, UI.ACCENT if said else UI.TEXT_DIM, "heavy" if said else "semi")
+	desc.name = "MatchDesc"
 	bv.add_child(desc)
 	# The map name, big, above the bar.
 	var big := UI.shadowed(UI.outlined(UI.label("CARGO CAGE", 132, UI.TEXT, "italic"), 10, Color(0.05, 0.04, 0.03, 0.95)), Vector2(0, 8), Color(0, 0, 0, 0.5))
