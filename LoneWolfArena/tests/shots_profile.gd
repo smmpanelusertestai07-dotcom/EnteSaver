@@ -1,6 +1,8 @@
 extends Node
 ## PROFILE screenshot tour, with real taps and checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_profile.gd
+## tools/qa/run_checks.sh runs it headless as well (every check, no pictures; the canvas is set to
+## the phone's 1560 x 720 then).
 ## A played-in profile (made up here). The lobby's player card shows its picture and opens PROFILE
 ## on CAREER (rates, averages, the row per mode); HISTORY with its matches (scrolled by a finger
 ## swipe that starts on a row), NAME CARD (a banner and a picture picked by taps: the name card
@@ -32,6 +34,8 @@ var _at: Node
 
 func run(at: Node) -> int:
 	_at = at
+	if DisplayServer.get_name() == "headless":
+		get_tree().root.size = Vector2i(1560, 720)      # a headless window has no size of its own
 	var saved_profile: Dictionary = Game.profile.duplicate(true)
 	var first := await _wait_scene("Lobby", 30.0)
 	# A fresh online service that only knows a dead local relay (read when it starts), then a new
@@ -151,8 +155,8 @@ func run(at: Node) -> int:
 	await _tap(layer.find_child("CardCopy", true, false) as Control)
 	await _settle(0.2)
 	var copy := layer.find_child("CardCopy", true, false) as Button
-	_check(DisplayServer.clipboard_get() == cloud.my_id and copy != null and copy.text == "COPIED",
-		"COPY puts the whole player ID on the clipboard and says COPIED")
+	var clip_ok := DisplayServer.clipboard_get() == cloud.my_id or not DisplayServer.has_feature(DisplayServer.FEATURE_CLIPBOARD)
+	_check(clip_ok and copy != null and copy.text == "COPIED", "COPY puts the whole player ID on the clipboard and says COPIED")
 	# BLOCKED: the name kept with the block (nothing else here knows TOXICTOM), the short ID for a
 	# block without one; UNBLOCK asks first. While it shows, the player cards are listened to.
 	await _tap(layer.find_child("ProfileTab_blocked", true, false) as Control)

@@ -4,7 +4,9 @@ extends Node
 ## the guest's announcement in the lobby, challenges it; the guest
 ## accepts; both load the arena, exchange their players' state, the host lands a lethal hit on
 ## its copy of the guest, the guest's phone applies it and reports its death, and both show the
-## result (host VICTORY, guest DEFEAT). Prints "CLOUD CHECK DONE bad=N".
+## result (host VICTORY, guest DEFEAT), which each one's profile keeps: a LONE WOLF entry in
+## HISTORY with the other phone's id and name (its row opens their card), the deaths and rounds in
+## CAREER, the other phone among the recent players. Prints "CLOUD CHECK DONE bad=N".
 
 var bad := 0
 var at: Node
@@ -35,6 +37,8 @@ func run(autotest: Node) -> int:
 	if not started[0]:
 		return _done("no session")
 	at.log_line("session up as %s, opponent %s" % ["host" if host else "guest", cloud.opponent.get("name", "?")])
+	var opp_id := String(cloud.opponent.get("id", ""))
+	var opp_name := String(cloud.opponent.get("name", ""))
 	# The lobby takes it from here, as for a player: match loading, then the arena.
 	t = 0.0
 	while (get_tree().current_scene == null or get_tree().current_scene.name != "Arena") and t < 30.0:
@@ -84,6 +88,20 @@ func run(autotest: Node) -> int:
 		_fail("host should win")
 	if not host and (winner != b or p.alive):
 		_fail("guest should lose")
+	# The profile (an automated run starts from a new one).
+	var sc: Dictionary = arena.get("score")
+	var history: Array = Game.profile.history
+	var h: Dictionary = history[0] if not history.is_empty() else {}
+	var recent: Array = Game.profile.recent
+	at.log_line("history: %s; deaths %d, rounds %d-%d, recent %s" % [str(h), int(Game.profile.deaths), int(Game.profile.rounds_won),
+		int(Game.profile.rounds_lost), str(recent)])
+	if (h.get("result") != ("won" if host else "lost") or h.get("mode") != "lonewolf" or h.get("id") != opp_id or opp_id == ""
+			or h.get("enemy") != opp_name or h.get("score") != int(sc.player) or h.get("enemy_score") != int(sc.bot)):
+		_fail("HISTORY does not keep the online match with the opponent's id")
+	if int(Game.profile.deaths) != int(sc.bot) or int(Game.profile.rounds_won) != int(sc.player) or int(Game.profile.rounds_lost) != int(sc.bot):
+		_fail("CAREER does not count the deaths and rounds of the online match")
+	if recent.is_empty() or String(recent[0].id) != opp_id:
+		_fail("the opponent is not among the recent players")
 	await at.wait(1.0)
 	return _done("")
 

@@ -109,6 +109,8 @@ func _wait(sec: float) -> void:
 
 
 func _shot(shot_name: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return          # no renderer (tools/qa/run_checks.sh runs tours this way): the checks run, no picture
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()
 	var path := shots_dir.path_join(shot_name + ".png")

@@ -10,14 +10,21 @@
 #                          signer list parsing, settings clamping, results honours
 #   --autotest=sim         a full headless match (scripted player vs bot) ends with results
 #   --autotest=aim         aim assist: pull, head stop, tracking with vs without, red crosshair
+#   tests/login_check.gd   guest login, first profile setup, the Privacy Notice true to cloud.gd
+#   tests/shots_profile.gd PROFILE and other players' cards with real taps and swipes: CAREER,
+#                          HISTORY (a row opens the opponent's card), BLOCKED (UNBLOCK, BLOCK asked
+#                          first, kept by name, follows changes), lists that scroll from any row,
+#                          56 px touch targets (headless: every check, no pictures)
 #   tests/anim_check.gd    every clip merged, toe fix, swap timing, flinch limit, grenade release
 #   tests/bot_check.gd     grenade arc accuracy, the bot survives the closing zone
 #   tests/flow_soak.gd     several matches in one process: no leaks, corpses stay on the floor
-#   tests/rounds_check.gd  a match over rounds: resets, alternating gun pick, the final result
+#   tests/rounds_check.gd  a match over rounds: resets, alternating gun pick, the final result,
+#                          HISTORY and CAREER after it; a match left with QUIT MATCH is LEFT
 #   tests/guard_check.gd   a detection made before a match voids it
 #   tests/cloud_check.gd   online 1 vs 1 with two copies of the game (LW_NET_ROLE host / guest)
 #                          through tests/mqtt_mock.gd: find, challenge, accept, two rounds
-#                          (end-to-end encrypted), lethal hits and the result on both
+#                          (end-to-end encrypted), lethal hits and the result on both, which
+#                          each one's HISTORY keeps with the other's id
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
@@ -51,6 +58,7 @@ if [ "${1:-}" != "quick" ]; then
   step sim godot --headless --path . -- --autotest=sim
   step aim godot --headless --path . -- --autotest=aim
   step login godot --headless --path . -- --autotest=script:res://tests/login_check.gd
+  step profile godot --headless --path . -- --autotest=script:res://tests/shots_profile.gd
   step anim godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
   step bot godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
   step soak env LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
