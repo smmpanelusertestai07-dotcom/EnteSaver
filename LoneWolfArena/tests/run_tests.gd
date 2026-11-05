@@ -48,6 +48,7 @@ func _ready() -> void:
 	_test_online_status()
 	_test_net_limits()
 	_test_session_ends()
+	_test_safe_saves()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -1503,3 +1504,26 @@ func _test_session_ends() -> void:
 	them.free()
 	Game.profile = saved_profile
 	Game.autotest = at
+
+
+## Saves survive a write cut short (Game.write_json / read_json, behind profile.json, settings.json
+## and hud_layout.json): a file only ever turns into a whole new one, the one before stays as .bak,
+## and a broken file reads as that.
+func _test_safe_saves() -> void:
+	var path := "user://save_check.json"
+	for p: String in [path, path + ".bak", path + ".tmp"]:
+		DirAccess.remove_absolute(p)
+	var first := Game.write_json(path, {"n": 1, "name": "ROOKIE"})
+	_check(first and int(Game.read_json(path).get("n", 0)) == 1 and not FileAccess.file_exists(path + ".tmp"),
+		"a save is written whole and no temporary file is left")
+	Game.write_json(path, {"n": 2})
+	_check(int(Game.read_json(path).get("n", 0)) == 2 and int(Game.read_json(path + ".bak").get("n", 0)) == 1,
+		"the save before stays as .bak")
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("{\"n\": 3, \"name\": \"ROO")             # what a full phone left of a write
+	f.close()
+	_check(int(Game.read_json(path).get("n", 0)) == 1, "a save cut short reads as the one before it")
+	_check(not Game.write_json("user://no_such_folder/x/save.json", {"n": 4}), "a save that cannot be written says so")
+	for p: String in [path, path + ".bak"]:
+		DirAccess.remove_absolute(p)
+	_check(Game.read_json(path).is_empty(), "no save reads as nothing")

@@ -298,21 +298,48 @@ func rounds_to_win(online_match := false) -> int:
 
 
 func _load_json(path: String) -> Variant:
-	if autotest != "" or not FileAccess.file_exists(path):
+	if autotest != "":
 		return {}
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return {}
-	var data: Variant = JSON.parse_string(f.get_as_text())
-	return data if data is Dictionary else {}
+	return read_json(path)
 
 
 func _save_json(path: String, data: Dictionary) -> void:
 	if autotest != "":
 		return
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(data, "\t"))
+	write_json(path, data)
+
+
+## A save as written by write_json: the file, or its previous version (path + ".bak") when the file
+## is missing or does not read as a JSON object (a write cut short); {} when neither does.
+static func read_json(path: String) -> Dictionary:
+	for p: String in [path, path + ".bak"]:
+		var json := JSON.new()
+		if FileAccess.file_exists(p) and json.parse(FileAccess.get_file_as_string(p)) == OK and json.data is Dictionary:
+			return json.data
+	return {}
+
+
+## Writes a save so that a write cut short (a full phone, the app killed) never leaves a broken
+## file in its place: the JSON goes to path + ".tmp" and is checked whole; only then does the old
+## file become path + ".bak" and the new one take its name (renames, so one of the two is always
+## complete). Returns whether the save was written; when it was not, the old file is untouched.
+static func write_json(path: String, data: Dictionary) -> bool:
+	var text := JSON.stringify(data, "\t")
+	var tmp := path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		return false
+	var stored := f.store_string(text)
+	f.flush()
+	var ok := stored and f.get_error() == OK and f.get_length() == text.to_utf8_buffer().size()
+	f.close()
+	if not ok or FileAccess.get_file_as_string(tmp) != text:
+		DirAccess.remove_absolute(tmp)
+		return false
+	if FileAccess.file_exists(path) and DirAccess.rename_absolute(path, path + ".bak") != OK:
+		DirAccess.remove_absolute(tmp)
+		return false
+	return DirAccess.rename_absolute(tmp, path) == OK
 
 
 func save_settings() -> void:

@@ -207,7 +207,10 @@ listed here. If a part needs something new from the core, add it in its own file
   GROUND -> `Loading.start_match` (caption LOADING); LONE WOLF -> `friends.open("online")`.
   `Game.count_match(mode)` and `Game.record_match(result)` count the totals and
   `profile.modes[mode]` (matches, wins, kills); the target dummy counts nowhere.
-- Saves: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
+- Saves (profile.json, settings.json, hud_layout.json) go through `Game.write_json(path, data)`:
+  a temporary file, checked whole, then renamed over the old one, which stays as `<path>.bak`;
+  `Game.read_json(path)` falls back to it when the file does not read (a write cut short on a
+  full phone). Their keys: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
   files are migrated by settings_version), the profile keys `Game.DEFAULT_PROFILE` (signed as a
   whole; older profiles are migrated by profile_version). Crosshair: `Game.crosshair_color()`,
   `Game.crosshair_scale()`. Blocks: profile "blocked" = [{id, name ("" when unknown), t}], oldest
