@@ -59,6 +59,20 @@ var _grenade_timer := 0.0
 var _zone_goal := Vector3.INF
 var _zone_goal_timer := 0.0
 var nav_ready := false
+## DUO / SQUAD (TeamArena sets them; empty in the 1 vs 1, where `target` stays the one opponent):
+## the other team's fighters and this bot's teammates. Every RETARGET_S the bot turns to the UP
+## enemy it sees nearest, else the one that hit it in the last 3 s, else the nearest one left (a
+## knocked enemy only when no UP one is in sight). With nobody in sight it revives a knocked
+## teammate nearby (REVIVE_QUIET_S of quiet, within REVIVE_SEEK_M) and keeps near a human
+## teammate (FOLLOW_M), never while the zone presses.
+var enemies: Array[Fighter] = []
+var allies: Array[Fighter] = []
+const RETARGET_S := 0.5
+const REVIVE_QUIET_S := 1.5
+const REVIVE_SEEK_M := 15.0
+const FOLLOW_M := 7.0
+var _retarget_t := 0.0
+var _following := false
 
 
 func _ready() -> void:
@@ -147,6 +161,20 @@ func hear(pos: Vector3, loudness: float) -> void:
 func _think(delta: float) -> void:
 	if p.is_empty():
 		configure(1, target)
+	if knocked:
+		_crawl(delta)
+		return
+	if not enemies.is_empty():
+		_retarget_t -= delta
+		if _retarget_t <= 0.0:
+			_retarget_t = RETARGET_S
+			_retarget()
+	if reviving != null:
+		# Reviving a teammate (TeamArena runs it): still, unless shot at.
+		move_dir = Vector2.ZERO
+		if _now() - last_attacked_time < 0.3 and arena and arena.has_method("cancel_revive"):
+			arena.cancel_revive(self)
+		return
 	perceive_timer -= delta
 	if perceive_timer <= 0.0:
 		perceive_timer = 0.1
@@ -173,6 +201,11 @@ func _think(delta: float) -> void:
 		_check_stuck(delta)
 		return
 	_maybe_grenade()
+	if (state == S.SEARCH or state == S.CHASE) and not allies.is_empty() and _team_errand(delta, state == S.SEARCH):
+		if weapon().ammo <= 0 and not weapon().reloading:
+			start_reload()
+		_check_stuck(delta)
+		return
 	match state:
 		S.ENGAGE:
 			_engage(delta)
@@ -387,6 +420,8 @@ func _aim_and_shoot(delta: float) -> void:
 		var origin := eye_position()
 		var dir := (goal - origin).normalized()
 		if perform_shot(origin, dir):
+			if net_local and arena and arena.has_method("net_shot_by"):
+				arena.net_shot_by(self, origin, dir)
 			burst_left -= 1
 			if burst_left <= 0:
 				burst_pause = float(p.pause) * rng.randf_range(0.7, 1.4)
@@ -551,3 +586,95 @@ func _check_stuck(delta: float) -> void:
 			_zone_goal_timer = 0.0      # and pick a fresh spot inside the zone
 		_stuck_timer = 0.0
 		_last_pos = global_position
+
+
+# ---------------------------------------------------------------- teams (DUO / SQUAD)
+
+## Picks whom to fight (see `enemies`).
+func _retarget() -> void:
+	var best: Fighter = null
+	var best_d := INF
+	for e: Fighter in enemies:
+		if e.alive and not e.knocked:
+			var d := global_position.distance_to(e.global_position)
+			if d < best_d and d < 85.0 and (can_see(e.chest_position()) or can_see(e.head_position())):
+				best = e
+				best_d = d
+	if best == null and last_attacker != null and is_instance_valid(last_attacker) and last_attacker.alive \
+			and _now() - last_attacked_time < 3.0 and last_attacker in enemies:
+		best = last_attacker
+	if best == null:
+		for e: Fighter in enemies:
+			if e.alive and e.knocked:
+				var d := global_position.distance_to(e.global_position)
+				if d < best_d and can_see(e.chest_position()):
+					best = e
+					best_d = d
+	if best == null:
+		for e: Fighter in enemies:
+			if e.alive:
+				var d := global_position.distance_to(e.global_position) + (30.0 if e.knocked else 0.0)
+				if d < best_d:
+					best = e
+					best_d = d
+	if best != null and best != target:
+		target = best
+		see_target = false               # a new face: the reaction time again
+		track_time = 0.0
+
+
+## With no enemy in sight: revive a knocked teammate nearby, or (may_follow) keep near a human
+## teammate. True when it moved the bot.
+func _team_errand(delta: float, may_follow: bool) -> bool:
+	if _now() - last_seen_time > REVIVE_QUIET_S and _now() - last_attacked_time > REVIVE_QUIET_S:
+		var down: Fighter = null
+		var down_d := REVIVE_SEEK_M
+		for a: Fighter in allies:
+			if a.alive and a.knocked and (a.revived_by == null or a.revived_by == self):
+				var d := global_position.distance_to(a.global_position)
+				if d < down_d:
+					down = a
+					down_d = d
+		if down != null:
+			if down_d <= Fighter.REVIVE_RANGE - 0.4:
+				move_dir = Vector2.ZERO
+				sprinting = false
+				_face_point(down.global_position + Vector3.UP * 0.3, delta, 0.8)
+				if arena and arena.has_method("start_revive"):
+					arena.start_revive(self, down)
+			else:
+				_move_to(down.global_position, delta)
+				_face_point(down.global_position + Vector3.UP * 1.2, delta, 0.6)
+			return true
+	if not may_follow:
+		return false
+	for a: Fighter in allies:
+		if a.alive and not a.knocked and (a is Player or a is RemoteFighter):
+			var d := global_position.distance_to(a.global_position)
+			if d > FOLLOW_M or (_following and d > 4.0):
+				_following = true
+				var behind := a.global_position + Basis(Vector3.UP, a.aim_yaw) * Vector3(1.2 if slot % 2 == 0 else -1.2, 0.0, 3.0)
+				var goal: Vector3 = arena.closest_nav_point(behind) if arena else behind
+				_move_to(goal, delta)
+				_face_point(goal + (goal - global_position) + Vector3.UP * 1.4, delta, 0.5)
+				return true
+			break
+	_following = false
+	return false
+
+
+## Knocked: crawl toward the nearest teammate still UP (no gun, no items).
+func _crawl(delta: float) -> void:
+	var best: Fighter = null
+	var best_d := INF
+	for a: Fighter in allies:
+		if a.alive and not a.knocked:
+			var d := global_position.distance_to(a.global_position)
+			if d < best_d:
+				best = a
+				best_d = d
+	if best == null or best_d < 1.5 or revived_by != null:
+		move_dir = Vector2.ZERO
+		return
+	_move_to(best.global_position, delta)
+	_face_point(best.global_position + Vector3.UP * 0.4, delta, 0.5)
