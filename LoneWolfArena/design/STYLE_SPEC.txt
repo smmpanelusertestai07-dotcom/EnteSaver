@@ -149,5 +149,5 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   fire-button drag or master volume: everything else is fixed at its best value.
 - In-match menu (the gear, Android back): the settings at once, as the reference's gear opens
   them in a match, with QUIT MATCH (red text on a dark plate, asks again) at the foot of the tab
-  column above RESET and EDIT CUSTOM HUD opening the editor over the match; X resumes. TRAINING
+  column above HOW TO PLAY and RESET, and EDIT CUSTOM HUD opening the editor over the match; X resumes. TRAINING
   GROUND pauses under it, online the match runs on.

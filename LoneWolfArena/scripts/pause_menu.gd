@@ -48,8 +48,8 @@ func _ready() -> void:
 	_open_settings.call_deferred()
 
 
-## The settings with QUIT MATCH in their tab column, right above RESET (a child of the panel: a
-## later sibling would count as something opened over it, which takes the back).
+## The settings with QUIT MATCH in their tab column, above HOW TO PLAY and RESET (a child of the
+## panel: a later sibling would count as something opened over it, which takes the back).
 func _open_settings() -> void:
 	if _closing or not is_inside_tree():
 		return
@@ -69,8 +69,8 @@ func _open_settings() -> void:
 	_quit.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_quit.offset_left = 24.0
 	_quit.offset_right = SettingsPanel.MENU_W - 24.0
-	_quit.offset_top = -80.0 - UI.TOUCH_MIN
-	_quit.offset_bottom = -80.0
+	_quit.offset_top = -146.0 - UI.TOUCH_MIN     # above HOW TO PLAY (-136..-80) and RESET
+	_quit.offset_bottom = -146.0
 	_quit.pressed.connect(_on_quit)
 	settings.add_child(_quit)
 	_quit_text("QUIT MATCH")
