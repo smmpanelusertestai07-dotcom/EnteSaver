@@ -6,6 +6,8 @@ extends Fighter
 enum S { SEARCH, ENGAGE, CHASE, COVER, HEAL }
 ## How long a bot walks its sidestep when it gets stuck on cover (_start_detour).
 const DETOUR_S := 0.8
+## Seconds without getting closer to the zone's centre before the bot tries another way in.
+const ZONE_REROUTE_S := 2.5
 
 const DIFF := [
 	{"reaction": 0.85, "error": 6.5, "head": 0.06, "burst_min": 3, "burst_max": 5, "pause": 0.75, "turn": 150.0, "strafe": 0.55, "shield": 0.2, "crouch": 0.0, "hear": 30.0, "sg_range": 5.0, "jump": 0.0, "grenade": 0.0},
@@ -43,6 +45,11 @@ var _last_pos := Vector3.ZERO
 ## A short sidestep around whatever snagged the bot (see _check_stuck): the point and the time left.
 var _detour := Vector3.INF
 var _detour_t := 0.0
+## Zone approach progress: the closest the bot got to the centre, how long it has not got closer,
+## and the angle its goal is turned around the centre to try another way in (see _zone_pressure).
+var _zone_best := INF
+var _zone_progress_t := 0.0
+var _zone_turn := 0.0
 var _shield_cooldown := 0.0
 var _decision_timer := 0.0
 var _grenade_timer := 0.0
@@ -89,6 +96,9 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_zone_goal = Vector3.INF
 	_zone_goal_timer = 0.0
 	_detour_t = 0.0
+	_zone_best = INF
+	_zone_progress_t = 0.0
+	_zone_turn = 0.0
 
 
 # ---------------------------------------------------------------- perception
@@ -241,12 +251,28 @@ func _zone_pressure(delta: float) -> bool:
 	var need := flat > r - minf(ZONE_MARGIN, r * 0.3)
 	if not need:
 		_zone_goal = Vector3.INF
+		_zone_best = INF
+		_zone_turn = 0.0
 		return false
+	# Moving about without getting closer to the centre (a snag the path keeps leading into):
+	# after ZONE_REROUTE_S, aim for a spot turned around the centre so the path takes another way.
+	if flat < _zone_best - 0.5:
+		_zone_best = flat
+		_zone_progress_t = 0.0
+	else:
+		_zone_progress_t += delta
+		if _zone_progress_t > ZONE_REROUTE_S:
+			_zone_progress_t = 0.0
+			_zone_best = flat
+			_zone_turn = 0.4 * PI if _zone_turn == 0.0 else -signf(_zone_turn) * minf(absf(_zone_turn) + 0.4 * PI, PI)
+			_zone_goal_timer = 0.0
 	_zone_goal_timer -= delta
 	if _zone_goal == Vector3.INF or _zone_goal_timer <= 0.0 or global_position.distance_to(_zone_goal) < 1.2:
 		_zone_goal_timer = 2.0
 		# A spot inside on the bot's own side of the centre (no detours around central cover).
 		var out := Vector3(global_position.x - c.x, 0.0, global_position.z - c.z)
+		if _zone_turn != 0.0:
+			out = out.rotated(Vector3.UP, _zone_turn)
 		var keep := clampf(r * 0.45, 0.5, 8.0)
 		var spot := c + (out.normalized() * keep if out.length() > 0.1 else Vector3.ZERO)
 		spot += Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)) * minf(keep * 0.3, 2.0)
