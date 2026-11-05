@@ -22,9 +22,11 @@ extends RefCounted
 ## gear's, which sits on the panel's corner on purpose.
 ## A camera cutout at a short side of the screen (`inset`, set by the HUD from UI.safe_margins)
 ## moves the edge-anchored widgets in by its width.
-## RELOAD (up and to the left of FIRE) and SWITCH (gun <-> fists, left of the weapon panel's small
-## slots) are the reference's quick reload and quick weapon switch buttons; the settings can turn
-## them off, as the left fire button (HUD.button_enabled), and the editor still places them.
+## RELOAD (up and to the left of FIRE) and SWITCH (gun <-> fists, right beside RELOAD on its left,
+## where the reference puts its quick weapon switch next to its quick reload) are the reference's
+## quick reload and quick weapon switch buttons; the settings can turn them off, as the left fire
+## button (HUD.button_enabled), and the editor still places them. SWITCH sat left of the weapon
+## panel's small slots before (MOVED).
 
 const VERSION := 5
 const REF_ASPECT := 20.0 / 9.0
@@ -38,7 +40,7 @@ const STRIP_H := 0.17            # zone status strip under the minimap, in minim
 const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button (taps count to 1.15 x it: 60 px at 720)
 ## Default places of earlier versions that have moved since: a saved layout that still has the
 ## widget exactly there takes its new default place (size and opacity stay the player's).
-const MOVED := {"prone": [{"x": 0.673, "y": 0.073, "a": "c"}]}
+const MOVED := {"prone": [{"x": 0.673, "y": 0.073, "a": "c"}], "swap": [{"x": 0.712, "y": 0.235, "a": "r"}]}
 
 ## The screen's sides that a camera cutout covers, in canvas pixels (x left, y right; the HUD and
 ## the editor keep it up to date from UI.safe_margins): edge-anchored widgets keep their distance
@@ -62,7 +64,7 @@ const DEFAULTS := {
 	"medkit": {"x": 0.0375, "y": 0.678, "s": 0.104, "o": 0.85, "a": "l"},
 	"grenade": {"x": 0.678, "y": 0.912, "s": 0.13, "o": 0.85, "a": "c"},
 	"reload": {"x": 0.73, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
-	"swap": {"x": 0.712, "y": 0.235, "s": 0.1, "o": 0.85, "a": "r"},
+	"swap": {"x": 0.672, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
 	"settings": {"x": 0.9865, "y": 0.035, "s": 0.046, "o": 0.9, "a": "r"},
 	"weapons": {"x": 0.861, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},

@@ -3,8 +3,22 @@ extends Fighter
 ## Local player: over-the-shoulder camera, touch look / drag-fire, scopes, recoil and aim assist.
 
 const CAM_HEIGHT := 1.62
+## Over the right shoulder: the camera's pivot steps CAM_SHOULDER right of the head and CAM_RAISE
+## up (in the view's own axes), so the crosshair's ray passes clear of the own body and the head
+## sits below and left of the crosshair, never on it; the camera then hangs CAM_DIST behind.
 const CAM_SHOULDER := 0.55
+const CAM_RAISE := 0.2
 const CAM_DIST := 3.25
+## The camera's collision: a sphere this big is swept from the head to the pivot (a container at
+## the right side, a low roof) and the spring arm sweeps it behind (a wall at the back), against
+## the map and the deployed walls, so the view never cuts into a wall.
+const CAM_RADIUS := 0.18
+const CAM_MASK := LAYER_WORLD | LAYER_SHIELD
+## Nearer than this to the head the own model is hidden (no view from inside it); nearer than
+## FADE_DIST, or with the body within COVER_GAP of the crosshair's ray, it is see-through.
+const HEAD_CLEAR := 0.45
+const FADE_DIST := 0.95
+const COVER_GAP := 0.06
 const ADS_DIST := 1.5
 const FOV_HIP := 68.0
 const PITCH_MIN := -70.0
@@ -82,6 +96,8 @@ var _track_dir := Vector3.ZERO        # last camera->target chest direction (for
 var _track_target: Fighter
 var _victory_yaw := INF
 var _faded := false
+var _hidden_close := false            # the camera is at the head: the own model is hidden
+var _cam_query: PhysicsShapeQueryParameters3D
 var _cam_y := CAM_HEIGHT
 var _fov := FOV_HIP
 var _scope_hold := false              # "hold fire to scope" for snipers: fire on release
@@ -110,11 +126,11 @@ func _build_camera() -> void:
 	yaw_node.add_child(pitch_node)
 	spring = SpringArm3D.new()
 	spring.spring_length = CAM_DIST
-	spring.collision_mask = LAYER_WORLD
-	spring.margin = 0.15
-	spring.position = Vector3(CAM_SHOULDER, 0, 0)
+	spring.collision_mask = CAM_MASK
+	spring.margin = 0.08
+	spring.position = Vector3(CAM_SHOULDER, CAM_RAISE, 0)
 	var sph := SphereShape3D.new()
-	sph.radius = 0.15
+	sph.radius = CAM_RADIUS
 	spring.shape = sph
 	pitch_node.add_child(spring)
 	camera = Camera3D.new()
@@ -903,21 +919,36 @@ func _process(delta: float) -> void:
 	var fov_target := float(w.def.ads_fov) if ads else FOV_HIP
 	_fov = lerpf(_fov, fov_target, 1.0 - exp(-14.0 * delta))
 	camera.fov = _fov
-	_update_fade(scoped)
-	var shoulder := 0.0 if (victory_cam or scoped) else (0.42 if ads else CAM_SHOULDER)
-	# Keep the shoulder offset out of walls (right side against a container): the spring arm
-	# only guards the line behind the shoulder, not the sideways step to it.
+	var pivot := Vector3.ZERO if (victory_cam or scoped) else (Vector3(0.42, CAM_RAISE * 0.5, 0) if ads else Vector3(CAM_SHOULDER, CAM_RAISE, 0))
+	# Keep the step to the pivot out of walls (the right side against a container, a low roof):
+	# the spring arm only guards the line behind the pivot, not the step to it.
 	var walled := false
-	if shoulder > 0.0:
-		var origin := pitch_node.global_position
-		var res := trace(origin, pitch_node.global_basis.x, shoulder + 0.2, LAYER_WORLD)
-		if not res.is_empty():
-			shoulder = maxf(origin.distance_to(res.position) - 0.2, 0.0)
+	if pivot != Vector3.ZERO:
+		var safe := _sweep(pitch_node.global_position, pitch_node.global_basis * pivot)
+		if safe < 1.0:
+			pivot *= safe
 			walled = true
-	if walled and shoulder < spring.position.x:
-		spring.position.x = shoulder        # pull in at once, ease back out
+	if walled and pivot.length() < spring.position.length():
+		spring.position = pivot             # pull in at once, ease back out
 	else:
-		spring.position.x = lerpf(spring.position.x, shoulder, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
+		spring.position = spring.position.lerp(pivot, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
+	_update_fade(scoped)
+
+
+## How far (0..1) a sphere the camera's size gets along `motion` from `from` before it would touch
+## the map or a deployed wall (1: all the way).
+func _sweep(from: Vector3, motion: Vector3) -> float:
+	if _cam_query == null:
+		_cam_query = PhysicsShapeQueryParameters3D.new()
+		var sph := SphereShape3D.new()
+		sph.radius = CAM_RADIUS
+		_cam_query.shape = sph
+		_cam_query.collision_mask = CAM_MASK
+		_cam_query.exclude = [get_rid()]
+	_cam_query.transform = Transform3D(Basis.IDENTITY, from)
+	_cam_query.motion = motion
+	var r := get_world_3d().direct_space_state.cast_motion(_cam_query)
+	return r[0] if r.size() == 2 else 1.0
 
 
 ## Finds an orbit angle with a clear 3 m view of the character (avoids walls).
@@ -938,16 +969,53 @@ func _pick_victory_yaw() -> float:
 	return best
 
 
+## The own model: hidden in the scope (a first-person view: head, hair and gun would fill it) and
+## with the camera pushed to the head (a wall behind and beside it); see-through while the camera
+## is close, or while the body would cover what the crosshair is on (the right side against a
+## container pulls the camera in behind the head).
 func _update_fade(scoped := false) -> void:
-	# The scope is a first-person view: the own model (head, hair, gun) would fill it.
-	if model.visible == scoped:
-		model.visible = not scoped
-	var close := spring.get_hit_length() < 0.95 and alive and not scoped
+	var own_view := alive and not victory_cam          # (dead: the camera is on the fall, then on the killer)
+	var cam := camera.global_position
+	var head := head_position()
+	_hidden_close = own_view and cam.distance_to(head) < (HEAD_CLEAR + (0.05 if _hidden_close else 0.0))
+	var gone := scoped or _hidden_close
+	if model.visible == gone:
+		model.visible = not gone
+	var close := own_view and not gone and (cam.distance_to(head) < FADE_DIST or covers_crosshair(COVER_GAP + (0.06 if _faded else 0.0)))
 	if close == _faded:
 		return
 	_faded = close
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).transparency = 0.75 if close else 0.0
+
+
+## True when the own body (any hit zone: head, torso, arms, legs) or the gun in hand comes within
+## `gap` m of the crosshair's ray between the camera and a little past the body: it would hide
+## what the crosshair is on.
+func covers_crosshair(gap := COVER_GAP) -> bool:
+	var xf := camera.global_transform
+	var from := xf.origin
+	var to := from - xf.basis.z * (from.distance_to(head_position()) + 1.2)
+	for hb: Area3D in hitboxes:
+		var cs := hb.get_child(0) as CollisionShape3D
+		var c := hb.global_position
+		var a := c
+		var b := c
+		var r := 0.0
+		if cs.shape is SphereShape3D:
+			r = (cs.shape as SphereShape3D).radius
+		elif cs.shape is CapsuleShape3D:
+			var cap := cs.shape as CapsuleShape3D
+			r = cap.radius
+			var half := hb.global_basis.y.normalized() * maxf(cap.height * 0.5 - r, 0.0)
+			a = c - half
+			b = c + half
+		var pts := Geometry3D.get_closest_points_between_segments(from, to, a, b)
+		if pts[0].distance_to(pts[1]) < r + gap:
+			return true
+	var hand := model.bone_position("hand_r")
+	var pts2 := Geometry3D.get_closest_points_between_segments(from, to, hand, model.muzzle_position())
+	return pts2[0].distance_to(pts2[1]) < 0.05 + gap
 
 
 func add_shake(amount: float) -> void:

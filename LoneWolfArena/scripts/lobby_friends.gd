@@ -555,7 +555,8 @@ static func _ago(ts: int) -> String:
 
 
 ## One player in a list: the name and code (a tap opens the player card), ADD FRIEND (not a friend
-## yet) and DUEL 1 VS 1 (online now).
+## yet) and DUEL 1 VS 1 (online now). Only the row of the player the challenge waits for reads
+## CANCEL; the others keep DUEL 1 VS 1, which calls that challenge off and challenges this player.
 func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
@@ -567,8 +568,15 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 		add.pressed.connect(add_friend.bind(id))
 		row.add_child(add)
 	if cloud.peers.has(id):
-		var b := UI.button("CANCEL" if waiting != "" else "DUEL 1 VS 1", 19, "light" if waiting != "" else "primary", Vector2(210, 56))
-		b.pressed.connect(challenge.bind(id))
+		# (while a challenge waits, the room it set up names its player: Cloud.opponent)
+		var theirs := waiting != "" and String(cloud.opponent.get("id", "")) == id
+		var b := UI.button("CANCEL" if theirs else "DUEL 1 VS 1", 19, "light" if theirs else "primary", Vector2(210, 56))
+		b.name = "Cancel_" + Cloud.friend_code(id) if theirs else "Duel_" + Cloud.friend_code(id)
+		b.pressed.connect(func() -> void:
+			var sv := Game.cloud_service()
+			if sv.waiting_for() != "" and String(sv.opponent.get("id", "")) != id:
+				sv.cancel_invite()           # one challenge at a time: this one replaces the one waiting
+			challenge(id))
 		row.add_child(b)
 	return row
 

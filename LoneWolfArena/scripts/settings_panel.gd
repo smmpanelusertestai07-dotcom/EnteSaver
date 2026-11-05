@@ -26,8 +26,9 @@ extends Control
 ## (buttons "ConfirmOk" and "ConfirmCancel"); HOW TO PLAY and the two documents as a page over it
 ## (open_sheet: node "Sheet", its header X "Close", "SheetOk"); back closes them first.
 ## _show_tab(i) takes the index in TABS (the screenshot walkthrough opens 2 = CONTROLS).
-## In a match (opened from the pause menu, or over the arena) the EDIT CUSTOM HUD button is
-## replaced by a note: going to the editor would abandon the match (DELETE MY DATA too).
+## In a match (the in-match menu, PauseMenu, sets edit_hud) EDIT CUSTOM HUD opens the editor over
+## the match; opened over the arena any other way it is a note: the lobby's editor would end it
+## (DELETE MY DATA is a note in a match too).
 
 signal closed
 
@@ -120,6 +121,8 @@ var _footer: Control
 var busy := false
 ## True when opened during a match (set by the pause menu; also detected from the scene).
 var in_match := false
+## Set by the in-match menu (PauseMenu): EDIT CUSTOM HUD then opens the editor over the match.
+var edit_hud := Callable()
 
 
 func _ready() -> void:
@@ -563,20 +566,30 @@ func _build_controls() -> void:
 		_body.add_child(UI.plate_row(String(r[0]), _toggle(String(r[1])), String(r[2])))
 	_body.add_child(UI.spacer(6))
 	if in_match:
-		var note := UI.label("IN THE LOBBY", 17, UI.TEXT_DIM, "bold")
-		note.name = "EditHudNote"
-		_body.add_child(UI.plate_row("Custom HUD", note, "Leaving for the editor now would end this match"))
-		_hint.text = "Custom HUD: open it from the lobby to move, resize and fade every in-match button."
+		if edit_hud.is_valid():
+			_body.add_child(_edit_hud_row(edit_hud))
+			_hint.text = "Custom HUD: move, resize and fade every in-match button; SAVE uses it in this match at once."
+		else:
+			var note := UI.label("IN THE LOBBY", 17, UI.TEXT_DIM, "bold")
+			note.name = "EditHudNote"
+			_body.add_child(UI.plate_row("Custom HUD", note, "Leaving for the editor now would end this match"))
+			_hint.text = "Custom HUD: open it from the lobby to move, resize and fade every in-match button."
 	else:
-		var hud_btn := UI.button("EDIT CUSTOM HUD", 20, "light", Vector2(300, 52))
-		hud_btn.name = "EditHud"
-		hud_btn.pressed.connect(func() -> void:
-			Game.save_settings()
-			Game.goto_hud_editor())
-		var r := HBoxContainer.new()
-		r.add_child(hud_btn)
-		_body.add_child(r)
+		_body.add_child(_edit_hud_row(Game.goto_hud_editor))
 		_hint.text = "Custom HUD: move, resize and fade every in-match button."
+
+
+## EDIT CUSTOM HUD: saves the settings, then `open` opens the editor (the lobby's scene, or in a
+## match the in-match menu's editor over it).
+func _edit_hud_row(open: Callable) -> HBoxContainer:
+	var hud_btn := UI.button("EDIT CUSTOM HUD", 20, "light", Vector2(300, 52))
+	hud_btn.name = "EditHud"
+	hud_btn.pressed.connect(func() -> void:
+		Game.save_settings()
+		open.call())
+	var r := HBoxContainer.new()
+	r.add_child(hud_btn)
+	return r
 
 
 func _set_run_mode(v: int) -> void:

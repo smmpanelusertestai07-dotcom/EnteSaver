@@ -37,7 +37,14 @@ listed here. If a part needs something new from the core, add it in its own file
   that (score, banner, the match's end) and starts each round on the host's "begin" / "round",
   one-way trip earlier (`peer_rtt` / 2, or `relay_rtt` before that is measured). The host takes
   that trip off the guest's death reports, so "first one down" is fair. A forfeit win keeps the
-  real score (no round added).
+  real score (no round added). The match ends when `Arena.match_over_after(round, mine, theirs,
+  goal)` says so: first to `goal`, or after `Arena.MAX_ROUNDS` (9) rounds at most, drawn rounds
+  counted (the most rounds won wins, level is a DRAW). At its end each phone sends "fin" [round,
+  time, host HP, guest HP, host rounds, guest rounds, kills, damage, headshots, shots, hits] (time,
+  HP and rounds from the host only, else -1; `Arena.final_from` checks it): the results wait for
+  it (`FINAL_WAIT_S`), the opponent's row shows its own phone's numbers and the guest the host's
+  TIME and HP LEFT, so both tables match; the host's "fin" also ends a guest match that still
+  waited for a next round.
 - Cloud: a frame gap while a match loads or in the first `Cloud.LOAD_STALL_MS` after its arena
   listens is the load (shader compiles), not this phone away (`Cloud.load_stall`); an app pause
   still counts. The other phone, told by "ka" keep-alives that it loads, waits that much longer.
@@ -52,6 +59,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
   (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
 - `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),
+  `out_banner(victim_name, cause)` (the opponent went down by itself: cause "zone", "fall" or "self"
+  in `HUD.OUT_LINES`; no badge, no red X, a line in its place), `banner_kind()` ("", "kill" or the cause),
   `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
   kill, which the other phone reports as its death)
 - the target dummy (`arena.practice`): the weapon panel's middle slot reads CHANGE GUN and calls
@@ -68,7 +77,7 @@ listed here. If a part needs something new from the core, add it in its own file
   the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
   Its buttons take their touches before the HUD (a child's _input runs first).
 
-## HUD layout (scripts/hud_layout.gd, version 3)
+## HUD layout (scripts/hud_layout.gd, version 5)
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
   screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
   "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
@@ -76,7 +85,8 @@ listed here. If a part needs something new from the core, add it in its own file
   left of SCOPE: the reference's place beside the score bar is under the panel below 18:9); no
   two default touch areas overlap from 16:10 to 22:9 but the gear's on the panel's corner.
   RELOAD (`reload`, up and left of FIRE; grey on a full magazine, without reserve or with the fists
-  out) and SWITCH (`swap`, left of the panel's small slots: gun <-> fists, showing the other one).
+  out) and SWITCH (`swap`, right beside RELOAD on its left, the reference's place: gun <-> fists,
+  showing the other one; a layout saved with it at its old place under the panel takes the new).
   `HUD.button_enabled(id)`: the settings left_fire (2 = OFF), reload_button, switch_button and
   freelook_button turn those buttons off in a match; the editor still places them (label "OFF").
 - `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
@@ -118,6 +128,12 @@ listed here. If a part needs something new from the core, add it in its own file
   ("reddot" | "sniper" | "none"), `healing`, `heal_progress()`, `medkits`, `shields`,
   `grenades`, `crosshair_on_target` (crosshair turns red), `current_spread()` (deg),
   `camera`, `firing`, `assist_target`, `hold_fire` (prep: cannot shoot)
+- camera: over the right shoulder (`Player.CAM_SHOULDER` right of the head and `CAM_RAISE` up, in
+  the view's axes, `CAM_DIST` behind); a sphere of `CAM_RADIUS` swept from the head to that pivot
+  and by the spring arm behind it, against `CAM_MASK` (the map and deployed walls), keeps it out
+  of walls; the own model is hidden with the camera within `HEAD_CLEAR` of the head (and in the
+  scope) and see-through within `FADE_DIST` or while `covers_crosshair()` (a hit zone or the gun
+  within `COVER_GAP` of the crosshair's ray: it would hide what the crosshair is on)
 - signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`;
   a shot reports `hit_landed` once for its head part (headshot true) and once for its body part,
   each the HP the target really lost, `killed` with the last (`Fighter.land_hits(hits)` lands
@@ -177,20 +193,35 @@ listed here. If a part needs something new from the core, add it in its own file
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
   damage, headshots, accuracy, time, xp, enemy, mode (the name shown), mode_id ("training" |
   "lonewolf", the profile counts the match there), map, weapon, score_player, score_bot,
-  hp_left, difficulty (the bot's level, or "ONLINE"), taken; shots, hits, deaths and enemy_id (the
+  hp_left, difficulty (the bot's level, or "ONLINE"), taken, opponent_left (the other player left: the
+  VICTORY screen says so, `OpponentLeft`, their row reads LEFT); shots, hits, deaths and enemy_id (the
   online opponent's player id, else "") go to the profile only (`Game.record_match`). Hides the arena's `hud` while
   shown; the opponent's orange row
   (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match
   overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`); Android back = LOBBY (ignored while
-  PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag.
-- `PauseMenu.new()` (Control, works while paused): signal `closed`. Hides `arena.hud` while open
-  (restored on close and exit). It ignores a back request in the frame it opens (the engine hands
-  the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with
-  `in_match = true`. `Arena.open_pause()` opens one at most (online the tree is not paused, so
-  an open menu is what blocks a second one). Online it is an overlay: the match runs on (its
-  SCORE / TIME LEFT / HP chips stay live), and the end of a round or of the match closes it
-  (`Arena.close_pause()`, also before the results). QUIT MATCH's second tap may come up to
-  `PauseMenu.QUIT_CONFIRM_S` real seconds later.
+  PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag. An internet LONE
+  WOLF match (enemy_id, not local) has `Rematch` in PLAY AGAIN's place, `AddFriend` (not friends
+  yet: `Cloud.request_friend`) and the line `RematchStatus`: REMATCH while the session is up sends
+  "rm" [takes their challenges] (`Arena.ask_rematch`; the other screen says "<NAME> WANTS A
+  REMATCH", `Arena.rematch_asked` / `rematch_wanted` / `rematch_they_take`); once both want it both
+  call `Arena.leave_session()` (the arena then leaves the new session alone and Game.online to it)
+  and a fresh `Cloud.invite` goes from the phone whose challenge the other takes (the old host when
+  both do, `Arena.hosted()`), which the other screen takes (`Cloud.invited` there: the old
+  opponent's challenge is the rematch, anyone else's is declined); `session_started` loads the
+  match. With the session gone a tap sends the fresh challenge itself. Off after a forfeit.
+- `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
+  Android back, signal `closed`. It is the settings at once (`settings`, a `SettingsPanel` with
+  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH, asks once
+  more: its second tap may come up to `PauseMenu.QUIT_CONFIRM_S` real seconds later) at the foot of
+  their tab column, and `edit_hud` set: EDIT CUSTOM HUD opens `HudEditor` (scripts/
+  hud_editor_overlay.gd: the lobby's editor, BACK or back closes it to the settings; SAVE reloads
+  the match HUD's layout) over the match. The settings' X or back closes the menu (saved; also
+  when the arena closes it). Hides `arena.hud` while open (restored on close and exit; a hidden HUD
+  ignores touches). It ignores a back request in the frame it opens (the engine hands the request
+  that opened it to it as well). `Arena.open_pause()` opens one at most and pauses a TRAINING
+  GROUND match while it is open; online the tree is not paused (an open menu is what blocks a
+  second one): the match runs on, and the end of a round or of the match closes it
+  (`Arena.close_pause()`, also before the results).
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
@@ -205,9 +236,10 @@ listed here. If a part needs something new from the core, add it in its own file
   (`open_help()`: `HowToPlay.page()`, scripts/how_to_play.gd) as a page over the panel
   (`open_sheet(title)`: node `Sheet`, its header X `Close`; `open_doc(title, sections)` adds
   `DocScroll` and `SheetOk`); back closes a question, then a page, then the panel. `busy` (DELETE
-  MY DATA running): back and the X do nothing. With `in_match` (also detected when the current
-  scene has `open_pause()`), EDIT CUSTOM HUD becomes a note (`EditHudNote`): leaving for the
-  editor would abandon the match; DELETE MY DATA becomes `DeleteNote`. A finger drag that starts
+  MY DATA running): back and the X do nothing. With `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD
+  (`EditHud`) calls `edit_hud` (a Callable the in-match menu sets: the editor over the match);
+  without one it is a note (`EditHudNote`): the lobby's editor would abandon the match; DELETE MY
+  DATA becomes `DeleteNote`. A finger drag that starts
   on a row scrolls a tab (its sliders keep their own drags). `covered()`: a visible Control was
   put on top of it (a lobby popup that came in meanwhile), which then takes Android back.
 - DELETE MY DATA (`SettingsAccount`, ACCOUNT's `DeleteData`, lobby only): asked twice, then a

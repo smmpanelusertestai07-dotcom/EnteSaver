@@ -15,6 +15,9 @@ extends Node
 ## relay) and the ping chip says DIRECT; then the guest blocks its UDP mid-match, the host falls
 ## back to the relay within TIMEOUT_MS (the chip says RELAY), the state flows on through the relay
 ## on both, and the match ends with the same result.
+## After the match (its results on both): the host's ADD FRIEND reaches the guest; the guest taps
+## REMATCH, the host's screen says so and its REMATCH agrees: a fresh challenge (the host's, the
+## guest takes it at once) loads a new match against the same player on both.
 
 var bad := 0
 var at: Node
@@ -27,8 +30,9 @@ func run(autotest: Node) -> int:
 	cloud.start_lobby()
 	var started := [false]
 	cloud.session_started.connect(func(_h: bool) -> void: started[0] = true)
+	var auto_accept := func(_who: String) -> void: cloud.answer(true)
 	if not host:
-		cloud.invited.connect(func(_who: String) -> void: cloud.answer(true))
+		cloud.invited.connect(auto_accept)
 	var t := 0.0
 	while host and (cloud.peers.is_empty() or cloud.status != "online") and t < 30.0:
 		await at.wait(0.25)
@@ -159,8 +163,68 @@ func run(autotest: Node) -> int:
 		_fail("CAREER does not count the deaths and rounds of the online match")
 	if recent.is_empty() or String(recent[0].id) != opp_id:
 		_fail("the opponent is not among the recent players")
+	if not host:
+		cloud.invited.disconnect(auto_accept)      # (from here on the results screen answers)
+	await _check_rematch(arena, host, cloud, opp_id, opp_name)
 	await at.wait(1.0)
 	return _done("")
+
+
+## The online results: ADD FRIEND (the host's request reaches the guest), then REMATCH: the guest
+## asks first, the host's screen says so and agrees, and a new match loads on both against the
+## same player (the host's fresh challenge, taken by the guest's results screen).
+func _check_rematch(arena: Node, host: bool, cloud: Cloud, opp_id: String, opp_name: String) -> void:
+	var layer: Node = arena.get("pause_layer")
+	if not await _until(func() -> bool: return layer.find_child("Rematch", true, false) != null, 10.0):
+		_fail("the online results have no REMATCH")
+		return
+	var rematch := layer.find_child("Rematch", true, false) as Button
+	var friend := layer.find_child("AddFriend", true, false) as Button
+	var status := layer.find_child("RematchStatus", true, false) as Label
+	if layer.find_child("PlayAgain", true, false) != null:
+		_fail("an online match's results still offer PLAY AGAIN")
+	if host:
+		if friend == null or friend.disabled:
+			_fail("the online results have no ADD FRIEND for a player who is not a friend")
+		else:
+			friend.pressed.emit()
+			if friend.text != "REQUEST SENT" or not friend.disabled:
+				_fail("ADD FRIEND did not send the friend request")
+		if not await _until(func() -> bool: return status.text.contains("WANTS A REMATCH"), 25.0):
+			_fail("the guest's REMATCH never showed on the host's results (\"%s\")" % status.text)
+			return
+		at.log_line("host's results: \"%s\"" % status.text)
+		rematch.pressed.emit()
+	else:
+		if not await _until(func() -> bool: return cloud.friend_requests.has(opp_id), 20.0):
+			_fail("the host's friend request never reached the guest")
+		await at.wait(0.5)
+		rematch.pressed.emit()
+		at.log_line("guest's REMATCH: \"%s\" / \"%s\"" % [rematch.text, status.text])
+		if rematch.text != "ASKED":
+			_fail("the guest's REMATCH did not ask the host")
+	var old := arena.get_instance_id()
+	var fresh := func() -> bool:
+		var s := get_tree().current_scene
+		return s != null and s.get_instance_id() != old and s.name == "Arena" and bool(s.get("online"))
+	if not await _until(fresh, 40.0):
+		_fail("the rematch never loaded (\"%s\")" % (status.text if is_instance_valid(status) else "?"))
+		return
+	var again := get_tree().current_scene
+	await at.wait_for_phase(again, 1, 40.0)
+	var b2: Fighter = again.get("bot")
+	at.log_line("rematch: a new arena, online %s, against %s, phase %d" % [again.get("online"), b2.display_name if b2 else "?", int(again.get("phase"))])
+	if b2 == null or b2.display_name != opp_name or not Game.session.in_session or int(again.get("phase")) != 1:
+		_fail("the rematch is not a running match against the same player")
+
+
+## Waits (game time) until cond() is true or `seconds` pass; returns whether it came true.
+func _until(cond: Callable, seconds: float) -> bool:
+	var t := 0.0
+	while not cond.call() and t < seconds:
+		await at.wait(0.25)
+		t += 0.25
+	return cond.call()
 
 
 ## The direct path is up on this copy, the state comes over it and goes out over it, the chip
