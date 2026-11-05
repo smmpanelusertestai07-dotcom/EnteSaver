@@ -907,6 +907,63 @@ func drop_player(id: String) -> void:
 		withdraw_request(id, false)
 
 
+## DELETE MY DATA (SettingsAccount): asks the relay to delete what this phone's id left there or
+## has waiting there (an empty retained message deletes a kept one): its player card, the friend
+## requests and answers it sent and the ones waiting for it, and the last chat message to and from
+## each friend; then it leaves the relay (DISCONNECT after them on the same link, which this node
+## keeps polling until the relay closes it) and forgets the key and the id here, ending whatever
+## was going on (a challenge either way, a custom room, a session). The caller deletes the key file
+## with the other saves; the next guest profile makes a new key. Returns whether the relay was
+## told: offline, other phones stop listing the card CARD_MAX_AGE_S after it was last refreshed.
+func forget_me() -> bool:
+	if _keygen != -1:
+		WorkerThreadPool.wait_for_task_completion(_keygen)     # a key still being made is never saved
+		_keygen = -1
+		_keygen_out.clear()
+	if in_session:
+		end_session("left")
+	cancel_invite()
+	answer(false)
+	if _room != "":
+		_leave_room()
+	close_room()
+	leave_join()
+	var told := _connected and my_id != ""
+	if told:
+		var p: Dictionary = Game.profile
+		var gone := {ROOT + "/p/" + my_id: true}
+		for id: Variant in (p.friend_out as Dictionary).keys() + (p.withdrawn as Array):
+			gone[ROOT + "/fr/" + String(id) + "/" + my_id] = true
+			gone[ROOT + "/fa/" + my_id + "/" + String(id)] = true
+		for id: Variant in (p.friend_in as Dictionary):
+			gone[ROOT + "/fr/" + my_id + "/" + String(id)] = true
+		for id: Variant in (p.friends as Dictionary):
+			gone[ROOT + "/fa/" + String(id) + "/" + my_id] = true
+			gone[ROOT + "/fm/" + String(id) + "/" + my_id] = true
+			gone[ROOT + "/fm/" + my_id + "/" + String(id)] = true
+		for topic: String in gone:
+			_publish(topic, PackedByteArray(), true)
+		_send_packet(PackedByteArray([0xE0, 0x00]))
+		_connect_t = 0.0             # (the link closes by itself; _process drops it after 8 s at most)
+	elif _ws != null:
+		_ws.close()
+		_ws = null
+	_connected = false
+	_want_lobby = false
+	peers.clear()
+	directory.clear()
+	_dir_wants.clear()
+	_dir_queue.clear()
+	_key = null
+	_pk_pem = ""
+	my_id = ""
+	_card_sig = ""
+	_card_ts = 0
+	relay_rtt = -1
+	status = "offline"
+	return told
+
+
 func answer(accept: bool, rules := {}) -> void:
 	if _incoming.is_empty():
 		return

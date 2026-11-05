@@ -205,6 +205,15 @@ ICONS["prone"] = svg(dot(96, 70, 11) + path("M84 78 L52 84 L14 88", False, 15) +
 ICONS["chevron"] = svg(path("M22 84 L64 42 L106 84", False, 16))
 # Tick (selected weapon card).
 ICONS["tick"] = svg(path("M20 66 L50 96 L108 34", False, 18))
+# Friends (the lobby's FRIENDS button): two busts, the one in front cut free of the one behind.
+ICONS["friends"] = svg(dot(86, 36, 18) + path("M54 106 C54 80 68 68 86 68 C104 68 118 80 118 106 Z")
+                       + '<circle cx="46" cy="46" r="28" fill="#000"/>'
+                       + '<path d="M2 124 C2 86 22 70 46 70 C70 70 90 86 90 124 Z" fill="#000"/>'
+                       + dot(46, 46, 21) + path("M10 118 C10 90 26 78 46 78 C66 78 82 90 82 118 Z"))
+# Online (the lobby's ONLINE 1 VS 1): a globe, its meridian and three parallels.
+ICONS["online"] = svg(ring(64, 64, 50, 7)
+                      + '<ellipse cx="64" cy="64" rx="21" ry="50" fill="none" stroke="%s" stroke-width="6"/>' % W
+                      + line(14, 64, 114, 64, 6) + line(24, 40, 104, 40, 5) + line(24, 88, 104, 88, 5))
 
 
 # Coloured badge for the elimination banner (kept in colour, not converted to white).

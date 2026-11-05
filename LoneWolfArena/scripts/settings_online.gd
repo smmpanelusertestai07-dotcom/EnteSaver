@@ -1,7 +1,7 @@
 class_name SettingsOnline
 extends RefCounted
 ## SettingsPanel's ONLINE tab (its TAB_KEYS row: chat, friend_chat, show_career, voice_chat,
-## challenges_from, friend_requests):
+## challenges_from, friend_requests, vibration, direct_connect):
 ##  - CHAT IN MATCHES ON / OFF (NetChat: quick messages and text with the opponent);
 ##  - FRIENDS CHAT FRIENDS ONLY / OFF (NetChat: messages from friends; blocked players never);
 ##  - SHOW MY CAREER ON / OFF (the player card's career summary, Cloud card v3);
@@ -9,7 +9,8 @@ extends RefCounted
 ##    microphone (RECORD_AUDIO) at that moment; refused, it stays off and says so;
 ##  - DUEL CHALLENGES FROM EVERYONE / FRIENDS ONLY / NOBODY (Cloud.challenge_allowed: the others are
 ##    declined at once and never shown) and FRIEND REQUESTS ON / OFF (Cloud.requests_allowed: off,
-##    they are ignored and never shown);
+##    they are ignored and never shown), and OUT OF A MATCH vibration ON / OFF (the reference's
+##    out-of-match vibration: a buzz when a challenge or a friend request reaches the lobby);
 ##  - DIRECT CONNECTION ON / OFF (NetDirect, last on the tab): the match state goes straight to the
 ##    other phone (faster), which shows each phone's IP address to the other; OFF never sends an
 ##    address and plays through the relay only.
@@ -36,6 +37,8 @@ static func build(panel: SettingsPanel) -> void:
 	body.add_child(UI.plate_row("Duel challenges from", duel, "Anyone else is declined at once; nothing pops up for you"))
 	body.add_child(UI.plate_row("Friend requests", panel._toggle("friend_requests"),
 		"Off: new friend requests are ignored and never shown"))
+	body.add_child(UI.plate_row("Vibration out of a match", panel._toggle("vibration"),
+		"A buzz when a duel challenge or a friend request comes in while you are in the lobby"))
 	body.add_child(UI.section("VOICE (EXPERIMENTAL)"))
 	var note := UI.label("", 16, UI.ACCENT, "semi")
 	note.name = "VoiceNote"

@@ -1,12 +1,15 @@
 extends Node
 ## Menus screenshot tour (everything outside the match), with real-input checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_menus.gd
-## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
-## captions bright, drag to turn the character, START position report), the modes (mode card,
-## SELECT MODE, LONE WOLF's START opens the ONLINE window, the DUMMY chip), name edit (pencil tap,
-## long name ends in "..."), the player card (opens PROFILE), how to play (MODES on top), the
-## wardrobe (card tap, every outfit listed), every settings tab (tab taps, HIGH graphics, EXTREME's
-## question, the FAST / STANDARD sensitivity presets, RESET's question), credits, the quit dialog, the match card of an online match, START ->
+## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (the
+## reference's layout: the bottom bar's captions bright, FRIENDS and the gear top-right, no left
+## menu, stats chips, name plate or version; drag to turn the character, START position report),
+## the modes (mode card, SELECT MODE with the opponent chips, the DUMMY chip, LONE WOLF's START opens
+## the ONLINE window), name edit (pencil tap, long name ends in "..."), the player card (opens
+## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
+## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
+## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
+## PLAY from the settings (MODES on top), the quit dialog, the match card of an online match, START ->
 ## match loading overlay (TRAINING GROUND) -> arena, the pause menu
 ## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
 ## shortcut), results screens (win, defeat, draw, invalid, online) with the opponent's row in an
@@ -17,6 +20,7 @@ extends Node
 
 var _fails := 0
 var _at: Node
+var saved_guest := false
 ## The capture box draws 1-3 frames a second and caps the process step, so tweens (process
 ## time) lag the autotest timers (real time): waits before shots use _settle().
 
@@ -26,6 +30,7 @@ func run(at: Node) -> int:
 	var saved_settings: Dictionary = Game.settings.duplicate(true)
 	var saved_bundle := String(Game.profile.bundle)
 	var saved_name := String(Game.profile.name)
+	saved_guest = bool(Game.profile.guest_ok)
 	Game.settings.difficulty = 1
 	Game.mode = "training"
 	Game.practice = false
@@ -92,9 +97,28 @@ func run(at: Node) -> int:
 	_check(marks.has("ui start"), "lobby reports the START position")
 	_check(lobby.find_child("Coins", true, false) == null and lobby.find_child("FeatureCard", true, false) == null
 		and _find_label(lobby, "OFFLINE") == null, "no coin strip, OFFLINE chip or featured card in the lobby")
-	var howto := lobby.find_child("HowToPlayButton", true, false) as Control
-	var lum := await _caption_lum(howto)
-	_check(lum >= 230.0, "menu captions are drawn bright, not under their plate (HOW TO PLAY max lum %.0f)" % lum)
+	var bar := lobby.find_child("BottomBar", true, false) as Control
+	var ward := lobby.find_child("BundlesButton", true, false) as Button
+	var online_btn := lobby.find_child("OnlineButton", true, false) as Button
+	_check(bar != null and ward != null and online_btn != null and ward.text == "WARDROBE" and online_btn.text == "ONLINE 1 VS 1"
+		and bar.is_ancestor_of(ward) and bar.is_ancestor_of(online_btn), "the bottom bar: WARDROBE and ONLINE 1 VS 1")
+	var vs0 := get_viewport().get_visible_rect().size
+	_check(bar != null and bar.get_global_rect().position.x < vs0.x * 0.05 and bar.get_global_rect().end.y > vs0.y * 0.9
+		and bar.get_global_rect().end.x < vs0.x * 0.5, "the bar sits bottom-left")
+	var pals := lobby.find_child("FriendsButton", true, false) as Control
+	var gear := lobby.find_child("SettingsButton", true, false) as Control
+	_check(pals != null and gear != null and pals.get_global_rect().position.x > vs0.x * 0.8 and pals.get_global_rect().end.x <= gear.get_global_rect().position.x
+		and gear.get_global_rect().end.y < vs0.y * 0.12, "FRIENDS left of the gear, top-right")
+	_check(lobby.find_child("Menu", true, false) == null and lobby.find_child("HowToPlayButton", true, false) == null
+		and lobby.find_child("CustomHudButton", true, false) == null and lobby.find_child("HelpButton", true, false) == null
+		and lobby.find_child("Stats", true, false) == null and lobby.find_child("OutfitName", true, false) == null
+		and _find_label(lobby, "v%s" % ProjectSettings.get_setting("application/config/version", "")) == null
+		and _find_label(lobby, String(Game.profile.name)) == lobby.find_child("PlayerName", true, false),
+		"no left menu, stats chips, outfit or version text, no name plate: the name only in the player card")
+	var lum := await _caption_lum(ward)
+	_check(lum >= 230.0, "the bar's captions are drawn bright (WARDROBE max lum %.0f)" % lum)
+	for c: Control in [ward, online_btn, pals, gear]:
+		_check(c.size.y >= UI.TOUCH_MIN and c.size.x >= UI.TOUCH_MIN, "%s is a full touch target" % c.name)
 	# Drag on the character turns it.
 	var model := lobby.get("model") as Node3D
 	var yaw0 := model.rotation.y
@@ -132,24 +156,26 @@ func run(at: Node) -> int:
 	_back()
 	await _settle(0.3)
 	_check(lobby.find_child("Profile", true, false) == null and lobby.get("_modal") == null, "back closes PROFILE")
-	# How to play from its menu row; the header X closes it.
-	await _tap(howto)
+	# ONLINE 1 VS 1 (the bottom bar) opens the ONLINE window on its ONLINE tab, FRIENDS on FRIENDS.
+	await _tap(online_btn)
 	await _settle(0.6)
-	await at.shot("m04_how_to_play")
-	var modal := lobby.get("_modal") as Node
-	_check(modal != null, "HOW TO PLAY opens")
-	var modes_row := modal.find_child("HowToModes", true, false) if modal else null
-	_check(modes_row != null and modes_row.get_child_count() == Game.MODE_NAMES.size() and _find_label(modal, "TRAINING GROUND") != null
-		and _find_label(modal, "LONE WOLF") != null and _find_label(modal, "FIRST TO %d ROUNDS" % Game.ROUNDS_TO_WIN) != null,
-		"HOW TO PLAY explains both modes and first to %d" % Game.ROUNDS_TO_WIN)
-	if modal:
-		await _tap(modal.find_child("Close", true, false) as Control)
-		await _settle(0.3)
-	_check(lobby.get("_modal") == null, "the popup X closes HOW TO PLAY")
-	# Wardrobe: open with a tap (the menu row reads WARDROBE), every outfit listed (no rarity
-	# tabs), pick a card by tapping it, back closes it.
-	var ward_row := lobby.find_child("BundlesButton", true, false) as Button
-	_check(ward_row != null and ward_row.text == "WARDROBE", "the menu row says WARDROBE")
+	var win := lobby.get("_modal") as Control
+	_check(win != null and win.find_child("Tab_online", true, false) != null and String(lobby.friends.get("_net_kind")) == "online",
+		"ONLINE 1 VS 1 opens the ONLINE window")
+	await at.shot("m04_online")
+	_back()
+	await _settle(0.4)
+	await _tap(pals)
+	await _settle(0.6)
+	win = lobby.get("_modal") as Control
+	_check(win != null and String(lobby.friends.get("_net_kind")) == "friends", "FRIENDS opens the ONLINE window on FRIENDS")
+	await at.shot("m04b_friends")
+	_back()
+	await _settle(0.4)
+	_check(lobby.get("_modal") == null, "back closes the ONLINE window")
+	# Wardrobe: open with a tap (the bar reads WARDROBE), every outfit listed (no rarity tabs), pick
+	# a card by tapping it, back closes it.
+	var ward_row := ward
 	await _tap(ward_row)
 	await at.wait(1.2)
 	var royal := lobby.find_child("Bundle_royal", true, false) as Control
@@ -175,7 +201,7 @@ func run(at: Node) -> int:
 	var sp := _settings(lobby)
 	_check(sp != null, "settings opens from the gear")
 	if sp:
-		await at.shot("m07_settings_basic")
+		await at.shot("m07_settings_display")
 		var g_before := int(Game.settings.graphics)
 		var high_q := _find_text(sp, "HIGH")
 		if high_q:
@@ -223,6 +249,42 @@ func run(at: Node) -> int:
 		await _tap(_find_text(sp, "SOUND"))
 		await _settle(0.3)
 		await at.shot("m11_settings_sound")
+		_check(sp.find_children("*", "HSlider", true, false).size() == 3, "SOUND: effects, music, voice chat (no master)")
+		# ACCOUNT: the player ID, CLEAR CACHE, the links along the bottom (no RESET).
+		await _tap(_find_text(sp, "ACCOUNT"))
+		await _settle(0.4)
+		await at.shot("m11b_settings_account")
+		_check(sp.find_child("PlayerIdValue", true, false) != null and sp.find_child("ClearCache", true, false) != null
+			and not (sp.find_child("Reset", true, false) as Control).visible, "ACCOUNT: the player ID, CLEAR CACHE, no RESET")
+		await _tap(sp.find_child("PrivacyLink", true, false) as Control)
+		await _settle(0.5)
+		await at.shot("m11c_settings_privacy")
+		_check(sp.find_child("Sheet", false, false) != null and sp.find_child("DocScroll", true, false) != null,
+			"the Privacy Notice opens over the settings")
+		_back()
+		await _settle(0.4)
+		_check(sp.find_child("Sheet", false, false) == null and _settings(lobby) != null, "back closes the Privacy Notice, not the settings")
+		await _tap(sp.find_child("DeleteData", true, false) as Control)
+		await _settle(0.4)
+		await at.shot("m11d_settings_delete_ask")
+		_check(sp.find_child("Confirm", true, false) != null, "DELETE MY DATA asks first")
+		await _tap(sp.find_child("ConfirmCancel", true, false) as Control)
+		await _settle(0.3)
+		_check(sp.find_child("Confirm", true, false) == null and bool(Game.profile.guest_ok) == saved_guest,
+			"CANCEL deletes nothing")
+		# HOW TO PLAY under the tabs: a page with MODES on top; its X closes it.
+		await _tap(sp.find_child("HowToPlay", false, false) as Control)
+		await _settle(0.6)
+		await at.shot("m04_how_to_play")
+		var page := sp.find_child("Sheet", false, false)
+		var modes_row := page.find_child("HowToModes", true, false) if page else null
+		_check(modes_row != null and modes_row.get_child_count() == Game.MODE_NAMES.size() and _find_label(page, "TRAINING GROUND") != null
+			and _find_label(page, "LONE WOLF") != null and _find_label(page, "FIRST TO %d ROUNDS" % Game.ROUNDS_TO_WIN) != null,
+			"HOW TO PLAY (SETTINGS) explains both modes and first to %d" % Game.ROUNDS_TO_WIN)
+		if page:
+			await _tap(page.find_child("Close", true, false) as Control)
+			await _settle(0.3)
+		_check(sp.find_child("Sheet", false, false) == null and _settings(lobby) != null, "the page's X closes HOW TO PLAY")
 		var closed := [false]
 		sp.closed.connect(func() -> void: closed[0] = true)
 		_back()
@@ -352,40 +414,58 @@ func run(at: Node) -> int:
 	return _fails
 
 
-## The two modes in the lobby: the mode card shows TRAINING GROUND (the default) with the bot
-## chips and the DUMMY; SELECT MODE offers both; LONE WOLF hides the chips and its START opens the
-## ONLINE window instead of a match; back to TRAINING GROUND at the end.
+## The two modes in the lobby: the mode card shows TRAINING GROUND (the default) against the NORMAL
+## bot; SELECT MODE offers both, with TRAINING GROUND's opponent chips (the bot's level or the
+## DUMMY) on its card; LONE WOLF's START opens the ONLINE window instead of a match; back to
+## TRAINING GROUND at the end.
 func _tour_modes(lobby: Node) -> void:
 	var card := lobby.find_child("ModeCard", true, false) as Control
-	var chips := lobby.find_child("Difficulty", true, false) as Control
-	_check(lobby.find_child("PracticeButton", true, false) == null, "no separate PRACTICE row: the dummy is a TRAINING GROUND choice")
+	_check(lobby.find_child("PracticeButton", true, false) == null and lobby.find_child("Difficulty", true, false) == null,
+		"the lobby has no opponent chips of its own: they are in SELECT MODE")
 	_check(card != null and _label_text(card, "ModeName") == "TRAINING GROUND" and _find_label(card, "CARGO CAGE") != null,
 		"the mode card shows TRAINING GROUND on CARGO CAGE")
-	_check(_label_text(card, "ModeFormat") == "1 VS BOT  ·  FIRST TO %d" % Game.rounds_to_win(),
-		"the mode card says 1 VS BOT and the real round count (%s)" % _label_text(card, "ModeFormat"))
-	_check(chips != null and chips.visible and lobby.find_child("Diff_DUMMY", true, false) != null
-		and (lobby.find_child("Diff_NORMAL", true, false) as Button).button_pressed, "TRAINING GROUND shows the bot chips and the DUMMY")
-	# The DUMMY chip: the target dummy instead of a bot (the card says so), NORMAL brings the bot back.
-	await _tap(lobby.find_child("Diff_DUMMY", true, false) as Control)
-	await _settle(0.3)
-	_check(Game.practice and _label_text(card, "ModeFormat") == "TARGET DUMMY", "DUMMY picks the target dummy")
-	await _at.shot("m02e_lobby_dummy")
-	await _tap(lobby.find_child("Diff_NORMAL", true, false) as Control)
-	await _settle(0.3)
-	_check(not Game.practice and int(Game.settings.difficulty) == 1, "NORMAL picks the bot again")
-	# SELECT MODE from the mode card.
+	_check(_label_text(card, "ModeFormat") == "BOT: NORMAL  ·  FIRST TO %d" % Game.rounds_to_win(),
+		"the mode card names the bot and the real round count (%s)" % _label_text(card, "ModeFormat"))
+	# SELECT MODE from the mode card: both modes, the opponent chips on TRAINING GROUND's card.
 	await _tap(card)
 	await _settle(0.6)
 	var popup := lobby.get("_modal") as Control
-	_check(popup != null and popup.find_child("Mode_training", true, false) != null and popup.find_child("Mode_lonewolf", true, false) != null,
+	var tg := popup.find_child("Mode_training", true, false) if popup else null
+	var chips := tg.find_child("Difficulty", true, false) if tg else null
+	_check(popup != null and tg != null and popup.find_child("Mode_lonewolf", true, false) != null,
 		"the mode card opens SELECT MODE with both modes")
+	_check(chips != null and chips.get_child_count() == Game.DIFFICULTY_NAMES.size() + 1 and chips.find_child("Diff_DUMMY", false, false) != null
+		and (chips.find_child("Diff_NORMAL", false, false) as Button).button_pressed, "TRAINING GROUND's card offers EASY, NORMAL, HARD and the DUMMY")
 	await _at.shot("m02b_select_mode")
+	# The DUMMY chip: the target dummy instead of a bot (the card says so); it closes SELECT MODE.
+	await _tap(chips.find_child("Diff_DUMMY", false, false) as Control if chips else null)
+	await _settle(0.4)
+	_check(Game.practice and Game.mode == "training" and lobby.get("_modal") == null and _label_text(card, "ModeFormat") == "TARGET DUMMY",
+		"DUMMY picks the target dummy and closes SELECT MODE")
+	await _at.shot("m02e_lobby_dummy")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Diff_HARD", true, false) as Control if popup else null)
+	await _settle(0.4)
+	_check(not Game.practice and int(Game.settings.difficulty) == 2 and _label_text(card, "ModeFormat").begins_with("BOT: HARD"),
+		"HARD picks the bot again, at its level")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Diff_NORMAL", true, false) as Control if popup else null)
+	await _settle(0.4)
+	_check(int(Game.settings.difficulty) == 1 and not Game.practice, "NORMAL again")
+	# LONE WOLF.
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
 	if popup:
-		await _tap(popup.find_child("Mode_lonewolf", true, false) as Control)
+		await _tap_art(popup.find_child("Mode_lonewolf", true, false) as Control)
 		await _settle(0.5)
 	_check(Game.mode == "lonewolf" and lobby.get("_modal") == null and Game.settings.mode == "lonewolf", "picking LONE WOLF keeps it and closes the popup")
-	_check(_label_text(card, "ModeName") == "LONE WOLF" and _label_text(card, "ModeFormat") == "1 VS 1 ONLINE" and not chips.visible,
-		"the LONE WOLF card says 1 VS 1 ONLINE and hides the bot chips")
+	_check(_label_text(card, "ModeName") == "LONE WOLF" and _label_text(card, "ModeFormat") == "1 VS 1 ONLINE",
+		"the LONE WOLF card says 1 VS 1 ONLINE")
 	await _at.shot("m02c_lobby_lone_wolf")
 	# LONE WOLF's START opens the ONLINE window (no match loads by itself).
 	var start := lobby.get("start_btn") as Button
@@ -399,14 +479,23 @@ func _tour_modes(lobby: Node) -> void:
 	if online:
 		await _tap(online.find_child("Close", true, false) as Control)
 		await _settle(0.4)
-	# And back to TRAINING GROUND.
+	# And back to TRAINING GROUND (a tap on its card, away from the chips).
 	await _tap(card)
 	await _settle(0.5)
 	popup = lobby.get("_modal") as Control
 	if popup:
-		await _tap(popup.find_child("Mode_training", true, false) as Control)
+		await _tap_art(popup.find_child("Mode_training", true, false) as Control)
 		await _settle(0.5)
-	_check(Game.mode == "training" and chips.visible and _label_text(card, "ModeName") == "TRAINING GROUND", "TRAINING GROUND is picked again")
+	_check(Game.mode == "training" and _label_text(card, "ModeName") == "TRAINING GROUND"
+		and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"), "TRAINING GROUND is picked again")
+
+
+## A real tap on a SELECT MODE card's art (its upper part: the mode, never a chip).
+func _tap_art(c: Control) -> void:
+	if c == null:
+		_check(false, "tap target exists")
+		return
+	await _tap_at(c.get_global_rect().position + Vector2(c.size.x * 0.5, 90.0))
 
 
 ## The match card of an online match (LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent's name;

@@ -634,7 +634,7 @@ func _apply_recoil(w: WeaponState) -> void:
 	recoil_yaw += rng.randf_range(-float(d.recoil_h), float(d.recoil_h)) * k
 	shake = minf(shake + (0.35 if int(d.pellets) > 1 else 0.1), 0.7)
 	if int(d.pellets) > 1 or String(d["class"]) == "SNIPER":
-		Game.vibrate(25)
+		Game.vibrate(25, "shooting")
 
 
 ## Yaw/pitch (radians) the aim needs so the camera's crosshair (including recoil) points at p.

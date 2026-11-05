@@ -163,10 +163,14 @@ static func privacy_sections() -> Array:
 			+ "tracking, no location, no contacts or camera, no microphone except while you hold TALK, and nothing "
 			+ "to buy. Apart from the relay and the direct connection above, and the phone you play with on your "
 			+ "own network, nothing leaves your phone."],
-		["Remove everything", ("Uninstall the game, or clear its data (Android Settings, Apps, Wolf Arena, Storage). "
-			+ "That deletes everything the game keeps on this phone, your player ID included, for good. Your last "
-			+ "player card stays on the relay: other players' games stop showing it %d days after you were last "
-			+ "online, and friend requests and chat messages you sent are dropped after %d days.") % [card_days, request_days]],
+		["Remove everything", ("DELETE MY DATA (Settings, ACCOUNT) deletes everything the game keeps on this phone, "
+			+ "your player ID included, for good. With internet, it first asks the relay to delete your player card, the "
+			+ "friend requests you sent or got that are still waiting there, your answers to them and the last chat "
+			+ "message to and from each friend. Uninstall the game, or clear its data (Android Settings, Apps, Wolf Arena, "
+			+ "Storage): that too deletes everything on this phone, but asks the relay nothing. Whatever a relay still "
+			+ "keeps (after that, without internet, or on a backup relay used before): other players' games stop showing "
+			+ "your player card %d days after you were last online, and friend requests and chat messages you sent are "
+			+ "dropped after %d days.") % [card_days, request_days]],
 	]
 
 
@@ -181,8 +185,8 @@ static func terms_sections() -> Array:
 			+ "players or flood them with invites, friend requests or messages."],
 		["Online play", "Online play runs over free public message relays that we do not run. They can be slow or "
 			+ "unavailable at any time, and a match can drop."],
-		["Your progress", "Your progress is kept only on this phone. If you uninstall the game or clear its data, it is "
-			+ "gone for good."],
+		["Your progress", "Your progress is kept only on this phone. If you uninstall the game, clear its data or use "
+			+ "DELETE MY DATA (Settings, ACCOUNT), it is gone for good."],
 		["As is", "The game is provided as is, without any warranty. As far as the law allows, we are not liable "
 			+ "for any loss that comes from using it."],
 		["Changes", "These terms can change with an update of the game; the version in your game applies."],

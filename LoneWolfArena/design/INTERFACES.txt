@@ -194,15 +194,32 @@ listed here. If a part needs something new from the core, add it in its own file
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
-  once. `TAB_KEYS` lists each tab's settings (its RESET), `NOT_SHOWN` the rest; RESET, EXTREME and
-  CLEAR CACHE (BASIC, `ClearCache`: `CacheCleaner.scan()` / `clear()` delete only the shader and
-  pipeline caches, old logs and the saves' leftover .tmp / older .bak, never a save or the
-  identity key; the row's note then says what was freed) ask first in a `Confirm` layer
-  (`ConfirmOk`, `ConfirmCancel`; back closes it). With
-  `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
-  note (`EditHudNote`): leaving for the editor would abandon the match. A finger drag that starts
+  once. Tabs (`TABS`, the reference's groups): DISPLAY, CONTROLS (with VIBRATION), SENSITIVITY,
+  SOUND, ONLINE, ACCOUNT (scripts/settings_account.gd: the player ID, CLEAR CACHE, and along the
+  bottom DELETE MY DATA, TERMS OF USE, PRIVACY NOTICE). `TAB_KEYS` lists each tab's settings (its
+  RESET; ACCOUNT has none and no RESET), `NOT_SHOWN` the rest; RESET, EXTREME, CLEAR CACHE
+  (ACCOUNT, `ClearCache`: `CacheCleaner.scan()` / `clear()` delete only the shader and pipeline
+  caches, old logs and the saves' leftover .tmp / older .bak, never a save or the identity key;
+  the row's note then says what was freed) and DELETE MY DATA ask first in a `Confirm` layer
+  (`ConfirmOk`, `ConfirmCancel`; back closes it). Under the tabs `HowToPlay` opens HOW TO PLAY
+  (`open_help()`: `HowToPlay.page()`, scripts/how_to_play.gd) as a page over the panel
+  (`open_sheet(title)`: node `Sheet`, its header X `Close`; `open_doc(title, sections)` adds
+  `DocScroll` and `SheetOk`); back closes a question, then a page, then the panel. `busy` (DELETE
+  MY DATA running): back and the X do nothing. With `in_match` (also detected when the current
+  scene has `open_pause()`), EDIT CUSTOM HUD becomes a note (`EditHudNote`): leaving for the
+  editor would abandon the match; DELETE MY DATA becomes `DeleteNote`. A finger drag that starts
   on a row scrolls a tab (its sliders keep their own drags). `covered()`: a visible Control was
   put on top of it (a lobby popup that came in meanwhile), which then takes Android back.
+- DELETE MY DATA (`SettingsAccount`, ACCOUNT's `DeleteData`, lobby only): asked twice, then a
+  waiting screen (`Erasing`: `EraseText`, `EraseOk`): a relay still connecting is waited for
+  (`RELAY_WAIT_S`), `SettingsAccount.forget_everything()` (the relay's copies through
+  `Cloud.forget_me()`, which also forgets the key and id; PLAY WITHOUT INTERNET's copy; settings
+  `Game.reset_settings()`, profile, HUD layout, chats and the session's choices as on a new
+  install), `FLUSH_S` later `SettingsAccount.erase_files(root)` (every save, backup, leftover and
+  key at the top of user://, and the caches; never in automated runs); `EraseOk` opens
+  scenes/login.tscn. `Cloud.forget_me()` -> bool (told the relay): empty retained messages over
+  the card ROOT/p/<id>, friend requests and answers either way (ROOT/fr, ROOT/fa) and friends'
+  chat messages either way (ROOT/fm), then DISCONNECT.
 - Touch targets are `UI.TOUCH_MIN` (56 canvas px) at least: buttons, the settings' segmented
   choices and -/+ steppers, the lobby's opponent chips and menu rows, the pause and results
   buttons, the login's links.
@@ -224,14 +241,18 @@ listed here. If a part needs something new from the core, add it in its own file
 - Lobby Android back closes the top layer (popup: `dialogs.back()`, the popup's own way back;
   settings, PROFILE, wardrobe), then shows a quit dialog (`QuitDialog`, `QuitCancel`,
   `QuitConfirm`); it is ignored during the START overlay.
-- The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, menus, mode card, START, settings,
-  input) makes four helpers that build under its `ui` and reach it through their `lobby`:
+- The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, the bottom bar `BottomBar` with WARDROBE
+  `BundlesButton` and ONLINE 1 VS 1 `OnlineButton`, FRIENDS `FriendsButton` and the gear
+  `SettingsButton` top-right, mode card, START, settings, input; the reference's layout: no text
+  menu, stats chips, name plate or version) makes four helpers that build under its `ui` and reach
+  it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
   open popup (its column `Frame`), signal `modal_closed`, `back()` (its X and Android back: the
   popup's meta "on_back" Callable, else close),
   `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`),
   `notice(title, text)` (one OK: `NoticeText`, `NoticeOk`); SELECT
-  MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog), `friends`
+  MODE `select_mode()` with TRAINING GROUND's opponent chips, the name editor, the quit dialog),
+  `friends`
   (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind, back)` with its list in `NetScroll`
   (back: reopened under a closing player card, the list scrolls back to where it was), custom
   rooms, the online service's signals; `challenge(id)`, `add_friend(id)`; DUEL CHALLENGE has
@@ -276,9 +297,11 @@ listed here. If a part needs something new from the core, add it in its own file
   target dummy, the default) or "lonewolf" (LONE WOLF, online 1 vs 1), kept as the setting
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
   `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
-  `ModeFormat`) opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`);
-  the opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) show in TRAINING GROUND
-  only, DUMMY sets `Game.practice` (session only, an online match ignores it). START: TRAINING
+  `ModeFormat`: `Lobby.mode_format()`, "BOT: <level>  ·  FIRST TO n", "TARGET DUMMY" or "1 VS 1
+  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`); the
+  opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) are on the TRAINING GROUND card:
+  a tap picks TRAINING GROUND with that opponent and closes SELECT MODE; DUMMY sets
+  `Game.practice` (session only, an online match ignores it). START: TRAINING
   GROUND -> `Loading.start_match` (caption LOADING); LONE WOLF -> `friends.open("online")`.
   `Game.count_match(mode)` and `Game.record_match(result)` count the totals and
   `profile.modes[mode]` (matches, wins, kills); the target dummy counts nowhere.
@@ -286,9 +309,15 @@ listed here. If a part needs something new from the core, add it in its own file
   a temporary file, checked whole, then renamed over the old one, which stays as `<path>.bak`;
   `Game.read_json(path)` falls back to it when the file does not read (a write cut short on a
   full phone). Their keys: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
-  files are migrated by settings_version), the profile keys `Game.DEFAULT_PROFILE` (signed as a
-  whole; older profiles are migrated by profile_version). Crosshair: `Game.crosshair_color()`,
-  `Game.crosshair_scale()`. Blocks: profile "blocked" = [{id, name ("" when unknown), t}], oldest
+  files are migrated by settings_version: version 6 dropped the FPS counter, crosshair colour and
+  size, fire-button drag and master volume, made show_fps / sens_fire `FIXED_SETTINGS` and gave
+  the reference's defaults: joystick DYNAMIC, free look button off), the profile keys
+  `Game.DEFAULT_PROFILE` (signed as a whole; older profiles are migrated by profile_version).
+  Crosshair (fixed): `Game.crosshair_color()` (white), `Game.crosshair_scale()`. Vibration:
+  `Game.vibrate(ms, kind)` / `Game.vibration_on(kind)`, kind a key of `Game.VIBRATE_KEYS`:
+  "footsteps" (an enemy's step within `HUD.STEP_BUZZ_M`), "damage" (taking a hit), "shooting"
+  (heavy shots, a kill), "lobby" (a challenge or friend request: the setting "vibration").
+  `Game.reset_settings()`: a new install's settings. Blocks: profile "blocked" = [{id, name ("" when unknown), t}], oldest
   first, `Game.MAX_BLOCKED` = 50 (`Game.block(id, name)` lifts the oldest when full:
   `Game.block_lifts()`; `Game.unblock(id)`, `Game.is_blocked(id)`, `Game.blocked_ids()`; a bare id
   saved by an earlier build loads as a block without a name). "withdrawn": ids whose friend request
@@ -350,14 +379,16 @@ listed here. If a part needs something new from the core, add it in its own file
   message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while that
   chat is open, a match loads, FRIENDS CHAT is off or they are blocked) and a friend request that
   comes while a popup is open (the tap opens FRIENDS); `LobbyNet.set_badge(row, n)` ("UnreadBadge")
-  puts `NetChat.unread_total()` on the ONLINE 1 VS 1 row (`FriendsButton`). Voice `NetVoice` (IMA
+  puts `NetChat.unread_total()` on the lobby's FRIENDS button (`FriendsButton`). Voice `NetVoice` (IMA
   ADPCM 8 kHz, `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"; played on the
   bus "Voice", setting vol_voice). Settings tab ONLINE (scripts/settings_online.gd): chat,
-  friend_chat, show_career, voice_chat (asks for RECORD_AUDIO), direct_connect (NetDirect), challenges_from
+  friend_chat, show_career, voice_chat (asks for RECORD_AUDIO), direct_connect (NetDirect), vibration
+  (out of a match: the lobby's buzz for a challenge or a friend request), challenges_from
   (`Game.CHALLENGES_EVERYONE` / `_FRIENDS` / `_NOBODY`: `Cloud.challenge_allowed(from)`, the others
   declined at once, never shown) and friend_requests (off: `Cloud.requests_allowed()` false, new
-  requests ignored and their waiting copies deleted, no popup). SOUND: vol_master, vol_sfx,
-  vol_music, vol_voice, each applied at once (`Game.apply_settings`: buses Master, SFX, Music, Voice).
+  requests ignored and their waiting copies deleted, no popup). SOUND: vol_sfx, vol_music,
+  vol_voice, each applied at once (`Game.apply_settings`: buses SFX, Music, Voice; no master
+  setting, the Master bus stays at full volume).
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
   `Game.goto_login()` opens scenes/login.tscn (`Login`) until `profile.guest_ok`, the lobby after
   that and always in automated runs.
@@ -378,6 +409,7 @@ listed here. If a part needs something new from the core, add it in its own file
   NameHint, Avatar_<id>, Banner_<id>, NameCard, PlayerId, GuestBadge, ConfirmButton, Welcome.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
   `StartButton`, `ModeCard`, `Mode_<mode>`, `Diff_<chip>`, `SettingsButton`, `BundlesButton`
-  (WARDROBE), `Bundle_<id>`, `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`,
+  (WARDROBE), `OnlineButton` (ONLINE 1 VS 1), `FriendsButton` (FRIENDS), `Bundle_<id>`,
+  `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`,
   a 56 px touch target around its plate, the name editor), `PlayerName`,
   `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.

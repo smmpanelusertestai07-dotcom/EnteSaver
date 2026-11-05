@@ -46,7 +46,8 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 - the settings gear sits outside the weapon panel, in the screen's top-right corner beside it;
 - PRONE sits under the weapon panel, left of SCOPE: the reference's place (top, right of the
   score bar, centre-anchored) is under the right-anchored panel on screens below about 18:9;
-- a LEFT FIRE button (hold to fire with the left thumb) and a FREE LOOK eye are added;
+- a LEFT FIRE button (hold to fire with the left thumb) and a FREE LOOK eye are added (the eye
+  starts off, as the reference's free camera button; SETTINGS > CONTROLS turns it on);
 - the reference's quick RELOAD and quick weapon SWITCH buttons start on (the owner's wish; the
   reference ships them off); each can be turned off in SETTINGS > CONTROLS, as LEFT FIRE;
 - a camera cutout on a short side moves the edge-anchored widgets in by its width.
@@ -111,13 +112,16 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   card (TRAINING GROUND or LONE WOLF / CARGO CAGE) with chips: FIRST TO 5, 1 VS BOT, BOT: <level>
   (or TARGET DUMMY); online FIRST TO n, 1 VS 1 ONLINE and the opponent's name, never a bot; big
   map wordmark, the bar.
-- Lobby: character large on a lit podium in a 3D container yard; player card top-left (emblem
-  avatar, level, name with EDIT, XP line) and nothing store-like (no currency, no featured or
-  "new" cards); left text menu centred on the left edge (ONLINE 1 VS 1, WARDROBE, CUSTOM HUD,
-  SETTINGS, HOW TO PLAY); right: stats chips, the opponent chips (TRAINING GROUND only: EASY,
-  NORMAL, HARD, DUMMY), the mode card (TRAINING GROUND / CARGO CAGE / "1 VS BOT · FIRST TO 5" or
-  "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1 ONLINE"; a tap opens SELECT MODE with the two
-  mode cards) and the big yellow START bottom-right (LONE WOLF: opens the ONLINE list).
+- Lobby (the reference lobby's layout): character large on a lit podium in the middle of a 3D
+  container yard; player card top-left (emblem avatar, level, name with EDIT, XP line) and nothing
+  store-like (no currency, no featured or "new" cards); top-right the logo, the ping chip, FRIENDS
+  (two busts; the unread badge) and the gear; bottom-left a dark translucent bar of main buttons
+  (WARDROBE | ONLINE 1 VS 1, glyph and caption each); bottom-right the mode card (TRAINING GROUND /
+  CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
+  ONLINE"; a tap opens SELECT MODE: the two mode cards, TRAINING GROUND's with the opponent chips
+  EASY, NORMAL, HARD, DUMMY) and the big yellow START (LONE WOLF: opens the ONLINE list). No text
+  menu, stats chips, name plate, outfit or version text (CUSTOM HUD and HOW TO PLAY are in
+  SETTINGS).
 - Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);
   3-column item cards with the rendered outfit portrait and the outfit's own colour bar, live
   preview on the podium, EQUIP and BACK.
@@ -128,14 +132,18 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 - Crosshair sizes (radius, the reference's M1887 circle is ~0.07 h across): rifle ring 0.028 h (grows
   with the spread up to 0.06 h), shotgun ring 0.035 h fixed, fists a dot in a 0.0175 h ring; lines
   ~1.4 px with a soft shadow.
-- Settings (the reference's conventions, our own words and values): BASIC (graphics AUTO / LOW ..
-  EXTREME with AUTO's pick marked and a heat warning before EXTREME, 30/60 FPS plus 90/120 where
-  the screen refreshes that fast, show FPS, visual effects, vibration, CLEAR CACHE), CONTROLS
-  (dynamic joystick, run mode TAP / DRAG / MIXED, aim precision ASSISTED / MANUAL IN SCOPE / FULL
-  MANUAL, left fire button OFF / ALWAYS / WHEN AIMING, hold fire to scope, the RELOAD, SWITCH and
-  free look buttons, the reload ring, crosshair colour and size 50-150 % with a live preview,
-  custom HUD), SENSITIVITY 1-200
-  (general, red dot, 2x scope, sniper scope, free look, fire-button drag; presets STANDARD /
-  FAST), SOUND; per-tab RESET that asks first. Everything else is fixed at its best value.
+- Settings (the reference's groups and defaults, our own words; only what it offers plus what
+  the owner asked for): DISPLAY (graphics AUTO / LOW .. EXTREME with AUTO's pick marked and a heat
+  warning before EXTREME, 30/60 FPS plus 90/120 where the screen refreshes that fast, visual
+  effects), CONTROLS (SHOOTING: aim precision ASSISTED / MANUAL IN SCOPE / FULL MANUAL, left fire
+  button OFF / ALWAYS / WHEN AIMING, hold fire to scope; QUICK BUTTONS: weapon switch, reload, the
+  reload ring, free look (off); MOVEMENT: joystick DYNAMIC (default) / FIXED, run mode TAP / DRAG
+  / MIXED; VIBRATION: enemy footsteps on, taking damage off, shooting off; custom HUD),
+  SENSITIVITY 1-200 (general, red dot, 2x scope, sniper scope, free look; presets STANDARD /
+  FAST), SOUND (effects, music, voice chat), ONLINE (chat, friends, career, who can reach you,
+  vibration out of a match, voice, direct connection), ACCOUNT (the player ID with COPY, CLEAR
+  CACHE; along the bottom DELETE MY DATA, Terms of Use, Privacy Notice as underlined links); HOW
+  TO PLAY under the tabs; per-tab RESET that asks first. No FPS counter, crosshair colour or size,
+  fire-button drag or master volume: everything else is fixed at its best value.
 - Pause: full-width dark band, PAUSED, the mode / map / FIRST TO n line, score / time left / HP
   chips (the target dummy: time and HP), RESUME, SETTINGS, QUIT MATCH (asks again).

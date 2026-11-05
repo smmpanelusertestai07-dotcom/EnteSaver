@@ -1,51 +1,67 @@
 class_name SettingsPanel
 extends Control
 ## Settings: a full-screen modal with a tab column on the left, sectioned rows on dark plates, a
-## close X (node "Close") top-right and a per-tab RESET bottom-left that, once confirmed, puts the
-## tab's settings (TAB_KEYS) back to their defaults. Every change applies at once (Game.settings +
-## Game.apply_settings(); graphics and visual effects also through Game.settings_changed, which the
-## arena and the lobby follow); closing saves (Game.save_settings()) and emits `closed`. Works
-## while the tree is paused.
-##  - BASIC: graphics AUTO / LOW .. EXTREME (AUTO marks the level it picked for this phone and
+## close X (node "Close") top-right; under the tabs HOW TO PLAY (node "HowToPlay") and a per-tab
+## RESET that, once confirmed, puts the tab's settings (TAB_KEYS) back to their defaults. Every
+## change applies at once (Game.settings + Game.apply_settings(); graphics and visual effects also
+## through Game.settings_changed, which the arena and the lobby follow); closing saves
+## (Game.save_settings()) and emits `closed`. Works while the tree is paused. What the reference
+## offers, in its groups and order, plus what the owner asked for:
+##  - DISPLAY: graphics AUTO / LOW .. EXTREME (AUTO marks the level it picked for this phone and
 ##    picks again after a frame-rate change; EXTREME asks first, it can heat the phone), frame rate
-##    (30 and 60; 90 and 120 where the screen refreshes that fast), the FPS counter, visual effects,
-##    vibration, CLEAR CACHE (CacheCleaner: asks first, then says how much it freed);
-##  - SENSITIVITY: General, Red Dot, 2x Scope, Sniper Scope, Free Look and Fire Button Drag, with
-##    the STANDARD / FAST presets;
-##  - CONTROLS: dynamic joystick, aim precision, the left fire button (OFF / ALWAYS / WHEN AIMING),
-##    hold fire to scope, the quick RELOAD and SWITCH buttons, the reload ring, crosshair colour and
-##    size (with a live preview), custom HUD;
-##  - SOUND: master, effects, music, voice chat (the other player's voice), all applied at once;
-##  - ONLINE: chat, friends chat, SHOW MY CAREER, voice chat, who may challenge you and friend
-##    requests (scripts/settings_online.gd).
-## Questions (RESET, EXTREME) open over the panel as node "Confirm" (buttons "ConfirmOk" and
-## "ConfirmCancel"); back closes them first.
+##    (30 and 60; 90 and 120 where the screen refreshes that fast), visual effects;
+##  - CONTROLS: SHOOTING (aim precision, the left fire button OFF / ALWAYS / WHEN AIMING, hold
+##    fire to scope), QUICK BUTTONS (weapon switch, reload, the reload ring, free look), MOVEMENT
+##    (joystick DYNAMIC / FIXED, run mode), VIBRATION (enemy footsteps, taking damage, shooting:
+##    Game.vibrate), custom HUD;
+##  - SENSITIVITY: General, Red Dot, 2x Scope, Sniper Scope and Free Look, with the STANDARD /
+##    FAST presets;
+##  - SOUND: effects, music, voice chat (the other player's voice), all applied at once;
+##  - ONLINE: chat, friends chat, SHOW MY CAREER, voice chat, who may challenge you, friend
+##    requests, the lobby's vibration, direct connection (scripts/settings_online.gd);
+##  - ACCOUNT: the guest profile's player ID, CLEAR CACHE (CacheCleaner: asks first, then says how
+##    much it freed) and along the bottom DELETE MY DATA, the Terms of Use and the Privacy Notice
+##    (scripts/settings_account.gd).
+## Questions (RESET, EXTREME, CLEAR CACHE, DELETE MY DATA) open over the panel as node "Confirm"
+## (buttons "ConfirmOk" and "ConfirmCancel"); HOW TO PLAY and the two documents as a page over it
+## (open_sheet: node "Sheet", its header X "Close", "SheetOk"); back closes them first.
 ## _show_tab(i) takes the index in TABS (the screenshot walkthrough opens 2 = CONTROLS).
 ## In a match (opened from the pause menu, or over the arena) the EDIT CUSTOM HUD button is
-## replaced by a note: going to the editor would abandon the match.
+## replaced by a note: going to the editor would abandon the match (DELETE MY DATA too).
 
 signal closed
 
-const TABS := ["BASIC", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE"]
+const TABS := ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT"]
 ## Menu order on screen (indices into TABS).
-const ORDER := [0, 2, 1, 3, 4]
-## The settings each tab shows, and its RESET puts back.
+const ORDER := [0, 2, 1, 3, 4, 5]
+## The settings each tab shows, and its RESET puts back (ACCOUNT has none: no RESET there).
 const TAB_KEYS := [
-	["graphics_auto", "graphics", "fps", "show_fps", "visual_effects", "vibration"],
-	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook", "sens_fire"],
-	["dynamic_joystick", "run_mode", "aim_precision", "left_fire", "hold_fire_scope", "reload_button", "switch_button",
-		"freelook_button", "reload_on_crosshair", "crosshair_color", "crosshair_size"],
-	["vol_master", "vol_sfx", "vol_music", "vol_voice"],
-	["chat", "friend_chat", "show_career", "voice_chat", "challenges_from", "friend_requests", "direct_connect"],
+	["graphics_auto", "graphics", "fps", "visual_effects"],
+	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook"],
+	["aim_precision", "left_fire", "hold_fire_scope", "switch_button", "reload_button", "reload_on_crosshair",
+		"freelook_button", "dynamic_joystick", "run_mode", "vibrate_footsteps", "vibrate_damage", "vibrate_shooting"],
+	["vol_sfx", "vol_music", "vol_voice"],
+	["chat", "friend_chat", "show_career", "voice_chat", "challenges_from", "friend_requests", "vibration", "direct_connect"],
+	[],
 ]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
 const SCENE_KEYS := ["visual_effects"]
-## Settings no tab shows: chosen elsewhere (the mode and the bot level in the lobby, the gun at the
-## pick) or the game's own bookkeeping.
+## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
+## the pick) or the game's own bookkeeping.
 const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done"]
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
-## Names of Game.CROSSHAIR_COLORS, in its order.
-const COLOR_NAMES := ["WHITE", "GREEN", "YELLOW", "CYAN"]
+## The joystick (setting dynamic_joystick: DYNAMIC true, FIXED false) and what each does.
+const JOYSTICK_NAMES := ["DYNAMIC", "FIXED"]
+const JOYSTICK_NOTES := [
+	"The stick starts where your thumb lands on the left and follows it",
+	"The stick stays in its place",
+]
+## The VIBRATION rows (Game.VIBRATE_KEYS: the reference's): [title, setting, note].
+const VIBRATION_ROWS := [
+	["Enemy footsteps", "vibrate_footsteps", "A light buzz with each step of an enemy running close by"],
+	["Taking damage", "vibrate_damage", "A buzz when you are hit"],
+	["Shooting", "vibrate_shooting", "A buzz with each shotgun or sniper shot, and on a kill"],
+]
 ## The choices of the settings aim_precision and left_fire, by value, with aim precision's notes.
 const PRECISION_NAMES := ["ASSISTED", "MANUAL IN SCOPE", "FULL MANUAL"]
 const PRECISION_NOTES := [
@@ -71,14 +87,13 @@ const SENS_ROWS := [
 	["2x Scope", "sens_2x", "While aiming through a 2x scope"],
 	["Sniper Scope", "sens_sniper", "While looking through the sniper scope"],
 	["Free Look", "sens_freelook", "Turning the camera with the eye button"],
-	["Fire Button Drag", "sens_fire", "Fire-button drags turn at this % of the view's speed"],
 ]
 ## STANDARD is the defaults; FAST our quicker set, in the usual order (Red Dot >= General > 2x >
 ## Sniper).
 const PRESET_NAMES := ["STANDARD", "FAST"]
 const SENS_PRESETS := {
-	"STANDARD": {"sens_general": 100, "sens_reddot": 100, "sens_2x": 100, "sens_sniper": 71, "sens_freelook": 100, "sens_fire": 100},
-	"FAST": {"sens_general": 165, "sens_reddot": 170, "sens_2x": 150, "sens_sniper": 125, "sens_freelook": 140, "sens_fire": 100},
+	"STANDARD": {"sens_general": 100, "sens_reddot": 100, "sens_2x": 100, "sens_sniper": 71, "sens_freelook": 100},
+	"FAST": {"sens_general": 165, "sens_reddot": 170, "sens_2x": 150, "sens_sniper": 125, "sens_freelook": 140},
 }
 const MENU_W := 230.0
 
@@ -93,10 +108,16 @@ var _graphics_seg: HBoxContainer
 var _graphics_note: Label
 var _aim_note: Label
 var _run_note: Label
+var _joy_note: Label
 var _cache_note: Label
-var _preview: Control
 var _ask_layer: Control
+var _sheet: Control
 var _hint: Label
+var _reset_btn: Button
+## The ACCOUNT tab's links along the bottom (in the hint's place), while that tab shows.
+var _footer: Control
+## A task that must not be left halfway (DELETE MY DATA): back and the X do nothing meanwhile.
+var busy := false
 ## True when opened during a match (set by the pause menu; also detected from the scene).
 var in_match := false
 
@@ -131,15 +152,28 @@ func _ready() -> void:
 		var b := _menu_button(TABS[i], i)
 		_menu.add_child(b)
 		_menu_buttons[i] = b
-	var reset := UI.button("RESET", 18, "ghost", Vector2(150, UI.TOUCH_MIN))
-	reset.name = "Reset"
-	reset.icon = UI.icon_texture("v_reload")
-	reset.expand_icon = true
-	reset.add_theme_constant_override("icon_max_width", 22)
-	reset.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	reset.position = Vector2(24, -70)
-	reset.pressed.connect(_ask_reset)
-	add_child(reset)
+	# Under the tabs: HOW TO PLAY (the game's help, in the lobby and in a match), then RESET.
+	var help := UI.button("HOW TO PLAY", 18, "ghost", Vector2(190, UI.TOUCH_MIN))
+	help.name = "HowToPlay"
+	help.icon = UI.icon_texture("v_info")
+	help.expand_icon = true
+	help.add_theme_constant_override("icon_max_width", 22)
+	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	help.offset_left = 24
+	help.offset_right = 24 + 190
+	help.offset_top = -136
+	help.offset_bottom = -136 + UI.TOUCH_MIN
+	help.pressed.connect(open_help)
+	add_child(help)
+	_reset_btn = UI.button("RESET", 18, "ghost", Vector2(150, UI.TOUCH_MIN))
+	_reset_btn.name = "Reset"
+	_reset_btn.icon = UI.icon_texture("v_reload")
+	_reset_btn.expand_icon = true
+	_reset_btn.add_theme_constant_override("icon_max_width", 22)
+	_reset_btn.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	_reset_btn.position = Vector2(24, -70)
+	_reset_btn.pressed.connect(_ask_reset)
+	add_child(_reset_btn)
 	# Header: title + close.
 	var title := UI.label("SETTINGS", 30, UI.TEXT, "heavy")
 	title.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
@@ -237,10 +271,9 @@ func _apply(key: String, value: Variant) -> void:
 	Game.apply_settings()
 	if key in SCENE_KEYS:
 		Game.settings_changed.emit()
-	if key == "vibration" and bool(value):
-		Game.vibrate(40)                # a short buzz: this is what it does
-	if _preview:
-		_preview.queue_redraw()
+	var kind: Variant = Game.VIBRATE_KEYS.find_key(key)
+	if kind != null and bool(value):
+		Game.vibrate(40, String(kind))  # a short buzz: this is what it does
 
 
 func _show_tab(i: int) -> void:
@@ -258,12 +291,17 @@ func _show_tab(i: int) -> void:
 	_graphics_note = null
 	_aim_note = null
 	_run_note = null
+	_joy_note = null
 	_cache_note = null
-	_preview = null
+	if _footer and is_instance_valid(_footer):
+		_footer.queue_free()
+	_footer = null
+	_hint.visible = true
+	_reset_btn.visible = not (TAB_KEYS[_current] as Array).is_empty()
 	_scroll.scroll_vertical = 0
 	match _current:
 		0:
-			_build_basic()
+			_build_display()
 		1:
 			_build_sensitivity()
 		2:
@@ -272,6 +310,8 @@ func _show_tab(i: int) -> void:
 			_build_sound()
 		4:
 			SettingsOnline.build(self)
+		5:
+			SettingsAccount.build(self)
 	# A finger drag that starts on a row scrolls the tab (a tap still presses); a slider keeps its
 	# own drag, so moving one never scrolls the list.
 	UI.drag_scroll(_scroll, _body)
@@ -279,10 +319,10 @@ func _show_tab(i: int) -> void:
 		(s as Control).mouse_filter = Control.MOUSE_FILTER_STOP
 
 
-# ---------------------------------------------------------------- BASIC
+# ---------------------------------------------------------------- DISPLAY
 
-func _build_basic() -> void:
-	_body.add_child(UI.section("DISPLAY"))
+func _build_display() -> void:
+	_body.add_child(UI.section("GRAPHICS"))
 	var sel := 0 if bool(Game.settings.graphics_auto) else int(Game.settings.graphics) + 1
 	_graphics_seg = UI.segmented(GRAPHICS_CHOICES, sel, _on_graphics, 17, 104.0)
 	_graphics_seg.name = "GraphicsChoice"
@@ -307,23 +347,21 @@ func _build_basic() -> void:
 	var fps_seg := UI.segmented(labels, fps_sel, func(v: int) -> void: _set_fps(int(fps_opts[v])), 17, 104.0)
 	fps_seg.name = "FpsChoice"
 	_body.add_child(UI.plate_row("Frame rate", fps_seg, _fps_note(fps_opts)))
-	_body.add_child(UI.plate_row("Show FPS", _toggle("show_fps"), "The frame rate under the minimap in a match"))
 	_body.add_child(UI.plate_row("Visual effects", _toggle("visual_effects"), "Lights on shots and blasts, full sparks; off helps weak phones"))
-	_body.add_child(UI.spacer(4))
-	_body.add_child(UI.section("FEEDBACK"))
-	_body.add_child(UI.plate_row("Vibration", _toggle("vibration"), "A buzz when you are hit, on a kill and on heavy shots"))
-	_body.add_child(UI.spacer(4))
-	_body.add_child(UI.section("STORAGE"))
-	var clear_btn := UI.button("CLEAR CACHE", 18, "light", Vector2(230, 52))
-	clear_btn.name = "ClearCache"
-	clear_btn.pressed.connect(_ask_clear_cache)
-	var cache_row := UI.plate_row("Cache", clear_btn, "Shader cache, old logs, leftover temporary files: %s" % CacheCleaner.size_text(int(CacheCleaner.scan().bytes)))
-	_cache_note = _note_of(cache_row)
-	_body.add_child(cache_row)
 	_hint.text = "Changes apply at once. In a match the 3D view draws a little smaller while frames run slow; the HUD stays sharp."
 
 
-## The frame-rate row's note: which rates this screen can't show, if any.
+## The cache row (ACCOUNT, TOOLS): what CLEAR CACHE would free now, the button (node ClearCache).
+func cache_row() -> Control:
+	var clear_btn := UI.button("CLEAR", 18, "light", Vector2(170, 52))
+	clear_btn.name = "ClearCache"
+	clear_btn.pressed.connect(_ask_clear_cache)
+	var row := UI.plate_row("Cache", clear_btn, "Shader cache, old logs, leftover temporary files: %s" % CacheCleaner.size_text(int(CacheCleaner.scan().bytes)))
+	clear_btn.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_SHRINK_END      # at the row's end
+	_cache_note = _note_of(row)
+	return row
+
+
 ## CLEAR CACHE asks first (what goes, what stays), then says how much it freed.
 func _ask_clear_cache() -> void:
 	var bytes := int(CacheCleaner.scan().bytes)
@@ -338,6 +376,7 @@ func _ask_clear_cache() -> void:
 				_cache_note.text = "Freed %s" % freed)
 
 
+## The frame-rate row's note: which rates this screen can't show, if any.
 func _fps_note(shown: Array) -> String:
 	var missing := PackedStringArray()
 	for f: int in Game.FPS_OPTIONS:
@@ -486,15 +525,6 @@ func _refresh_preset() -> void:
 # ---------------------------------------------------------------- CONTROLS
 
 func _build_controls() -> void:
-	_body.add_child(UI.section("MOVEMENT"))
-	_body.add_child(UI.plate_row("Dynamic joystick", _toggle("dynamic_joystick"), "The stick follows your thumb"))
-	var run := clampi(int(Game.settings.run_mode), 0, RUN_MODE_NAMES.size() - 1)
-	var run_seg := UI.segmented(RUN_MODE_NAMES, run, _set_run_mode, 16, 130.0)
-	run_seg.name = "RunMode"
-	var run_row := UI.plate_row("Run mode", run_seg, String(RUN_MODE_NOTES[run]))
-	_run_note = _note_of(run_row)
-	_body.add_child(run_row)
-	_body.add_child(UI.spacer(4))
 	_body.add_child(UI.section("SHOOTING"))
 	var precision := clampi(int(Game.settings.aim_precision), 0, PRECISION_NAMES.size() - 1)
 	var aim_seg := UI.segmented(PRECISION_NAMES, precision, _set_precision, 16, 172.0)
@@ -509,31 +539,28 @@ func _build_controls() -> void:
 	_body.add_child(UI.plate_row("Hold fire to scope", _toggle("hold_fire_scope"), "Sniper rifles: hold FIRE to look through the scope, let go to shoot"))
 	_body.add_child(UI.spacer(4))
 	_body.add_child(UI.section("QUICK BUTTONS"))
-	_body.add_child(UI.plate_row("Reload button", _toggle("reload_button"), "RELOAD beside FIRE (tapping the weapon panel reloads too)"))
 	_body.add_child(UI.plate_row("Weapon switch button", _toggle("switch_button"), "Swaps the gun and the fists; it shows the one it swaps to"))
-	_body.add_child(UI.plate_row("Free look button", _toggle("freelook_button"), "Hold the eye button and drag to look around while you run on"))
+	_body.add_child(UI.plate_row("Reload button", _toggle("reload_button"), "RELOAD beside FIRE (tapping the weapon panel reloads too)"))
 	_body.add_child(UI.plate_row("Reload ring", _toggle("reload_on_crosshair"), "The reload's progress around the crosshair"))
+	_body.add_child(UI.plate_row("Free look button", _toggle("freelook_button"), "Hold the eye button and drag to look around while you run on"))
 	_body.add_child(UI.spacer(4))
-	_body.add_child(UI.section("CROSSHAIR"))
-	var cross := HBoxContainer.new()
-	cross.add_theme_constant_override("separation", 8)
-	var rows := VBoxContainer.new()
-	rows.add_theme_constant_override("separation", 8)
-	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var colors := UI.segmented(COLOR_NAMES, int(Game.settings.crosshair_color), func(v: int) -> void: _apply("crosshair_color", v), 16, 118.0)
-	colors.name = "CrosshairColor"
-	for i in colors.get_child_count():
-		_add_swatch(colors.get_child(i) as Button, Game.CROSSHAIR_COLORS[i])
-	rows.add_child(UI.plate_row("Colour", colors, "It turns red on an enemy whatever its colour"))
-	var size_st := UI.stepper(Game.settings.crosshair_size, 50, 150, func(v: float) -> void: _apply("crosshair_size", int(v)), 5.0)
-	size_st.name = "CrosshairSize"
-	rows.add_child(UI.plate_row("Size", size_st, "50-150 % of the standard size"))
-	cross.add_child(rows)
-	_preview = CrosshairPreview.new()
-	_preview.name = "CrosshairPreview"
-	_preview.custom_minimum_size = Vector2(150, 0)
-	cross.add_child(_preview)
-	_body.add_child(cross)
+	_body.add_child(UI.section("MOVEMENT"))
+	var dynamic := bool(Game.settings.dynamic_joystick)
+	var joy_seg := UI.segmented(JOYSTICK_NAMES, 0 if dynamic else 1, _set_joystick, 16, 150.0)
+	joy_seg.name = "Toggle_dynamic_joystick"
+	var joy_row := UI.plate_row("Joystick", joy_seg, String(JOYSTICK_NOTES[0 if dynamic else 1]))
+	_joy_note = _note_of(joy_row)
+	_body.add_child(joy_row)
+	var run := clampi(int(Game.settings.run_mode), 0, RUN_MODE_NAMES.size() - 1)
+	var run_seg := UI.segmented(RUN_MODE_NAMES, run, _set_run_mode, 16, 130.0)
+	run_seg.name = "RunMode"
+	var run_row := UI.plate_row("Run mode", run_seg, String(RUN_MODE_NOTES[run]))
+	_run_note = _note_of(run_row)
+	_body.add_child(run_row)
+	_body.add_child(UI.spacer(4))
+	_body.add_child(UI.section("VIBRATION"))
+	for r: Array in VIBRATION_ROWS:
+		_body.add_child(UI.plate_row(String(r[0]), _toggle(String(r[1])), String(r[2])))
 	_body.add_child(UI.spacer(6))
 	if in_match:
 		var note := UI.label("IN THE LOBBY", 17, UI.TEXT_DIM, "bold")
@@ -558,50 +585,23 @@ func _set_run_mode(v: int) -> void:
 		_run_note.text = String(RUN_MODE_NOTES[v])
 
 
+## The joystick choice: 0 DYNAMIC, 1 FIXED.
+func _set_joystick(v: int) -> void:
+	_apply("dynamic_joystick", v == 0)
+	if _joy_note and is_instance_valid(_joy_note):
+		_joy_note.text = String(JOYSTICK_NOTES[v])
+
+
 func _set_precision(v: int) -> void:
 	_apply("aim_precision", v)
 	if _aim_note and is_instance_valid(_aim_note):
 		_aim_note.text = String(PRECISION_NOTES[v])
 
 
-## A colour choice button: its colour as a dot left of the name (the name moves right for it).
-func _add_swatch(b: Button, col: Color) -> void:
-	for state: String in ["normal", "hover", "pressed", "hover_pressed"]:
-		var st := b.get_theme_stylebox(state).duplicate() as StyleBox
-		st.content_margin_left = 30.0
-		b.add_theme_stylebox_override(state, st)
-	b.draw.connect(func() -> void:
-		var c := Vector2(17.0, b.size.y * 0.5)
-		b.draw_circle(c, 7.5, Color(0, 0, 0, 0.75))
-		b.draw_circle(c, 6.0, col))
-
-
-## The match's rifle crosshair (HUD._draw_crosshair: ring and centre dot) at the chosen colour and
-## size, over a patch of the arena's grey wall.
-class CrosshairPreview extends Control:
-	func _draw() -> void:
-		var r := Rect2(Vector2.ZERO, size)
-		var top := Color(0.52, 0.54, 0.57)
-		var bottom := Color(0.3, 0.31, 0.33)
-		draw_polygon(PackedVector2Array([r.position, Vector2(r.end.x, 0.0), r.end, Vector2(0.0, r.end.y)]),
-			PackedColorArray([top, top, bottom, bottom]))
-		draw_rect(r, Color(1, 1, 1, 0.16), false, 1.0)
-		draw_string(UI.font("bold"), Vector2(8, 17), "PREVIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.7))
-		var c := size * 0.5 + Vector2(0, 6)
-		var sc := Game.crosshair_scale()
-		var col := Game.crosshair_color()
-		var ring_r := 0.028 * HudLayout.unit(get_viewport_rect().size) * sc
-		HudDraw.ring(self, c, ring_r, Color(0, 0, 0, 0.3), 3.0)
-		HudDraw.ring(self, c, ring_r, Color(col, col.a * 0.92), 1.4)
-		HudDraw.disk(self, c, 2.6 * sc, Color(0, 0, 0, 0.45))
-		HudDraw.disk(self, c, 1.7 * sc, col)
-
-
 # ---------------------------------------------------------------- SOUND
 
 func _build_sound() -> void:
 	_body.add_child(UI.section("VOLUME"))
-	_body.add_child(UI.plate_row("Master", UI.stepper(Game.settings.vol_master, 0, 100, func(v: float) -> void: _apply("vol_master", int(v)), 5.0)))
 	_body.add_child(UI.plate_row("Effects", UI.stepper(Game.settings.vol_sfx, 0, 100, func(v: float) -> void: _apply("vol_sfx", int(v)), 5.0)))
 	_body.add_child(UI.plate_row("Music", UI.stepper(Game.settings.vol_music, 0, 100, func(v: float) -> void: _apply("vol_music", int(v)), 5.0)))
 	var voice := UI.stepper(Game.settings.vol_voice, 0, 100, func(v: float) -> void: _apply("vol_voice", int(v)), 5.0)
@@ -622,8 +622,9 @@ func _ask_reset() -> void:
 	_ask("RESET " + tab, "Put every %s setting back to its default?" % tab, "RESET", _reset_tab)
 
 
-## A question over the panel: ok_text runs on_ok, CANCEL (or back) only closes it.
-func _ask(title: String, text: String, ok_text: String, on_ok: Callable) -> void:
+## A question over the panel: ok_text runs on_ok, CANCEL (or back) only closes it; `danger` makes
+## the OK button red (a step that cannot be undone).
+func _ask(title: String, text: String, ok_text: String, on_ok: Callable, danger := false) -> void:
 	_close_ask()
 	var layer := Control.new()
 	layer.name = "Confirm"
@@ -652,7 +653,7 @@ func _ask(title: String, text: String, ok_text: String, on_ok: Callable) -> void
 	var no := UI.button("CANCEL", 18, "light", Vector2(170, 50))
 	no.name = "ConfirmCancel"
 	no.pressed.connect(_close_ask)
-	var yes := UI.button(ok_text, 18, "primary", Vector2(200, 50))
+	var yes := UI.button(ok_text, 18, "danger" if danger else "primary", Vector2(200, 50))
 	yes.name = "ConfirmOk"
 	yes.pressed.connect(func() -> void:
 		_close_ask()
@@ -666,11 +667,120 @@ func _ask(title: String, text: String, ok_text: String, on_ok: Callable) -> void
 
 func _close_ask() -> void:
 	if _ask_layer and is_instance_valid(_ask_layer):
+		_ask_layer.name = "ConfirmClosed"       # a question asked right after takes the name "Confirm"
 		_ask_layer.queue_free()
 	_ask_layer = null
 
 
-## RESET (once confirmed) puts the current tab's settings back to their defaults (BASIC: AUTO
+## A page over the panel (HOW TO PLAY, the Terms of Use, the Privacy Notice) in the popup look:
+## the light header with the title and its X ("Close"), the dark body, at most `width` px wide and
+## most of the screen tall. Returns the body's column, whose content should fill it (a scroll box
+## that expands); open_doc adds an OK under it. Back and the X close it (close_sheet).
+func open_sheet(title: String, width := 1000.0) -> VBoxContainer:
+	close_sheet()
+	_sheet = Control.new()
+	_sheet.name = "Sheet"
+	UI.full_rect(_sheet)
+	_sheet.mouse_filter = Control.MOUSE_FILTER_STOP
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.74)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UI.full_rect(shade)
+	_sheet.add_child(shade)
+	var vs := get_viewport_rect().size
+	var w := minf(width, vs.x - 64.0)
+	var h := minf(660.0, vs.y - 40.0)
+	var frame := VBoxContainer.new()
+	frame.add_theme_constant_override("separation", 0)
+	frame.anchor_left = 0.5
+	frame.anchor_right = 0.5
+	frame.anchor_top = 0.5
+	frame.anchor_bottom = 0.5
+	frame.offset_left = -w * 0.5
+	frame.offset_right = w * 0.5
+	frame.offset_top = -h * 0.5
+	frame.offset_bottom = h * 0.5
+	_sheet.add_child(frame)
+	var head := UI.popup_header(title, 26, 54.0)
+	(head.get_node("Close") as Button).pressed.connect(close_sheet)
+	frame.add_child(head)
+	var body := UI.popup_body()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	frame.add_child(body)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	body.add_child(v)
+	add_child(_sheet)
+	if _ask_layer and is_instance_valid(_ask_layer):
+		move_child(_ask_layer, -1)          # a question stays on top
+	_sheet.modulate.a = 0.0
+	_sheet.create_tween().tween_property(_sheet, "modulate:a", 1.0, 0.15)
+	return v
+
+
+func close_sheet() -> void:
+	if _sheet and is_instance_valid(_sheet):
+		_sheet.name = "SheetClosed"             # a page opened right after takes the name "Sheet"
+		_sheet.queue_free()
+	_sheet = null
+
+
+## HOW TO PLAY (the button under the tabs): the game's help as a page over the panel.
+func open_help() -> void:
+	var v := open_sheet("HOW TO PLAY", 1060.0)
+	v.add_child(HowToPlay.page())
+
+
+## A document (Login.terms_sections / privacy_sections: [title, text] sections) as a page over the
+## panel, the text scrolling (node "DocScroll"), OK ("SheetOk") under it.
+func open_doc(title: String, sections: Array) -> void:
+	var v := open_sheet(title)
+	var scroll := ScrollContainer.new()
+	scroll.name = "DocScroll"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	UI.style_scroll(scroll)
+	v.add_child(scroll)
+	var text := VBoxContainer.new()
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text.add_theme_constant_override("separation", 6)
+	scroll.add_child(text)
+	for s: Array in sections:
+		if String(s[0]) != "":
+			text.add_child(UI.spacer(4))
+			text.add_child(UI.section(String(s[0]), 19))
+		var l := UI.label(String(s[1]), 18, Color(1, 1, 1, 0.9) if String(s[0]) != "" else UI.TEXT_DIM, "semi")
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		text.add_child(l)
+	UI.drag_scroll(scroll, text)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	var ok := UI.button("OK", 22, "primary", Vector2(200, 56))
+	ok.name = "SheetOk"
+	ok.pressed.connect(close_sheet)
+	row.add_child(ok)
+	v.add_child(row)
+
+
+## What a tab shows along the bottom instead of its hint (the ACCOUNT tab's links); the next tab
+## takes it away.
+func set_footer(c: Control) -> void:
+	_hint.visible = false
+	_footer = c
+	c.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	c.offset_left = MENU_W + 28
+	c.offset_right = -28
+	c.offset_top = -4 - UI.TOUCH_MIN
+	c.offset_bottom = -4
+	add_child(c)
+	if _sheet and is_instance_valid(_sheet):
+		move_child(_sheet, -1)
+	if _ask_layer and is_instance_valid(_ask_layer):
+		move_child(_ask_layer, -1)
+
+
+## RESET (once confirmed) puts the current tab's settings back to their defaults (DISPLAY: AUTO
 ## graphics picks afresh for this phone).
 func _reset_tab() -> void:
 	var keys: Array = TAB_KEYS[_current]
@@ -688,19 +798,24 @@ func _reset_tab() -> void:
 
 
 func _close() -> void:
+	if busy:
+		return
 	Game.save_settings()
 	closed.emit()
 	queue_free()
 
 
-## Android back: answers an open question first, else closes the panel; never while something was
-## opened on top of it (a challenge popup in the lobby: that one takes the back).
+## Android back: answers an open question first, then closes an open page, else closes the panel;
+## never while something was opened on top of it (a challenge popup in the lobby: that one takes
+## the back) or a task runs (busy).
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST and is_inside_tree():
-		if covered():
+		if covered() or busy:
 			return
 		if _ask_layer and is_instance_valid(_ask_layer):
 			_close_ask()            # back answers an open question first
+		elif _sheet and is_instance_valid(_sheet):
+			close_sheet()
 		else:
 			_close()
 
