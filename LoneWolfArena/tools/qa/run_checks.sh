@@ -117,6 +117,8 @@ if [ "${1:-}" != "quick" ]; then
   # --- DUO / SQUAD: WP-B2's steps (none planned) go right below this line ---
 
   # --- DUO / SQUAD: WP-C's steps (team_offline) go right below this line ---
+  # TRAINING SQUAD scripted through knocks, a revive, spectating and a team wipe; a DUO played by the bots to its end
+  step team_offline timeout 170 godot --headless --path . -- --autotest=script:res://tests/team_offline_check.gd
 
   # --- DUO / SQUAD: WP-N's steps (team_online: two copies, mock port 47820) go right below this line ---
 
