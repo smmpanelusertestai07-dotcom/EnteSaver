@@ -157,6 +157,9 @@ listed here. If a part needs something new from the core, add it in its own file
   then calls `Game.goto_login()` (after `TIMEOUT_S` at the latest; loads still running then are
   handed to the `LoadingCache` node, a `Loading.Cache`, which collects them as they finish).
   Automated runs skip it; `Loading.hold_for_test = true` keeps it up for a screenshot tour.
+  Once the loads are in, a `ShaderWarmup` (scripts/shader_warmup.gd, under the root) draws the
+  arena and a fighter off-screen for a few frames so their shaders compile there, not in a
+  match's first frames (`ShaderWarmup.kept` holds the materials; not in automated or headless runs).
 - `IntroSting` (scripts/intro_sting.gd): the launch sting, `IntroSting.play_over(host)` puts it
   over the boot screen in its own CanvasLayer `IntroLayer` (layer 90) while the boot loads run;
   the boot screen leaves only once `IntroSting.playing(host)` is false. 2.4 s (`LENGTH`), synced
