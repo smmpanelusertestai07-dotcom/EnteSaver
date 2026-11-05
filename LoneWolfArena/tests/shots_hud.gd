@@ -440,6 +440,11 @@ func team_tour(at: Node) -> void:
 	await at.wait(0.6)
 	_check(p.reviving == mate, "a tap on REVIVE starts reviving", at)
 	await at.wait(1.6)
+	_check_clear(hud, team.bar_rect("REVIVING " + mate.display_name.to_upper()), "the REVIVING bar", at)
+	var stop_c := team.revive_center()
+	var stop_r := team.revive_radius() * 1.15
+	_check(not team.bar_rect("REVIVING " + mate.display_name.to_upper()).intersects(Rect2(stop_c - Vector2(stop_r, stop_r), Vector2(stop_r, stop_r) * 2.0)),
+		"the REVIVING bar keeps clear of STOP", at)
 	await at.shot("team_06_reviving")
 	await _until(at, func() -> bool: return team.status(mate) == "up", Fighter.REVIVE_S + 4.0)
 	_check(team.status(mate) == "up" and absf(mate.hp - Fighter.REVIVE_HP) < 1.0, "the revive stands the teammate up with %d HP" % roundi(Fighter.REVIVE_HP), at)
@@ -447,6 +452,7 @@ func team_tour(at: Node) -> void:
 	p.take_damage(999.0, "chest", foe, foe.global_position)
 	await at.wait(0.6)
 	_check(p.alive and p.knocked, "the player out of HP with teammates up is KNOCKED", at)
+	_check_clear(hud, team.bar_rect("BLEEDING OUT"), "the BLEEDING OUT bar", at)
 	await at.shot("team_07_knocked_self")
 	var helper: Fighter = mates[2]
 	helper.global_position = arena.call("closest_nav_point", p.global_position + fwd * 1.0)

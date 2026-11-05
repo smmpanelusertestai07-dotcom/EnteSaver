@@ -570,14 +570,32 @@ func _draw_revive_button(u: float) -> void:
 			HudDraw.text(self, tg.display_name.to_upper(), c + Vector2(0, r + 0.022 * u), int(0.019 * u), BLUE_TEXT, 1, 3, "bold")
 
 
-## A progress bar with a title over it, under the crosshair.
-func _bar(vs: Vector2, u: float, fy: float, title: String, title_col: Color, frac: float, col: Color, sub := "") -> void:
-	var w := 0.34 * u
-	var c := Vector2(vs.x * 0.5, vs.y * fy)
+## The plate of a progress bar (REVIVING, BLEEDING OUT, BEING REVIVED) titled `title`: centred, on
+## the first height clear of the controls and of REVIVE.
+func bar_rect(title: String) -> Rect2:
+	var vs := size
+	var u := _u()
+	var tw := maxf(HudDraw.text_width(title, int(0.032 * u), "bold"), 0.3 * u) + 0.06 * u
+	var h := 0.115 * u
+	var blocked := blocked_rects()
+	if revive_shown():
+		var rc := revive_center()
+		var rr := revive_radius() * 1.15
+		blocked.append(Rect2(rc - Vector2(rr, rr), Vector2(rr, rr) * 2.0))
+	var cands: Array[Rect2] = []
+	for fy: float in [0.6, 0.53, 0.42, 0.66, 0.36]:
+		cands.append(Rect2(Vector2(vs.x * 0.5 - tw * 0.5, vs.y * fy - 0.05 * u), Vector2(tw, h)))
+	return free_spot(cands, blocked)
+
+
+## A progress bar with a title over it, near the crosshair (bar_rect).
+func _bar(_vs: Vector2, u: float, title: String, title_col: Color, frac: float, col: Color, sub := "") -> void:
+	var pr := bar_rect(title)
+	var w := 0.3 * u
+	var c := Vector2(pr.get_center().x, pr.position.y + 0.05 * u)
 	var bar := Rect2(c.x - w * 0.5, c.y, w, maxf(6.0, 0.012 * u))
-	var tw := maxf(HudDraw.text_width(title, int(0.034 * u), "bold"), w) + 0.06 * u
-	HudDraw.plate(self, Rect2(c.x - tw * 0.5, c.y - 0.05 * u, tw, 0.085 * u + (0.03 * u if sub != "" else 0.0)), 0.6)
-	HudDraw.text(self, title, Vector2(c.x, c.y - 0.022 * u), int(0.034 * u), title_col, 1, 3, "bold")
+	HudDraw.plate(self, pr, 0.6)
+	HudDraw.text(self, title, Vector2(c.x, c.y - 0.022 * u), int(0.032 * u), title_col, 1, 3, "bold")
 	draw_rect(bar.grow(1.0), Color(0, 0, 0, 0.6))
 	draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(frac, 0.0, 1.0), bar.size.y)), col)
 	if sub != "":
@@ -595,11 +613,11 @@ func _draw_knocked_self(vs: Vector2, u: float) -> void:
 	var rv := revive_progress(p)
 	if rv >= 0.0:
 		var who := reviver_of(p)
-		_bar(vs, u, 0.6, "BEING REVIVED", HudDraw.HEAL_GREEN, rv, HudDraw.HEAL_GREEN,
+		_bar(vs, u, "BEING REVIVED", HudDraw.HEAL_GREEN, rv, HudDraw.HEAL_GREEN,
 			("BY " + who.display_name.to_upper()) if who != null else "")
 	else:
 		var frac := clampf(p.knock_hp / Fighter.KNOCK_HP, 0.0, 1.0)
-		_bar(vs, u, 0.6, "BLEEDING OUT", KNOCK_RED, frac, Color(KNOCK_RED, 0.8 + 0.2 * sin(_time * 7.0)),
+		_bar(vs, u, "BLEEDING OUT", KNOCK_RED, frac, Color(KNOCK_RED, 0.8 + 0.2 * sin(_time * 7.0)),
 			"%d s  ·  CRAWL TO A TEAMMATE" % ceili(frac * Fighter.BLEED_S))
 
 
@@ -619,7 +637,7 @@ func _draw_reviving(vs: Vector2, u: float) -> void:
 	var rv := reviving()
 	if rv == null:
 		return
-	_bar(vs, u, 0.53, "REVIVING " + rv.display_name.to_upper(), HudDraw.HEAL_GREEN, maxf(revive_progress(rv), 0.0), HudDraw.HEAL_GREEN,
+	_bar(vs, u, "REVIVING " + rv.display_name.to_upper(), HudDraw.HEAL_GREEN, maxf(revive_progress(rv), 0.0), HudDraw.HEAL_GREEN,
 		"STAY STILL")
 
 
