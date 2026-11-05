@@ -14,14 +14,20 @@ extends Control
 ## first, children added on the way included). The settings are therefore added at the end of that
 ## frame, and the menu ignores a back request in the frame it was opened; the next back goes to
 ## the settings (a question or the editor over them first), whose closing closes the menu.
+##
+## DUO / SQUAD: the host of an online TEAM INVITE match (Game.team_match online, coop, host) runs the
+## bots, so its quitting ends the match for the teammate: the first tap on QUIT MATCH also shows
+## HOST_WARNING (node QuitWarning) over the button.
 
 signal closed
 
 const QUIT_CONFIRM_S := 6.0     # real seconds the second tap may take (a slow phone, a slow touch)
 const HudEditorOverlay := preload("res://scripts/hud_editor_overlay.gd")
+const HOST_WARNING := "YOU ARE THE HOST: QUITTING ENDS THE MATCH FOR YOUR TEAMMATE"
 
 var settings: SettingsPanel     # the settings shown (null once they closed)
 var _quit: Button
+var _warning: Label             # HOST_WARNING (the host of an online co-op team match), while QUIT is armed
 var _quit_armed := 0.0
 var _was_over := false          # online: the round was already over when last looked at
 var _opened_frame := -1
@@ -74,6 +80,25 @@ func _open_settings() -> void:
 	_quit.pressed.connect(_on_quit)
 	settings.add_child(_quit)
 	_quit_text("QUIT MATCH")
+	if host_of_team():
+		_warning = UI.outlined(UI.label(HOST_WARNING, 14, Color(1.0, 0.8, 0.45), "bold"), 3)
+		_warning.name = "QuitWarning"
+		_warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_warning.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		_warning.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+		_warning.offset_left = 24.0
+		_warning.offset_right = SettingsPanel.MENU_W - 24.0
+		_warning.offset_top = -146.0 - UI.TOUCH_MIN - 70.0
+		_warning.offset_bottom = -146.0 - UI.TOUCH_MIN - 6.0
+		_warning.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_warning.visible = false
+		settings.add_child(_warning)
+
+
+## This phone hosts an online co-op team match (its bots run here: quitting ends it for the teammate).
+static func host_of_team() -> bool:
+	var tm: Dictionary = Game.team_match
+	return tm.get("online", false) == true and tm.get("coop", false) == true and tm.get("host", false) == true
 
 
 ## EDIT CUSTOM HUD in a match: the editor over it (back or BACK closes it again, to the settings).
@@ -117,6 +142,8 @@ func _on_quit() -> void:
 	_quit_armed = Time.get_ticks_msec() + QUIT_CONFIRM_S * 1000.0
 	if _quit:
 		_quit_text("TAP AGAIN TO QUIT")
+	if _warning:
+		_warning.visible = true
 
 
 ## QUIT MATCH's caption, its font made smaller until it fits the tab column.
@@ -135,6 +162,8 @@ func _process(_delta: float) -> void:
 		_quit_armed = 0.0
 		if _quit:
 			_quit_text("QUIT MATCH")
+		if _warning:
+			_warning.visible = false
 	var arena := get_tree().current_scene
 	if arena == null or arena.get("online") != true or _closing:
 		return

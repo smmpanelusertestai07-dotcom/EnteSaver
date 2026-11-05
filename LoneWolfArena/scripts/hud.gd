@@ -45,6 +45,8 @@ const FEED_Y := [0.853, 0.81, 0.767]
 ## An opponent who went down by itself (nobody's kill): what out_banner says took them out.
 const OUT_LINES := {"zone": "CAUGHT IN THE ZONE", "fall": "DOWN FROM A FALL", "self": "HIT BY THEIR OWN FRAG"}
 const OUT_ICONS := {"zone": "v_zone", "fall": "v_skull", "self": "item_grenade"}
+## The team kill feed's verbs in their colours (add_team_feed).
+const FEED_VERB_COLORS := {"KNOCKED": Color(1.0, 0.5, 0.3), "REVIVED": Color(0.45, 0.9, 0.5), "LEFT": Color(0.7, 0.72, 0.76)}
 
 var player: Player
 var arena: Node
@@ -55,6 +57,7 @@ var match_over := false
 var tips_time := 0.0
 var minimap: HudMinimap
 var panels: HudPanels
+var team: HudTeam                  # DUO / SQUAD: the team layer (HudTeam.attach in bind), null in a 1 vs 1
 var seen := {}                     # fighter -> in sight (refreshed 10x per second)
 
 var _touches := {}                 # touch index -> {"kind": joy|look|fire|ui, "id": String}
@@ -144,6 +147,9 @@ func bind(p: Player, a: Node) -> void:
 	_hp_last = player.hp
 	# The ping chip in every match; chat and voice in an online one (scripts/hud_net.gd).
 	HudNet.attach(self, bool(a.get("online")))
+	# DUO / SQUAD: teammates, ally tags, knocked markers, REVIVE, spectating (scripts/hud_team.gd).
+	if HudTeam.wanted(a):
+		team = HudTeam.attach(self, a)
 
 
 # ---------------------------------------------------------------- arena -> HUD API
@@ -187,16 +193,26 @@ func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_i
 
 
 ## DUO / SQUAD (TeamArena): a kill feed line with each side in its colour (the player's team blue,
-## the other orange); verb "KNOCKED", "REVIVED", "LEFT" or "" (ELIMINATED / HEADSHOT). Step-0 stub:
-## WP-B draws the colours.
-func add_team_feed(killer: String, _killer_ally: bool, victim: String, _victim_ally: bool, weapon_name: String,
+## the other orange); verb "KNOCKED", "REVIVED", "LEFT" or "" (ELIMINATED / HEADSHOT). REVIVED reads
+## "<reviver> REVIVED <teammate>"; LEFT "<who> LEFT" (victim "").
+func add_team_feed(killer: String, killer_ally: bool, victim: String, victim_ally: bool, weapon_name: String,
 		weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
 	add_kill_feed(killer, victim, weapon_name, weapon_icon, headshot, mine, verb)
+	var k: Dictionary = _kill_feed[0]
+	k["kc"] = side_color(killer_ally)
+	k["vc"] = side_color(victim_ally)
+	k["verb_col"] = FEED_VERB_COLORS.get(verb, HudDraw.FEED_HEAD if headshot else HudDraw.FEED_ELIM)
 
 
-## DUO / SQUAD: the player knocked an enemy down (a KNOCKED badge, calmer than a kill's). Step-0 stub.
-func knock_banner(_victim_name: String) -> void:
-	pass
+## A name's colour in the team kill feed: the player's team blue, the other orange.
+static func side_color(ally: bool) -> Color:
+	return HudTeam.BLUE_TEXT if ally else HudTeam.ORANGE_TEXT
+
+
+## DUO / SQUAD: the player knocked an enemy down: a KNOCKED plate (a red cross, KNOCKED and the name)
+## in the elimination badge's place, calmer than a kill's.
+func knock_banner(victim_name: String) -> void:
+	_kill_banner = {"t": KILL_BANNER_TIME * 0.8, "name": victim_name, "head": false, "cause": "", "knock": true}
 
 
 ## Big elimination feedback when the player takes someone out: a red X on them and the badge.
@@ -222,6 +238,8 @@ func out_banner(victim_name: String, cause: String) -> void:
 func banner_kind() -> String:
 	if float(_kill_banner.t) <= 0.0:
 		return ""
+	if bool(_kill_banner.get("knock", false)):
+		return "knock"
 	var cause := String(_kill_banner.get("cause", ""))
 	return cause if cause != "" else "kill"
 
@@ -1414,10 +1432,10 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		var t := float(k.t)
 		var a := clampf(t / 0.5, 0.0, 1.0) * clampf((FEED_LIFE - t) / 0.15, 0.0, 1.0)
 		var head := bool(k.head)
-		var parts := [[String(k.killer) + "  ", Color(1, 1, 1) if not bool(k.mine) else Color(0.75, 0.9, 1.0)],
+		var parts := [[String(k.killer) + "  ", k.get("kc", Color(1, 1, 1) if not bool(k.mine) else Color(0.75, 0.9, 1.0))],
 			[(String(k.get("verb", "")) if String(k.get("verb", "")) != "" else ("HEADSHOT" if head else "ELIMINATED")) + "  ",
-				HudDraw.FEED_HEAD if head else HudDraw.FEED_ELIM],
-			[String(k.victim), Color(1, 1, 1)]]
+				k.get("verb_col", HudDraw.FEED_HEAD if head else HudDraw.FEED_ELIM)],
+			[String(k.victim), k.get("vc", Color(1, 1, 1))]]
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
 		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
@@ -1455,6 +1473,10 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		var b: Variant = arena.get("bot")
 		if b is Fighter:
 			hp_bot = clampf((b as Fighter).hp / Fighter.MAX_HP, 0.0, 1.0)
+		if team != null:
+			# DUO / SQUAD: each bar is the team's HP still standing (knocked and out count 0)
+			hp_me = team.team_hp(team.my_team())
+			hp_bot = team.team_hp(1 - team.my_team())
 	HudDraw.vband(self, Rect2(cx - cw, 0.0, cw * 2.0, ph), Color(0, 0, 0, 0.5), Color(0, 0, 0, 0.32))
 	# Blue plate (your rounds) and bar, orange plate (enemy rounds) and bar, slanted like a V.
 	var bx0 := cx - cw - pw - sl
@@ -1557,7 +1579,9 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 	HudDraw.text(self, "PREPARE", Vector2(cx, vs.y * 0.215), int(0.042 * u), Color(1, 1, 1, 0.95), 1, 4, "bold")
 	HudDraw.text(self, str(n), Vector2(cx, vs.y * 0.315), int(0.15 * u * pop), Color(1.0, 0.2, 0.16), 1, 6, "title")
 	var b: Variant = arena.get("bot")
-	if player != null and b is Fighter:
+	if team != null:
+		_draw_team_matchup(vs, u)
+	elif player != null and b is Fighter:
 		# The match-up on a dark plate: readable over the bright, red-tinted alcove.
 		var parts := [[player.display_name, Color(0.62, 0.86, 1.0)], ["   VS   ", Color(1, 1, 1, 0.85)],
 			[(b as Fighter).display_name, Color(1.0, 0.72, 0.52)]]
@@ -1571,10 +1595,52 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 		HudDraw.text(self, note, Vector2(cx, vs.y * 0.49), int(0.03 * u), Color(1.0, 0.86, 0.35), 1, 3, "bold")
 
 
+## DUO / SQUAD prep: "BLUE: A, B  VS  ORANGE: C, D" on a dark plate (two lines when one would not
+## fit the screen).
+func _draw_team_matchup(vs: Vector2, u: float) -> void:
+	var lines := team_matchup_lines()
+	var blue: Array = lines[0]
+	var orange: Array = lines[1]
+	var mfs := int(0.03 * u)
+	var one := blue + [["   VS   ", Color(1, 1, 1, 0.85)]] + orange
+	var room := vs.x * 0.92
+	var cx := vs.x * 0.5
+	var my := vs.y * 0.415
+	if HudDraw.parts_width(one, mfs) <= room:
+		var mw := HudDraw.parts_width(one, mfs)
+		HudDraw.plate(self, Rect2(cx - mw * 0.5 - 0.06 * u, my - 0.03 * u, mw + 0.12 * u, 0.06 * u), 0.62)
+		HudDraw.text_parts(self, one, Vector2(cx, my), mfs, 1, 3, "bold")
+		return
+	var two := [blue, [["VS   ", Color(1, 1, 1, 0.85)]] + orange]
+	var w := maxf(HudDraw.parts_width(two[0], mfs), HudDraw.parts_width(two[1], mfs))
+	if w > room:
+		mfs = maxi(10, int(mfs * room / w))
+		w = room
+	HudDraw.plate(self, Rect2(cx - w * 0.5 - 0.05 * u, my - 0.035 * u, w + 0.1 * u, 0.1 * u), 0.62)
+	HudDraw.text_parts(self, two[0], Vector2(cx, my - 0.005 * u), mfs, 1, 3, "bold")
+	HudDraw.text_parts(self, two[1], Vector2(cx, my + 0.04 * u), mfs, 1, 3, "bold")
+
+
+## The prep line's two halves as text parts: [["BLUE: ", col], ["A, B", col]] and the same for ORANGE.
+func team_matchup_lines() -> Array:
+	var out := []
+	for side in 2:
+		var t: int = team.my_team() if side == 0 else 1 - team.my_team()
+		var names := PackedStringArray()
+		for f: Fighter in team.members(t):
+			names.append(f.display_name.to_upper())
+		out.append([["BLUE: " if side == 0 else "ORANGE: ", HudDraw.BLUE if side == 0 else HudDraw.ORANGE],
+			[", ".join(names), HudTeam.BLUE_TEXT if side == 0 else HudTeam.ORANGE_TEXT]])
+	return out
+
+
 ## "ROUND n / AREA: name" on a band fading from blue (left) to orange (right).
 ## Eliminated and following the killer's view: SPECTATING and their name at the bottom right
-## (the controls are hidden then; the kill feed keeps the bottom centre).
+## (the controls are hidden then; the kill feed keeps the bottom centre). DUO / SQUAD: HudTeam
+## draws it, with NEXT.
 func _draw_spectating(vs: Vector2, u: float) -> void:
+	if team != null:
+		return
 	var who := player.spectating_now() if player != null else null
 	if who == null:
 		return
@@ -1638,6 +1704,9 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var pop := 1.0 + 0.45 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
 	var c := Vector2(vs.x * 0.5, vs.y * 0.19)
 	var cause := String(_kill_banner.get("cause", ""))
+	if bool(_kill_banner.get("knock", false)):
+		_draw_knock_banner(c, u, a, pop)
+		return
 	if cause != "":
 		_draw_out_banner(c, u, a, cause)
 		return
@@ -1665,6 +1734,26 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var line_y := ty + 0.026 * u
 	draw_rect(Rect2(c.x - pw * 0.3, line_y, pw * 0.6, maxf(1.5, 0.003 * u)), Color(HudDraw.KILL_RED, a))
 	HudDraw.text(self, nm, Vector2(c.x, line_y + 0.025 * u), fs, Color(1, 1, 1, a), 1, 2, "bold")
+
+
+## knock_banner's plate: a red cross in a ring over KNOCKED and the name (calmer than a kill's badge).
+func _draw_knock_banner(c: Vector2, u: float, a: float, pop: float) -> void:
+	var r := 0.04 * u * lerpf(1.0, pop, 0.5)
+	var red := Color(1.0, 0.5, 0.3)
+	HudDraw.disk(self, c, r, Color(0.1, 0.03, 0.02, 0.75 * a))
+	HudDraw.ring(self, c, r, Color(red, 0.95 * a), maxf(2.0, 0.005 * u))
+	var s := r * 1.1
+	var t := s * 0.32
+	draw_rect(Rect2(c - Vector2(t * 0.5, s * 0.5), Vector2(t, s)), Color(red, a))
+	draw_rect(Rect2(c - Vector2(s * 0.5, t * 0.5), Vector2(s, t)), Color(red, a))
+	var nm := String(_kill_banner.name).to_upper()
+	var fs := int(0.03 * u)
+	var lfs := int(0.032 * u)
+	var ty := c.y + r + 0.03 * u
+	var pw := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("KNOCKED", lfs, "bold")) + 0.14 * u
+	HudDraw.plate(self, Rect2(c.x - pw * 0.5, ty - 0.026 * u, pw, 0.088 * u), 0.66 * a)
+	HudDraw.text(self, "KNOCKED", Vector2(c.x, ty), lfs, Color(red, a), 1, 3, "bold")
+	HudDraw.text(self, nm, Vector2(c.x, ty + 0.037 * u), fs, Color(1, 1, 1, a), 1, 2, "bold")
 
 
 ## out_banner's plate: a small disk with what took them out (the zone's blue for the zone) and one
