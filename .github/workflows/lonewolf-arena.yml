@@ -109,16 +109,17 @@ jobs:
       - name: Check the APK's permissions
         working-directory: LoneWolfArena
         run: |
-          # Only vibration, INTERNET and the network state (the online 1 vs 1) plus the androidx
-          # receiver permission the engine's manifest brings; anything else (Wi-Fi, location, ...)
-          # fails the run. tools/build_apk.sh checks release builds against the same list.
+          # Only vibration, INTERNET and the network state (the online 1 vs 1), the microphone
+          # (RECORD_AUDIO: push-to-talk voice, asked for only when VOICE CHAT is turned on) plus the
+          # androidx receiver permission the engine's manifest brings; anything else (Wi-Fi,
+          # location, ...) fails the run. tools/build_apk.sh checks release builds against the same list.
           AAPT="$(ls "$ANDROID_HOME"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1 || true)"
           [ -n "$AAPT" ] || AAPT="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
           BADGING="$("$AAPT" dump badging build/LoneWolfArena.apk)"
           grep -E "^package:|uses-permission|uses-feature" <<< "$BADGING" || true
           PERMS="$(grep -oE "uses-permission: name='[^']+'" <<< "$BADGING" | sed "s/.*name='//; s/'\$//" | sort -u || true)"
           [ -n "$PERMS" ] || { echo "::error::no permissions read from the APK"; exit 1; }
-          EXTRA="$(grep -vxE "android\.permission\.(VIBRATE|INTERNET|ACCESS_NETWORK_STATE)|.*\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" <<< "$PERMS" || true)"
+          EXTRA="$(grep -vxE "android\.permission\.(VIBRATE|INTERNET|ACCESS_NETWORK_STATE|RECORD_AUDIO)|.*\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" <<< "$PERMS" || true)"
           if [ -n "$EXTRA" ]; then
             echo "::error::the APK requests unexpected permissions: $EXTRA"
             exit 1

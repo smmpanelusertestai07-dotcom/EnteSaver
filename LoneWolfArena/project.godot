@@ -15,6 +15,10 @@ boot_splash/show_image=true
 boot_splash/image="res://assets/ui/boot_splash.png"
 boot_splash/stretch_mode=0
 
+[audio]
+
+driver/enable_input=true
+
 [autoload]
 
 Guard="*res://autoload/guard.gd"
