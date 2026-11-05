@@ -8,8 +8,8 @@ extends Node
 ## teammate still UP; three enemies knocked do not end the round, the last one UP down wipes their
 ## team, and a teammate knocked at the round's end stands up in the next round, played to 2-0;
 ## the results hold 8 rows and the profile counts the match as TRAINING. Then a DUO match: a
-## bot revives its knocked teammate, then the bots play it to its end. No damage is ever taken from
-## a teammate.
+## bot revives its knocked teammate, the kill feed's zone and bleed-out lines read right, then the
+## bots play it to its end. No damage is ever taken from a teammate.
 ## Prints "TEAM OFFLINE CHECK DONE bad=N".
 
 var bad := 0
@@ -234,6 +234,23 @@ func _duo() -> void:
 		foes[1].display_name, int(foes[1].stats.revives), t])
 	if foes[0].knocked or foes[0].hp != Fighter.REVIVE_HP or int(foes[1].stats.revives) != 1:
 		_fail("a bot did not revive its knocked teammate")
+	# The kill feed with nobody to credit: the zone names no gun, a bleed-out reads "<name> BLED
+	# OUT"; a bleed-out after a knock credits the knocker (the knocker's gun).
+	var feed: Array = arena.hud._kill_feed
+	arena._feed(null, foes[1], "zone", false, "KNOCKED")
+	var zone_line: Dictionary = feed[0]
+	arena._feed(null, foes[1], "bleed", false, "")
+	var bleed_line: Dictionary = feed[0]
+	arena._feed(arena.player, foes[1], "bleed", false, "")
+	var credit_line: Dictionary = feed[0]
+	at.log_line("feed: zone %s / %s / %s; bleed %s / %s / %s; credited %s / %s" % [zone_line.killer, zone_line.verb,
+		zone_line.weapon, bleed_line.killer, bleed_line.verb, bleed_line.victim, credit_line.killer, credit_line.victim])
+	if String(zone_line.killer) != "ZONE" or String(zone_line.verb) != "KNOCKED" or String(zone_line.weapon) != "":
+		_fail("the zone's knock line names a gun or not the zone")
+	if String(bleed_line.killer) != foes[1].display_name or String(bleed_line.verb) != "BLED OUT" or String(bleed_line.victim) != "":
+		_fail("a bleed-out with no knocker does not read <name> BLED OUT")
+	if String(credit_line.killer) != arena.player.display_name or String(credit_line.victim) != foes[1].display_name:
+		_fail("a bleed-out after a knock does not credit the knocker")
 	for f in arena.fighters:
 		f.frozen = false
 	t = 0.0

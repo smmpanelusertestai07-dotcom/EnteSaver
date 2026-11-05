@@ -752,9 +752,10 @@ func _feed(by: Fighter, victim: Fighter, cause: String, headshot: bool, verb: St
 		return
 	if cause == "left":
 		hud.add_team_feed(victim.display_name, ally(victim), "", false, "", "", false, false, "LEFT")
+	elif by == null and cause == "bleed":       # (no knocker to credit: "<name> BLED OUT")
+		hud.add_team_feed(victim.display_name, ally(victim), "", false, "", "", false, false, "BLED OUT")
 	elif by == null:
-		var what := "BLED OUT" if cause == "bleed" else cause.to_upper()
-		hud.add_team_feed(what, false, victim.display_name, ally(victim), what, "", false, false, verb)
+		hud.add_team_feed(cause.to_upper(), false, victim.display_name, ally(victim), "", "", false, false, verb)
 	elif cause == "self" or by == victim:
 		hud.add_team_feed(victim.display_name, ally(victim), victim.display_name, ally(victim), "FRAG", "item_grenade", false, false, verb)
 	else:
