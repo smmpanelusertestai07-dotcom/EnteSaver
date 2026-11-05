@@ -13,6 +13,12 @@ extends Control
 ## bottom-left band; PLAY AGAIN (yellow, node PlayAgain, 0.661-0.819 W) and LOBBY (grey, node
 ## Lobby, 0.836-0.992 W) in the 0.88-0.96 H band. Works unpaused at time scale 1. Android back
 ## = LOBBY (ignored while PLAY AGAIN's match loading runs).
+## DUO / SQUAD (result.team, built by TeamArena._match_result): the plates read YOUR TEAM and the
+## other side (ORANGE TEAM, or the other player's name in a match against them); both teams' tables
+## side by side (TeamTables: TeamTable_0 blue, the player's team with the player first, and
+## TeamTable_1 orange; rows TeamRow_<n>, n the row's index in result.rows: name, K, KNOCKS, REVIVES,
+## DAMAGE, HS, ACC); no REMATCH; PLAY AGAIN only for a match on this phone (an online one goes back
+## to the lobby: LOBBY only); ADD FRIEND for the other player of an online match against them.
 
 const COLUMNS := ["ELIMINATIONS", "DAMAGE", "HEADSHOTS", "ACCURACY", "TIME", "HP LEFT"]
 const NAME_W := 250.0
@@ -38,6 +44,9 @@ var _title: Control
 var _title_x := 0.0
 var _enemy := {}                  # the opponent's scoreboard row ({} when the scene has none)
 var _shades: Array[Control] = []  # the full-screen shades behind the content (see _fit_cutout)
+var _team := false                # a DUO / SQUAD result (result.team)
+var _team_online := false         # ... played between two phones
+const TEAM_COLUMNS := ["K", "KNOCKS", "REVIVES", "DAMAGE", "HS", "ACC"]
 # An internet match (not one without internet): REMATCH and ADD FRIEND (see _build_online).
 const INVITE_DELAY_MS := 700      # the fresh challenge goes out this long after the old session is left
 const AWAIT_MS := 12000           # how long a phone waits for the other's fresh challenge
@@ -70,8 +79,12 @@ func setup(result: Dictionary) -> void:
 	_kind = "invalid" if invalid else ("draw" if is_draw else ("victory" if won else "defeat"))
 	_enemy_id = String(result.get("enemy_id", ""))
 	_online = String(result.get("mode_id", "")) == "lonewolf" and result.get("local", false) != true and Game.is_player_id(_enemy_id)
+	_team = result.get("team", false) == true
+	if _team:
+		_online = false                   # no REMATCH after a team match (PLAY AGAIN TOGETHER: next update)
+		_team_online = result.get("online", Game.online or Game.team_match.get("online", false) == true) == true
 	_hide_match_hud()
-	_enemy = _enemy_row()
+	_enemy = {} if _team else _enemy_row()
 	_build()
 	_animate_in()
 
@@ -211,11 +224,11 @@ func _build() -> void:
 	score.alignment = BoxContainer.ALIGNMENT_CENTER
 	score.add_theme_constant_override("separation", 8)
 	add_child(score)
-	score.add_child(_score_plate("YOU", int(r.get("score_player", 0)), UI.BLUE, true))
+	score.add_child(_score_plate("YOUR TEAM" if _team else "YOU", int(r.get("score_player", 0)), UI.BLUE, true))
 	var colon := UI.label(":", 30, UI.TEXT, "number")
 	colon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	score.add_child(colon)
-	score.add_child(_score_plate(String(r.get("enemy", "BOT")).to_upper(), int(r.get("score_bot", 0)), UI.ORANGE, false))
+	score.add_child(_score_plate(String(r.get("enemy", "ORANGE TEAM" if _team else "BOT")).to_upper(), int(r.get("score_bot", 0)), UI.ORANGE, false))
 	var note := ""
 	if _kind == "invalid":
 		note = "INTEGRITY CHECK FAILED  -  THIS MATCH DOES NOT COUNT"
@@ -228,9 +241,15 @@ func _build() -> void:
 		why.anchor_right = 1.0
 		why.offset_top = 438
 		why.offset_bottom = 464
+		if _team:
+			why.offset_top = 258
+			why.offset_bottom = 282
 		why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		add_child(why)
-	_build_table()
+	if _team:
+		_build_team_tables()
+	else:
+		_build_table()
 	_build_footer()
 
 
@@ -373,6 +392,99 @@ func _stat_row(node_name: String, who_name: String, sub: String, values: Array, 
 	return row
 
 
+## DUO / SQUAD: both teams' tables side by side (rows: result.rows, else the arena's scoreboard).
+func _build_team_tables() -> void:
+	var rows: Array = _result.get("rows", []) if _result.get("rows") is Array else []
+	if rows.is_empty():
+		var scene := get_tree().current_scene if is_inside_tree() else null
+		if scene != null and scene.has_method("scoreboard_rows"):
+			rows = scene.call("scoreboard_rows")
+	var box := HBoxContainer.new()
+	box.name = "TeamTables"
+	box.anchor_left = 0.5
+	box.anchor_right = 0.5
+	box.offset_left = -560
+	box.offset_right = 560
+	box.offset_top = 286 if bool(_result.get("opponent_left", false)) else 268
+	box.offset_bottom = 560
+	box.add_theme_constant_override("separation", 20)
+	add_child(box)
+	_table = box
+	resized.connect(_layout_table)
+	_layout_table.call_deferred()
+	var n := maxi(int(_result.get("team_size", 0)), 1)
+	for side in 2:
+		var mine := side == 0
+		var col := VBoxContainer.new()
+		col.name = "TeamTable_%d" % side
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_theme_constant_override("separation", 2)
+		box.add_child(col)
+		var head := PanelContainer.new()
+		head.add_theme_stylebox_override("panel", UI.box(Color(UI.BLUE if mine else UI.ORANGE, 0.9), 0, 0, Color.TRANSPARENT, 10.0))
+		var hh := HBoxContainer.new()
+		head.add_child(hh)
+		var tl := UI.label("YOUR TEAM" if mine else String(_result.get("enemy", "ORANGE TEAM")).to_upper(), 19, UI.TEXT, "heavy")
+		tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hh.add_child(UI.ellipsis(tl))
+		hh.add_child(UI.label("ROUNDS %d" % int(_result.get("score_player" if mine else "score_bot", 0)), 17, UI.TEXT, "bold"))
+		col.add_child(head)
+		col.add_child(_team_cells("TeamHeader_%d" % side, "PLAYER", "", TEAM_COLUMNS, Color(0.19, 0.185, 0.18, 0.92), UI.TEXT_DIM, 14, 26))
+		var shown := 0
+		for i in rows.size():
+			var row: Variant = rows[i]
+			if not row is Dictionary:
+				continue
+			var d: Dictionary = row
+			if bool(d.get("ally", bool(d.get("me", false)))) != mine:
+				continue
+			shown += 1
+			var me := bool(d.get("me", false))
+			var sub := "YOU" if me else ("BOT" if bool(d.get("bot", false)) else ("LEFT" if String(d.get("status", "")) == "left" else "PLAYER"))
+			var vals := [str(int(d.get("kills", 0))), str(int(d.get("knocks", 0))), str(int(d.get("revives", 0))), str(int(d.get("damage", 0))),
+				str(int(d.get("headshots", 0))), "%d%%" % int(d.get("accuracy", 0))]
+			var base := Color(0.0, 0.32, 0.55, 0.92) if mine else Color(0.36, 0.15, 0.06, 0.9)
+			if me:
+				base = Color(0.02, 0.42, 0.68, 0.96)
+			var line := _team_cells("TeamRow_%d" % i, String(d.get("name", "?")).to_upper(), sub, vals, base, UI.TEXT, 22 if n <= 2 else 19,
+				44 if n <= 2 else 36)
+			col.add_child(line)
+		if shown == 0:
+			col.add_child(UI.label("NO PLAYERS", 15, UI.TEXT_DIM, "bold"))
+
+
+## One row of a team table: name (+ a small line under it) then the values, each in its own cell.
+func _team_cells(node_name: String, who: String, sub: String, values: Array, bg: Color, ink: Color, fs: int, h: int) -> Control:
+	var row := PanelContainer.new()
+	row.name = node_name
+	row.add_theme_stylebox_override("panel", UI.box(bg, 0, 0, Color.TRANSPARENT, 4.0))
+	row.custom_minimum_size = Vector2(0, h)
+	var rh := HBoxContainer.new()
+	rh.add_theme_constant_override("separation", 0)
+	row.add_child(rh)
+	var nv := VBoxContainer.new()
+	nv.alignment = BoxContainer.ALIGNMENT_CENTER
+	nv.add_theme_constant_override("separation", -4)
+	nv.custom_minimum_size = Vector2(150, 0)
+	nv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nv.size_flags_stretch_ratio = 2.3
+	var nl := UI.ellipsis(UI.label(who, fs if sub != "" else 14, ink, "bold"))
+	nl.name = "Name"
+	nv.add_child(nl)
+	if sub != "":
+		nv.add_child(UI.label(sub, 11, UI.ACCENT if sub == "YOU" else Color(1, 1, 1, 0.65), "bold"))
+	rh.add_child(nv)
+	for i in values.size():
+		var l := UI.label(String(values[i]), fs if sub != "" else 13, ink, "number" if sub != "" else "bold")
+		l.name = "Value_%d" % i
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		l.clip_text = true
+		rh.add_child(l)
+	return row
+
+
 func _layout_table() -> void:
 	if _table == null:
 		return
@@ -475,6 +587,8 @@ func _build_footer() -> void:
 	# an internet match has REMATCH in PLAY AGAIN's place and ADD FRIEND left of it.
 	if _online:
 		_build_online()
+	elif _team and _team_online:
+		_build_team_online()
 	else:
 		var again := UI.hero_button("PLAY AGAIN", 30, Vector2(0, 46))
 		again.name = "PlayAgain"
@@ -571,6 +685,30 @@ func _build_online() -> void:
 		a.connect("rematch_asked", _on_they_want)
 		if a.get("rematch_wanted") == true:
 			_on_they_want.call_deferred()
+
+
+## DUO / SQUAD between two phones: no PLAY AGAIN or REMATCH (LOBBY only); ADD FRIEND for the other
+## player of a match against them (in PLAY AGAIN's place) while the two are not friends.
+func _build_team_online() -> void:
+	if not Game.is_player_id(_enemy_id) or Game.is_friend(_enemy_id) or Game.is_blocked(_enemy_id):
+		return
+	_status = UI.outlined(UI.label("", 19, UI.TEXT, "bold"), 4)
+	_status.name = "RematchStatus"
+	_status.anchor_left = 0.40
+	_status.anchor_right = 0.992
+	_status.anchor_top = 0.815
+	_status.anchor_bottom = 0.87
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_status)
+	var asked := Game.cloud != null and Game.cloud.friend_asked(_enemy_id)
+	_friend = UI.button("REQUEST SENT" if asked else "ADD FRIEND", 22, "dark" if asked else "light", Vector2(0, 46))
+	_friend.name = "AddFriend"
+	_friend.disabled = asked
+	_place(_friend, 0.661, 0.819)
+	_friend.pressed.connect(_on_add_friend)
+	add_child(_friend)
 
 
 ## The arena behind (the current scene) when it offers the rematch's calls, else null.

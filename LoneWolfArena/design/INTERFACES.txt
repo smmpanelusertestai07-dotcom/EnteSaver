@@ -461,7 +461,40 @@ listed here. If a part needs something new from the core, add it in its own file
 - (WP-B1 writes its notes here)
 
 ## DUO / SQUAD: match HUD and results (WP-B2: HudTeam, kill feed, minimap, scoreboard, results)
-- (WP-B2 writes its notes here)
+- HUD.bind attaches `HudTeam` (node "HudTeam", `hud.team`) when HudTeam.wanted(arena): the arena has
+  `team_size` > 1. A 1 vs 1 HUD has none (`hud.team == null`).
+- HudTeam reads only TeamArena's read API (duck-typed, so a stand-in works): `player`, `my_team`,
+  `members(t)` (slot order: the panel's badge 1..n), `status_of(f)` ("up" / "knocked" / "out" /
+  "left"), `revive_candidate(player)`, `start_revive(player, target)`, `cancel_revive(player)`,
+  `revive_progress(f)` (-1: nobody revives), `spectated()`, `spectate_next()`; and the fighters'
+  `knocked`, `knock_hp`, `reviving`, `team`, `hp`, `alive`, `display_name`.
+- REVIVE: shown while revive_candidate(player) is not null, or while `player.reviving` is set (then
+  it reads STOP: a tap calls cancel_revive). A tap calls hud.release_all() first, then start_revive.
+  Its place: HudTeam.revive_center() (beside FIRE, the first spot clear of every other control).
+- The panel's place: HudTeam.panel_rect() (right of the minimap, else beside / under HudNet's
+  buttons, else under the zone strip: the first free one). SPECTATING + NEXT: spectate_rects().
+  blocked_rects() lists what they keep clear of (the tours check it).
+- HUD calls for the arena (C): add_team_feed(killer, killer_ally, victim, victim_ally, weapon_name,
+  weapon_icon, headshot, mine, verb) with verb "KNOCKED" / "REVIVED" / "LEFT" / "" (REVIVED: killer
+  = the reviver, victim = the revived; LEFT: killer = who left, victim ""); knock_banner(name) when
+  the player knocks an enemy (banner_kind() "knock"). The 1 vs 1 calls are unchanged.
+- Score bar: `score` {"player", "bot"} as today (TeamArena mirrors team_score); the two HP bars show
+  each team's HP still standing (HudTeam.team_hp). The prep line lists members(my_team) as BLUE and
+  the others as ORANGE.
+- Scoreboard (team arena): scoreboard_rows() rows need "ally" (or "me"), "status", "knocks",
+  "revives" besides today's keys; my team first. Shorter rows: a SQUAD board fits 720 px.
+- Results: `result.team == true` switches the screen: plates YOUR TEAM : result.enemy; TeamTables
+  with TeamTable_0 (rows with "ally" true) and TeamTable_1; TeamRow_<n>, n = the row's index in
+  result.rows (else the scene's scoreboard_rows()), values K, KNOCKS, REVIVES, DAMAGE, HS, ACC
+  (row keys kills, knocks, revives, damage, headshots, accuracy; sub-line YOU / BOT / LEFT / PLAYER
+  from "me", "bot", "status"). No REMATCH. PLAY AGAIN only when the match was on this phone
+  (result.online, else Game.online or Game.team_match.online): online only LOBBY, plus ADD FRIEND
+  (in PLAY AGAIN's place) when result.enemy_id is another player's id and not yet a friend.
+- Pause menu: PauseMenu.host_of_team() (Game.team_match online + coop + host): the first QUIT tap
+  also shows QuitWarning, PauseMenu.HOST_WARNING.
+- Tests: tests/team_hud_unit.gd (stand-in arena); the HUD tour's team part
+  (`LW_TOUR=team tools/qa/capture.sh <dir> 1280x720 script:res://tests/shots_hud.gd` runs it alone;
+  the full tour runs it after the 1 vs 1 part).
 
 ## DUO / SQUAD: gameplay (WP-C: team_arena, team_referee, fighter knock/revive, bots in teams)
 - Rules: TeamReferee (scripts/team_referee.gd) is pure logic: down() / revive() / leave() return
