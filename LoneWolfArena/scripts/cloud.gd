@@ -59,7 +59,14 @@ signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk a
 signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
 
 const ROOT := "lonewolfarena/v1"
-const BROKERS := ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"]
+## The relays, nearest to the players first (every phone settles on the same one, see
+## _maybe_return_home). FreeMQTT runs in Mumbai (about 25 ms from Indian networks, measured with
+## free public probes on 2026-11-05) and asks for the shared login its operator publishes on its
+## home page for everyone (not an account, not a secret); HiveMQ (Frankfurt) and EMQX (Europe /
+## US) take over if it is down.
+const BROKERS := ["wss://broker.freemqtt.com:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt", "wss://broker.emqx.io:8084/mqtt"]
+## Relays that refuse anonymous clients: [user, password], both published by the relay itself.
+const BROKER_LOGINS := {"wss://broker.freemqtt.com:8084/mqtt": ["freemqtt", "public"]}
 const ANNOUNCE_S := 3.0
 const PEER_TIMEOUT_MS := 10000
 const INVITE_TIMEOUT_MS := 25000
@@ -506,8 +513,13 @@ func _send_packet(p: PackedByteArray) -> void:
 
 func _send_connect() -> void:
 	var body := _str("MQTT")
-	body.append_array(PackedByteArray([4, 0x02, 0, 60]))       # level 4, clean session, keep-alive 60 s
+	var login: Array = BROKER_LOGINS.get(String(_brokers[_broker_i]) if not _brokers.is_empty() else "", [])
+	# level 4, clean session (0x02) plus user name and password (0xC0) when the relay wants its login, keep-alive 60 s
+	body.append_array(PackedByteArray([4, 0xC2 if login.size() == 2 else 0x02, 0, 60]))
 	body.append_array(_str("lw" + my_id.left(20)))           # MQTT allows 23-character client ids
+	if login.size() == 2:
+		body.append_array(_str(String(login[0])))
+		body.append_array(_str(String(login[1])))
 	_send_packet(_packet(0x10, body))
 	_sent_connect = true
 
