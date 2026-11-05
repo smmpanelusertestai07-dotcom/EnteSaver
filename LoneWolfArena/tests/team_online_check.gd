@@ -91,9 +91,12 @@ func _coop() -> bool:
 	_started = false
 	_history_before = (Game.profile.get("history", []) as Array).size()
 	if host:
-		await at.wait(2.0)                # (the guest has the host as a friend by then)
+		await at.wait(2.0)
 		_link(2, true, cloud.my_id, other)
-		if not cloud.team_invite(other, 2, true):
+		# The guest makes the host its friend when it first sees it in the lobby, which can be a
+		# lobby announcement later than the host saw the guest: a TEAM INVITE before that is
+		# declined (only a friend's team invite is shown), and _invite_until_taken sends it again.
+		if not await _invite_until_taken(func() -> bool: return cloud.team_invite(other, 2, true), "team invite"):
 			_fail("the team invite did not go out")
 			return false
 	else:
@@ -230,7 +233,7 @@ func _host_quits() -> void:
 	Game.match_notice = []
 	if host:
 		_link(2, true, cloud.my_id, other)
-		if not cloud.team_invite(other, 2, true):
+		if not await _invite_until_taken(func() -> bool: return cloud.team_invite(other, 2, true), "second team invite"):
 			_fail("the second team invite did not go out")
 			return
 	elif await _until(func() -> bool: return cloud.has_invite(), 20.0):
@@ -376,7 +379,7 @@ func _duel() -> void:
 	Game.team_match = {}                 # (the lobby clears it for every duel)
 	await at.wait(1.0)
 	if host:
-		if not cloud.invite(other):
+		if not await _invite_until_taken(func() -> bool: return cloud.invite(other), "duel challenge"):
 			_fail("the duel challenge did not go out")
 			return
 	elif await _until(func() -> bool: return cloud.has_invite(), 20.0):
@@ -396,9 +399,35 @@ func _duel() -> void:
 		_fail("the duel loaded %s" % arena.scene_file_path)
 	await at.wait_for_phase(arena, 1, 40.0)
 	if arena.get("phase") != 1 or not (arena.get("bot") is RemoteFighter):
-		_fail("the duel is not the 1 vs 1 against the other phone")
+		_fail("the duel is not the 1 vs 1 against the other phone (phase %s, opponent %s)" % [str(arena.get("phase")), str(arena.get("bot"))])
 	else:
 		at.log_line("the duel after the team matches is the 1 vs 1 (arena.tscn)")
+	if host:
+		await at.wait(6.0)               # (the duel stays up while the guest, a little behind, checks it too)
+
+
+## Sends an invite (send: a Callable that returns whether it went out) until the other copy takes
+## it: a copy still on its results (no lobby listening) or one that has not yet made this one its
+## friend declines at once, as a phone does, so a declined invite goes out again (up to 8 times).
+func _invite_until_taken(send: Callable, what: String) -> bool:
+	var declined := [false]
+	var on_answer := func(accepted: bool, _who: String) -> void:
+		if not accepted:
+			declined[0] = true
+	cloud.invite_answered.connect(on_answer)
+	var sent := false
+	for attempt in 8:
+		declined[0] = false
+		if not send.call():
+			break
+		sent = true
+		await _until(func() -> bool: return _started or declined[0], 10.0)
+		if not declined[0]:
+			break
+		at.log_line("%s %d declined (the other copy is not ready for it yet): again" % [what, attempt + 1])
+		await at.wait(1.5)
+	cloud.invite_answered.disconnect(on_answer)
+	return sent
 
 
 func _until(cond: Callable, seconds: float) -> bool:
