@@ -79,7 +79,7 @@ static func draw(ci: CanvasItem, pos: Vector2, h: float, ms: int, font_size: int
 	return x - pos.x + w
 
 
-## The lobby's chip in the top bar, left of HOW TO PLAY and SETTINGS (Lobby._build_top_bar): the
+## The lobby's chip in the top bar, left of FRIENDS and SETTINGS (Lobby._build_top_bar): the
 ## relay round trip.
 static func lobby_chip() -> Control:
 	var chip := Chip.new()

@@ -760,7 +760,7 @@ func _on_directory_changed() -> void:
 	_net_sig = "-"
 
 
-## The ONLINE 1 VS 1 row's unread count, redrawn when it changes.
+## The unread count on the lobby's FRIENDS button (top-right), redrawn when it changes.
 func _update_badge() -> void:
 	var n := NetChat.unread_total()
 	if n == _badge_n:

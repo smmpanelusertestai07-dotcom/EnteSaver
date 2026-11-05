@@ -201,7 +201,7 @@ func run(at: Node) -> int:
 	var sp := _settings(lobby)
 	_check(sp != null, "settings opens from the gear")
 	if sp:
-		await at.shot("m07_settings_basic")
+		await at.shot("m07_settings_display")
 		var g_before := int(Game.settings.graphics)
 		var high_q := _find_text(sp, "HIGH")
 		if high_q:
