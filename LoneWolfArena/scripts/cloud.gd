@@ -6,9 +6,10 @@ extends Node
 ## 1 vs 1) plays through it, the arena reaches it as Game.session.
 ##
 ## Lobby (topic ROOT/lobby): from the first time the game's lobby opens (presence then stays on,
-## through matches too) every phone announces {id, name, outfit, RSA-2048 public key} every 3 s
-## and lists the others; the id is a hash of the key, so nobody can announce someone else's id
-## with their own key. DUEL 1 VS 1 sends that phone (topic ROOT/u/<id>)
+## through matches too) every phone announces {id, name, outfit, RSA-2048 public key} every 5 s
+## (and soon after it first hears a player new to it, so a phone that just came online sees the
+## others within a second or so) and lists the others; the id is a hash of the key, so nobody can
+## announce someone else's id with their own key. DUEL 1 VS 1 sends that phone (topic ROOT/u/<id>)
 ## a fresh room name, AES-256 key and HMAC key encrypted with its public key, signed with the
 ## sender's key (invite_text); the answers carry an HMAC only the holders of those keys can make. In the room (ROOT/r/<room>) every message is
 ## AES-256-CBC with a random IV plus an HMAC-SHA256 over it, and carries the sender's id and a
@@ -74,8 +75,11 @@ const SEEK_TOPIC := ROOT + "/mm/seek"
 const BROKERS := ["wss://broker.freemqtt.com:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt", "wss://broker.emqx.io:8084/mqtt"]
 ## Relays that refuse anonymous clients: [user, password], both published by the relay itself.
 const BROKER_LOGINS := {"wss://broker.freemqtt.com:8084/mqtt": ["freemqtt", "public"]}
-const ANNOUNCE_S := 3.0
-const PEER_TIMEOUT_MS := 10000
+## The lobby announcement's period: light on the free relays (whose terms ask for light use); a
+## player new to this phone gets an answer within ANNOUNCE_REPLY_S instead (_on_lobby).
+const ANNOUNCE_S := 5.0
+const ANNOUNCE_REPLY_S := 0.6
+const PEER_TIMEOUT_MS := 12000   # two announcements lost in a row: the player has left the lobby
 const INVITE_TIMEOUT_MS := 25000
 const SILENCE_MS := 8000
 ## A phone that was away, or heard nothing at all from the relay, this long in a match has dropped
@@ -420,7 +424,7 @@ func _process(delta: float) -> void:
 		return
 	if not _connected:
 		return
-	# Every phone hears its own lobby announcement (3 s), the ping's answer (5 s) and in a match
+	# Every phone hears its own lobby announcement (5 s), the ping's answer (5 s) and in a match
 	# its own room messages back from the relay: nothing at all for this long means the link died
 	# without closing (the network went away, the relay stalls). In a match that is this phone
 	# dropping out, not the other one leaving.
@@ -662,6 +666,9 @@ func _parse() -> void:
 					if room_code != "":
 						_subscribe(ROOT + "/c/" + room_code)
 				else:
+					# The relay refused this phone (a login it no longer takes, or it is full):
+					# trying it again cannot help, so the next relay right away (_next_broker).
+					_fail_n = maxi(_fail_n, 2)
 					_ws.close()
 			0x30:                    # PUBLISH
 				if body.size() < 2:
@@ -732,7 +739,10 @@ func _on_lobby(d: Dictionary) -> void:
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
 	var known := peers.has(id) and String(peers[id].name) == who
+	var new_here := not peers.has(id)
 	peers[id] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec()}
+	if new_here and _want_lobby:
+		_announce_t = minf(_announce_t, ANNOUNCE_REPLY_S * randf_range(0.5, 1.0))   # so it sees this phone soon too
 	if not known:
 		peers_changed.emit()
 

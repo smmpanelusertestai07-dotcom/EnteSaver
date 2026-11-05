@@ -1805,6 +1805,17 @@ func _test_blocking() -> void:
 	cl.directory[z] = {"name": "ZED", "bundle": "default", "pk": "", "ts": 1}
 	_check(cl.request_friend(z) and cl.friend_asked(z) and p.withdrawn.is_empty(),
 		"a new request to a player cancels the deletion still waiting for them")
+	# A relay that refuses the phone (CONNACK return code 5: not authorised, say its shared login
+	# changed) is left for the next relay at once, not asked twice more (_next_broker on the close).
+	cl._ws = WebSocketPeer.new()
+	cl._fail_n = 0
+	var relay_before: int = cl._broker_i
+	cl._rx = PackedByteArray([0x20, 0x02, 0x00, 0x05])
+	cl._parse()
+	cl._next_broker()
+	_check(cl._broker_i == (relay_before + 1) % cl._brokers.size() and cl._fail_n == 0,
+		"a relay that refuses the phone (CONNACK 5) is left for the next relay at once")
+	cl._ws = null
 	cl.free()
 	them.free()
 	Game.profile = saved_profile
