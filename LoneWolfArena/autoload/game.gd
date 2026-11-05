@@ -40,7 +40,13 @@ const DEFAULT_SETTINGS := {
 	"crosshair_color": 0,         # index into CROSSHAIR_COLORS
 	"crosshair_size": 100,        # % of the standard crosshair (CROSSHAIR_SCALE)
 	"aim_precision": 0,           # aim assist: 0 always, 1 not while aiming down a sight, 2 never (Player.assist_allowed)
-	"left_fire": 0,               # the left fire button: 0 always, 1 only while aiming
+	"left_fire": 0,               # the left fire button: 0 always, 1 only while aiming, 2 off (HUD.LEFT_FIRE_OFF)
+	"reload_button": true,        # the RELOAD button up and left of FIRE (HUD)
+	"switch_button": true,        # the SWITCH button left of the weapon panel: gun <-> fists
+	"reload_on_crosshair": true,  # the reload's progress ring on the crosshair
+	"hold_fire_scope": true,      # sniper rifles: holding FIRE looks through the scope, letting go fires
+	"freelook_button": true,      # the free look (eye) button
+	"run_mode": 2,                # sprint: 0 TAP (the sprint button), 1 DRAG (push the stick past its ring), 2 MIXED (both)
 	"visual_effects": true,       # muzzle / explosion lights and full particle bursts (Effects.configure)
 	"vol_master": 85,
 	"vol_sfx": 90,
@@ -52,8 +58,7 @@ const DEFAULT_SETTINGS := {
 ## Behaviour that is not a setting (the settings screen keeps to graphics, sensitivity,
 ## joystick, custom HUD and sound): always these values, whatever an older settings file says.
 const FIXED_SETTINGS := {
-	"damage_numbers": true, "hold_fire_scope": true, "reload_on_crosshair": true, "run_mode": 2,
-	"dynamic_crosshair": true,
+	"damage_numbers": true, "dynamic_crosshair": true,
 }
 ## Settings that FIXED_SETTINGS held until version 4, whatever the file said: a file from then
 ## has no say in them, they start from their defaults (what version 4 played with).
@@ -65,10 +70,11 @@ const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
 	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "sens_fire": [1, 200], "vol_master": [0, 100],
 	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2], "crosshair_color": [0, 3],
-	"crosshair_size": [50, 150], "aim_precision": [0, 2], "left_fire": [0, 1],
+	"crosshair_size": [50, 150], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
 }
 ## On/off settings: anything but true or false falls back to the default.
-const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects"]
+const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects",
+	"reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope", "freelook_button"]
 ## Every frame rate the setting can hold; the settings offer those the screen can show
 ## (fps_choices).
 const FPS_OPTIONS := [30, 60, 90, 120]

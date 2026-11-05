@@ -22,6 +22,9 @@ extends RefCounted
 ## gear's, which sits on the panel's corner on purpose.
 ## A camera cutout at a short side of the screen (`inset`, set by the HUD from UI.safe_margins)
 ## moves the edge-anchored widgets in by its width.
+## RELOAD (up and to the left of FIRE) and SWITCH (gun <-> fists, left of the weapon panel's small
+## slots) are the reference's quick reload and quick weapon switch buttons; the settings can turn
+## them off, as the left fire button (HUD.button_enabled), and the editor still places them.
 
 const VERSION := 5
 const REF_ASPECT := 20.0 / 9.0
@@ -44,7 +47,7 @@ static var inset := Vector2.ZERO
 
 ## Hit-test order (first wins when two widgets overlap) and editor list.
 const ORDER := ["settings", "weapons", "fire_r", "fire_l", "scope", "freelook", "wall", "jump", "crouch", "prone", "sprint",
-	"medkit", "grenade", "minimap", "joystick"]
+	"medkit", "grenade", "reload", "swap", "minimap", "joystick"]
 const DEFAULTS := {
 	"joystick": {"x": 0.18, "y": 0.71, "s": 0.23, "o": 0.8, "a": "l"},
 	"fire_r": {"x": 0.798, "y": 0.68, "s": 0.26, "o": 0.9, "a": "r"},
@@ -58,6 +61,8 @@ const DEFAULTS := {
 	"sprint": {"x": 0.181, "y": 0.438, "s": 0.131, "o": 0.85, "a": "l"},
 	"medkit": {"x": 0.0375, "y": 0.678, "s": 0.104, "o": 0.85, "a": "l"},
 	"grenade": {"x": 0.678, "y": 0.912, "s": 0.13, "o": 0.85, "a": "c"},
+	"reload": {"x": 0.73, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
+	"swap": {"x": 0.712, "y": 0.235, "s": 0.1, "o": 0.85, "a": "r"},
 	"settings": {"x": 0.9865, "y": 0.035, "s": 0.046, "o": 0.9, "a": "r"},
 	"weapons": {"x": 0.861, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
@@ -65,7 +70,7 @@ const DEFAULTS := {
 const LABELS := {
 	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
 	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "freelook": "FREE LOOK",
-	"weapons": "WEAPONS", "minimap": "MAP",
+	"weapons": "WEAPONS", "minimap": "MAP", "reload": "RELOAD", "swap": "SWITCH",
 }
 
 

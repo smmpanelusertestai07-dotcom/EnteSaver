@@ -57,6 +57,10 @@ listed here. If a part needs something new from the core, add it in its own file
   (`HudLayout.DEFAULTS`) are the reference phone's places, except PRONE (under the weapon panel,
   left of SCOPE: the reference's place beside the score bar is under the panel below 18:9); no
   two default touch areas overlap from 16:10 to 22:9 but the gear's on the panel's corner.
+  RELOAD (`reload`, up and left of FIRE; grey on a full magazine, without reserve or with the fists
+  out) and SWITCH (`swap`, left of the panel's small slots: gun <-> fists, showing the other one).
+  `HUD.button_enabled(id)`: the settings left_fire (2 = OFF), reload_button, switch_button and
+  freelook_button turn those buttons off in a match; the editor still places them (label "OFF").
 - `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
   dropped; a widget saved exactly at an old default place in `MOVED` takes the new one),
   `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
@@ -166,8 +170,11 @@ listed here. If a part needs something new from the core, add it in its own file
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
-  once. `TAB_KEYS` lists each tab's settings (its RESET), `NOT_SHOWN` the rest; RESET and EXTREME
-  ask first in a `Confirm` layer (`ConfirmOk`, `ConfirmCancel`; back closes it). With
+  once. `TAB_KEYS` lists each tab's settings (its RESET), `NOT_SHOWN` the rest; RESET, EXTREME and
+  CLEAR CACHE (BASIC, `ClearCache`: `CacheCleaner.scan()` / `clear()` delete only the shader and
+  pipeline caches, old logs and the saves' leftover .tmp / older .bak, never a save or the
+  identity key; the row's note then says what was freed) ask first in a `Confirm` layer
+  (`ConfirmOk`, `ConfirmCancel`; back closes it). With
   `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
   note (`EditHudNote`): leaving for the editor would abandon the match. A finger drag that starts
   on a row scrolls a tab (its sliders keep their own drags). `covered()`: a visible Control was

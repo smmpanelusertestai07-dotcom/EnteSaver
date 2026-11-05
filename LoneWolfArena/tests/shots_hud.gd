@@ -3,8 +3,9 @@ extends Node
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_hud.gd
 ## Prep with the weapon pick panel (pick + SELECT by touch), PREPARE countdown, round banner,
 ## the bot in view (red crosshair), firing (each shot its own damage number, hit marker),
-## separate damage numbers in a row (never on top of each other), red-dot ADS, reload ring,
-## fists, the lever shotgun's own silhouette, sniper scope, sprint (stick past the ring and the
+## separate damage numbers in a row (never on top of each other), red-dot ADS, the RELOAD button
+## (grey on a full magazine) and the reload ring, fists and back with SWITCH, the lever shotgun's
+## own silhouette, sniper scope, sprint (stick past the ring and the
 ## button), the settings gear (over the weapon panel's corner), scoreboard (tap on the score bar,
 ## clear of the weapon panel), healing, low HP with
 ## damage arcs, the elimination (red X, badge, kill feed) and the HUD editor (select + drag).
@@ -115,17 +116,28 @@ func run(at: Node) -> int:
 		await at.wait(0.1)
 	await at.shot("hud_07_ads_reddot")
 	p.toggle_ads()
-	# Reload ring on the crosshair.
+	# RELOAD: nothing to do on a full magazine, then the reload and its ring on the crosshair.
+	var reload_c := HudLayout.center(hud.layout.reload, vs)
+	p.weapons[0].ammo = int(p.weapons[0].def.mag)
+	await _tap(at, reload_c)
+	var full_ignored := not p.weapons[0].reloading
 	p.weapons[0].ammo = 2
-	p.do_reload()
-	await at.wait(0.7)
+	await _tap(at, reload_c)
+	_check(full_ignored and p.weapons[0].reloading, "RELOAD does nothing on a full magazine, reloads a short one", at)
+	await at.wait(0.6)
 	await at.shot("hud_08_reload")
 	await at.wait(2.0)
-	# Fists.
+	# Fists from their slot, then SWITCH (showing the gun now) back to the gun and to the fists.
 	await _tap(at, HudLayout.weapon_slots(hud.layout.weapons, vs)[2].get_center())
 	await at.wait(0.4)
 	await at.shot("hud_09_fists")
 	_check(p.current == 1, "fist slot selects the fists", at)
+	var swap_c := HudLayout.center(hud.layout.swap, vs)
+	await _tap(at, swap_c)
+	var back_to_gun := p.current == 0
+	await at.wait(0.3)
+	await _tap(at, swap_c)
+	_check(back_to_gun and p.current == 1, "SWITCH swaps the gun and the fists", at)
 	await _tap(at, HudLayout.weapon_main(hud.layout.weapons, vs).get_center())
 	await at.wait(0.3)
 	# The lever shotgun in the weapon panel (its own silhouette, not the pump gun's).

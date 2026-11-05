@@ -9,11 +9,12 @@ extends Control
 ##  - BASIC: graphics AUTO / LOW .. EXTREME (AUTO marks the level it picked for this phone and
 ##    picks again after a frame-rate change; EXTREME asks first, it can heat the phone), frame rate
 ##    (30 and 60; 90 and 120 where the screen refreshes that fast), the FPS counter, visual effects,
-##    vibration;
+##    vibration, CLEAR CACHE (CacheCleaner: asks first, then says how much it freed);
 ##  - SENSITIVITY: General, Red Dot, 2x Scope, Sniper Scope, Free Look and Fire Button Drag, with
 ##    the STANDARD / FAST presets;
-##  - CONTROLS: dynamic joystick, aim precision, the left fire button, crosshair colour and size
-##    (with a live preview), custom HUD;
+##  - CONTROLS: dynamic joystick, aim precision, the left fire button (OFF / ALWAYS / WHEN AIMING),
+##    hold fire to scope, the quick RELOAD and SWITCH buttons, the reload ring, crosshair colour and
+##    size (with a live preview), custom HUD;
 ##  - SOUND: master, effects, music.
 ## Questions (RESET, EXTREME) open over the panel as node "Confirm" (buttons "ConfirmOk" and
 ## "ConfirmCancel"); back closes them first.
@@ -30,7 +31,8 @@ const ORDER := [0, 2, 1, 3]
 const TAB_KEYS := [
 	["graphics_auto", "graphics", "fps", "show_fps", "visual_effects", "vibration"],
 	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook", "sens_fire"],
-	["dynamic_joystick", "aim_precision", "left_fire", "crosshair_color", "crosshair_size"],
+	["dynamic_joystick", "run_mode", "aim_precision", "left_fire", "hold_fire_scope", "reload_button", "switch_button",
+		"freelook_button", "reload_on_crosshair", "crosshair_color", "crosshair_size"],
 	["vol_master", "vol_sfx", "vol_music"],
 ]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
@@ -48,7 +50,17 @@ const PRECISION_NOTES := [
 	"No aim assist while aiming down a sight; assisted from the hip",
 	"No aim assist: shots go exactly where you aim",
 ]
-const LEFT_FIRE_NAMES := ["ALWAYS", "WHEN AIMING"]
+const LEFT_FIRE_NAMES := ["OFF", "ALWAYS", "WHEN AIMING"]
+## Sprint (setting run_mode, by value) and what each does.
+const RUN_MODE_NAMES := ["TAP", "DRAG", "MIXED"]
+const RUN_MODE_NOTES := [
+	"Tap the sprint button to run until you stop",
+	"Push the stick past its ring to sprint (no sprint button)",
+	"The sprint button, or the stick pushed past its ring",
+]
+## The left fire choices left to right as values of the setting (0 always, 1 while aiming, 2 off:
+## the values of version 5 keep their meaning).
+const LEFT_FIRE_VALUES := [2, 0, 1]
 ## The sensitivity rows top to bottom: [title, setting, note].
 const SENS_ROWS := [
 	["General", "sens_general", "Camera turn when dragging the right side"],
@@ -77,6 +89,8 @@ var _preset_seg: HBoxContainer
 var _graphics_seg: HBoxContainer
 var _graphics_note: Label
 var _aim_note: Label
+var _run_note: Label
+var _cache_note: Label
 var _preview: Control
 var _ask_layer: Control
 var _hint: Label
@@ -240,6 +254,8 @@ func _show_tab(i: int) -> void:
 	_graphics_seg = null
 	_graphics_note = null
 	_aim_note = null
+	_run_note = null
+	_cache_note = null
 	_preview = null
 	_scroll.scroll_vertical = 0
 	match _current:
@@ -291,10 +307,32 @@ func _build_basic() -> void:
 	_body.add_child(UI.spacer(4))
 	_body.add_child(UI.section("FEEDBACK"))
 	_body.add_child(UI.plate_row("Vibration", _toggle("vibration"), "A buzz when you are hit, on a kill and on heavy shots"))
+	_body.add_child(UI.spacer(4))
+	_body.add_child(UI.section("STORAGE"))
+	var clear_btn := UI.button("CLEAR CACHE", 18, "light", Vector2(230, 52))
+	clear_btn.name = "ClearCache"
+	clear_btn.pressed.connect(_ask_clear_cache)
+	var cache_row := UI.plate_row("Cache", clear_btn, "Shader cache, old logs, leftover temporary files: %s" % CacheCleaner.size_text(int(CacheCleaner.scan().bytes)))
+	_cache_note = _note_of(cache_row)
+	_body.add_child(cache_row)
 	_hint.text = "Changes apply at once. In a match the 3D view draws a little smaller while frames run slow; the HUD stays sharp."
 
 
 ## The frame-rate row's note: which rates this screen can't show, if any.
+## CLEAR CACHE asks first (what goes, what stays), then says how much it freed.
+func _ask_clear_cache() -> void:
+	var bytes := int(CacheCleaner.scan().bytes)
+	if bytes == 0:
+		_cache_note.text = "Nothing to clear"
+		return
+	_ask("CLEAR CACHE", ("Delete %s: the shader cache (rebuilt as you play, the next match may stutter for a moment), "
+		+ "old logs and leftover temporary files? Your profile, settings, player ID and HUD layout stay.") % CacheCleaner.size_text(bytes),
+		"CLEAR", func() -> void:
+			var freed := CacheCleaner.size_text(CacheCleaner.clear())
+			if _cache_note and is_instance_valid(_cache_note):
+				_cache_note.text = "Freed %s" % freed)
+
+
 func _fps_note(shown: Array) -> String:
 	var missing := PackedStringArray()
 	for f: int in Game.FPS_OPTIONS:
@@ -445,6 +483,12 @@ func _refresh_preset() -> void:
 func _build_controls() -> void:
 	_body.add_child(UI.section("MOVEMENT"))
 	_body.add_child(UI.plate_row("Dynamic joystick", _toggle("dynamic_joystick"), "The stick follows your thumb"))
+	var run := clampi(int(Game.settings.run_mode), 0, RUN_MODE_NAMES.size() - 1)
+	var run_seg := UI.segmented(RUN_MODE_NAMES, run, _set_run_mode, 16, 130.0)
+	run_seg.name = "RunMode"
+	var run_row := UI.plate_row("Run mode", run_seg, String(RUN_MODE_NOTES[run]))
+	_run_note = _note_of(run_row)
+	_body.add_child(run_row)
 	_body.add_child(UI.spacer(4))
 	_body.add_child(UI.section("SHOOTING"))
 	var precision := clampi(int(Game.settings.aim_precision), 0, PRECISION_NAMES.size() - 1)
@@ -453,9 +497,17 @@ func _build_controls() -> void:
 	var aim_row := UI.plate_row("Aim precision", aim_seg, String(PRECISION_NOTES[precision]))
 	_aim_note = _note_of(aim_row)
 	_body.add_child(aim_row)
-	var left_fire := UI.segmented(LEFT_FIRE_NAMES, int(Game.settings.left_fire), func(v: int) -> void: _apply("left_fire", v), 16, 150.0)
+	var lf_at := maxi(LEFT_FIRE_VALUES.find(int(Game.settings.left_fire)), 0)
+	var left_fire := UI.segmented(LEFT_FIRE_NAMES, lf_at, func(v: int) -> void: _apply("left_fire", int(LEFT_FIRE_VALUES[v])), 16, 150.0)
 	left_fire.name = "LeftFire"
-	_body.add_child(UI.plate_row("Left fire button", left_fire, "Shown always, or only while aiming down a sight"))
+	_body.add_child(UI.plate_row("Left fire button", left_fire, "Off, always shown, or only while aiming down a sight"))
+	_body.add_child(UI.plate_row("Hold fire to scope", _toggle("hold_fire_scope"), "Sniper rifles: hold FIRE to look through the scope, let go to shoot"))
+	_body.add_child(UI.spacer(4))
+	_body.add_child(UI.section("QUICK BUTTONS"))
+	_body.add_child(UI.plate_row("Reload button", _toggle("reload_button"), "RELOAD beside FIRE (tapping the weapon panel reloads too)"))
+	_body.add_child(UI.plate_row("Weapon switch button", _toggle("switch_button"), "Swaps the gun and the fists; it shows the one it swaps to"))
+	_body.add_child(UI.plate_row("Free look button", _toggle("freelook_button"), "Hold the eye button and drag to look around while you run on"))
+	_body.add_child(UI.plate_row("Reload ring", _toggle("reload_on_crosshair"), "The reload's progress around the crosshair"))
 	_body.add_child(UI.spacer(4))
 	_body.add_child(UI.section("CROSSHAIR"))
 	var cross := HBoxContainer.new()
@@ -493,6 +545,12 @@ func _build_controls() -> void:
 		r.add_child(hud_btn)
 		_body.add_child(r)
 		_hint.text = "Custom HUD: move, resize and fade every in-match button."
+
+
+func _set_run_mode(v: int) -> void:
+	_apply("run_mode", v)
+	if _run_note and is_instance_valid(_run_note):
+		_run_note.text = String(RUN_MODE_NOTES[v])
 
 
 func _set_precision(v: int) -> void:

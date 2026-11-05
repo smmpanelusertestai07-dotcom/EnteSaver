@@ -29,7 +29,8 @@ const HOW_TO := [
 		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
 		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
 		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
-		["v_reload", "RELOAD", "Tap the weapon panel (or it reloads by itself when the magazine is empty)."],
+		["v_reload", "RELOAD", "Tap RELOAD beside FIRE or the weapon panel (or it reloads by itself when the magazine is empty)."],
+		["v_fist", "SWITCH  ·  FISTS", "SWITCH swaps the gun and the fists (it shows the other one). Fists out you run 15 % faster."],
 	]],
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],

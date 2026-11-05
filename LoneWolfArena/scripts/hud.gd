@@ -5,7 +5,8 @@ extends Control
 ## icon textures loaded once):
 ##  - multi-touch controls: floating joystick (sprint by pushing past the ring) + sprint button,
 ##    look area, right / left FIRE (drag to aim while firing), scope, jump, crouch, prone,
-##    reload, medkit, wall, grenade, settings (pause) and scoreboard buttons, the weapon panel;
+##    RELOAD, SWITCH (gun <-> fists), medkit, wall, grenade, settings (pause) and scoreboard
+##    buttons, the weapon panel;
 ##  - crosshair: spread ring / wide ring / dot by gun, red on target, red dot when aiming, full
 ##    sniper scope, reload and heal progress rings;
 ##  - feedback: damage numbers, hit marker, headshot icon, the elimination X and badge, damage
@@ -15,20 +16,22 @@ extends Control
 
 signal pause_pressed
 
-const BUTTONS := ["fire_r", "fire_l", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook", "settings"]
+const BUTTONS := ["fire_r", "fire_l", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook",
+	"reload", "swap", "settings"]
 const GLYPHS := {
 	"fire_r": "v_fire", "fire_l": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
 	"prone": "stance_prone", "sprint": "stance_sprint", "medkit": "v_medkit", "wall": "v_wall",
-	"grenade": "item_grenade", "settings": "v_settings", "freelook": "v_eye",
+	"grenade": "item_grenade", "settings": "v_settings", "freelook": "v_eye", "reload": "v_mag", "swap": "v_fist",
 }
 const GLYPH_FALLBACK := {"prone": "v_prone", "sprint": "v_sprint", "jump": "v_chevron"}
 const GLYPH_SCALE := {
 	"fire_r": 0.54, "fire_l": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
-	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56,
+	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56, "reload": 0.4, "swap": 0.5,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
 const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
+const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming, 2 off
 const DMG_LIFE := 0.95
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
@@ -402,12 +405,29 @@ func _widget_at(pos: Vector2, vs: Vector2) -> String:
 func _button_visible(id: String) -> bool:
 	if editor_mode:
 		return true
+	if not button_enabled(id):
+		return false
 	match id:
 		"sprint":
 			return int(Game.settings.get("run_mode", 2)) != 1
 		"fire_l":
 			# setting Left fire button: always, or only while aiming down a sight
 			return int(Game.settings.get("left_fire", 0)) == 0 or (player != null and player.ads)
+	return true
+
+
+## Whether the settings show a button at all (CONTROLS: the left fire button, RELOAD, SWITCH and free
+## look can be turned off; the editor still shows and places them, marked OFF).
+static func button_enabled(id: String) -> bool:
+	match id:
+		"fire_l":
+			return int(Game.settings.get("left_fire", 0)) != LEFT_FIRE_OFF
+		"reload":
+			return bool(Game.settings.get("reload_button", true))
+		"swap":
+			return bool(Game.settings.get("switch_button", true))
+		"freelook":
+			return bool(Game.settings.get("freelook_button", true))
 	return true
 
 
@@ -443,6 +463,11 @@ func _press(id: String, index: int) -> void:
 		"freelook":
 			_touches[index] = {"kind": "free", "id": id}
 			player.start_free_look()
+		"reload":
+			if player.current == 0:         # grey with the fists out: nothing to reload
+				player.do_reload()
+		"swap":
+			player.select_weapon(1 - player.current)
 		"settings":
 			release_all()
 			pause_pressed.emit()
@@ -818,6 +843,10 @@ func _draw_button(id: String, vs: Vector2) -> void:
 				count = player.grenades
 				en = player.grenades > 0
 				act = player.ready_item == "grenade"
+			"reload":
+				var g: WeaponState = player.weapons[0]
+				act = g.reloading
+				en = player.current == 0 and (g.reloading or g.can_reload())    # grey: full, no reserve, fists out
 	elif editor_mode:
 		match id:
 			"medkit", "wall":
@@ -835,13 +864,43 @@ func _draw_button(id: String, vs: Vector2) -> void:
 			glyph = _glyph(player.ready_item)   # a wall or grenade in hand: FIRE uses it
 		elif player != null and Weapons.is_melee(player.weapon().def):
 			glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
+	var gscale := float(GLYPH_SCALE.get(id, 0.6))
+	if id == "swap" and player != null and not editor_mode and player.current == 1:
+		glyph = HudDraw.weapon_tex(player.weapons[0].def)      # the other slot: fists out, it shows the gun
+		gscale = 0.62
 	if id == "fire_r":
 		_draw_fire_halo(c, r, o, pressed)
-	HudDraw.button(self, c, r, glyph, o, pressed, act, en, float(GLYPH_SCALE.get(id, 0.6)))
+	HudDraw.button(self, c, r, glyph, o, pressed, act, en, gscale)
 	if count >= 0:
 		HudDraw.count_badge(self, c, r, count, o)
 	if id == "medkit" and act and player != null:
 		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.GOLD, 0.95 * o), 3.0, player.heal_progress())
+	if id == "reload" and act and player != null:
+		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.YELLOW, 0.95 * o), 3.0, player.weapons[0].reload_progress())
+	if id == "swap" or (id == "reload" and not act):
+		# SWITCH: two arrows chasing each other (it trades the hand's slot); RELOAD: one round the
+		# magazine (while it reloads, the gold progress ring takes its place)
+		var mark := Color(1, 1, 1, (0.85 if en else 0.38) * o)
+		if id == "swap":
+			_draw_cycle_arrows(c, r, mark, 2, 80.0)
+		else:
+			_draw_cycle_arrows(c, r, mark, 1, 285.0)
+
+
+## `n` arrows evenly spread round a button's rim, each an arc of `span` degrees, clockwise.
+func _draw_cycle_arrows(c: Vector2, r: float, col: Color, n: int, span: float) -> void:
+	var rr := r * 0.78
+	var lw := maxf(1.5, r * 0.07)
+	var hs := r * 0.17
+	for k in n:
+		var a0 := deg_to_rad(-150.0) + TAU * k / n
+		var a1 := a0 + deg_to_rad(span)
+		draw_arc(c, rr, a0, a1, maxi(8, int(span / 8.0)), col, lw, true)
+		var tip := c + Vector2.from_angle(a1) * rr
+		var along := Vector2.from_angle(a1 + PI * 0.5)
+		var out := Vector2.from_angle(a1)
+		draw_colored_polygon(PackedVector2Array([tip + along * hs, tip - along * hs * 0.3 + out * hs * 0.65,
+			tip - along * hs * 0.3 - out * hs * 0.65]), col)
 
 
 ## The main fire button's outer dotted ring (reference look), warm while firing.
@@ -1633,6 +1692,8 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 		var r := HudLayout.hit_rect(id, w, vs)
 		var sel := id == selected_id
 		var label := String(SHORT_LABELS.get(id, HudLayout.LABELS.get(id, id)))
+		if not button_enabled(id):
+			label += " (OFF)"              # turned off in SETTINGS > CONTROLS: placed, not shown in a match
 		# Labels keep clear of the selection ring (r + 5) and of the fire button's dotted halo.
 		var lr0 := r
 		if HudLayout.kind(id) in ["button", "joy"]:

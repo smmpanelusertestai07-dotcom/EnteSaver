@@ -58,6 +58,7 @@ func _ready() -> void:
 	_test_net_limits()
 	_test_session_ends()
 	_test_safe_saves()
+	_test_clear_cache()
 	_test_no_sprint_firing()
 	_test_move_speeds()
 	_test_lobby_ui_rules()
@@ -435,7 +436,7 @@ func _test_settings_v5() -> void:
 		and d.dynamic_joystick == false and d.last_pick == "ar", "the older settings keep their defaults")
 	for k in ["show_fps", "vibration", "crosshair_color", "crosshair_size", "sens_fire"]:
 		_check(d.has(k) and not Game.FIXED_SETTINGS.has(k), "%s is a setting now, no longer fixed" % k)
-	_check(Game.FIXED_SETTINGS.has("damage_numbers") and Game.FIXED_SETTINGS.has("run_mode"), "the rest stays fixed")
+	_check(Game.FIXED_SETTINGS.has("damage_numbers") and Game.FIXED_SETTINGS.has("dynamic_crosshair"), "the rest stays fixed")
 	_check(int(Game.SETTING_RANGES.crosshair_color[1]) == Game.CROSSHAIR_COLORS.size() - 1, "the crosshair colour range is the colour list")
 	_near(Game.CROSSHAIR_SCALE, lerpf(0.75, 1.35, 0.5), "crosshair size 100 % is the size the HUD drew before")
 	# Ranges and on/off values.
@@ -557,7 +558,40 @@ func _test_controls_settings() -> void:
 	var hidden_at_hip := not hud._button_visible("fire_l") and hud._button_visible("fire_r")
 	Game.settings.left_fire = 0
 	_check(hidden_at_hip and hud._button_visible("fire_l"), "the left fire button shows always, or only while aiming")
+	Game.settings.left_fire = HUD.LEFT_FIRE_OFF
+	var left_off := not hud._button_visible("fire_l")
+	Game.settings.merge({"left_fire": 0, "reload_button": false, "switch_button": false}, true)
+	var quick_off := not hud._button_visible("reload") and not hud._button_visible("swap") and hud._button_visible("fire_l")
+	hud.editor_mode = true
+	var placed := hud._button_visible("reload") and hud._button_visible("swap")
+	hud.editor_mode = false
+	Game.settings.merge({"reload_button": true, "switch_button": true}, true)
+	_check(left_off and quick_off and placed and hud._button_visible("reload") and hud._button_visible("swap"),
+		"LEFT FIRE can be off; RELOAD and SWITCH follow their settings; the editor still places them")
 	hud.free()
+	_check(d.reload_button == true and d.switch_button == true and d.reload_on_crosshair == true and d.hold_fire_scope == true
+		and not Game.FIXED_SETTINGS.has("reload_on_crosshair") and not Game.FIXED_SETTINGS.has("hold_fire_scope"),
+		"RELOAD, SWITCH, the reload ring and hold fire to scope start on, and they are settings now")
+	var v5: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 5, "left_fire": 1, "reload_on_crosshair": true}))
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings(v5)
+	_check(Game.settings.left_fire == 1 and Game.settings.reload_button == true and Game.settings.switch_button == true,
+		"a version 5 file keeps WHEN AIMING and gets the new buttons on")
+	Game.settings.merge({"reload_button": "no", "left_fire": 5, "run_mode": -1, "freelook_button": 3}, true)
+	Game._sanitize_settings()
+	_check(Game.settings.reload_button == true and Game.settings.left_fire == 2 and Game.settings.run_mode == 0
+		and Game.settings.freelook_button == true, "on/off, left fire and run mode values are checked")
+	_check(d.run_mode == 2 and d.freelook_button == true and SettingsPanel.RUN_MODE_NAMES.size() == int(Game.SETTING_RANGES.run_mode[1]) + 1
+		and SettingsPanel.RUN_MODE_NOTES.size() == SettingsPanel.RUN_MODE_NAMES.size(), "run mode TAP / DRAG / MIXED (MIXED as before), free look on")
+	var hud2 := HUD.new()
+	Game.settings.merge({"run_mode": 1, "freelook_button": false}, true)
+	var drag_only := not hud2._button_visible("sprint") and not hud2._button_visible("freelook")
+	Game.settings.merge({"run_mode": 0, "freelook_button": true}, true)
+	_check(drag_only and hud2._button_visible("sprint") and hud2._button_visible("freelook"), "DRAG hides the sprint button; the free look button follows its setting")
+	hud2.free()
+	Game.settings = d.duplicate(true)
+	_check(SettingsPanel.LEFT_FIRE_VALUES.size() == SettingsPanel.LEFT_FIRE_NAMES.size() and SettingsPanel.LEFT_FIRE_VALUES[0] == HUD.LEFT_FIRE_OFF
+		and SettingsPanel.LEFT_FIRE_NAMES[SettingsPanel.LEFT_FIRE_VALUES.find(0)] == "ALWAYS", "LEFT FIRE offers OFF / ALWAYS / WHEN AIMING")
 	Game.settings = saved
 	var lights := Effects.lights_enabled
 	var share := Effects.particle_share
@@ -678,6 +712,18 @@ func _test_settings_panel() -> void:
 	panel._reset_tab()
 	_check(Game.settings.fps == 60 and Game.settings.show_fps == false and Game.settings.vibration == true and Game.settings.graphics_auto == true
 		and Game.settings.visual_effects == true, "RESET on BASIC: 60 FPS, no counter, effects and vibration on, AUTO graphics")
+	var clear_btn := panel.find_child("ClearCache", true, false) as Button
+	if clear_btn:
+		DirAccess.make_dir_recursive_absolute("user://shader_cache")
+		var cf := FileAccess.open("user://shader_cache/panel_check.cache", FileAccess.WRITE)
+		cf.store_string("cache")
+		cf.close()
+		clear_btn.pressed.emit()
+	var asked := panel._ask_layer != null and FileAccess.file_exists("user://shader_cache/panel_check.cache")
+	if asked:
+		(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
+	_check(clear_btn != null and asked and not FileAccess.file_exists("user://shader_cache/panel_check.cache")
+		and panel._cache_note.text.begins_with("Freed"), "BASIC: CLEAR CACHE asks first, then says what it freed")
 	panel._ask_reset()
 	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
 	_check(panel._ask_layer == null and panel.is_inside_tree() and not panel.is_queued_for_deletion(), "back closes the question, not the settings")
@@ -1695,6 +1741,41 @@ func _test_safe_saves() -> void:
 
 ## The stick pushed past the ring asks for a sprint every frame: firing keeps it off (and with it
 ## the firing slowdown), letting go of FIRE brings it back.
+## CLEAR CACHE deletes the shader and pipeline caches, old logs and the saves' leftovers (a .tmp,
+## a .bak older than a save that reads whole) and says how much it freed; the saves, the identity
+## key, the current log, a backup still needed and any other file stay.
+func _test_clear_cache() -> void:
+	var root := "user://cache_check"
+	var files := {
+		"shader_cache/a1/b2/shader.cache": 300, "vulkan/pipelines.cache": 200, "logs/godot2026-11-01T10.00.00.log": 50,
+		"logs/godot.log": 40, "settings.json": -1, "settings.json.bak": -1, "profile.json.tmp": 70,
+		"hud_layout.json": 10, "hud_layout.json.bak": -1, "net_identity.key": 30, "notes.txt": 5,
+	}
+	for rel: String in files:
+		var path := root.path_join(rel)
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		if rel.ends_with(".json.bak") or rel == "settings.json":
+			f.store_string("{\"a\": 1}")
+		else:
+			f.store_string("x".repeat(int(files[rel])))          # hud_layout.json: not whole JSON
+		f.close()
+	var found: Dictionary = CacheCleaner.scan(root)
+	var want := 300 + 200 + 50 + 70 + 8          # settings.json.bak: its 8 bytes
+	var freed := CacheCleaner.clear(root)
+	var gone := ["shader_cache/a1/b2/shader.cache", "vulkan/pipelines.cache", "logs/godot2026-11-01T10.00.00.log",
+		"profile.json.tmp", "settings.json.bak"]
+	var kept := ["logs/godot.log", "settings.json", "hud_layout.json", "hud_layout.json.bak", "net_identity.key", "notes.txt"]
+	_check(int(found.bytes) == want and freed == want, "CLEAR CACHE finds and frees the caches (%d / %d of %d bytes)" % [int(found.bytes), freed, want])
+	_check(gone.all(func(r: String) -> bool: return not FileAccess.file_exists(root.path_join(r)))
+		and kept.all(func(r: String) -> bool: return FileAccess.file_exists(root.path_join(r))),
+		"caches, old logs and leftovers go; saves, the key, the current log and a needed backup stay")
+	_check(CacheCleaner.clear(root) == 0 and CacheCleaner.size_text(0) == "0 B" and CacheCleaner.size_text(1536) == "2 KB"
+		and CacheCleaner.size_text(13 * 1048576) == "13.0 MB", "a second clear frees nothing; sizes read as B, KB, MB")
+	for rel: String in kept:
+		DirAccess.remove_absolute(root.path_join(rel))
+
+
 func _test_no_sprint_firing() -> void:
 	var p := Player.new()
 	p.firing = true
