@@ -273,6 +273,14 @@ func _test_results() -> void:
 		and forfeit.find_child("AddFriend", true, false) != null and forfeit.find_child("Lobby", true, false) != null,
 		"after a forfeit: no REMATCH (LOBBY, ADD FRIEND)")
 	_drop(forfeit)
+	# The tap tells Cloud whose team invite to take (play_again) until the screen closes. (No session
+	# here: the fresh invite would go out on a later frame; none comes in this test.)
+	var tap := _results(_team_result(true, String(them.id)))
+	(tap.find_child("Rematch", true, false) as Button).pressed.emit()
+	_check(Game.cloud_service().play_again == {"id": String(them.id), "size": 2, "coop": false},
+		"REMATCH tells Cloud the player, size and coop whose team invite to take")
+	_drop(tap)
+	_check(Game.cloud_service().play_again.is_empty(), "closing the results clears Cloud.play_again")
 	Game.team_match = TeamArena.link_match(2, true, me, them, true, 7)
 	var coop := _results(_team_result(true, ""))
 	_check(coop.find_child("AddFriend", true, false) == null, "co-op against bots: no ADD FRIEND")
