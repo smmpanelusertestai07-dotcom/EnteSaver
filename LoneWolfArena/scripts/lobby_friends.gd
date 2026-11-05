@@ -82,7 +82,8 @@ func process(delta: float) -> void:
 ## free public relay carries end-to-end encrypted messages (see Cloud). Tabs: ONLINE (players
 ## online now, then every player with a card), FRIENDS (your ID, search, requests, friends) and
 ## CUSTOM ROOM. Players show up by name; DUEL 1 VS 1 sends a challenge, the other phone accepts
-## or declines. The player cards are listened to only while this window is open.
+## or declines. This window listens to the player cards while it is open (PROFILE's BLOCKED does
+## too: Cloud.start_directory(by)).
 ## back: it opens again under a player's card that closed (X, back, BLOCK, DUEL 1 VS 1): the list
 ## scrolls back to where that card was opened from, so a long ALL PLAYERS keeps the player's place.
 func open(kind := "online", back := false) -> void:

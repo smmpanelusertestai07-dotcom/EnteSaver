@@ -19,11 +19,11 @@ extends RefCounted
 ## SINCE (profile "created"). It is what other players get: Cloud's signed card (Cloud.my_card).
 ##
 ## The player card (open_player) is another player's name card in a popup (Lobby.dialogs), opened by
-## a tap on a player in the ONLINE window's lists (LobbyFriends) or in BLOCKED. It shows their
-## public card (Cloud.directory: picture, banner, level, signature, name and outfit), online now or
-## when last seen, and what can be done: DUEL 1 VS 1 (online now: LobbyFriends.challenge), ADD
-## FRIEND / REQUEST SENT / REMOVE FRIEND and BLOCK / UNBLOCK (both asked again). Its X and back go
-## back to the list it came from.
+## a tap on a player in the ONLINE window's lists (LobbyFriends), in BLOCKED or on a HISTORY row. It
+## shows their public card (Cloud.directory: picture, banner, level, signature, name and outfit),
+## online now or when last seen, and what can be done: DUEL 1 VS 1 (online now:
+## LobbyFriends.challenge), ADD FRIEND / REQUEST SENT / REMOVE FRIEND and BLOCK / UNBLOCK (both
+## asked again). Its X and back go back to the list it came from.
 ## The lobby makes it (Lobby.profile_ui), opens it from the player card and calls process() every
 ## frame; everything is built under the lobby's UI layer.
 ## Node names: Profile, ProfileClose, ProfileTab_<career|history|namecard|blocked>, NameCard,
