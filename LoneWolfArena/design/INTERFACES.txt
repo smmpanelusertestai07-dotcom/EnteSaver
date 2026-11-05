@@ -519,6 +519,11 @@ listed here. If a part needs something new from the core, add it in its own file
   nearest left), revive a knocked teammate within 15 m after 1.5 s without an enemy in sight
   (never while the zone presses), keep near a human teammate (go 3 m behind when over 7 m away),
   crawl toward a teammate when knocked.
+- Performance (R12), measured against the 1 vs 1 with the Xvfb renderer (llvmpipe, so frame times
+  are only rough): SQUAD draws about twice the draw calls (LOW 190 / 95, MEDIUM 349 / 159 at the
+  spawn); frame and physics times were within the noise. Cuts applied: at LOW and MEDIUM the other
+  fighters farther than TeamArena.SHADOW_CUT_M (15 m) from the camera cast no shadow (MEDIUM in a
+  fight: 283), and bots' looks around and target choices are staggered across frames.
 - HUD / results API (WP-B2): members(), slot_fighter(), status_of(), revive_candidate(),
   start_revive(), cancel_revive(), revive_progress(), spectate_next(), spectated(),
   slot_stats(), scoreboard_rows() (my team first, me first; keys "team", "ally", "slot", "status",
