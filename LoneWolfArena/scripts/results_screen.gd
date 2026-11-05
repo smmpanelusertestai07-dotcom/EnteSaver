@@ -17,8 +17,11 @@ extends Control
 ## other side (ORANGE TEAM, or the other player's name in a match against them); both teams' tables
 ## side by side (TeamTables: TeamTable_0 blue, the player's team with the player first, and
 ## TeamTable_1 orange; rows TeamRow_<n>, n the row's index in result.rows: name, K, KNOCKS, REVIVES,
-## DAMAGE, HS, ACC); no REMATCH; PLAY AGAIN only for a match on this phone (an online one goes back
-## to the lobby: LOBBY only); ADD FRIEND for the other player of an online match against them.
+## DAMAGE, HS, ACC); PLAY AGAIN for a match on this phone. A match between two phones offers the
+## same two humans another one (see _build_online): PLAY AGAIN TOGETHER (node PlayAgainTogether) after
+## a co-op TEAM INVITE match, REMATCH (node Rematch) after one against the other player, in PLAY
+## AGAIN's place; none after a forfeit or once a player left (LOBBY only). ADD FRIEND for the other
+## player of an online match against them.
 
 const COLUMNS := ["ELIMINATIONS", "DAMAGE", "HEADSHOTS", "ACCURACY", "TIME", "HP LEFT"]
 const NAME_W := 250.0
@@ -46,6 +49,8 @@ var _enemy := {}                  # the opponent's scoreboard row ({} when the s
 var _shades: Array[Control] = []  # the full-screen shades behind the content (see _fit_cutout)
 var _team := false                # a DUO / SQUAD result (result.team)
 var _team_online := false         # ... played between two phones
+var _team_again := false          # ... that offers PLAY AGAIN TOGETHER / REMATCH (team_again_offered)
+var _again_team := {}             # ... the same team again: {"size", "coop"} (Game.team_match)
 const TEAM_COLUMNS := ["K", "KNOCKS", "REVIVES", "DAMAGE", "HS", "ACC"]
 # An internet match (not one without internet): REMATCH and ADD FRIEND (see _build_online).
 const INVITE_DELAY_MS := 700      # the fresh challenge goes out this long after the old session is left
@@ -53,6 +58,8 @@ const AWAIT_MS := 12000           # how long a phone waits for the other's fresh
 const GUEST_GRACE_MS := 2500      # with the session gone the old guest first waits this long for the host's
 var _online := false
 var _enemy_id := ""
+var _peer_id := ""                # the other phone's player (the 1 vs 1 opponent, the teammate or the other team's player)
+var _peer_name := ""
 var _rematch: Button
 var _friend: Button
 var _status: Label
@@ -79,10 +86,18 @@ func setup(result: Dictionary) -> void:
 	_kind = "invalid" if invalid else ("draw" if is_draw else ("victory" if won else "defeat"))
 	_enemy_id = String(result.get("enemy_id", ""))
 	_online = String(result.get("mode_id", "")) == "lonewolf" and result.get("local", false) != true and Game.is_player_id(_enemy_id)
+	_peer_id = _enemy_id
+	_peer_name = String(result.get("enemy", "THE OPPONENT"))
 	_team = result.get("team", false) == true
 	if _team:
-		_online = false                   # no REMATCH after a team match (PLAY AGAIN TOGETHER: next update)
+		_online = false                   # (the 1 vs 1's REMATCH; a team match's own: _team_again)
 		_team_online = result.get("online", Game.online or Game.team_match.get("online", false) == true) == true
+		var other := other_player(Game.team_match)
+		_team_again = _team_online and team_again_offered(result, Game.team_match)
+		if _team_again:
+			_peer_id = String(other.id)
+			_peer_name = String(other.name)
+			_again_team = {"size": int(Game.team_match.size), "coop": bool(Game.team_match.coop)}
 	_hide_match_hud()
 	_enemy = {} if _team else _enemy_row()
 	_build()
@@ -644,6 +659,12 @@ func _notification(what: int) -> void:
 ## gone (the other went back to the lobby) a tap sends the fresh challenge itself (the old guest
 ## first waits GUEST_GRACE_MS for the host's). A challenge from the old opponent that comes here is
 ## their rematch: REMATCH takes it. After a forfeit (they left the match) REMATCH is off.
+## DUO / SQUAD between two phones (_team_again) works the same way with the other phone's player:
+## PLAY AGAIN TOGETHER after a co-op match ("<NAME> WANTS TO PLAY AGAIN"), REMATCH after one against
+## them. The fresh invite is a team invite with the same size and coop (Cloud.team_invite, not
+## quick), and once both want it only the old host sends it (it runs the bots: the same roles and
+## sides); the tap also tells Cloud (Cloud.play_again) so that player's invite reaches this screen,
+## friend or not. The new match is the team match of the session it starts (_on_session).
 func _build_online() -> void:
 	_status = UI.outlined(UI.label("", 19, UI.TEXT, "bold"), 4)
 	_status.name = "RematchStatus"
@@ -655,16 +676,20 @@ func _build_online() -> void:
 	_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_status)
-	_rematch = UI.hero_button("REMATCH", 30, Vector2(0, 46))
-	_rematch.name = "Rematch"
-	_place(_rematch, 0.661, 0.819)
+	_rematch = UI.hero_button(_caption(), 22 if _coop_again() else 30, Vector2(0, 46))
+	_rematch.name = "PlayAgainTogether" if _coop_again() else "Rematch"
+	_place(_rematch, 0.56 if _coop_again() else 0.661, 0.819)      # (co-op: no ADD FRIEND, room for the longer word)
+	# Its Caption shows the state (_set_rematch); the button's own text stays for checks, never drawn.
+	_rematch.clip_text = true
+	for c: String in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color", "font_disabled_color"]:
+		_rematch.add_theme_color_override(c, Color.TRANSPARENT)
 	_rematch.pressed.connect(_on_rematch)
 	add_child(_rematch)
 	if bool(_result.get("opponent_left", false)):
-		_set_rematch("REMATCH", false)
+		_set_rematch(_caption(), false)
 		_say("%s LEFT: NO REMATCH" % _name(), UI.TEXT_DIM)
-	if not Game.is_friend(_enemy_id) and not Game.is_blocked(_enemy_id):
-		var asked := Game.cloud_service().friend_asked(_enemy_id)
+	if not _coop_again() and not Game.is_friend(_peer_id) and not Game.is_blocked(_peer_id):
+		var asked := Game.cloud_service().friend_asked(_peer_id)
 		_friend = UI.button("REQUEST SENT" if asked else "ADD FRIEND", 22, "dark" if asked else "light", Vector2(0, 46))
 		_friend.name = "AddFriend"
 		_friend.disabled = asked
@@ -687,9 +712,14 @@ func _build_online() -> void:
 			_on_they_want.call_deferred()
 
 
-## DUO / SQUAD between two phones: no PLAY AGAIN or REMATCH (LOBBY only); ADD FRIEND for the other
-## player of a match against them (in PLAY AGAIN's place) while the two are not friends.
+## DUO / SQUAD between two phones: PLAY AGAIN TOGETHER / REMATCH as the 1 vs 1's REMATCH
+## (_build_online) when the results offer it (_team_again). Otherwise (a forfeit, a player left) no
+## PLAY AGAIN: LOBBY, and ADD FRIEND for the other player of a match against them (in PLAY AGAIN's
+## place) while the two are not friends.
 func _build_team_online() -> void:
+	if _team_again:
+		_build_online()
+		return
 	if not Game.is_player_id(_enemy_id) or Game.is_friend(_enemy_id) or Game.is_blocked(_enemy_id):
 		return
 	_status = UI.outlined(UI.label("", 19, UI.TEXT, "bold"), 4)
@@ -711,6 +741,58 @@ func _build_team_online() -> void:
 	add_child(_friend)
 
 
+## The other phone's player in an online team match (`tm`: Game.team_match): {"id", "name"} of the
+## roster's human who is not this player, {} when there is none.
+static func other_player(tm: Dictionary) -> Dictionary:
+	var roster: Variant = tm.get("roster")
+	if not roster is Array or not bool(tm.get("online", false)):
+		return {}
+	for e: Variant in roster:
+		if e is Dictionary and not bool((e as Dictionary).get("bot", true)) and int((e as Dictionary).get("slot", -1)) != int(tm.get("my_slot", 0)) \
+				and Game.is_player_id((e as Dictionary).get("id")):
+			return {"id": String(e.id), "name": String((e as Dictionary).get("name", "PLAYER"))}
+	return {}
+
+
+## Whether an online team match's results offer PLAY AGAIN TOGETHER / REMATCH (`r`: the result, `tm`:
+## Game.team_match): only with the other phone's player known, never after a forfeit (they left:
+## result.opponent_left), once a player left (a row LEFT), or after a match that ended early or was
+## left (result.ended / left).
+static func team_again_offered(r: Dictionary, tm: Dictionary) -> bool:
+	if other_player(tm).is_empty() or bool(r.get("opponent_left", false)) or bool(r.get("ended", false)) or bool(r.get("left", false)) \
+			or bool(r.get("invalid", false)):
+		return false
+	var rows: Variant = r.get("rows")
+	if rows is Array:
+		for row: Variant in rows:
+			if row is Dictionary and String((row as Dictionary).get("status", "")) == "left":
+				return false
+	return true
+
+
+## PLAY AGAIN TOGETHER after a co-op team match between two phones, else REMATCH.
+func _caption() -> String:
+	return "PLAY AGAIN TOGETHER" if _coop_again() else "REMATCH"
+
+
+func _coop_again() -> bool:
+	return _team_again and bool(_again_team.get("coop", false))
+
+
+## The word in the status line: PLAY AGAIN (co-op) or REMATCH.
+func _word() -> String:
+	return "PLAY AGAIN" if _coop_again() else "REMATCH"
+
+
+## What starts or loads: THE NEXT MATCH (co-op) or THE REMATCH.
+func _what() -> String:
+	return "THE NEXT MATCH" if _coop_again() else "THE REMATCH"
+
+
+func _wants() -> String:
+	return "WANTS TO PLAY AGAIN" if _coop_again() else "WANTS A REMATCH"
+
+
 ## The arena behind (the current scene) when it offers the rematch's calls, else null.
 func _arena() -> Node:
 	var s := get_tree().current_scene if is_inside_tree() else null
@@ -718,13 +800,13 @@ func _arena() -> Node:
 
 
 func _name() -> String:
-	return String(_result.get("enemy", "THE OPPONENT")).to_upper()
+	return _peer_name.to_upper()
 
 
 ## Whether this phone's DUEL CHALLENGES FROM lets the opponent's challenge through.
 func _takes_challenges() -> bool:
 	var who := int(Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE))
-	return who == Game.CHALLENGES_EVERYONE or (who == Game.CHALLENGES_FRIENDS and Game.is_friend(_enemy_id))
+	return who == Game.CHALLENGES_EVERYONE or (who == Game.CHALLENGES_FRIENDS and Game.is_friend(_peer_id))
 
 
 func _say(text: String, col := UI.TEXT) -> void:
@@ -736,6 +818,7 @@ func _say(text: String, col := UI.TEXT) -> void:
 func _set_rematch(text: String, enabled: bool) -> void:
 	if _rematch:
 		_rematch.text = text
+		UI.set_caption(_rematch, text)
 		_rematch.disabled = not enabled
 		_rematch.modulate.a = 1.0 if enabled else 0.6
 
@@ -744,17 +827,19 @@ func _on_rematch() -> void:
 	if _starting or _rematch.disabled:
 		return
 	var cl := Game.cloud_service()
-	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _enemy_id:
+	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
 		_take_challenge()                # their fresh challenge is here already: this tap takes it
 		return
 	_want = true
+	if _team_again:
+		cl.play_again = {"id": _peer_id, "size": int(_again_team.size), "coop": bool(_again_team.coop)}
 	var a := _arena()
 	if a != null and bool(a.call("ask_rematch", _takes_challenges())):
 		if _they_want:
 			_agree()
 		else:
 			_set_rematch("ASKED", false)
-			_say("REMATCH ASKED: WAITING FOR %s" % _name())
+			_say("%s ASKED: WAITING FOR %s" % [_word(), _name()])
 		return
 	_challenge_now()                     # the match's session is gone
 
@@ -769,12 +854,13 @@ func _on_they_want() -> void:
 	if _want:
 		_agree()
 	elif not _starting:
-		_set_rematch("REMATCH", true)
-		_say("%s WANTS A REMATCH" % _name(), UI.ACCENT)
+		_set_rematch(_caption(), true)
+		_say("%s %s" % [_name(), _wants()], UI.ACCENT)
 
 
 ## Both want the rematch: out of the old session; the phone whose challenge the other takes sends
-## a fresh one a moment later, the other one waits for it (and takes it at once).
+## a fresh one a moment later, the other one waits for it (and takes it at once). A team match's
+## comes from the old host only (it runs the bots), so the old guest must take the host's.
 func _agree() -> void:
 	var a := _arena()
 	var i_take := _takes_challenges()
@@ -784,13 +870,17 @@ func _agree() -> void:
 	var guest_takes := _they_take if host else i_take
 	var host_takes := i_take if host else _they_take
 	var i_invite := guest_takes if host else (not guest_takes and host_takes)
+	if _team_again and not guest_takes:
+		_say("DUEL CHALLENGES FROM LEAVES THE HOST OUT: NO %s" % _word(), UI.BAD)
+		_set_rematch(_caption(), false)
+		return
 	if not guest_takes and not host_takes:
 		_say("DUEL CHALLENGES ARE OFF ON BOTH PHONES: NO REMATCH", UI.BAD)
 		_set_rematch("REMATCH", false)
 		return
 	_starting = true
 	_set_rematch("STARTING", false)
-	_say("STARTING THE REMATCH...", UI.ACCENT)
+	_say("STARTING %s..." % _what(), UI.ACCENT)
 	if a != null:
 		a.call("leave_session")
 	if i_invite:
@@ -798,7 +888,7 @@ func _agree() -> void:
 	else:
 		_await_ms = Time.get_ticks_msec() + AWAIT_MS
 		var cl := Game.cloud_service()
-		if cl.has_invite() and String(cl.invite_from().get("id", "")) == _enemy_id:
+		if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
 			_take_challenge()
 
 
@@ -807,7 +897,7 @@ func _agree() -> void:
 func _challenge_now() -> void:
 	_starting = true
 	_set_rematch("STARTING", false)
-	_say("SENDING %s A REMATCH CHALLENGE..." % _name())
+	_say(("INVITING %s AGAIN..." if _coop_again() else "SENDING %s A REMATCH CHALLENGE...") % _name())
 	var a := _arena()
 	if a != null:
 		a.call("leave_session")
@@ -817,17 +907,17 @@ func _challenge_now() -> void:
 
 func _send_challenge() -> void:
 	var cl := Game.cloud_service()
-	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _enemy_id:
+	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
 		_take_challenge()                # theirs came first: take it rather than cross it
 		return
-	if cl.waiting_for() != "" and String(cl.opponent.get("id", "")) == _enemy_id:
+	if cl.waiting_for() != "" and String(cl.opponent.get("id", "")) == _peer_id:
 		return                           # (already sent)
-	if not cl.peers.has(_enemy_id):
+	if not cl.peers.has(_peer_id):
 		_give_up("%s IS NOT ONLINE NOW" % _name())
-	elif not cl.invite(_enemy_id):
-		_give_up("COULD NOT SEND THE CHALLENGE: TAP REMATCH AGAIN")
+	elif not (cl.team_invite(_peer_id, int(_again_team.size), bool(_again_team.coop)) if _team_again else cl.invite(_peer_id)):
+		_give_up("COULD NOT SEND THE CHALLENGE: TAP %s AGAIN" % _caption())
 	else:
-		_say("REMATCH: WAITING FOR %s..." % _name(), UI.ACCENT)
+		_say("%s: WAITING FOR %s..." % [_word(), _name()], UI.ACCENT)
 
 
 ## Takes the old opponent's fresh challenge (out of the old session first: the new room is not
@@ -841,7 +931,7 @@ func _take_challenge() -> void:
 		a.call("leave_session")
 	Game.cloud_service().answer(true)
 	_set_rematch("STARTING", false)
-	_say("STARTING THE REMATCH...", UI.ACCENT)
+	_say("STARTING %s..." % _what(), UI.ACCENT)
 
 
 func _give_up(why: String) -> void:
@@ -849,17 +939,26 @@ func _give_up(why: String) -> void:
 	_want = false
 	_invite_ms = 0
 	_await_ms = 0
+	_forget_play_again()
 	_say(why, UI.BAD)
-	_set_rematch("REMATCH", true)
+	_set_rematch(_caption(), true)
+
+
+## Cloud stops showing that player's team invite here (Cloud.play_again: set by this screen's tap).
+func _forget_play_again() -> void:
+	if _team_again and Game.cloud != null and String(Game.cloud.play_again.get("id", "")) == _peer_id:
+		Game.cloud.play_again = {}
 
 
 ## A challenge came in here: the old opponent's is their rematch (taken at once when this player
-## wants one too); anyone else's is declined (no lobby to show it).
+## wants one too); anyone else's is declined (no lobby to show it). After a team match only that
+## player's team invite with the same size and coop is theirs.
 func _on_invited(_who: String) -> void:
 	var cl := Game.cloud_service()
 	if not cl.has_invite():
 		return                           # (answered already)
-	if String(cl.invite_from().get("id", "")) != _enemy_id or _loading:
+	var inv := cl.invite_from()
+	if String(inv.get("id", "")) != _peer_id or _loading or (_team_again and inv.get("team", {}) != _again_team):
 		cl.answer(false)
 		return
 	if _want or _starting:
@@ -867,19 +966,19 @@ func _on_invited(_who: String) -> void:
 	else:
 		_they_want = true
 		_set_rematch("ACCEPT", true)
-		_say("%s WANTS A REMATCH" % _name(), UI.ACCENT)
+		_say("%s %s" % [_name(), _wants()], UI.ACCENT)
 
 
 func _on_answered(accepted: bool, _who: String) -> void:
 	if not accepted and _starting and not _loading:
-		_give_up("%s DID NOT TAKE THE REMATCH" % _name())
+		_give_up("%s DID NOT TAKE %s" % [_name(), _what()])
 
 
 func _on_their_challenge_gone() -> void:
 	if _they_want and not _starting and not _loading:
 		_they_want = false
-		_set_rematch("REMATCH", true)
-		_say("%s CALLED THE REMATCH OFF" % _name(), UI.TEXT_DIM)
+		_set_rematch(_caption(), true)
+		_say("%s CALLED %s OFF" % [_name(), _what()], UI.TEXT_DIM)
 
 
 func _on_failed(_who: String) -> void:
@@ -887,21 +986,31 @@ func _on_failed(_who: String) -> void:
 		_give_up("COULD NOT REACH %s" % _name())
 
 
-## The rematch's session is up: its match loads (as an accepted challenge does in the lobby).
+## The rematch's session is up: its match loads (as an accepted challenge does in the lobby). After
+## a team match it is the team match of that session (LobbyFriends.session_team_match: the same two
+## humans, the old host hosting again), so team_arena_net loads.
 func _on_session(_host: bool) -> void:
 	if not _starting or _loading:
 		return
+	var cl := Game.cloud_service()
+	if _team_again:
+		var tm := LobbyFriends.session_team_match(cl) if cl.session_team == _again_team else {}
+		if tm.is_empty():
+			cl.end_session("left")         # (not the team asked for: nothing loads)
+			_give_up("COULD NOT START %s" % _what())
+			return
+		Game.team_match = tm
 	_loading = true
 	_invite_ms = 0
 	_await_ms = 0
-	var cl := Game.cloud_service()
+	_forget_play_again()
 	Game.online = true
 	Game.session = cl
 	Game.room_rules = cl.session_rules.duplicate()
 	_set_rematch("LOADING", false)
 	if _friend:
 		_friend.disabled = true
-	_say("LOADING THE REMATCH...", UI.ACCENT)
+	_say("LOADING %s..." % _what(), UI.ACCENT)
 	Loading.start_match(get_tree().current_scene)
 
 
@@ -930,16 +1039,19 @@ func _step_rematch() -> void:
 	if _await_ms > 0 and now >= _await_ms:
 		_await_ms = 0
 		if not _loading:
-			_give_up("NO CHALLENGE CAME FROM %s" % _name())
+			_give_up("NO CHALLENGE CAME FROM %s" % _name())    # (a team match's play-again stops here too)
 
 
 ## Leaving (LOBBY, back): the old opponent's challenge waiting here is declined (the lobby would not
-## show it).
+## show it), and Cloud no longer takes a team invite for this screen (Cloud.play_again).
 func _exit_tree() -> void:
-	if not _online or _loading or Game.cloud == null:
+	if not (_online or _team_again) or Game.cloud == null:
+		return
+	_forget_play_again()
+	if _loading:
 		return
 	var cl := Game.cloud_service()
-	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _enemy_id:
+	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
 		cl.answer(false)
 
 

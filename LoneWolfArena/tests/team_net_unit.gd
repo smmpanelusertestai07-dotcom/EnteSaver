@@ -196,9 +196,93 @@ func _team_invites() -> void:
 	me.seek_stop()
 	rival.cancel_invite(false)
 	_check(rival.session_team.is_empty(), "a duel challenge never carries a team")
+	_play_again(me, rival, shown)
 	me.free()
 	rival.free()
 	Game.profile.friends = {}
+
+
+## PLAY AGAIN TOGETHER / a team REMATCH (Cloud.play_again, set by the results screen's tap): a
+## stranger's team invite (not quick) is declined as before, and reaches the results (which take it
+## at once) only while this player wants another match with exactly that player, size and coop.
+## Every other check stays: DUEL CHALLENGES FROM, blocked players, busy.
+func _play_again(me: RecordingCloud, rival: RecordingCloud, shown: Array) -> void:
+	var rid := rival.my_id
+	Game.profile.friends = {}
+	Game.settings.challenges_from = Game.CHALLENGES_EVERYONE
+	rival.cancel_invite(false)
+	rival.sent.clear()
+	_check(rival.team_invite(me.my_id, 2, false), "a team REMATCH invite (not quick) goes out")
+	var again := rival.last()
+	rival.cancel_invite(false)
+	rival.sent.clear()
+	rival.team_invite(me.my_id, 2, true)
+	var together := rival.last()
+	rival.cancel_invite(false)
+	var take := func(_who: String) -> void: me.answer(true)
+	me.invited.connect(take)
+	_reset(me)
+	shown.clear()
+	me.play_again = {}
+	me._on_inbox(again)
+	_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "a stranger's team invite is declined while no play-again is wanted")
+	for c3: Array in [[{"id": rid, "size": 4, "coop": false}, "for SQUAD"], [{"id": rid, "size": 2, "coop": true}, "for co-op"],
+			[{"id": "c3".repeat(16), "size": 2, "coop": false}, "with another player"]]:
+		_reset(me)
+		shown.clear()
+		me.play_again = c3[0]
+		me._on_inbox(again)
+		_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "a play-again wanted %s does not let this invite in" % c3[1])
+	_reset(me)
+	shown.clear()
+	me.play_again = {"id": rid, "size": 2, "coop": false}
+	me._on_inbox(again)
+	_check(shown.size() == 1 and String(me.last().get("t", "")) == "acc" and me.session_team == {"size": 2, "coop": false} and not me.is_host,
+		"while a REMATCH with that player (DUO, against them) is wanted, their team invite is taken")
+	_reset(me)
+	shown.clear()
+	me.play_again = {"id": rid, "size": 2, "coop": true}
+	me._on_inbox(together)
+	_check(shown.size() == 1 and String(me.last().get("t", "")) == "acc" and me.session_team == {"size": 2, "coop": true},
+		"while PLAY AGAIN TOGETHER with that player is wanted, their co-op invite is taken (friend or not)")
+	# The checks before it still hold.
+	_reset(me)
+	shown.clear()
+	me.play_again = {"id": rid, "size": 2, "coop": false}
+	Game.settings.challenges_from = Game.CHALLENGES_NOBODY
+	me._on_inbox(again)
+	_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "with challenges from nobody, a wanted play-again invite is declined")
+	Game.settings.challenges_from = Game.CHALLENGES_FRIENDS
+	_reset(me)
+	me._on_inbox(again)
+	_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "with challenges from friends only, a stranger's play-again invite is declined")
+	Game.settings.challenges_from = Game.CHALLENGES_EVERYONE
+	_reset(me)
+	Game.profile.blocked = [{"id": rid, "name": "ACE"}]
+	me._on_inbox(again)
+	_check(shown.is_empty() and me.sent.is_empty() and not me.has_invite(), "a blocked player's play-again invite is ignored")
+	Game.profile.blocked = []
+	_reset(me)
+	me._incoming = {"id": "d4".repeat(16), "name": "OTHER", "room": "00", "mac": PackedByteArray([1]), "t": Time.get_ticks_msec()}
+	me._on_inbox(again)
+	_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "a play-again invite while busy is declined")
+	var unsigned := again.duplicate()
+	unsigned.erase("sig")
+	_reset(me)
+	me._on_inbox(unsigned)
+	_check(shown.is_empty() and me.sent.is_empty() and not me.has_invite(), "an unsigned play-again invite is ignored")
+	rival.sent.clear()
+	rival.team_invite(me.my_id, 2, false, true)
+	var quick := rival.last()
+	rival.cancel_invite(false)
+	_reset(me)
+	me._on_inbox(quick)
+	_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "a quick team challenge is not a play-again: declined outside a search")
+	me.play_again = {}
+	_reset(me)
+	me._on_inbox(again)
+	_check(shown.is_empty() and String(me.last().get("t", "")) == "dec", "once the results let go (play_again cleared) it is declined again")
+	me.invited.disconnect(take)
 
 
 func _reset(me: RecordingCloud) -> void:

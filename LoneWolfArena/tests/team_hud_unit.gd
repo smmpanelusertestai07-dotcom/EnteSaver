@@ -252,14 +252,53 @@ func _test_results() -> void:
 	_check(rs.find_child("Rematch", true, false) == null, "no REMATCH after a team match")
 	_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "offline: PLAY AGAIN and LOBBY")
 	rs.queue_free()
-	var on := _results(_team_result(true, "ab".repeat(16)))
-	_check(on.find_child("PlayAgain", true, false) == null and on.find_child("Rematch", true, false) == null and on.find_child("Lobby", true, false) != null,
-		"online: no PLAY AGAIN and no REMATCH, LOBBY")
+	# Between two phones (Game.team_match from TeamArena.link_match): the same two humans get another
+	# match, PLAY AGAIN TOGETHER after a co-op one, REMATCH after one against each other, in PLAY
+	# AGAIN's place under a status line; none after a forfeit or once a player left (LOBBY only).
+	var keep: Dictionary = Game.team_match
+	var me := {"id": "cd".repeat(16), "name": "ME", "bundle": "default"}
+	var them := {"id": "ab".repeat(16), "name": "ACE", "bundle": "default"}
+	Game.team_match = TeamArena.link_match(2, false, me, them, true, 7)
+	_check(ResultsScreen.other_player(Game.team_match) == {"id": them.id, "name": "ACE"}, "the other phone's player comes from the roster")
+	var on := _results(_team_result(true, String(them.id)))
+	_check(on.find_child("PlayAgain", true, false) == null and on.find_child("Rematch", true, false) != null and on.find_child("Lobby", true, false) != null
+		and on.find_child("RematchStatus", true, false) != null and on.find_child("PlayAgainTogether", true, false) == null,
+		"online against another player: REMATCH with its status line (no PLAY AGAIN), LOBBY")
 	_check(on.find_child("AddFriend", true, false) != null, "online against another player: ADD FRIEND for them")
-	on.queue_free()
+	_drop(on)
+	var left := _team_result(true, String(them.id))
+	left["opponent_left"] = true
+	var forfeit := _results(left)
+	_check(forfeit.find_child("Rematch", true, false) == null and forfeit.find_child("PlayAgainTogether", true, false) == null
+		and forfeit.find_child("AddFriend", true, false) != null and forfeit.find_child("Lobby", true, false) != null,
+		"after a forfeit: no REMATCH (LOBBY, ADD FRIEND)")
+	_drop(forfeit)
+	Game.team_match = TeamArena.link_match(2, true, me, them, true, 7)
 	var coop := _results(_team_result(true, ""))
 	_check(coop.find_child("AddFriend", true, false) == null, "co-op against bots: no ADD FRIEND")
-	coop.queue_free()
+	var together := coop.find_child("PlayAgainTogether", true, false) as Button
+	_check(together != null and (together.get_node("Caption") as Label).text == "PLAY AGAIN TOGETHER" and not together.disabled
+		and coop.find_child("Rematch", true, false) == null
+		and coop.find_child("PlayAgain", true, false) == null, "online co-op: PLAY AGAIN TOGETHER in PLAY AGAIN's place")
+	_drop(coop)
+	var gone := _team_result(true, "")
+	(gone.rows[1] as Dictionary)["status"] = "left"          # the teammate left (the host's bots played on)
+	var mate_left := _results(gone)
+	_check(mate_left.find_child("PlayAgainTogether", true, false) == null and mate_left.find_child("Lobby", true, false) != null,
+		"once a player left: no PLAY AGAIN TOGETHER")
+	_drop(mate_left)
+	Game.team_match = {}
+	var unknown := _results(_team_result(true, ""))
+	_check(unknown.find_child("PlayAgainTogether", true, false) == null and unknown.find_child("Rematch", true, false) == null,
+		"no other player known: no PLAY AGAIN TOGETHER")
+	_drop(unknown)
+	Game.team_match = keep
+
+
+## Takes a results screen out now (its _exit_tree runs; its Cloud connections go with it).
+func _drop(rs: ResultsScreen) -> void:
+	t.remove_child(rs)
+	rs.free()
 
 
 func _test_quit_warning() -> void:
