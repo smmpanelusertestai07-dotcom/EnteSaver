@@ -456,3 +456,15 @@ listed here. If a part needs something new from the core, add it in its own file
   `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`,
   a 56 px touch target around its plate, the name editor), `PlayerName`,
   `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.
+
+## DUO / SQUAD: lobby (WP-B1: SELECT MODE sizes, START routing, TEAM bar and invites, TeamMatch, records)
+- (WP-B1 writes its notes here)
+
+## DUO / SQUAD: match HUD and results (WP-B2: HudTeam, kill feed, minimap, scoreboard, results)
+- (WP-B2 writes its notes here)
+
+## DUO / SQUAD: gameplay (WP-C: team_arena, team_referee, fighter knock/revive, bots in teams)
+- (WP-C writes its notes here)
+
+## DUO / SQUAD: between two phones (WP-N: team_arena_net, Cloud team invites and seeks, RemoteFighter)
+- (WP-N writes its notes here)

@@ -186,6 +186,19 @@ func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_i
 		_kill_feed.pop_back()
 
 
+## DUO / SQUAD (TeamArena): a kill feed line with each side in its colour (the player's team blue,
+## the other orange); verb "KNOCKED", "REVIVED", "LEFT" or "" (ELIMINATED / HEADSHOT). Step-0 stub:
+## WP-B draws the colours.
+func add_team_feed(killer: String, _killer_ally: bool, victim: String, _victim_ally: bool, weapon_name: String,
+		weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
+	add_kill_feed(killer, victim, weapon_name, weapon_icon, headshot, mine, verb)
+
+
+## DUO / SQUAD: the player knocked an enemy down (a KNOCKED badge, calmer than a kill's). Step-0 stub.
+func knock_banner(_victim_name: String) -> void:
+	pass
+
+
 ## Big elimination feedback when the player takes someone out: a red X on them and the badge.
 func kill_banner(victim_name: String, headshot: bool) -> void:
 	_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot, "cause": ""}

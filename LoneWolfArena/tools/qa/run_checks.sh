@@ -112,6 +112,15 @@ if [ "${1:-}" != "quick" ]; then
     h=$!; LW_NET_ROLE=guest LW_SYNC_OUT="$0.guest" timeout 170 godot --headless --path . -- --autotest=script:res://tests/sync_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- as each saw it:"; cat "$0.host" "$0.guest"
     [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest"' "$LOGS/sync_host.txt"
+  # --- DUO / SQUAD: WP-B1's steps (team_lobby) go right below this line ---
+
+  # --- DUO / SQUAD: WP-B2's steps (none planned) go right below this line ---
+
+  # --- DUO / SQUAD: WP-C's steps (team_offline) go right below this line ---
+
+  # --- DUO / SQUAD: WP-N's steps (team_online: two copies, mock port 47820) go right below this line ---
+
+  # --- DUO / SQUAD: the integration's steps (team_invite_e2e, mock port 47822) go right below this line ---
 fi
 # A script error anywhere fails the run even when the check itself exited 0.
 if grep -l "SCRIPT ERROR" "$LOGS"/*.log >/dev/null 2>&1; then

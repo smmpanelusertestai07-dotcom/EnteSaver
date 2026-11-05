@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS := {
 	"vol_voice": 80,              # the other player's push-to-talk voice (NetVoice, bus "Voice")
 	"difficulty": 1,
 	"last_pick": "ar",
+	"team_size": 1,               # SOLO 1, DUO 2, SQUAD 4: the team size START plays (Game.team_size)
 	# ONLINE (SettingsPanel's tab, scripts/settings_online.gd)
 	"chat": true,                 # chat in an online match (NetChat)
 	"friend_chat": true,          # FRIENDS CHAT: true friends only, false off
@@ -90,7 +91,7 @@ const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
 	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "vol_sfx": [0, 100], "vol_music": [0, 100],
 	"difficulty": [0, 2], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
-	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY],
+	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY], "team_size": [1, 4],
 }
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "dynamic_joystick", "vibrate_footsteps", "vibrate_damage",
@@ -199,6 +200,31 @@ var lan: Lan
 ## [title, text] the lobby shows once when it opens again: why an online match was called off (the
 ## connection was lost, or the other player left before it began); [] = nothing to say.
 var match_notice: Array = []
+## DUO / SQUAD (PLAN_TEAMS). The team sizes START offers: 1 SOLO (the 1 vs 1), 2 DUO, 4 SQUAD.
+const TEAM_SIZES := [1, 2, 4]
+## The team size START plays, kept as the setting "team_size" (anything else is SOLO).
+var team_size: int:
+	get:
+		var n := int(settings.get("team_size", 1))
+		return n if n in TEAM_SIZES else 1
+	set(value):
+		settings["team_size"] = value if value in TEAM_SIZES else 1
+## The next arena run is a team match ({} = a 1 vs 1, scenes/arena.tscn): {"size": 2 | 4 (players a
+## team), "online": bool (two phones over Cloud's 1 vs 1 session: scenes/team_arena_net.tscn),
+## "coop": bool (online: both players on team 0 against bots), "mode_id": "duo" | "squad" | "training"
+## (what the profile counts it as), "my_slot": int, "host": bool, "roster": [{"slot", "id" ("" for a
+## bot), "name", "bundle", "team" (0 | 1), "bot": bool, "diff": 0..2 (a bot's level)}]}: built by
+## TeamArena.offline_match / TeamArena.link_match; TeamArena reads it. Cleared ({}) whenever a lobby
+## opens or a 1 vs 1 starts (WP-B1).
+var team_match := {}
+
+
+## The scene the next match runs in: a team match on this phone (team_arena) or between two phones
+## (team_arena_net), else the 1 vs 1 arena.
+func arena_scene() -> String:
+	if team_match.is_empty():
+		return "res://scenes/arena.tscn"
+	return "res://scenes/team_arena_net.tscn" if bool(team_match.get("online", false)) else "res://scenes/team_arena.tscn"
 
 
 ## The online service (made on first use; it outlives scene changes).
@@ -951,7 +977,7 @@ func goto_lobby() -> void:
 func goto_arena() -> void:
 	get_tree().paused = false
 	Engine.time_scale = 1.0
-	get_tree().change_scene_to_file("res://scenes/arena.tscn")
+	get_tree().change_scene_to_file(arena_scene())
 
 
 func goto_hud_editor() -> void:

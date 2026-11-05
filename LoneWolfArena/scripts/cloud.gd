@@ -203,6 +203,11 @@ var relay_states_out := 0      # states sent through the relay this session (tes
 var relay_states_in := 0       # states taken from the relay this session (tests)
 var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
 var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
+## DUO / SQUAD over this 1 vs 1 session (PLAN_TEAMS; WP-N fills these in): the team of the session a
+## team invite started ({"size": 2 | 4, "coop": bool}: coop = both players on one team against bots,
+## else each with bot teammates against the other), {} for a 1 vs 1; the team search's size (0: none).
+var session_team := {}
+var seek_team := 0
 
 
 func _ready() -> void:
@@ -807,6 +812,24 @@ func _on_inbox(d: Dictionary) -> void:
 				if state != join_state:
 					join_state = state
 					room_changed.emit()
+
+
+# ---------------------------------------------------------------- DUO / SQUAD (WP-N fills these in)
+
+## A team invite ("tinv", which builds before 1.4.0 ignore): a friend into this player's team against
+## bots (coop), or a team QUICK MATCH challenge (quick). False when it did not go out. Step-0 stub.
+func team_invite(_peer_id: String, _size: int, _coop: bool, _quick := false) -> bool:
+	return false
+
+
+## The team search: listens to ROOT/mm/t<size> instead of the 1 vs 1 seekers (send_seek then
+## publishes there). Step-0 stubs.
+func team_seek_start(_size: int) -> void:
+	pass
+
+
+func team_seek_stop() -> void:
+	pass
 
 
 # ---------------------------------------------------------------- QUICK MATCH (NetMatch)

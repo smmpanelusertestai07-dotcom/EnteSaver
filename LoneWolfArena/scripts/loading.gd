@@ -503,7 +503,7 @@ func _process_boot(delta: float) -> void:
 
 
 func _process_match(delta: float) -> void:
-	var path := "res://scenes/arena.tscn"
+	var path := Game.arena_scene()
 	var loaded := true
 	if _arena_scene == null and ResourceLoader.exists(path):
 		var st := ResourceLoader.load_threaded_get_status(path)

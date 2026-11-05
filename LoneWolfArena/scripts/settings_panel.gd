@@ -49,7 +49,7 @@ const TAB_KEYS := [
 const SCENE_KEYS := ["visual_effects"]
 ## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
 ## the pick) or the game's own bookkeeping.
-const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done"]
+const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size"]
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
 ## The joystick (setting dynamic_joystick: DYNAMIC true, FIXED false) and what each does.
 const JOYSTICK_NAMES := ["DYNAMIC", "FIXED"]

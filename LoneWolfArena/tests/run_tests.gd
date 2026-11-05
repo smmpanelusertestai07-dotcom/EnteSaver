@@ -8,6 +8,10 @@ const NetFeatureCheck := preload("res://tests/net_feature_check.gd")
 const LanUnitCheck := preload("res://tests/lan_unit_check.gd")
 const DirectCheck := preload("res://tests/direct_check.gd")
 const MatchUnitCheck := preload("res://tests/match_unit_check.gd")
+const TeamLobbyUnit := preload("res://tests/team_lobby_unit.gd")   # DUO / SQUAD: WP-B1 fills it
+const TeamHudUnit := preload("res://tests/team_hud_unit.gd")       # DUO / SQUAD: WP-B2 fills it
+const TeamRulesUnit := preload("res://tests/team_rules_unit.gd")   # DUO / SQUAD: WP-C fills it
+const TeamNetUnit := preload("res://tests/team_net_unit.gd")       # DUO / SQUAD: WP-N fills it
 
 var _fails := 0
 var _passes := 0
@@ -86,6 +90,10 @@ func _ready() -> void:
 	_test_move_speeds()
 	_test_lobby_ui_rules()
 	MatchUnitCheck.run(self)      # round cap, end-of-match numbers, out banner, challenge rows (tests/match_unit_check.gd)
+	TeamLobbyUnit.run(self)       # DUO / SQUAD lobby, START, TEAM invites, records (tests/team_lobby_unit.gd)
+	TeamHudUnit.run(self)         # DUO / SQUAD match HUD and results (tests/team_hud_unit.gd)
+	TeamRulesUnit.run(self)       # DUO / SQUAD rules: knocks, revives, rounds (tests/team_rules_unit.gd)
+	TeamNetUnit.run(self)         # DUO / SQUAD between two phones (tests/team_net_unit.gd)
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 

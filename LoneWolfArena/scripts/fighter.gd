@@ -10,6 +10,14 @@ signal hit_landed(target: Fighter, amount: float, headshot: bool, pos: Vector3, 
 signal fired(w: WeaponState)
 signal weapon_switched
 signal stance_changed(stance: int)
+## DUO / SQUAD (TeamArena, PLAN_TEAMS): a fighter whose HP runs out while a teammate still stands is
+## knocked down (on the floor, crawling at KNOCK_SPEED, no gun or items) with KNOCK_HP that runs out
+## over BLEED_S, until a teammate revives it (REVIVE_S next to it, within REVIVE_RANGE: back up with
+## REVIVE_HP) or it is finished. TeamReferee decides; team -1 (the 1 vs 1) never knocks.
+@warning_ignore("unused_signal")
+signal knocked_down(victim: Fighter, killer: Fighter, headshot: bool)
+@warning_ignore("unused_signal")
+signal revived(victim: Fighter, by: Fighter)
 
 enum Stance { STAND, CROUCH, PRONE }
 
@@ -50,6 +58,12 @@ const THROW_RELEASE := 0.43      # s from the throw input to the grenade leaving
 const START_MEDKITS := 2         # the items every round starts with
 const START_SHIELDS := 2
 const START_GRENADES := 1
+const KNOCK_HP := 100.0
+const BLEED_S := 30.0
+const KNOCK_SPEED := 0.8
+const REVIVE_S := 5.0
+const REVIVE_HP := 50.0
+const REVIVE_RANGE := 2.0
 
 var display_name := "PLAYER"
 var is_player := false
@@ -94,7 +108,8 @@ var want_jump := false
 var frozen := false
 var round_over := false        # the result is decided: no more shots or damage (a grenade in the air)
 var endless_hp := false        # practice: hits land and show their damage, HP never drops
-var stats := {"shots": 0, "hits": 0, "headshots": 0, "damage": 0.0, "kills": 0, "taken": 0.0, "healed": 0.0}
+var stats := {"shots": 0, "hits": 0, "headshots": 0, "damage": 0.0, "kills": 0, "taken": 0.0, "healed": 0.0,
+	"knocks": 0, "revives": 0}
 var model: CharacterModel
 var arena: Node
 var hitboxes: Array[Area3D] = []
@@ -107,6 +122,17 @@ var invulnerable := false
 var stance_lock := 0.0           # s until the stance change finishes (can't fire meanwhile)
 var hold_fire := false           # prep phase: may move, may not shoot or use items
 var last_hit_cause := ""         # the last damage's cause when not a gun ("frag": see take_damage)
+var team := -1                   # DUO / SQUAD: 0 or 1 (-1: no teams, the 1 vs 1)
+var slot := -1                   # DUO / SQUAD: the roster slot (Game.team_match)
+var knocked := false             # down on the floor, waiting for a revive (team modes only)
+var knock_hp := 0.0              # what is left of KNOCK_HP while knocked
+var knocked_by: Fighter          # who knocked it (the kill goes to them when nobody finishes it)
+var reviving: Fighter            # the knocked teammate this fighter is reviving (null: none)
+var revive_t := 0.0              # s of that revive done so far
+## Run on this phone in an online team match (the player; on the host also the bots): its hits on a
+## fighter the other phone runs (RemoteFighter) are sent there, and its shots, frags and walls go
+## through arena.net_shot_by / net_grenade_by / net_wall_by (TeamArena) instead of the 1 vs 1 calls.
+var net_local := false
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
@@ -383,6 +409,11 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	set_loadout(weapons[0].id if not weapons.is_empty() else Weapons.DEFAULT_PICK)
 	last_damage_time = -99.0
 	last_attacked_time = -99.0
+
+
+## On the same team (team modes only; never itself).
+func ally_of(other: Fighter) -> bool:
+	return team >= 0 and other != null and other != self and other.team == team
 
 
 func _now() -> float:
