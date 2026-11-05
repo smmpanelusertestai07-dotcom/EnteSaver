@@ -9,8 +9,17 @@ extends Node
 ##    open when the friend's key is not known yet. X and back go back to where it was opened.
 ##  - The CAREER block of another player's card (`career_block`): matches, wins, kills, K/D,
 ##    headshot rate and level from their card v3, or a line saying the player keeps it hidden.
+##  - Lobby notices (`toast`): a short line at the top (`LobbyToast` in the lobby's `NoticeLayer`,
+##    over the popups and the settings) for TOAST_S seconds; a tap opens what it is about
+##    (LobbyFriends: a friend's message opens that chat, a friend request the FRIENDS tab). The
+##    lobby only: a match shows chat in its own feed (HudNet).
+##  - The unread badge (`set_badge`, `UnreadBadge`) on the ONLINE 1 VS 1 menu row
+##    (NetChat.unread_total).
 
 const WINDOW_W := 760.0
+const TOAST_S := 4.0
+const TOAST_W := 660.0
+const TOAST_H := 64.0
 const LIST_H := 300.0
 const REASONS := {"OFFLINE": "YOU ARE OFFLINE: TRY AGAIN WHEN CONNECTED", "OFF": "FRIENDS CHAT IS OFF (SETTINGS, ONLINE)",
 	"NOT A FRIEND": "ONLY FRIENDS CAN CHAT", "EMPTY": "TYPE A MESSAGE FIRST", "WAIT": "ONE MESSAGE A SECOND",
@@ -161,7 +170,8 @@ func _scroll_to_end() -> void:
 
 func _bubble(mine: bool, text: String, ts: int) -> Control:
 	var row := HBoxContainer.new()
-	row.name = "ChatMine" if mine else "ChatTheirs"
+	# numbered: a name repeated among siblings would be replaced by an automatic one
+	row.name = ("ChatMine_%d" if mine else "ChatTheirs_%d") % _list.get_child_count()
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var p := PanelContainer.new()
@@ -212,6 +222,85 @@ func go_back() -> void:
 		lobby.profile_ui.open_player(id, back_to.substr(5))
 	else:
 		lobby.dialogs.close_modal()
+
+
+# ---------------------------------------------------------------- lobby notices
+
+## A notice at the top of the lobby: an icon, `text` (cut with "..." when too long) and a small
+## `caption` on the right; it slides in, stays TOAST_S seconds and fades. A tap closes it and
+## runs on_tap. A newer notice takes its place.
+static func toast(owner_lobby: Lobby, text: String, caption: String, on_tap: Callable, icon_name := "v_player") -> Button:
+	var layer := owner_lobby.get_node_or_null(^"NoticeLayer") as CanvasLayer
+	if layer == null:
+		layer = CanvasLayer.new()
+		layer.name = "NoticeLayer"
+		layer.layer = 20                 # over the lobby's ui (popups, settings); the match loading is 100
+		owner_lobby.add_child(layer)
+	for c in layer.get_children():
+		layer.remove_child(c)
+		c.queue_free()
+	var b := Button.new()
+	b.name = "LobbyToast"
+	b.focus_mode = Control.FOCUS_NONE
+	var st := UI.chamfer(Color(0.05, 0.05, 0.045, 0.94), 12, 2, Color(UI.ACCENT, 0.9), 14.0, ["tl", "br"])
+	for k in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(k, st)
+	b.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	b.offset_left = -TOAST_W * 0.5
+	b.offset_right = TOAST_W * 0.5
+	b.offset_top = -TOAST_H - 8.0
+	b.offset_bottom = -8.0
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 12)
+	UI.full_rect(row)
+	row.offset_left = 20
+	row.offset_right = -18
+	b.add_child(row)
+	var icon := UI.icon(icon_name, 28.0, UI.ACCENT)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(icon)
+	var l := UI.ellipsis(UI.label(text, 20, UI.TEXT, "semi"))
+	l.name = "ToastText"
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(l)
+	var cap := UI.label(caption, 14, UI.ACCENT, "bold")
+	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(cap)
+	layer.add_child(b)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		b.queue_free()
+		on_tap.call())
+	var tw := b.create_tween()
+	tw.tween_property(b, "offset_top", 10.0, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(b, "offset_bottom", 10.0 + TOAST_H, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(TOAST_S)
+	tw.tween_property(b, "modulate:a", 0.0, 0.3)
+	tw.tween_callback(b.queue_free)
+	return b
+
+
+## The unread count on a lobby menu row (ONLINE 1 VS 1): a small red badge on its icon's corner,
+## hidden at 0.
+static func set_badge(row: Control, n: int) -> void:
+	var badge := row.get_node_or_null(^"UnreadBadge") as Label
+	if badge == null:
+		badge = UI.label("", 14, UI.TEXT, "heavy")
+		badge.name = "UnreadBadge"
+		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		var st := UI.box(UI.BAD, 12, 2, Color(0, 0, 0, 0.55), 0.0)
+		st.content_margin_left = 5
+		st.content_margin_right = 5
+		badge.add_theme_stylebox_override("normal", st)
+		badge.custom_minimum_size = Vector2(24, 24)
+		badge.position = Vector2(40, 1)
+		row.add_child(badge)
+	badge.visible = n > 0
+	badge.text = "9+" if n > 9 else str(n)
 
 
 # ---------------------------------------------------------------- another player's CAREER

@@ -167,6 +167,32 @@ static func unread(id: String) -> int:
 	return int(_store[id].unread) if _store.has(id) else 0
 
 
+## The unread messages from friends (not blocked) in all: the lobby's ONLINE 1 VS 1 badge. 0 while
+## FRIENDS CHAT is off.
+static func unread_total() -> int:
+	_load()
+	if not bool(Game.settings.get("friend_chat", true)):
+		return 0
+	var n := 0
+	for id: String in _store:
+		if Game.is_friend(id) and not Game.is_blocked(id):
+			n += int(_store[id].unread)
+	return n
+
+
+## A message's first words for a short notice: the whole text when it fits in max_len characters,
+## else the words that fit (a word cut in two is left out when a space comes after half of it)
+## and "...".
+static func first_words(text: String, max_len := 34) -> String:
+	if text.length() <= max_len:
+		return text
+	var cut := text.substr(0, max_len)
+	var sp := cut.rfind(" ")
+	if text[max_len] != " " and sp >= max_len * 0.5:
+		cut = cut.substr(0, sp)
+	return cut.strip_edges() + "..."
+
+
 ## What all the unread counts are, in one string (a list redraws when it changes).
 static func unread_key() -> String:
 	_load()

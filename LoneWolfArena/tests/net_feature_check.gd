@@ -4,9 +4,19 @@ extends RefCounted
 ## numbers, repeats skipped, NetSmoother drawing it in the past and bridging gaps), chat (NetChat's
 ## text rules, the match line's rate and settings, a friend's message sealed, opened, tampered and
 ## replayed, only from friends), card v3 (the career summary signed, hidden, malformed, older
-## builds' check still passing), the voice codec (NetVoice) and the ONLINE settings tab.
+## builds' check still passing), the voice codec (NetVoice), the ONLINE settings tab, who can reach
+## you (DUEL CHALLENGES FROM, FRIEND REQUESTS: settings and Cloud), the lobby's notice helpers and
+## the SOUND tab's volumes (VOICE CHAT on its own bus, every slider heard at once).
 
 var t: Node
+
+
+## A Cloud that keeps what it would publish ([topic, payload, retain]) instead of sending it.
+class RecordingCloud extends Cloud:
+	var sent := []
+
+	func _publish(topic: String, payload: PackedByteArray, retain := false) -> void:
+		sent.append([topic, payload, retain])
 
 
 static func run(runner: Node) -> void:
@@ -26,6 +36,9 @@ static func run(runner: Node) -> void:
 	me._card_v3()
 	me._voice()
 	me._settings()
+	me._reach()
+	me._notices()
+	me._volumes()
 	NetChat.reset_for_test()
 	Game.profile = saved_profile
 	Game.settings = saved_settings
@@ -359,8 +372,8 @@ func _voice() -> void:
 
 
 func _settings() -> void:
-	_check(SettingsPanel.TABS[4] == "ONLINE" and SettingsPanel.TAB_KEYS[4] == ["chat", "friend_chat", "show_career", "voice_chat"],
-		"the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat")
+	_check(SettingsPanel.TABS[4] == "ONLINE" and SettingsPanel.TAB_KEYS[4] == ["chat", "friend_chat", "show_career", "voice_chat",
+		"challenges_from", "friend_requests"], "the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat, challenges, requests")
 	_check(Game.DEFAULT_SETTINGS.chat == true and Game.DEFAULT_SETTINGS.friend_chat == true and Game.DEFAULT_SETTINGS.show_career == true
 		and Game.DEFAULT_SETTINGS.voice_chat == false, "chat and the public career on by default, voice off until asked for")
 	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
@@ -370,6 +383,158 @@ func _settings() -> void:
 	var panel := SettingsPanel.new()
 	t.add_child(panel)
 	panel._show_tab(4)
-	_check(["Toggle_chat", "Toggle_friend_chat", "Toggle_show_career", "Toggle_voice_chat"].all(func(n: String) -> bool:
-		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its four settings")
+	_check(["Toggle_chat", "Toggle_friend_chat", "Toggle_show_career", "Toggle_voice_chat", "Toggle_challenges_from",
+		"Toggle_friend_requests"].all(func(n: String) -> bool:
+		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its six settings")
+	var duel := panel.find_child("Toggle_challenges_from", true, false)
+	(duel.get_child(2) as Button).pressed.emit()
+	_check(Game.settings.challenges_from == Game.CHALLENGES_NOBODY, "DUEL CHALLENGES FROM's third choice is NOBODY")
+	Game.settings.challenges_from = Game.CHALLENGES_EVERYONE
 	panel.free()
+
+
+## DUEL CHALLENGES FROM and FRIEND REQUESTS: their defaults, their checks on load, and Cloud
+## declining or ignoring what they leave out (never shown here).
+func _reach() -> void:
+	var d := Game.DEFAULT_SETTINGS
+	_check(d.challenges_from == Game.CHALLENGES_EVERYONE and d.friend_requests == true and d.vol_voice == 80,
+		"challenges from everyone, friend requests on and the voice at 80 by default")
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game._apply_saved_settings({"challenges_from": 7, "friend_requests": "off", "vol_voice": 250})
+	_check(Game.settings.challenges_from == Game.CHALLENGES_NOBODY and Game.settings.friend_requests == true
+		and Game.settings.vol_voice == 100, "a choice or volume past its range is clamped, a request switch not true or false is ON")
+	Game._apply_saved_settings({"challenges_from": -3, "vol_voice": -5, "friend_requests": false})
+	_check(Game.settings.challenges_from == Game.CHALLENGES_EVERYONE and Game.settings.vol_voice == 0 and Game.settings.friend_requests == false,
+		"a negative choice is EVERYONE, a negative volume 0, OFF is kept")
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game._apply_saved_settings({"challenges_from": "NOBODY"})
+	_check(Game.settings.challenges_from == Game.CHALLENGES_EVERYONE, "a choice saved as text is dropped")
+	# Challenges: shown, or declined at once (the challenger hears "dec", nothing pops up here).
+	var me := RecordingCloud.new()
+	var key := Crypto.new().generate_rsa(2048)
+	me._use_key(key)
+	var ka := Crypto.new().generate_rsa(2048)
+	var pa := ka.save_to_string(true)
+	var friend := pa.sha256_text().left(32)
+	var stranger := "b2".repeat(16)
+	var rival := RecordingCloud.new()           # the friend's phone: its challenge (Cloud.invite) is signed
+	rival._use_key(ka)
+	rival._connected = true
+	rival.peers[me.my_id] = {"name": "ME", "bundle": "default", "pk": key.save_to_string(true), "seen": 0}
+	_check(rival.invite(me.my_id) and rival.sent.size() == 1, "a challenge goes out")
+	var signed: Variant = JSON.parse_string((rival.sent[0][1] as PackedByteArray).get_string_from_utf8()) if rival.sent.size() == 1 else {}
+	_check(signed is Dictionary and me.invite_proven(signed, friend) and not me.invite_proven(signed, stranger),
+		"a challenge is signed with its sender's key, for its sender's id")
+	rival.free()
+	var pub := _pub(key.save_to_string(true))
+	var made_up := func(from: String) -> Dictionary:
+		return {"t": "inv", "from": from, "name": "RIVAL", "sec": Marshalls.raw_to_base64(Crypto.new().encrypt(pub, Crypto.new().generate_random_bytes(80)))}
+	var shown := []
+	me.invited.connect(func(who: String) -> void: shown.append(who))
+	Game.profile.friends = {friend: {"name": "ACE"}}
+	Game.profile.blocked = []
+	for c: Array in [[Game.CHALLENGES_EVERYONE, stranger, made_up.call(stranger), true, "a stranger's"],
+			[Game.CHALLENGES_FRIENDS, stranger, made_up.call(stranger), false, "a stranger's"],
+			[Game.CHALLENGES_FRIENDS, friend, signed, true, "a friend's"],
+			[Game.CHALLENGES_FRIENDS, friend, made_up.call(friend), false, "an unsigned one in a friend's name"],
+			[Game.CHALLENGES_NOBODY, friend, signed, false, "a friend's"]]:
+		Game.settings.challenges_from = c[0]
+		me._inbox_budget = 8.0
+		me._incoming = {}
+		me.sent.clear()
+		shown.clear()
+		me._on_inbox(c[2])
+		var said_no := false
+		if me.sent.size() == 1 and String(me.sent[0][0]).ends_with("/u/" + String(c[1])):
+			var answer: Variant = JSON.parse_string((me.sent[0][1] as PackedByteArray).get_string_from_utf8())
+			said_no = answer is Dictionary and String((answer as Dictionary).get("t", "")) == "dec"
+		_check(shown.size() == (1 if c[3] else 0) and me.has_invite() == c[3] and said_no != c[3],
+			"challenges from %s: %s challenge is %s" % [SettingsOnline.CHALLENGE_CHOICES[c[0]], c[4],
+			"shown" if c[3] else "declined at once, never shown"])
+	Game.settings.challenges_from = Game.CHALLENGES_EVERYONE
+	Game.profile.friends = {}
+	# Friend requests, straight and waiting on the relay: ignored while FRIEND REQUESTS is off.
+	var changed := [0]
+	me.friends_changed.connect(func() -> void: changed[0] += 1)
+	Game.profile.friend_in = {}
+	var pk := "A NEW PLAYER'S KEY"
+	var asker := pk.sha256_text().left(32)
+	Game.settings.friend_requests = false
+	me._inbox_budget = 8.0
+	me.sent.clear()
+	me._on_inbox({"t": "frq", "from": asker, "name": "NEWBIE", "pk": pk})
+	_check(me.friend_requests.is_empty() and changed[0] == 0 and me.sent.is_empty(), "with FRIEND REQUESTS off a request is ignored, unanswered")
+	var ida := friend                           # (not a friend any more: a request from them is listed)
+	var now := int(Time.get_unix_time_from_system())
+	var waiting := {"t": "frq", "from": ida, "to": me.my_id, "name": "WAITER", "pk": pa, "ts": now,
+		"sig": Cloud._sign_with(ka, Cloud.waiting_text("frq", ida, me.my_id, now))}
+	me._on_waiting(true, ida, waiting)
+	_check(me.friend_requests.is_empty() and changed[0] == 0 and me.sent.size() == 1 and (me.sent[0][1] as PackedByteArray).is_empty()
+		and bool(me.sent[0][2]), "and one waiting on the relay is deleted there unread")
+	Game.settings.friend_requests = true
+	me._inbox_budget = 8.0
+	me._on_inbox({"t": "frq", "from": asker, "name": "NEWBIE", "pk": pk})
+	me._on_waiting(true, ida, waiting)
+	_check(me.friend_requests.has(asker) and me.friend_requests.has(ida) and changed[0] == 2, "with it on both are listed")
+	Game.profile.friend_in = {}
+	me.free()
+
+
+## The lobby's notices: the unread badge's count and a message's first words.
+func _notices() -> void:
+	NetChat.reset_for_test()
+	var a := "c3".repeat(16)
+	var b := "d4".repeat(16)
+	var stranger := "e5".repeat(16)
+	var now := int(Time.get_unix_time_from_system())
+	Game.profile.friends = {a: {"name": "ACE"}, b: {"name": "BOLT"}}
+	Game.profile.blocked = []
+	Game.settings.friend_chat = true
+	NetChat.add(a, now, false, "ONE")
+	NetChat.add(a, now + 1, false, "TWO")
+	NetChat.add(a, now + 2, true, "MINE")
+	NetChat.add(b, now, false, "HI")
+	NetChat.add(stranger, now, false, "NOT A FRIEND")
+	_check(NetChat.unread_total() == 3, "the ONLINE 1 VS 1 badge counts the friends' unread messages")
+	Game.profile.blocked = [{"id": b, "name": "", "t": 0}]
+	_check(NetChat.unread_total() == 2, "not a blocked player's")
+	Game.settings.friend_chat = false
+	_check(NetChat.unread_total() == 0, "and none while FRIENDS CHAT is off")
+	Game.settings.friend_chat = true
+	NetChat.mark_read(a)
+	_check(NetChat.unread_total() == 0, "read, they leave the badge")
+	Game.profile.blocked = []
+	_check(NetChat.first_words("SEE YOU AT 9") == "SEE YOU AT 9"
+		and NetChat.first_words("SEE YOU AT 9? BRING THE SNIPER AND THE SHOTGUN TOO") == "SEE YOU AT 9? BRING THE SNIPER AND..."
+		and NetChat.first_words("SEE YOU AT 9? BRING THE SNIPERRIFLE") == "SEE YOU AT 9? BRING THE..."
+		and NetChat.first_words("X".repeat(60)) == "X".repeat(34) + "...", "a notice shows a message's first words")
+	NetChat.reset_for_test()
+
+
+## SOUND: VOICE CHAT plays the other player's voice on its own bus; every slider is heard at once.
+func _volumes() -> void:
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	var panel := SettingsPanel.new()
+	t.add_child(panel)
+	panel._show_tab(3)
+	var sliders := panel.find_children("*", "HSlider", true, false)
+	_check(SettingsPanel.TAB_KEYS[3] == ["vol_master", "vol_sfx", "vol_music", "vol_voice"] and sliders.size() == 4
+		and panel.find_child("Stepper_vol_voice", true, false) != null, "the SOUND tab: master, effects, music and voice chat")
+	if sliders.size() == 4:
+		(sliders[1] as HSlider).value = 30
+		(sliders[2] as HSlider).value = 20
+		(sliders[3] as HSlider).value = 0
+	var db := func(bus: String) -> float: return AudioServer.get_bus_volume_db(AudioServer.get_bus_index(bus))
+	_check(Game.settings.vol_sfx == 30 and absf(float(db.call("SFX")) - linear_to_db(0.3)) < 0.01
+		and Game.settings.vol_music == 20 and absf(float(db.call("Music")) - linear_to_db(0.2)) < 0.01,
+		"moving EFFECTS or MUSIC sets its bus at once, while the panel is open")
+	_check(Game.settings.vol_voice == 0 and AudioServer.is_bus_mute(AudioServer.get_bus_index("Voice")), "VOICE CHAT at 0 mutes the voice")
+	panel.free()
+	var voice := NetVoice.new()
+	t.add_child(voice)
+	var out_bus := AudioServer.get_bus_index(NetVoice.OUT_BUS)
+	_check(voice._out.bus == NetVoice.OUT_BUS and out_bus >= 0 and AudioServer.get_bus_send(out_bus) == &"Master",
+		"the other phone's voice plays on the Voice bus")
+	voice.free()
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game.apply_settings()

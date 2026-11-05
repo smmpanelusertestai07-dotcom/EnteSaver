@@ -9,8 +9,8 @@ extends Node
 ## through matches too) every phone announces {id, name, outfit, RSA-2048 public key} every 3 s
 ## and lists the others; the id is a hash of the key, so nobody can announce someone else's id
 ## with their own key. DUEL 1 VS 1 sends that phone (topic ROOT/u/<id>)
-## a fresh room name, AES-256 key and HMAC key encrypted with its public key; the answers carry an
-## HMAC only the holders of those keys can make. In the room (ROOT/r/<room>) every message is
+## a fresh room name, AES-256 key and HMAC key encrypted with its public key, signed with the
+## sender's key (invite_text); the answers carry an HMAC only the holders of those keys can make. In the room (ROOT/r/<room>) every message is
 ## AES-256-CBC with a random IV plus an HMAC-SHA256 over it, and carries the sender's id and a
 ## counter (replays are dropped). The inviter hosts. State goes out 20 times a second (a state
 ## that did not change only twice, then every STATE_IDLE_MS) with the sender's clock, so the other
@@ -21,6 +21,9 @@ extends Node
 ## While a phone loads the match it sends a keep-alive, so a slow load is not taken for leaving.
 ## Anyone can publish to a public broker, so invites are rate limited and the list is capped. The
 ## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere.
+## Each player decides who reaches them (the ONLINE settings): DUEL CHALLENGES FROM everyone,
+## friends only or nobody (challenge_allowed: the others are declined at once, unseen) and FRIEND
+## REQUESTS on or off (requests_allowed: off, they are ignored).
 ##
 ## Player cards (topic ROOT/p/<id>, kept by the broker as a RETAINED message): every phone that
 ## has gone online leaves {id, name, outfit, public key, last-seen time} signed with its own key,
@@ -688,8 +691,10 @@ func _on_inbox(d: Dictionary) -> void:
 					_room_tag(_join.key, "inv", from).to_utf8_buffer(), String(d.rc).to_utf8_buffer()):
 				answer(true, rules_from(d.get("rules")))
 				return
-			if invited.get_connections().is_empty():
-				answer(false)            # in a match (no lobby listening): say no at once, not after 25 s
+			if invited.get_connections().is_empty() or not challenge_allowed(from, d):
+				# In a match (no lobby listening), or DUEL CHALLENGES FROM leaves this player out:
+				# a polite no at once (not after 25 s), never shown here.
+				answer(false)
 				return
 			invited.emit(String(_incoming.name))
 		"can":
@@ -715,7 +720,8 @@ func _on_inbox(d: Dictionary) -> void:
 			var asker := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 			if Game.is_friend(from):
 				_publish_json(ROOT + "/u/" + from, {"t": "fra", "from": my_id, "name": String(Game.profile.name)})
-			elif not Game.is_blocked(from) and not friend_requests.has(from) and friend_requests.size() < Game.MAX_REQUESTS:
+			elif not Game.is_blocked(from) and requests_allowed() and not friend_requests.has(from) \
+					and friend_requests.size() < Game.MAX_REQUESTS:
 				friend_requests[from] = {"name": asker if asker != "" else "PLAYER", "t": int(Time.get_unix_time_from_system())}
 				Game.save_profile()
 				friends_changed.emit()
@@ -761,8 +767,9 @@ func invite(peer_id: String, extra := {}) -> bool:
 	is_host = true
 	session_rules = {}
 	_enter_room(_outgoing)
-	var msg := {"t": "inv", "from": my_id, "name": String(Game.profile.name),
-		"bundle": String(Game.profile.bundle), "sec": Marshalls.raw_to_base64(wrapped)}
+	var sec_text := Marshalls.raw_to_base64(wrapped)
+	var msg := {"t": "inv", "from": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle),
+		"sec": sec_text, "pk": _pk_pem, "sig": _sign(invite_text(my_id, peer_id, sec_text))}
 	msg.merge(extra)
 	_publish_json(ROOT + "/u/" + peer_id, msg)
 	return true
@@ -776,6 +783,41 @@ func cancel_invite(tell := true) -> void:
 	_outgoing = {}
 	if not in_session:
 		_leave_room()
+
+
+## DUEL CHALLENGES FROM (setting challenges_from): may this challenge (`d`, from `from`) be shown?
+## Everyone, friends only or nobody; the rest are declined at once (the challenger reads
+## DECLINED), so a player who wants quiet is never interrupted. FRIENDS ONLY takes a friend's
+## challenge only when it proves its sender (invite_proven), so nobody gets through by writing a
+## friend's id. A challenge from the custom room this phone asked to join is not one of these: it
+## starts the match it asked for.
+func challenge_allowed(from: String, d: Dictionary) -> bool:
+	var who_may := int(Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE))
+	if who_may == Game.CHALLENGES_EVERYONE:
+		return true
+	return who_may == Game.CHALLENGES_FRIENDS and Game.is_friend(from) and invite_proven(d, from)
+
+
+## What a challenge signs: who sends it, to whom, and the wrapped room keys.
+static func invite_text(from: String, to: String, sec: String) -> String:
+	return "inv|%s|%s|%s" % [from, to, sec]
+
+
+## A challenge signed by its sender's key, whose hash is the id it claims (builds before this one
+## sign none: they reach a player whose challenges are open to everyone).
+func invite_proven(d: Dictionary, from: String) -> bool:
+	for k in ["pk", "sig", "sec"]:
+		if typeof(d.get(k)) != TYPE_STRING:
+			return false
+	return String(d.pk).length() <= 1200 and from == String(d.pk).sha256_text().left(32) \
+		and verify_signed(String(d.pk), invite_text(from, my_id, String(d.sec)), String(d.sig))
+
+
+## FRIEND REQUESTS (setting friend_requests): off, a request (straight or waiting on the relay) is
+## ignored: not listed, not answered, its waiting copy deleted. A friend's own request still gets
+## its yes again; the requests already listed stay to be answered.
+static func requests_allowed() -> bool:
+	return bool(Game.settings.get("friend_requests", true))
 
 
 func has_invite() -> bool:
@@ -1205,8 +1247,8 @@ func _on_waiting(is_request: bool, from: String, d: Dictionary) -> void:
 		if Game.is_friend(from):
 			_publish(topic, PackedByteArray(), true)
 			_publish_waiting("fra", from)            # already friends: answer yes again
-		elif Game.is_blocked(from):
-			_publish(topic, PackedByteArray(), true)
+		elif Game.is_blocked(from) or not requests_allowed():
+			_publish(topic, PackedByteArray(), true)     # ignored: deleted unanswered, never shown
 		elif not friend_requests.has(from) and friend_requests.size() < Game.MAX_REQUESTS:
 			friend_requests[from] = {"name": who if who != "" else "PLAYER", "t": ts}
 			Game.save_profile()

@@ -15,8 +15,9 @@ extends Control
 ##  - CONTROLS: dynamic joystick, aim precision, the left fire button (OFF / ALWAYS / WHEN AIMING),
 ##    hold fire to scope, the quick RELOAD and SWITCH buttons, the reload ring, crosshair colour and
 ##    size (with a live preview), custom HUD;
-##  - SOUND: master, effects, music;
-##  - ONLINE: chat, friends chat, SHOW MY CAREER, voice chat (scripts/settings_online.gd).
+##  - SOUND: master, effects, music, voice chat (the other player's voice), all applied at once;
+##  - ONLINE: chat, friends chat, SHOW MY CAREER, voice chat, who may challenge you and friend
+##    requests (scripts/settings_online.gd).
 ## Questions (RESET, EXTREME) open over the panel as node "Confirm" (buttons "ConfirmOk" and
 ## "ConfirmCancel"); back closes them first.
 ## _show_tab(i) takes the index in TABS (the screenshot walkthrough opens 2 = CONTROLS).
@@ -34,8 +35,8 @@ const TAB_KEYS := [
 	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook", "sens_fire"],
 	["dynamic_joystick", "run_mode", "aim_precision", "left_fire", "hold_fire_scope", "reload_button", "switch_button",
 		"freelook_button", "reload_on_crosshair", "crosshair_color", "crosshair_size"],
-	["vol_master", "vol_sfx", "vol_music"],
-	["chat", "friend_chat", "show_career", "voice_chat"],
+	["vol_master", "vol_sfx", "vol_music", "vol_voice"],
+	["chat", "friend_chat", "show_career", "voice_chat", "challenges_from", "friend_requests"],
 ]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
 const SCENE_KEYS := ["visual_effects"]
@@ -603,7 +604,10 @@ func _build_sound() -> void:
 	_body.add_child(UI.plate_row("Master", UI.stepper(Game.settings.vol_master, 0, 100, func(v: float) -> void: _apply("vol_master", int(v)), 5.0)))
 	_body.add_child(UI.plate_row("Effects", UI.stepper(Game.settings.vol_sfx, 0, 100, func(v: float) -> void: _apply("vol_sfx", int(v)), 5.0)))
 	_body.add_child(UI.plate_row("Music", UI.stepper(Game.settings.vol_music, 0, 100, func(v: float) -> void: _apply("vol_music", int(v)), 5.0)))
-	_hint.text = "0 mutes a channel."
+	var voice := UI.stepper(Game.settings.vol_voice, 0, 100, func(v: float) -> void: _apply("vol_voice", int(v)), 5.0)
+	voice.name = "Stepper_vol_voice"
+	_body.add_child(UI.plate_row("Voice chat", voice, "Your opponent's voice in an online match (push to talk)"))
+	_hint.text = "0 mutes a channel. Changes are heard at once."
 
 
 func _toggle(key: String) -> Control:

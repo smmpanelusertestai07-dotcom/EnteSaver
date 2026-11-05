@@ -1,11 +1,17 @@
 class_name SettingsOnline
 extends RefCounted
-## SettingsPanel's ONLINE tab (its TAB_KEYS row: chat, friend_chat, show_career, voice_chat):
+## SettingsPanel's ONLINE tab (its TAB_KEYS row: chat, friend_chat, show_career, voice_chat,
+## challenges_from, friend_requests):
 ##  - CHAT IN MATCHES ON / OFF (NetChat: quick messages and text with the opponent);
 ##  - FRIENDS CHAT FRIENDS ONLY / OFF (NetChat: messages from friends; blocked players never);
 ##  - SHOW MY CAREER ON / OFF (the player card's career summary, Cloud card v3);
 ##  - VOICE CHAT OFF / ON (NetVoice, experimental, push to talk). Turning it on asks Android for the
-##    microphone (RECORD_AUDIO) at that moment; refused, it stays off and says so.
+##    microphone (RECORD_AUDIO) at that moment; refused, it stays off and says so;
+##  - DUEL CHALLENGES FROM EVERYONE / FRIENDS ONLY / NOBODY (Cloud.challenge_allowed: the others are
+##    declined at once and never shown) and FRIEND REQUESTS ON / OFF (Cloud.requests_allowed: off,
+##    they are ignored and never shown).
+
+const CHALLENGE_CHOICES := ["EVERYONE", "FRIENDS ONLY", "NOBODY"]     # by Game.CHALLENGES_* value
 
 
 static func build(panel: SettingsPanel) -> void:
@@ -20,6 +26,13 @@ static func build(panel: SettingsPanel) -> void:
 	body.add_child(UI.section("PROFILE"))
 	body.add_child(UI.plate_row("Show my career", panel._toggle("show_career"),
 		"Other players see your matches, wins, kills, K/D and headshot rate on your player card"))
+	body.add_child(UI.section("WHO CAN REACH YOU"))
+	var duel := UI.segmented(CHALLENGE_CHOICES, int(Game.settings.challenges_from),
+		func(v: int) -> void: panel._apply("challenges_from", v), 16, 128.0)
+	duel.name = "Toggle_challenges_from"
+	body.add_child(UI.plate_row("Duel challenges from", duel, "Anyone else is declined at once; nothing pops up for you"))
+	body.add_child(UI.plate_row("Friend requests", panel._toggle("friend_requests"),
+		"Off: new friend requests are ignored and never shown"))
 	body.add_child(UI.section("VOICE (EXPERIMENTAL)"))
 	var note := UI.label("", 16, UI.ACCENT, "semi")
 	note.name = "VoiceNote"
