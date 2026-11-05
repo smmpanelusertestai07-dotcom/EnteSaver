@@ -191,10 +191,11 @@ func run(at: Node) -> int:
 	await _tap(at, prone_c)
 	await at.wait(0.6)
 	_check(p.stance == Fighter.Stance.STAND, "a second tap on PRONE stands up", at)
-	# Settings gear opens the pause menu (closed again right away).
+	# The gear opens the in-match settings (closed again right away).
 	await _tap(at, HudLayout.center(hud.layout.settings, vs))
 	await at.wait(0.3)
-	_check(at.get_tree().paused, "settings button opens the pause menu", at)
+	var menu := (arena.get("pause_layer") as Node).find_child("PauseMenu", false, false)
+	_check(at.get_tree().paused and menu != null and menu.get("settings") is SettingsPanel, "the gear opens the in-match settings", at)
 	for n in (arena.get("pause_layer") as Node).get_children():
 		n.queue_free()
 	at.get_tree().paused = false

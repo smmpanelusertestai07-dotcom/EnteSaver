@@ -1,32 +1,34 @@
 class_name PauseMenu
 extends Control
-## In-match pause menu (offline the tree is paused while it is open; online it is an overlay: the
-## match runs on, its chips (score, time left, HP) stay live, the fighter just takes no input, and
-## the menu closes itself when the round or the match ends), in the reference system-dialog
-## look: a full-width dark band across the middle (0.30 .. 0.70 H) with PAUSED and a yellow
-## underline, the match state (the arena's mode_name, map, FIRST TO n, score, time left, HP) on
-## the left and RESUME (yellow),
-## SETTINGS (grey) and QUIT MATCH (asks once more) on the right. The match HUD is hidden while
-## it is open (its weapon-pick panel would show through). Emits `closed` when it goes away.
+## The in-match menu behind the HUD's gear (and Android back), the reference's way: the settings
+## open straight away (`SettingsPanel`, in_match) with QUIT MATCH at the foot of their tab column
+## (it asks once more) and EDIT CUSTOM HUD in CONTROLS opening the editor over the match
+## (scripts/hud_editor_overlay.gd: SAVE applies it to this match). The settings' X (or back) closes
+## the menu and the match goes on. A TRAINING GROUND match is paused while it is open (the arena
+## pauses the tree); online the match runs on underneath (the other phone plays on): the fighter
+## takes no input (the HUD is hidden, and a hidden HUD ignores touches) and the end of a round or
+## of the match closes the menu, the HUD editor with it. Emits `closed` when it goes away.
 ##
 ## Android back: the arena opens this menu while it handles NOTIFICATION_WM_GO_BACK_REQUEST, and
 ## the engine then delivers that same notification to the new menu (it walks the tree parent
-## first, children added on the way included). The menu therefore ignores a back request in the
-## frame it was opened; the next back closes it (or the settings panel on top of it).
+## first, children added on the way included). The settings are therefore added at the end of that
+## frame, and the menu ignores a back request in the frame it was opened; the next back goes to
+## the settings (a question or the editor over them first), whose closing closes the menu.
 
 signal closed
 
 const QUIT_CONFIRM_S := 6.0     # real seconds the second tap may take (a slow phone, a slow touch)
+const HudEditorOverlay := preload("res://scripts/hud_editor_overlay.gd")
 
+var settings: SettingsPanel     # the settings shown (null once they closed)
 var _quit: Button
 var _quit_armed := 0.0
-var _vals := {}                 # chip caption -> its value Label (kept live online)
 var _was_over := false          # online: the round was already over when last looked at
-var _band: Control
 var _opened_frame := -1
 var _hud: CanvasItem
 var _hud_was_visible := false
 var _closing := false
+var _editor: Control            # the HUD editor over the match, while open
 
 
 func _ready() -> void:
@@ -36,126 +38,55 @@ func _ready() -> void:
 	UI.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_hide_match_hud()
+	var arena := get_tree().current_scene
+	_was_over = arena != null and arena.get("phase") == 3          # opened between rounds
 	var shade := ColorRect.new()
 	shade.color = Color(0, 0, 0, 0.5)
 	UI.full_rect(shade)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(shade)
-	_band = Control.new()
-	_band.name = "Band"
-	_band.anchor_left = 0.0
-	_band.anchor_right = 1.0
-	_band.anchor_top = 0.30
-	_band.anchor_bottom = 0.70
-	_band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_band.draw.connect(func() -> void: UI.draw_dialog_band(_band, _band.size))
-	add_child(_band)
-	var margin := MarginContainer.new()
-	UI.full_rect(margin)
-	margin.add_theme_constant_override("margin_left", 64)
-	margin.add_theme_constant_override("margin_right", 48)
-	margin.add_theme_constant_override("margin_top", 22)
-	margin.add_theme_constant_override("margin_bottom", 20)
-	_band.add_child(margin)
-	UI.keep_clear_of_cutout(margin)            # the band spans the screen, its content not a camera cutout
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 40)
-	margin.add_child(h)
-	# Left: title + match state.
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation", 4)
-	info.alignment = BoxContainer.ALIGNMENT_CENTER
-	h.add_child(info)
-	var title := UI.shadowed(UI.label("PAUSED", 50, UI.TEXT, "bold"))     # dialog titles are upright
-	info.add_child(title)
-	var bar := ColorRect.new()
-	bar.color = UI.ACCENT
-	bar.custom_minimum_size = Vector2(64, 4)
-	bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	info.add_child(bar)
-	info.add_child(UI.spacer(4))
-	# The match: mode (TRAINING GROUND / LONE WOLF), map and format, then the state chips. Against
-	# the target dummy there is no score and the clock counts up.
-	var arena := get_tree().current_scene
-	var dummy: bool = arena != null and arena.get("practice") == true
-	_was_over = arena != null and arena.get("phase") == 3          # opened between rounds
-	var mode_row := HBoxContainer.new()
-	mode_row.add_theme_constant_override("separation", 12)
-	var mode_name: Variant = arena.get("mode_name") if arena else null
-	mode_row.add_child(UI.label(String(mode_name) if mode_name != null else Game.mode_name(), 24, UI.AMBER, "heavy"))
-	var map_name := String(arena.get("map_name")) if arena and arena.get("map_name") != null else "CARGO CAGE"
-	mode_row.add_child(UI.label(map_name, 24, UI.TEXT, "heavy"))
-	var goal: Variant = arena.get("rounds_to_win") if arena else null
-	var format := "TARGET DUMMY" if dummy else ("FIRST TO %d" % int(goal) if goal != null else "")
-	if format != "":
-		var f := UI.label("·  " + format, 20, UI.TEXT_DIM, "bold")
-		f.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		mode_row.add_child(f)
-	info.add_child(mode_row)
-	var chips := HBoxContainer.new()
-	chips.add_theme_constant_override("separation", 10)
-	info.add_child(chips)
-	if arena and arena.get("score") is Dictionary and not dummy:
-		var sc: Dictionary = arena.get("score")
-		chips.add_child(_chip("SCORE", "%d : %d" % [int(sc.get("player", 0)), int(sc.get("bot", 0))]))
-	if arena and arena.get("time_left") != null:
-		var t := maxf(float(arena.get("time_left")), 0.0)
-		chips.add_child(_chip("TIME" if dummy else "TIME LEFT", "%d:%02d" % [int(t) / 60, int(t) % 60]))
-	var p: Variant = arena.get("player") if arena else null
-	if p is Node and (p as Node).get("hp") != null:
-		chips.add_child(_chip("HP", str(roundi(float((p as Node).get("hp"))))))
-	# Right: actions.
-	var acts := VBoxContainer.new()
-	acts.add_theme_constant_override("separation", 10)
-	acts.alignment = BoxContainer.ALIGNMENT_CENTER
-	acts.custom_minimum_size = Vector2(320, 0)
-	h.add_child(acts)
-	var resume := UI.button("RESUME", 24, "primary", Vector2(320, 56))
-	resume.name = "Resume"
-	resume.pressed.connect(_close)
-	acts.add_child(resume)
-	var settings := UI.button("SETTINGS", 22, "light", Vector2(320, UI.TOUCH_MIN))
+	_open_settings.call_deferred()
+
+
+## The settings with QUIT MATCH in their tab column, right above RESET (a child of the panel: a
+## later sibling would count as something opened over it, which takes the back).
+func _open_settings() -> void:
+	if _closing or not is_inside_tree():
+		return
+	settings = SettingsPanel.new()
 	settings.name = "Settings"
-	settings.pressed.connect(_open_settings)
-	acts.add_child(settings)
-	_quit = UI.button("QUIT MATCH", 20, "dark", Vector2(320, UI.TOUCH_MIN))
+	settings.in_match = true
+	settings.edit_hud = _open_hud_editor
+	settings.closed.connect(func() -> void:
+		settings = null              # (it saved itself)
+		_close())
+	add_child(settings)
+	_quit = UI.button("QUIT MATCH", 19, "dark", Vector2(SettingsPanel.MENU_W - 48.0, UI.TOUCH_MIN))
 	_quit.name = "Quit"
 	_quit.add_theme_color_override("font_color", Color(1.0, 0.55, 0.5))
 	_quit.add_theme_color_override("font_hover_color", Color(1.0, 0.65, 0.6))
+	_quit.add_theme_color_override("font_pressed_color", Color(1.0, 0.65, 0.6))
+	_quit.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	_quit.offset_left = 24.0
+	_quit.offset_right = SettingsPanel.MENU_W - 24.0
+	_quit.offset_top = -80.0 - UI.TOUCH_MIN
+	_quit.offset_bottom = -80.0
 	_quit.pressed.connect(_on_quit)
-	acts.add_child(_quit)
-	modulate.a = 0.0
-	create_tween().tween_property(self, "modulate:a", 1.0, 0.15)
+	settings.add_child(_quit)
+	_quit_text("QUIT MATCH")
 
 
-func _chip(cap: String, value: String) -> PanelContainer:
-	var p := PanelContainer.new()
-	var st := UI.chamfer(Color(1, 1, 1, 0.06), 8, 1, Color(1, 1, 1, 0.14), 14.0, ["br"])
-	st.content_margin_top = 3
-	st.content_margin_bottom = 3
-	p.add_theme_stylebox_override("panel", st)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 10)
-	var c := UI.label(cap, 15, UI.TEXT_DIM, "bold")
-	c.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	h.add_child(c)
-	var v := UI.label(value, 24, UI.TEXT, "number")
-	h.add_child(v)
-	_vals[cap] = v
-	p.add_child(h)
-	return p
-
-
-## The settings panel on top, without the HUD editor shortcut (leaving for the editor would
-## abandon the match).
-func _open_settings() -> void:
-	for c in get_children():
-		if c is SettingsPanel:
-			return
-	var sp := SettingsPanel.new()
-	sp.in_match = true
-	add_child(sp)
+## EDIT CUSTOM HUD in a match: the editor over it (back or BACK closes it again, to the settings).
+func _open_hud_editor() -> void:
+	if _closing or (_editor != null and is_instance_valid(_editor)):
+		return
+	var ed := HudEditorOverlay.new()
+	ed.closed.connect(func() -> void:
+		_editor = null
+		if _hud and is_instance_valid(_hud) and _hud.has_method("reload_layout"):
+			_hud.call("reload_layout"))         # a layout SAVEd there counts in this match at once
+	_editor = ed
+	add_child(ed)
 
 
 func _hide_match_hud() -> void:
@@ -178,43 +109,52 @@ func _on_quit() -> void:
 		var arena := get_tree().current_scene
 		if arena and arena.has_method("record_left"):
 			arena.call("record_left")        # a counted match goes into HISTORY as LEFT, a defeat
+		if settings != null:
+			Game.save_settings()             # (the panel saves only when it closes itself)
 		get_tree().paused = false
 		Game.goto_lobby()
 		return
 	_quit_armed = Time.get_ticks_msec() + QUIT_CONFIRM_S * 1000.0
-	_quit.text = "TAP AGAIN TO QUIT"
+	if _quit:
+		_quit_text("TAP AGAIN TO QUIT")
+
+
+## QUIT MATCH's caption, its font made smaller until it fits the tab column.
+func _quit_text(text: String) -> void:
+	_quit.text = text
+	var font := _quit.get_theme_font("font")
+	var room := SettingsPanel.MENU_W - 48.0 - 28.0
+	var fs := 19
+	while fs > 13 and font != null and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > room:
+		fs -= 1
+	_quit.add_theme_font_size_override("font_size", fs)
 
 
 func _process(_delta: float) -> void:
 	if _quit_armed > 0.0 and Time.get_ticks_msec() >= _quit_armed:     # (real time: not the slow motion)
 		_quit_armed = 0.0
-		_quit.text = "QUIT MATCH"
+		if _quit:
+			_quit_text("QUIT MATCH")
 	var arena := get_tree().current_scene
 	if arena == null or arena.get("online") != true or _closing:
 		return
-	# Online the match goes on: the chips follow it, and the end of a round or of the match closes
-	# the menu (the round result and the results screen are never drawn under it).
+	# Online the match goes on: the end of a round or of the match closes the menu (the round
+	# result and the results screen are never drawn under it).
 	var phase := int(arena.get("phase"))
 	var over := phase == 2 or phase == 3
 	if (over and not _was_over) or phase == 2:
 		_close()
 		return
 	_was_over = over
-	var sc: Variant = arena.get("score")
-	if sc is Dictionary and _vals.has("SCORE"):
-		(_vals.SCORE as Label).text = "%d : %d" % [int((sc as Dictionary).get("player", 0)), int((sc as Dictionary).get("bot", 0))]
-	if _vals.has("TIME LEFT"):
-		var t := maxf(float(arena.get("time_left")), 0.0)
-		(_vals["TIME LEFT"] as Label).text = "%d:%02d" % [int(t) / 60, int(t) % 60]
-	var p: Variant = arena.get("player")
-	if p is Node and _vals.has("HP"):
-		(_vals.HP as Label).text = str(roundi(float((p as Node).get("hp"))))
 
 
+## Closes the menu (the settings' X or back, or the arena: the end of an online round, the results).
 func _close() -> void:
 	if _closing:
 		return
 	_closing = true
+	if settings != null and is_instance_valid(settings):
+		Game.save_settings()                 # closed from outside: the panel did not save itself
 	_restore_match_hud()
 	closed.emit()
 	queue_free()
@@ -228,7 +168,6 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST and is_inside_tree() and not _closing:
 		if Engine.get_process_frames() == _opened_frame:
 			return              # the back request that opened this menu
-		for c in get_children():
-			if c is SettingsPanel:
-				return          # the settings panel closes itself first
+		if settings != null and is_instance_valid(settings):
+			return              # the settings take it (and close the menu with them)
 		_close()

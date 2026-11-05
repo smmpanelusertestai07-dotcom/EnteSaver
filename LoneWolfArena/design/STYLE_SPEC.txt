@@ -70,7 +70,7 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 | Crouch | right, below 0.922, 0.834, anchor r | 0.166 | crouching-figure silhouette |
 | Prone | under the weapon panel, left of SCOPE 0.762, 0.385, anchor r | 0.104 | lying-figure silhouette |
 | Reload | up and left of FIRE 0.73, 0.52, anchor r | 0.10 | magazine glyph with a turning arrow; grey on a full magazine, without reserve or with the fists out; gold progress ring while reloading |
-| Switch | left of the weapon panel's small slots 0.712, 0.235, anchor r | 0.10 | the other slot's glyph (fist, or the gun with the fists out) between two chasing arrows; gun <-> fists |
+| Switch | beside RELOAD on its left (the reference's quick switch), 0.672, 0.52, anchor r | 0.10 | the other slot's glyph (fist, or the gun with the fists out) between two chasing arrows; gun <-> fists |
 | Grenade | bottom 0.678, 0.912, anchor c | 0.13 | grenade silhouette + count |
 | Settings / pause | top-right corner 0.9865, 0.035, anchor r, beside the weapon panel's corner | 0.046 (touch radius >= 0.036 h, a tap counts to 1.15 x it) | small gear on a soft dark disk, drawn over the panel's corner and winning a touch there |
 | Scoreboard | (no button) | - | a tap on the score bar opens it |
@@ -139,5 +139,7 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   custom HUD), SENSITIVITY 1-200
   (general, red dot, 2x scope, sniper scope, free look, fire-button drag; presets STANDARD /
   FAST), SOUND; per-tab RESET that asks first. Everything else is fixed at its best value.
-- Pause: full-width dark band, PAUSED, the mode / map / FIRST TO n line, score / time left / HP
-  chips (the target dummy: time and HP), RESUME, SETTINGS, QUIT MATCH (asks again).
+- In-match menu (the gear, Android back): the settings at once, as the reference's gear opens
+  them in a match, with QUIT MATCH (red text on a dark plate, asks again) at the foot of the tab
+  column above RESET and EDIT CUSTOM HUD opening the editor over the match; X resumes. TRAINING
+  GROUND pauses under it, online the match runs on.

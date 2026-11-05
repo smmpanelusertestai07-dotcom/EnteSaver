@@ -96,8 +96,11 @@ func run(autotest: Node) -> int:
 	var pm := arena.find_child("PauseMenu", true, false)
 	if pm == null:
 		return _done("no pause menu")
-	pm.call("_on_quit")                    # TAP AGAIN TO QUIT
-	pm.call("_on_quit")
+	var quit := pm.find_child("Quit", true, false) as Button
+	if quit == null:
+		return _done("the in-match settings have no QUIT MATCH")
+	quit.pressed.emit()                    # QUIT MATCH, then TAP AGAIN TO QUIT
+	quit.pressed.emit()
 	t = 0.0
 	while (get_tree().current_scene == arena or get_tree().current_scene == null or get_tree().current_scene.name != "Lobby") and t < 20.0:
 		await at.wait(0.25)

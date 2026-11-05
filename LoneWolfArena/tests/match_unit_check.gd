@@ -5,7 +5,8 @@ extends RefCounted
 ## - the end-of-match numbers ("fin") another phone sends are checked field by field;
 ## - an opponent who went down by itself (zone, fall, own frag) gets the out banner, never the
 ##   kill's ELIMINATED badge;
-## - in the ONLINE lists only the row of the player a challenge waits for reads CANCEL.
+## - in the ONLINE lists only the row of the player a challenge waits for reads CANCEL;
+## - SWITCH sits beside RELOAD on every screen, and a layout saved at its old place moves it.
 
 const ArenaCode := preload("res://scripts/arena.gd")     # (the arena script has no class name)
 
@@ -19,6 +20,7 @@ static func run(runner: Node) -> void:
 	me._final_numbers()
 	me._out_banner()
 	me._challenge_rows()
+	me._switch_place()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -73,6 +75,27 @@ func _out_banner() -> void:
 		and not HUD.OUT_LINES.has("gun") and not String(HUD.OUT_LINES.zone).contains("ELIMINATED"),
 		"a zone death shows its own line (not ELIMINATED); a kill shows the badge; leaving shows neither")
 	hud.free()
+
+
+## SWITCH sits right beside RELOAD (its left, the same height), left of and above FIRE, on every
+## screen from 16:10 to 22:9; a layout saved with SWITCH at its old default place takes the new one
+## (its size and opacity stay the player's), one moved by the player stays where they put it.
+func _switch_place() -> void:
+	var def := HudLayout.resolve({})
+	var bad := PackedStringArray()
+	for vs: Vector2 in [Vector2(1280, 800), Vector2(1280, 720), Vector2(1440, 720), Vector2(1560, 720), Vector2(1600, 720), Vector2(1760, 720)]:
+		var sw := HudLayout.center(def.swap, vs)
+		var rl := HudLayout.center(def.reload, vs)
+		var fr := HudLayout.center(def.fire_r, vs)
+		var gap := rl.x - sw.x
+		if absf(sw.y - rl.y) > 1.0 or gap <= 0.0 or gap > 0.16 * vs.y or sw.x >= fr.x or sw.y >= fr.y:
+			bad.append(str(vs))
+	_check(bad.is_empty(), "SWITCH sits beside RELOAD, left of and above FIRE %s" % bad)
+	var old := HudLayout.resolve({"swap": {"x": 0.712, "y": 0.235, "s": 0.12, "o": 0.6, "a": "r"}})
+	var mine := HudLayout.resolve({"swap": {"x": 0.5, "y": 0.3, "a": "c"}})
+	_check(is_equal_approx(old.swap.x, HudLayout.DEFAULTS.swap.x) and is_equal_approx(old.swap.y, HudLayout.DEFAULTS.swap.y)
+		and is_equal_approx(old.swap.s, 0.12) and is_equal_approx(old.swap.o, 0.6) and is_equal_approx(mine.swap.x, 0.5) and mine.swap.a == "c",
+		"a saved SWITCH at its old place moves beside RELOAD (keeping size and opacity); one the player moved stays")
 
 
 func _challenge_rows() -> void:

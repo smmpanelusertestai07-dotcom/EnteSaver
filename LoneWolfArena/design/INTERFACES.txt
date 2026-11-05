@@ -77,7 +77,7 @@ listed here. If a part needs something new from the core, add it in its own file
   the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
   Its buttons take their touches before the HUD (a child's _input runs first).
 
-## HUD layout (scripts/hud_layout.gd, version 3)
+## HUD layout (scripts/hud_layout.gd, version 5)
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
   screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
   "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
@@ -85,7 +85,8 @@ listed here. If a part needs something new from the core, add it in its own file
   left of SCOPE: the reference's place beside the score bar is under the panel below 18:9); no
   two default touch areas overlap from 16:10 to 22:9 but the gear's on the panel's corner.
   RELOAD (`reload`, up and left of FIRE; grey on a full magazine, without reserve or with the fists
-  out) and SWITCH (`swap`, left of the panel's small slots: gun <-> fists, showing the other one).
+  out) and SWITCH (`swap`, right beside RELOAD on its left, the reference's place: gun <-> fists,
+  showing the other one; a layout saved with it at its old place under the panel takes the new).
   `HUD.button_enabled(id)`: the settings left_fire (2 = OFF), reload_button, switch_button and
   freelook_button turn those buttons off in a match; the editor still places them (label "OFF").
 - `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
@@ -202,14 +203,19 @@ listed here. If a part needs something new from the core, add it in its own file
   both do, `Arena.hosted()`), which the other screen takes (`Cloud.invited` there: the old
   opponent's challenge is the rematch, anyone else's is declined); `session_started` loads the
   match. With the session gone a tap sends the fresh challenge itself. Off after a forfeit.
-- `PauseMenu.new()` (Control, works while paused): signal `closed`. Hides `arena.hud` while open
-  (restored on close and exit). It ignores a back request in the frame it opens (the engine hands
-  the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with
-  `in_match = true`. `Arena.open_pause()` opens one at most (online the tree is not paused, so
-  an open menu is what blocks a second one). Online it is an overlay: the match runs on (its
-  SCORE / TIME LEFT / HP chips stay live), and the end of a round or of the match closes it
-  (`Arena.close_pause()`, also before the results). QUIT MATCH's second tap may come up to
-  `PauseMenu.QUIT_CONFIRM_S` real seconds later.
+- `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
+  Android back, signal `closed`. It is the settings at once (`settings`, a `SettingsPanel` with
+  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH, asks once
+  more: its second tap may come up to `PauseMenu.QUIT_CONFIRM_S` real seconds later) at the foot of
+  their tab column, and `edit_hud` set: EDIT CUSTOM HUD opens `HudEditor` (scripts/
+  hud_editor_overlay.gd: the lobby's editor, BACK or back closes it to the settings; SAVE reloads
+  the match HUD's layout) over the match. The settings' X or back closes the menu (saved; also
+  when the arena closes it). Hides `arena.hud` while open (restored on close and exit; a hidden HUD
+  ignores touches). It ignores a back request in the frame it opens (the engine hands the request
+  that opened it to it as well). `Arena.open_pause()` opens one at most and pauses a TRAINING
+  GROUND match while it is open; online the tree is not paused (an open menu is what blocks a
+  second one): the match runs on, and the end of a round or of the match closes it
+  (`Arena.close_pause()`, also before the results).
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
@@ -218,8 +224,9 @@ listed here. If a part needs something new from the core, add it in its own file
   pipeline caches, old logs and the saves' leftover .tmp / older .bak, never a save or the
   identity key; the row's note then says what was freed) ask first in a `Confirm` layer
   (`ConfirmOk`, `ConfirmCancel`; back closes it). With
-  `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
-  note (`EditHudNote`): leaving for the editor would abandon the match. A finger drag that starts
+  `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD (`EditHud`)
+  calls `edit_hud` (a Callable the in-match menu sets: the editor over the match); without one it
+  is a note (`EditHudNote`): the lobby's editor would abandon the match. A finger drag that starts
   on a row scrolls a tab (its sliders keep their own drags). `covered()`: a visible Control was
   put on top of it (a lobby popup that came in meanwhile), which then takes Android back.
 - Touch targets are `UI.TOUCH_MIN` (56 canvas px) at least: buttons, the settings' segmented

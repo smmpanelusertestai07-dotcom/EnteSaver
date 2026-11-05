@@ -358,8 +358,8 @@ func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fi
 # ---------------------------------------------------------------- touch input
 
 func _input(event: InputEvent) -> void:
-	if editor_mode or player == null:
-		return
+	if editor_mode or player == null or not is_visible_in_tree():
+		return              # (hidden under the in-match menu or the results: online the tree runs on)
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
 		if t.pressed:

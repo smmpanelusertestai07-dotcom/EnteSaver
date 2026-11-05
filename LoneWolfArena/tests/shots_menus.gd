@@ -7,9 +7,9 @@ extends Node
 ## long name ends in "..."), the player card (opens PROFILE), how to play (MODES on top), the
 ## wardrobe (card tap, every outfit listed), every settings tab (tab taps, HIGH graphics, EXTREME's
 ## question, the FAST / STANDARD sensitivity presets, RESET's question), credits, the quit dialog, the match card of an online match, START ->
-## match loading overlay (TRAINING GROUND) -> arena, the pause menu
-## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
-## shortcut), results screens (win, defeat, draw, invalid, online) with the opponent's row in an
+## match loading overlay (TRAINING GROUND) -> arena, the in-match settings (opened by Android
+## back and by the HUD gear: QUIT MATCH in them, EDIT CUSTOM HUD opens the editor over the
+## match), results screens (win, defeat, draw, invalid, online) with the opponent's row in an
 ## empty scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
 ## Android back is sent the way the engine delivers it (_back(): the node, then its children
 ## by index, children added during the walk included), so a menu opened by a back request also
@@ -262,49 +262,56 @@ func run(at: Node) -> int:
 	_check(arena != null, "START enters the arena")
 	if arena:
 		await at.wait(1.0)
-		# Android back opens the pause menu (and the same request must not close it again).
+		# Android back opens the in-match menu: the settings straight away (and the same request
+		# must not close them again), QUIT MATCH in their tab column, the match paused.
 		_back()
 		await _settle(0.5)
 		var pm := arena.find_child("PauseMenu", true, false)
-		_check(pm != null and get_tree().paused, "back in a match opens the pause menu and keeps it open")
+		var psp: Node = pm.get("settings") if pm else null
+		_check(pm != null and get_tree().paused and psp is SettingsPanel, "back in a match opens the settings at once and keeps them open")
 		var hud := arena.get("hud") as CanvasItem
-		_check(hud != null and not hud.visible, "the match HUD is hidden under the pause menu")
-		_check(pm != null and _find_label(pm, "TRAINING GROUND") != null and _find_label(pm, "LONE WOLF") == null
-			and _texts(pm).contains("FIRST TO %d" % int(arena.get("rounds_to_win"))), "the pause menu names the match's mode and format")
+		_check(hud != null and not hud.visible, "the match HUD is hidden under the in-match settings")
+		var quit: Button = (psp.find_child("Quit", true, false) as Button) if psp else null
+		_check(quit != null and quit.text == "QUIT MATCH" and quit.get_global_rect().end.x <= SettingsPanel.MENU_W + 1.0
+			and quit.size.y >= UI.TOUCH_MIN, "QUIT MATCH sits in the settings' tab column")
 		await at.shot("m14_pause")
-		if pm:
-			await _tap(pm.find_child("Settings", true, false) as Control)
-			await _settle(0.5)
-			var psp: Node = null
-			for c in pm.get_children():
-				if c is SettingsPanel:
-					psp = c
-			_check(psp != null, "SETTINGS opens over the pause menu")
-			if psp:
-				await _tap(_find_text(psp, "CONTROLS"))
-				await _settle(0.4)
-				(psp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
-				await _settle(0.4)
-				await at.shot("m15_pause_settings")
-				_check(psp.find_child("EditHud", true, false) == null and psp.find_child("EditHudNote", true, false) != null,
-					"in a match the HUD editor shortcut is replaced by a note")
-				_back()
-				await _settle(0.4)
-			_check(arena.find_child("PauseMenu", true, false) != null and _no_settings(pm), "back closes the settings, the pause menu stays")
+		if quit:
+			await _tap(quit)                 # asks once more, still inside the column
+			await _settle(0.2)
+			_check(quit.text == "TAP AGAIN TO QUIT" and quit.get_global_rect().end.x <= SettingsPanel.MENU_W + 1.0
+				and arena.find_child("PauseMenu", true, false) != null, "QUIT MATCH asks once more (its caption fits)")
+		if psp:
+			await _tap(_find_text(psp, "CONTROLS"))
+			await _settle(0.4)
+			(psp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
+			await _settle(0.4)
+			await at.shot("m15_pause_settings")
+			var edit := psp.find_child("EditHud", true, false) as Control
+			_check(edit != null and psp.find_child("EditHudNote", true, false) == null, "in a match EDIT CUSTOM HUD is there")
+			# EDIT CUSTOM HUD opens the editor over the match; back closes it to the settings.
+			await _tap(edit)
+			await _settle(0.6)
+			var ed := pm.find_child("HudEditor", true, false)
+			_check(ed != null and get_tree().paused and arena == get_tree().current_scene, "EDIT CUSTOM HUD opens the editor over the paused match")
+			await at.shot("m15b_pause_hud_editor")
+			_back()
+			await _settle(0.4)
+			_check(pm.find_child("HudEditor", true, false) == null and is_instance_valid(psp) and not psp.is_queued_for_deletion(),
+				"back closes the editor, the settings stay")
 			_back()
 			await _settle(0.4)
 			_check(arena.find_child("PauseMenu", true, false) == null and not get_tree().paused and hud.visible,
-				"a second back resumes the match and shows the HUD again")
-		# The HUD gear opens it too; RESUME closes it.
+				"back again closes the settings: the match goes on, its HUD shows again")
+		# The HUD gear opens them too; their X closes them and the match goes on.
 		var gear_c := HudLayout.center(HudLayout.current().settings, get_viewport().get_visible_rect().size)
 		await _tap_at(gear_c)
 		await _settle(0.4)
 		var pm2 := arena.find_child("PauseMenu", true, false)
-		_check(pm2 != null and get_tree().paused, "the HUD gear opens the pause menu")
-		if pm2:
-			await _tap(pm2.find_child("Resume", true, false) as Control)
+		_check(pm2 != null and get_tree().paused and pm2.get("settings") is SettingsPanel, "the HUD gear opens the settings")
+		if pm2 and pm2.get("settings") is SettingsPanel:
+			await _tap((pm2.get("settings") as Node).find_child("Close", true, false) as Control)
 			await _settle(0.4)
-		_check(not get_tree().paused, "RESUME unpauses")
+		_check(not get_tree().paused and arena.find_child("PauseMenu", true, false) == null, "the settings' X closes them and unpauses")
 	# Results in an empty scene (the key art stands in for the arena behind; a stub scoreboard
 	# gives the opponent's row).
 	for r in [_sample("victory"), _sample("defeat"), _sample("draw"), _sample("invalid"), _sample("online")]:
