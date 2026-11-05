@@ -134,9 +134,12 @@ static func privacy_sections() -> Array:
 			+ "player ID, name, outfit and public key there, your name card (profile picture, banner and signature "
 			+ "line) and level, your career summary (matches, wins, kills, K/D and headshot rate) unless you turn "
 			+ "SHOW MY CAREER off (Settings, ONLINE), and the time you were last online: your player card, which the "
-			+ "relay keeps so friends can find you and send you requests while you are offline. Invites and friend "
-			+ "requests carry no more than that. Like any internet service, the relay sees your phone's internet (IP) "
-			+ "address while it is connected.") % relay],
+			+ "relay keeps so friends can find you and send you requests while you are offline. Invites (duel "
+			+ "challenges and TEAM INVITES) and friend requests carry no more than that: a TEAM INVITE's team size "
+			+ "travels encrypted inside it. While you search for a random match (QUICK MATCH, or a DUO or SQUAD "
+			+ "match), your phone also tells the relay your player ID and the IDs of the other players it saw "
+			+ "searching, so two searching players can find each other. Like any internet service, the relay sees "
+			+ "your phone's internet (IP) address while it is connected.") % relay],
 		["Matches and chat are end-to-end encrypted", "Everything sent during an online match, chat included, is "
 			+ "encrypted on the two phones, with keys only they hold, before it leaves them: the relay only passes on "
 			+ "scrambled data. A chat message to a friend is encrypted so that only your friend's phone can read it; "
