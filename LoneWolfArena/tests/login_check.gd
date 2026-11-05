@@ -14,7 +14,8 @@ extends Node
 ##   skips, it ends by itself, and IntroSting.playing() follows it;
 ## - the Privacy Notice stays true to scripts/cloud.gd: every relay host, the card and request
 ##   ages, and the player card still carries what the notice lists (Cloud.card_text, card2_text,
-##   my_card). Change the notice (Login.privacy_sections) together with what goes online.
+##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice). Change the notice
+##   (Login.privacy_sections) together with what goes online.
 ## Returns the number of failed checks.
 
 var _fails := 0
@@ -51,15 +52,20 @@ func _check_texts() -> void:
 	# what the notice lists. A card that carries more needs the notice changed.
 	var card_args := {}
 	for m: Dictionary in (load("res://scripts/cloud.gd") as Script).get_script_method_list():
-		if String(m.name) in ["card_text", "card2_text"]:
+		if String(m.name) in ["card_text", "card2_text", "card3_text"]:
 			card_args[String(m.name)] = (m.args as Array).size()
-	_check(card_args.get("card_text") == 4 and card_args.get("card2_text") == 8,
-		"the player card carries the ID, name, outfit, name card, level and time the Privacy Notice lists (%s)" % str(card_args))
+	_check(card_args.get("card_text") == 4 and card_args.get("card2_text") == 8 and card_args.get("card3_text") == 9,
+		"the player card carries the ID, name, outfit, name card, level, career and time the Privacy Notice lists (%s)" % str(card_args))
 	var shown := Cloud.my_card().keys()
 	shown.sort()
-	_check(shown == ["avatar", "banner", "bundle", "level", "name", "signature"], "the player card shows what the notice lists (%s)" % str(shown))
+	_check(shown == ["avatar", "banner", "bundle", "career", "level", "name", "signature"], "the player card shows what the notice lists (%s)" % str(shown))
+	_check(Cloud.CAREER_KEYS == ["matches", "wins", "kills", "kd", "hs"], "the career summary is what the notice lists")
 	for what: String in ["random player ID, name, outfit and public key", "name card (profile picture, banner and signature line) and level",
 			"the time you were last online", "match history", "blocked players", "end-to-end encrypted",
+			"career summary (matches, wins, kills, K/D and headshot rate) unless you turn SHOW MY CAREER off",
+			"last %d chat messages with each friend" % NetChat.HISTORY_MAX, "only your friend's phone can read it",
+			"keeps your last unread message", "never a blocked player", "only while you hold TALK", "never stored",
+			"no microphone except while you hold TALK",
 			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data"]:
 		_check(notice.contains(what), "the Privacy Notice says: %s" % what)
 	var terms := ""

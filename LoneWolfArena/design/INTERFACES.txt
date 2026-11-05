@@ -49,6 +49,11 @@ listed here. If a part needs something new from the core, add it in its own file
   ({Fighter: bool} line of sight, refreshed 10x per second)
 - helpers live in their own files: `hud_draw.gd` (HudDraw: icons, buttons, text, shapes shared
   with the editor), `hud_minimap.gd` (HudMinimap), `hud_panels.gd` (HudPanels)
+- online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
+  round trip to the other phone under the gear (NetPing), CHAT / MUTE (NetChat) and TALK / SOUND
+  (NetVoice) right of the minimap, the chat feed under the score bar (`feed`, `add_line`, `send`),
+  the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
+  Its buttons take their touches before the HUD (a child's _input runs first).
 
 ## HUD layout (scripts/hud_layout.gd, version 3)
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
@@ -274,10 +279,15 @@ listed here. If a part needs something new from the core, add it in its own file
   headshots, t}; result "left": quit with QUIT MATCH), added by `Game.record_match` and checked
   entry by entry on load; a row with an opponent's id opens their card; a version 2
   profile starts it empty.
-- Public player card v2 (cloud.gd, retained on ROOT/p/<id>): {"t": "card", "v": 2, id, name,
-  bundle, avatar, banner, level, signature, pk, ts, sig, sig2}; sig2 signs
-  "card2|id|name|bundle|avatar|banner|level|signature|ts" (`Cloud.card2_text`), sig the v1 text
-  "card|id|name|bundle|ts" (older builds list it; cards without "v" are v1 and still accepted).
+- Public player card v3 (cloud.gd, retained on ROOT/p/<id>): {"t": "card", "v": 3, id, name,
+  bundle, avatar, banner, level, signature, career, pk, ts, sig, sig2, sig3}; career is
+  `Cloud.career_summary(profile)` ({matches, wins, kills, kd (x100, -1 unknown), hs (% per hit, -1
+  unknown)}) while the setting show_career (SHOW MY CAREER) is on, else {}; sig3 signs
+  "card3|id|name|bundle|avatar|banner|level|signature|<career_text>|ts" (`Cloud.card3_text`), sig2
+  the v2 text "card2|id|name|bundle|avatar|banner|level|signature|ts" (`Cloud.card2_text`, what
+  v2 builds check), sig the v1 text "card|id|name|bundle|ts" (cards without "v" are v1, "v" 2 has
+  no career: both still accepted). The directory entry's "career" ({} hidden or older) feeds the
+  player card's CAREER block (`LobbyNet.career_block`).
   `Cloud.my_card()` is everything public; the cards are listened to while anyone wants them
   (`Cloud.start_directory(by)` / `stop_directory(by)`: the ONLINE window "window", PROFILE
   "profile"); `_check_card` checks every field (types, size, no "|",
@@ -286,6 +296,19 @@ listed here. If a part needs something new from the core, add it in its own file
 - No credits screen: `Licences.publish()` prints the licence notices the shipped parts need
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
+- Online extras: ping `NetPing` (colours, bars; `NetPing.lobby_chip()` "PingChip" in the lobby's
+  top bar: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
+  `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`). Match state: 20 a second
+  (`Cloud.state_interval`), `Cloud.compact_state`, unchanged states skipped (`STATE_IDLE_MS`), the
+  sender's clock "t" (`Cloud.last_state_sent_ms`) for `RemoteFighter.apply_state(s, sent_ms)`, drawn
+  by `NetSmoother` (DELAY_MS behind, EXTRAP_MS at most across a gap). Chat `NetChat` (text rules,
+  QUICK, the friends' messages kept in user://chat.json): in a match `Cloud.send_chat(text)` /
+  signal `chat_received(text)`; friends `Cloud.send_friend_chat(id, text)` (RSA to the friend's key,
+  signed, retained on ROOT/fm/<to>/<from> until read) / signal `friend_chat_changed(id)`; the
+  lobby's window and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`,
+  "ChatWindow", "ChatField", "ChatSend", "FriendChat"). Voice `NetVoice` (IMA ADPCM 8 kHz,
+  `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"). Settings tab ONLINE
+  (scripts/settings_online.gd): chat, friend_chat, show_career, voice_chat (asks for RECORD_AUDIO).
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
   `Game.goto_login()` opens scenes/login.tscn (`Login`) until `profile.guest_ok`, the lobby after
   that and always in automated runs.

@@ -22,8 +22,10 @@ app (Ente Saver) and must not be touched for game work.
   everything in a match is end-to-end encrypted on the phones; the lobby shows only a random id,
   the name, the outfit and a public key). The same-Wi-Fi mode was removed (2026-11): no local
   network play, no Wi-Fi permissions. Hence the APK's permissions are exactly VIBRATE, INTERNET
-  (Android needs it for any socket) and ACCESS_NETWORK_STATE; CI and tools/build_apk.sh fail on
-  any other.
+  (Android needs it for any socket), ACCESS_NETWORK_STATE and RECORD_AUDIO (push-to-talk voice in
+  an online match, scripts/net_voice.gd: asked for only when the player turns VOICE CHAT on, the
+  microphone runs only while TALK is held, the sound is end-to-end encrypted and never stored); CI
+  and tools/build_apk.sh fail on any other. Chat (scripts/net_chat.gd) is end-to-end encrypted too.
 
 ## Originality (legal)
 - The game should FEEL like popular mobile battle-royale "Lone Wolf" modes (layout, flow,

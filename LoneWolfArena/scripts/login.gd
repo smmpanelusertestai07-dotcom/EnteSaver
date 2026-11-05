@@ -106,7 +106,8 @@ static func create_profile(player_name: String, avatar: String, banner: String) 
 
 
 ## The Privacy Notice as [title, text] sections, true to scripts/cloud.gd and autoload/game.gd:
-## the relays are Cloud.BROKERS, the ages Cloud.CARD_MAX_AGE_S and REQUEST_MAX_AGE_S.
+## the relays are Cloud.BROKERS, the ages Cloud.CARD_MAX_AGE_S and REQUEST_MAX_AGE_S, the chat's
+## limits NetChat.HISTORY_MAX, the voice NetVoice (only while TALK is held).
 static func privacy_sections() -> Array:
 	var hosts := PackedStringArray()
 	for url: String in Cloud.BROKERS:
@@ -121,25 +122,34 @@ static func privacy_sections() -> Array:
 			+ "it shares."],
 		["Stored only on this phone", "Your player name, profile picture, name card and outfit, your settings and "
 			+ "control layout, your match stats, match history and level, your friends list, friend requests and "
-			+ "blocked players, and the random key pair behind your player ID. They stay in the game's private storage on this phone and are left "
+			+ ("blocked players, your last %d chat messages with each friend, and the random key pair behind your player ID. ") % NetChat.HISTORY_MAX
+			+ "They stay in the game's private storage on this phone and are left "
 			+ "out of phone backups. To spot edited saves, the game signs them with a key made from this phone's "
 			+ "device ID; that ID never leaves the phone."],
 		["Shared only when online", ("While you play and the phone has internet, the game connects to a free public "
 			+ "message relay (%s) so friends can see you online, add you and challenge you. It shares your random "
 			+ "player ID, name, outfit and public key there, your name card (profile picture, banner and signature "
-			+ "line) and level, and the time you were last online: your player card, which the relay keeps so "
-			+ "friends can find you and send you requests while you are offline. Invites and friend requests carry "
-			+ "no more than that. Like any internet service, the relay sees your phone's internet (IP) address while "
-			+ "it is connected.") % relay],
-		["Matches are end-to-end encrypted", "Everything sent during an online match is encrypted on the two phones, "
-			+ "with keys only they hold, before it leaves them: the relay only passes on scrambled data."],
+			+ "line) and level, your career summary (matches, wins, kills, K/D and headshot rate) unless you turn "
+			+ "SHOW MY CAREER off (Settings, ONLINE), and the time you were last online: your player card, which the "
+			+ "relay keeps so friends can find you and send you requests while you are offline. Invites and friend "
+			+ "requests carry no more than that. Like any internet service, the relay sees your phone's internet (IP) "
+			+ "address while it is connected.") % relay],
+		["Matches and chat are end-to-end encrypted", "Everything sent during an online match, chat included, is "
+			+ "encrypted on the two phones, with keys only they hold, before it leaves them: the relay only passes on "
+			+ "scrambled data. A chat message to a friend is encrypted so that only your friend's phone can read it; "
+			+ "while they are offline the relay keeps your last unread message for them, and their game deletes it "
+			+ "from the relay once it has it. Only friends can message you, never a blocked player; Settings, ONLINE "
+			+ "turns chat off."],
+		["Voice chat", "Off unless you turn VOICE CHAT on (Settings, ONLINE), which asks for the microphone. The "
+			+ "microphone is used only while you hold TALK in an online match: the sound goes straight to the other "
+			+ "phone, end-to-end encrypted, and is never stored or recorded, here or anywhere else."],
 		["What the game never does", "No account, no e-mail address or phone number, no ads, no analytics or "
-			+ "tracking, no location, no contacts, camera or microphone, and nothing to buy. Apart from the relay "
-			+ "above, nothing leaves your phone."],
+			+ "tracking, no location, no contacts or camera, no microphone except while you hold TALK, and nothing "
+			+ "to buy. Apart from the relay above, nothing leaves your phone."],
 		["Remove everything", ("Uninstall the game, or clear its data (Android Settings, Apps, Wolf Arena, Storage). "
 			+ "That deletes everything the game keeps on this phone, your player ID included, for good. Your last "
 			+ "player card stays on the relay: other players' games stop showing it %d days after you were last "
-			+ "online, and friend requests you sent are dropped after %d days.") % [card_days, request_days]],
+			+ "online, and friend requests and chat messages you sent are dropped after %d days.") % [card_days, request_days]],
 	]
 
 
@@ -151,7 +161,7 @@ static func terms_sections() -> Array:
 		["Play fair", "No cheats, hacks, modified game files or tools that give you an edge. A match in which the game "
 			+ "detects tampering does not count."],
 		["Be decent", "Pick a name that does not insult, threaten or pretend to be someone else. Do not harass other "
-			+ "players or flood them with invites or friend requests."],
+			+ "players or flood them with invites, friend requests or messages."],
 		["Online play", "Online play runs over free public message relays that we do not run. They can be slow or "
 			+ "unavailable at any time, and a match can drop."],
 		["Your progress", "Your progress is kept only on this phone. If you uninstall the game or clear its data, it is "

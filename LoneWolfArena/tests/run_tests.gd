@@ -4,6 +4,7 @@ extends Node
 
 const GuardCode := preload("res://autoload/guard.gd")     # its static helpers, without the autoload
 const GameCode := preload("res://autoload/game.gd")       # (the same for Game's)
+const NetFeatureCheck := preload("res://tests/net_feature_check.gd")
 
 var _fails := 0
 var _passes := 0
@@ -56,6 +57,7 @@ func _ready() -> void:
 	_test_id_search()
 	_test_online_status()
 	_test_net_limits()
+	NetFeatureCheck.run(self)     # ping, smoothing, chat, card v3, voice codec (tests/net_feature_check.gd)
 	_test_session_ends()
 	_test_safe_saves()
 	_test_clear_cache()
@@ -1328,7 +1330,7 @@ func _test_card_v2() -> void:
 		"a v2 card carries the shown fields, the id, key, time and signatures, nothing else (%s)" % str(keys))
 	var mine := Cloud.my_card().keys()
 	mine.sort()
-	_check(mine == ["avatar", "banner", "bundle", "level", "name", "signature"], "my_card() is the whole public part of the profile")
+	_check(mine == ["avatar", "banner", "bundle", "career", "level", "name", "signature"], "my_card() is the whole public part of the profile")
 	_check(int(card.v) == 2 and Cloud.verify_signed(pk, Cloud.card2_text(id, "SWIFTWOLF42", "neon", "royal", "hive", 12, "ONE MORE ROUND", now),
 		String(card.sig2)), "sig2 signs every field of a v2 card")
 	_check(Cloud.verify_signed(pk, Cloud.card_text(id, "SWIFTWOLF42", "neon", now), String(card.sig)),
@@ -1357,7 +1359,8 @@ func _test_card_v2() -> void:
 	var v1 := {"t": "card", "id": id, "name": "OLDTIMER", "bundle": "desert", "pk": pk, "ts": now,
 		"sig": Cloud._sign_with(key, Cloud.card_text(id, "OLDTIMER", "desert", now))}
 	_check(_card_listed(cl, v1, id) and cl.directory[id] == {"name": "OLDTIMER", "bundle": "desert", "pk": pk, "ts": now, "v": 1,
-		"avatar": "emblem", "banner": "default", "level": 0, "signature": ""}, "a v1 card is still listed, with the default picture and banner")
+		"avatar": "emblem", "banner": "default", "level": 0, "signature": "", "career": {}},
+		"a v1 card is still listed, with the default picture and banner")
 	var v1_bad := v1.duplicate()
 	v1_bad.name = "FAKENAME"
 	_check(not _card_listed(cl, v1_bad, id), "a v1 card with a changed name is still rejected")

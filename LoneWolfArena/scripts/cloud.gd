@@ -12,7 +12,9 @@ extends Node
 ## a fresh room name, AES-256 key and HMAC key encrypted with its public key; the answers carry an
 ## HMAC only the holders of those keys can make. In the room (ROOT/r/<room>) every message is
 ## AES-256-CBC with a random IV plus an HMAC-SHA256 over it, and carries the sender's id and a
-## counter (replays are dropped). The inviter hosts. State goes out 10 times a second; a silent
+## counter (replays are dropped). The inviter hosts. State goes out 20 times a second (a state
+## that did not change only twice, then every STATE_IDLE_MS) with the sender's clock, so the other
+## phone can draw the fighter a little in the past, smoothly (RemoteFighter); a silent
 ## opponent or a "bye" ends the match ("left"); a phone that hears nothing at all from the relay,
 ## or was away (background, screen off) longer than the other phone waits, ends it as "connection
 ## lost" (it is the one that dropped out; a link that went quiet outside a match is replaced too).
@@ -29,10 +31,13 @@ extends Node
 ## profile picture, the name card's banner, the level and the signature line, all signed together
 ## with the name, outfit and time (card2_text, "sig2"); its "sig" still signs the v1 text, so
 ## builds from before v2 keep listing the player. Cards from those builds (no "v") are still
-## accepted, with the v2 fields at their defaults. Nothing else of the profile is published:
-## my_card() is the whole list (the card's JSON adds only the id, the public key, the time and the
-## two signatures). A change to any of it publishes the card again (CARD_CHANGE_S later, so a run
-## of taps in NAME CARD makes one card).
+## accepted, with the v2 fields at their defaults. Card v3 ("v": 3) adds the career summary
+## (career_summary: matches, wins, kills, K/D and headshot rate as whole numbers) while the setting
+## SHOW MY CAREER is on, {} while it is off, and "sig3" over every field including it (card3_text);
+## its sig2 and sig still sign the v2 and v1 texts, so older builds keep listing the player. Nothing
+## else of the profile is published: my_card() is the whole list (the card's JSON adds only the id,
+## the public key, the time and the signatures). A change to any of it publishes the card again
+## (CARD_CHANGE_S later, so a run of taps in NAME CARD makes one card).
 
 signal peers_changed
 signal invited(peer_name: String)
@@ -46,6 +51,9 @@ signal state_received(state: PackedFloat32Array)
 signal friends_changed                 # a friend request came in or was answered
 signal room_changed                    # the hosted custom room got a player / a join attempt ended
 signal directory_changed               # a player card came in (the ALL PLAYERS list)
+signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
+signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk audio (a NetVoice frame)
+signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
 
 const ROOT := "lonewolfarena/v1"
 const BROKERS := ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"]
@@ -60,7 +68,9 @@ const AWAY_MS := SILENCE_MS - 1500
 const QUIET_MS := 15000        # nothing at all from the relay this long outside a match: the link is dead
 const KEEP_ALIVE_MS := 60000   # the keep-alive CONNECT asks for: the relay has dropped a phone away longer
 const LOAD_KEEP_MS := 30000    # a new session's keep-alives while its arena loads stop after this
-const PING_S := 20.0
+const PING_S := 5.0            # PINGREQ while connected: the keep-alive and the relay round trip (relay_rtt)
+const PEER_PING_S := 2.0       # encrypted room ping in a match: the round trip to the other phone (peer_rtt)
+const STATE_IDLE_MS := 250     # a state that did not change goes out this often (it is sent twice, then skipped)
 const MAX_MESSAGE := 4096
 const MAX_PEERS := 40
 const INBOX_RATE := 4.0        # inbox messages handled per second (each invite costs an RSA decrypt)
@@ -76,7 +86,10 @@ const CARD_LEVEL_MAX := 999                # a card's level is shown as 1..999
 const CARD_FIELD_MAX := 64                 # longest avatar, banner or signature text a card may carry
 const CARD_CHANGE_S := 1.5                 # a changed card goes out this long after the change
 
-var state_interval := 0.1      # seconds between state packets
+var state_interval := 0.05     # seconds between state packets (20 a second)
+var relay_rtt := -1            # ms, round trip to the relay (MQTT ping), -1 until measured on this connection
+var peer_rtt := -1             # ms, round trip to the other phone in a match (room ping), -1 until it answered
+var last_state_sent_ms := -1   # the sender's clock on the state just received (-1: an older build sent none)
 var my_id := ""                # hash of this phone's public key (set once the key exists)
 var peers := {}                # id -> {"name", "bundle", "pk", "seen"}
 var in_session := false
@@ -142,6 +155,18 @@ var _away_wall_ms := 0         # how long the last pause lasted by the wall cloc
 var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
 var _session_ms := 0           # when the session started
 var _keep_t := 0.0             # s until the next keep-alive while the arena loads
+var _pingreq_ms := 0           # when the PINGREQ waiting for its PINGRESP went out (0: none)
+var _peer_ping_t := 0.0        # s until the next room ping
+var _peer_pings := {}          # room ping number -> when it went out (the last few)
+var _ping_n := 0
+var _pong_budget := 3.0        # room pings answered (a flood of them is not answered in kind)
+var _last_state: Array = []    # the state last sent, and how often in a row (send_state skips repeats)
+var _same_n := 0
+var _state_ms := 0
+var _chat_in := [2.0, 0]       # the opponent's chat lines: [tokens, ms] (NetChat.RATE_S)
+var _chat_out_ms := 0          # when this phone last sent one
+var _voice_in := [10.0, 0]     # the opponent's voice frames: [tokens, ms]
+var _fchat_ms := 0             # when this phone last sent a friend a chat message
 
 
 func _ready() -> void:
@@ -232,6 +257,8 @@ func _connect() -> void:
 	_sent_connect = false
 	_connect_t = 0.0
 	_last_rx_ms = Time.get_ticks_msec()
+	relay_rtt = -1
+	_pingreq_ms = 0
 	if _ws.connect_to_url(String(_brokers[_broker_i])) != OK:
 		_ws = null
 		_next_broker()
@@ -331,7 +358,7 @@ func _process(delta: float) -> void:
 		return
 	if not _connected:
 		return
-	# Every phone hears its own lobby announcement (3 s), the ping's answer (20 s) and in a match
+	# Every phone hears its own lobby announcement (3 s), the ping's answer (5 s) and in a match
 	# its own room messages back from the relay: nothing at all for this long means the link died
 	# without closing (the network went away, the relay stalls). In a match that is this phone
 	# dropping out, not the other one leaving.
@@ -357,7 +384,10 @@ func _process(delta: float) -> void:
 	_ping_t -= delta
 	if _ping_t <= 0.0:
 		_ping_t = PING_S
+		if _pingreq_ms == 0 or Time.get_ticks_msec() - _pingreq_ms > 4 * int(PING_S * 1000.0):
+			_pingreq_ms = Time.get_ticks_msec()        # (an answer lost on the way: measure afresh)
 		_send_packet(PackedByteArray([0xC0, 0x00]))
+	_pong_budget = minf(_pong_budget + delta, 3.0)
 	_tick_room(delta)
 	_card_t -= delta
 	if card_key(my_card()) != _card_sig:
@@ -415,6 +445,17 @@ func _tick_room(delta: float, now := Time.get_ticks_msec()) -> void:
 		if _keep_t <= 0.0:
 			_keep_t = 1.0
 			_room_send({"k": "ka"})
+	if in_session and not event_received.get_connections().is_empty():
+		# The round trip to the other phone: a numbered ping it answers at once (NetPing). Only
+		# once the arena is up on both: a phone that never gets its match loaded must still fall
+		# silent after LOAD_KEEP_MS, so the other one stops waiting for it.
+		_peer_ping_t -= delta
+		if _peer_ping_t <= 0.0:
+			_peer_ping_t = PEER_PING_S
+			_ping_n += 1
+			_peer_pings[_ping_n] = now
+			_peer_pings.erase(_ping_n - 4)
+			_room_send({"k": "pi", "i": _ping_n})
 	if not _join.is_empty() and not in_session:
 		# Asking to join, then (let in) asking again now and then: the host answers while its room
 		# is open, so a room that closed or a host that left is noticed (join_state "none").
@@ -452,9 +493,12 @@ static func _packet(header: int, body: PackedByteArray) -> PackedByteArray:
 	return out
 
 
+## The WebSocket writes what is queued when it is polled: polling right after the send puts a
+## state or a hit on the wire now instead of a frame later.
 func _send_packet(p: PackedByteArray) -> void:
 	if _ws != null and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN:
 		_ws.send(p)
+		_ws.poll()
 
 
 func _send_connect() -> void:
@@ -527,10 +571,11 @@ func _parse() -> void:
 					_connected = true
 					_fail_n = 0
 					status = "online"
-					_ping_t = PING_S
+					_ping_t = 0.0                                  # the first ping now: the round trip shows at once
 					_subscribe(ROOT + "/u/" + my_id)
 					_subscribe(ROOT + "/fr/" + my_id + "/+")      # friend requests waiting for this phone
 					_subscribe(ROOT + "/fa/" + my_id + "/+")      # answers to the ones it sent
+					_subscribe(ROOT + "/fm/" + my_id + "/+")      # friends' chat messages (NetChat)
 					if not (Game.profile.withdrawn as Array).is_empty():
 						_send_withdrawals()                        # requests taken back while offline
 						Game.save_profile()
@@ -557,11 +602,21 @@ func _parse() -> void:
 				var payload := body.slice(start)
 				if payload.size() <= MAX_MESSAGE:
 					_on_publish(topic, payload)
+			0xD0:                    # PINGRESP: the relay's round trip
+				if _pingreq_ms > 0:
+					relay_rtt = NetPing.smooth(relay_rtt, Time.get_ticks_msec() - _pingreq_ms)
+					_pingreq_ms = 0
 
 
 func _on_publish(topic: String, payload: PackedByteArray) -> void:
 	if topic.begins_with(ROOT + "/p/"):
 		_on_card(topic, payload)
+		return
+	if topic.begins_with(ROOT + "/fm/" + my_id + "/"):
+		if not payload.is_empty():
+			var m: Variant = JSON.parse_string(payload.get_string_from_utf8())
+			if m is Dictionary:
+				_on_friend_chat(topic.get_slice("/", 4), m)
 		return
 	if topic.begins_with(ROOT + "/fr/" + my_id + "/") or topic.begins_with(ROOT + "/fa/" + my_id + "/"):
 		if not payload.is_empty():
@@ -923,17 +978,73 @@ static func card2_text(id: String, who: String, bundle: String, avatar: String, 
 	return "card2|%s|%s|%s|%s|%s|%d|%s|%d" % [id, who, bundle, avatar, banner, level, signature, ts]
 
 
+## What a v3 card signs ("sig3"): every v2 field and the career summary (career_text).
+static func card3_text(id: String, who: String, bundle: String, avatar: String, banner: String, level: int,
+		signature: String, career: String, ts: int) -> String:
+	return "card3|%s|%s|%s|%s|%s|%d|%s|%s|%d" % [id, who, bundle, avatar, banner, level, signature, career, ts]
+
+
 ## Everything this phone's card shows besides its id, public key and time: the whole public part
-## of the profile (name, outfit, profile picture, name card banner, level, signature line).
+## of the profile (name, outfit, profile picture, name card banner, level, signature line and,
+## with SHOW MY CAREER on, the career summary; {} with it off).
 static func my_card() -> Dictionary:
 	var p: Dictionary = Game.profile
 	return {"name": String(p.name), "bundle": String(p.bundle), "avatar": String(p.avatar), "banner": String(p.banner),
-		"level": clampi(Game.level(), 1, CARD_LEVEL_MAX), "signature": String(p.signature)}
+		"level": clampi(Game.level(), 1, CARD_LEVEL_MAX), "signature": String(p.signature),
+		"career": career_summary(p) if bool(Game.settings.get("show_career", true)) else {}}
+
+
+const CAREER_KEYS := ["matches", "wins", "kills", "kd", "hs"]
+
+## The career summary a v3 card carries (the CAREER tab's lifetime numbers): matches, wins, kills,
+## kd = 100 x kills per death (the kills themselves before the first death, -1 with neither) and
+## hs = headshots per hit in % (-1 without a hit), all whole numbers.
+static func career_summary(p: Dictionary) -> Dictionary:
+	var n := {}
+	for k: String in ["matches", "wins", "kills", "deaths", "headshots", "hits"]:
+		var v: Variant = p.get(k, 0)
+		n[k] = clampi(int(v), 0, Game.COUNTER_MAX) if (v is int or v is float) else 0
+	return {"matches": n.matches, "wins": mini(n.wins, n.matches), "kills": n.kills,
+		"kd": -1 if n.kills == 0 and n.deaths == 0 else roundi(100.0 * n.kills / maxi(n.deaths, 1)),
+		"hs": -1 if n.hits == 0 else clampi(roundi(100.0 * n.headshots / n.hits), 0, 100)}
+
+
+## A career summary in the signed text: "-" when hidden ({}), else its five numbers.
+static func career_text(c: Dictionary) -> String:
+	if c.is_empty():
+		return "-"
+	return "%d,%d,%d,%d,%d" % [int(c.matches), int(c.wins), int(c.kills), int(c.kd), int(c.hs)]
+
+
+## A card's career summary from untrusted data: {} (hidden) or the five whole numbers in range;
+## null when it is anything else (the card is rejected).
+static func career_from(v: Variant) -> Variant:
+	if not v is Dictionary:
+		return null
+	var d := v as Dictionary
+	if d.is_empty():
+		return {}
+	if d.size() != CAREER_KEYS.size():
+		return null
+	var out := {}
+	for k: String in CAREER_KEYS:
+		var x: Variant = d.get(k)
+		if not (x is int or x is float) or float(x) != floorf(float(x)):
+			return null
+		var lo := -1.0 if k in ["kd", "hs"] else 0.0
+		var hi := 100.0 if k == "hs" else float(Game.COUNTER_MAX) * 100.0
+		if float(x) < lo or float(x) > hi:
+			return null
+		out[k] = int(x)
+	if int(out.wins) > int(out.matches):
+		return null
+	return out
 
 
 ## A card's content in one string: a change of any field publishes the card again.
 static func card_key(c: Dictionary) -> String:
-	return "%s|%s|%s|%s|%d|%s" % [c.name, c.bundle, c.avatar, c.banner, int(c.level), c.signature]
+	return "%s|%s|%s|%s|%d|%s|%s" % [c.name, c.bundle, c.avatar, c.banner, int(c.level), c.signature,
+		career_text(c.get("career", {}))]
 
 
 static func waiting_text(kind: String, from: String, to: String, ts: int) -> String:
@@ -950,15 +1061,22 @@ func _publish_card() -> void:
 	_publish(ROOT + "/p/" + my_id, card_json(c, my_id, _pk_pem, _card_ts, _key).to_utf8_buffer(), true)
 
 
-## A signed v2 card as published (`key` is the private key of `pk`; tests make cards with it too).
+## A signed card as published (`key` is the private key of `pk`; tests make cards with it too): v3
+## when `c` has a "career" (my_card always has), else v2.
 static func card_json(c: Dictionary, id: String, pk: String, ts: int, key: CryptoKey) -> String:
 	var who := String(c.name)
 	var b := String(c.bundle)
 	var level := int(c.level)
-	return JSON.stringify({"t": "card", "v": 2, "id": id, "name": who, "bundle": b, "avatar": String(c.avatar),
+	var d := {"t": "card", "v": 2, "id": id, "name": who, "bundle": b, "avatar": String(c.avatar),
 		"banner": String(c.banner), "level": level, "signature": String(c.signature), "pk": pk, "ts": ts,
 		"sig": _sign_with(key, card_text(id, who, b, ts)),
-		"sig2": _sign_with(key, card2_text(id, who, b, String(c.avatar), String(c.banner), level, String(c.signature), ts))})
+		"sig2": _sign_with(key, card2_text(id, who, b, String(c.avatar), String(c.banner), level, String(c.signature), ts))}
+	if c.get("career") is Dictionary:
+		d.v = 3
+		d.career = (c.career as Dictionary).duplicate()
+		d.sig3 = _sign_with(key, card3_text(id, who, b, String(c.avatar), String(c.banner), level, String(c.signature),
+			career_text(c.career), ts))
+	return JSON.stringify(d)
 
 
 static func _sign_with(key: CryptoKey, text: String) -> String:
@@ -1007,7 +1125,13 @@ func _check_card(payload: PackedByteArray) -> void:
 	if not (ver is float or ver is int) or ((d as Dictionary).has("v") and float(ver) < 2.0):
 		return
 	var v2 := float(ver) >= 2.0
+	var v3 := float(ver) >= 3.0
 	var level := 0
+	var career: Variant = {}
+	if v3:
+		career = career_from(d.get("career"))
+		if career == null or typeof(d.get("sig3")) != TYPE_STRING:
+			return
 	if v2:
 		for k in ["avatar", "banner", "signature", "sig2"]:
 			if typeof(d.get(k)) != TYPE_STRING:
@@ -1026,7 +1150,11 @@ func _check_card(payload: PackedByteArray) -> void:
 		return
 	if directory.has(id) and int(directory[id].ts) >= ts:
 		return
-	if v2:
+	if v3:
+		if not verify_signed(String(d.pk), card3_text(id, String(d.name), String(d.bundle), String(d.avatar), String(d.banner),
+				level, String(d.signature), career_text(career), ts), String(d.sig3)):
+			return
+	elif v2:
 		if not verify_signed(String(d.pk), card2_text(id, String(d.name), String(d.bundle), String(d.avatar), String(d.banner),
 				level, String(d.signature), ts), String(d.sig2)):
 			return
@@ -1036,7 +1164,7 @@ func _check_card(payload: PackedByteArray) -> void:
 	var avatar := String(d.avatar) if v2 else ""
 	var banner := String(d.banner) if v2 else ""
 	directory[id] = {"name": who if who != "" else "PLAYER", "bundle": String(CharacterModel.bundle_info(String(d.bundle)).id),
-		"pk": String(d.pk), "ts": ts, "v": 2 if v2 else 1,
+		"pk": String(d.pk), "ts": ts, "v": 3 if v3 else (2 if v2 else 1), "career": career,
 		"avatar": avatar if avatar in Game.avatar_ids() else String(Game.DEFAULT_PROFILE.avatar),
 		"banner": banner if banner in Game.BANNERS else String(Game.DEFAULT_PROFILE.banner),
 		"level": clampi(level, 1, CARD_LEVEL_MAX) if v2 else 0,
@@ -1087,6 +1215,66 @@ func _on_waiting(is_request: bool, from: String, d: Dictionary) -> void:
 		_publish(topic, PackedByteArray(), true)
 		if (Game.profile.friend_out as Dictionary).has(from):
 			_became_friends(from, who)
+
+
+# ---------------------------------------------------------------- friends chat (NetChat)
+
+## A chat message to a friend (NetChat): encrypted to their public key, signed, left on the relay
+## for them (retained: the last unread one waits while they are offline). "" when it went out,
+## else why not: "OFFLINE", "OFF" (FRIENDS CHAT is off), "NOT A FRIEND", "EMPTY", "WAIT" (one a
+## second), "NO KEY" (their key is not known yet: it comes with their player card).
+func send_friend_chat(id: String, text: String) -> String:
+	if not bool(Game.settings.get("friend_chat", true)):
+		return "OFF"
+	if not Game.is_friend(id) or Game.is_blocked(id):
+		return "NOT A FRIEND"
+	if not _connected or _key == null:
+		return "OFFLINE"
+	var line := NetChat.clean(text, NetChat.FRIEND_MAX)
+	if line == "":
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _fchat_ms > 0 and now - _fchat_ms < NetChat.FRIEND_RATE_MS:
+		return "WAIT"
+	var ts := maxi(int(Time.get_unix_time_from_system()), NetChat.last_sent(id) + 1)
+	var d := NetChat.seal(line, my_id, id, ts, friend_key(id), _key, _pk_pem)
+	if d.is_empty():
+		return "NO KEY"
+	_fchat_ms = now
+	_publish(ROOT + "/fm/" + id + "/" + my_id, JSON.stringify(d).to_utf8_buffer(), true)
+	NetChat.add(id, ts, true, line)
+	return ""
+
+
+## A friend's public key: from the lobby, their player card or their last message.
+func friend_key(id: String) -> String:
+	if peers.has(id):
+		return String(peers[id].pk)
+	if directory.has(id):
+		return String(directory[id].pk)
+	return NetChat.cached_key(id)
+
+
+## A friend's message that waited for this phone (or came now): checked (NetChat.open_message),
+## kept, and deleted from the relay. From anyone who is not a friend, a blocked player, or with
+## FRIENDS CHAT off, it is deleted unread.
+func _on_friend_chat(from: String, d: Dictionary) -> void:
+	if not Game.is_player_id(from) or from == my_id:
+		return
+	var topic := ROOT + "/fm/" + my_id + "/" + from
+	if not Game.is_friend(from) or Game.is_blocked(from) or not bool(Game.settings.get("friend_chat", true)):
+		_publish(topic, PackedByteArray(), true)
+		return
+	if _inbox_budget < 1.0:
+		return                       # (it stays on the relay: read at the next connection)
+	_inbox_budget -= 1.0
+	var line := NetChat.open_message(d, from, my_id, _key, int(Time.get_unix_time_from_system()), NetChat.last_received(from))
+	_publish(topic, PackedByteArray(), true)
+	if line == "":
+		return
+	NetChat.cache_key(from, String(d.pk))
+	NetChat.add(from, int(d.ts), false, line)
+	friend_chat_changed.emit(from)
 
 
 # ---------------------------------------------------------------- custom rooms
@@ -1252,6 +1440,12 @@ func _on_room(msg: PackedByteArray) -> void:
 				_accept_ms = 0
 				_session_ms = Time.get_ticks_msec()
 				_keep_t = 0.0
+				peer_rtt = -1
+				_peer_ping_t = 0.0
+				_peer_pings.clear()
+				_last_state = []
+				_chat_in = [2.0, Time.get_ticks_msec()]
+				_chat_out_ms = 0
 				queue.clear()
 				session_started.emit(is_host)
 		"st":
@@ -1262,7 +1456,46 @@ func _on_room(msg: PackedByteArray) -> void:
 					if typeof(v) != TYPE_FLOAT and typeof(v) != TYPE_INT:
 						return
 					out.append(float(v))
+				var t: Variant = (d as Dictionary).get("t")
+				last_state_sent_ms = int(t) if (t is float or t is int) and is_finite(float(t)) else -1
 				state_received.emit(out)
+		"pi":
+			# The other phone measures its round trip: answered at once (not a flood of answers).
+			var i: Variant = (d as Dictionary).get("i")
+			if in_session and (i is float or i is int) and _pong_budget >= 1.0 and not event_received.get_connections().is_empty():
+				_pong_budget -= 1.0
+				_room_send({"k": "po", "i": int(i)})
+		"po":
+			var i: Variant = (d as Dictionary).get("i")
+			if (i is float or i is int) and _peer_pings.has(int(i)):
+				peer_rtt = NetPing.smooth(peer_rtt, Time.get_ticks_msec() - int(_peer_pings[int(i)]))
+				_peer_pings.erase(int(i))
+		"chat":
+			# A chat line: only with CHAT on, never from a blocked player, at most one per
+			# NetChat.RATE_S (a short burst of two), cleaned and cut to NetChat.MATCH_MAX.
+			var x: Variant = (d as Dictionary).get("x")
+			if not in_session or typeof(x) != TYPE_STRING or not bool(Game.settings.get("chat", true)) \
+					or Game.is_blocked(String(opponent.get("id", ""))):
+				return
+			var now := Time.get_ticks_msec()
+			var tokens := minf(2.0, float(_chat_in[0]) + float(now - int(_chat_in[1])) / 1000.0 / NetChat.RATE_S)
+			_chat_in = [tokens - 1.0 if tokens >= 1.0 else tokens, now]
+			var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
+			if tokens >= 1.0 and line != "":
+				chat_received.emit(line)
+		"vo":
+			# Push-to-talk audio (NetVoice): with VOICE CHAT on here, never from a blocked player,
+			# at most NetVoice.MAX_FRAMES_S frames a second, each a frame NetVoice can play.
+			var a: Variant = (d as Dictionary).get("a")
+			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 \
+					or not bool(Game.settings.get("voice_chat", false)) or Game.is_blocked(String(opponent.get("id", ""))):
+				return
+			var now := Time.get_ticks_msec()
+			var tokens := minf(NetVoice.MAX_FRAMES_S, float(_voice_in[0]) + float(now - int(_voice_in[1])) / 1000.0 * NetVoice.MAX_FRAMES_S)
+			_voice_in = [tokens - 1.0 if tokens >= 1.0 else tokens, now]
+			var frame := Marshalls.base64_to_raw(String(a))
+			if tokens >= 1.0 and NetVoice.frame_ok(frame):
+				voice_received.emit(frame)
 		"ev":
 			var ev: Variant = (d as Dictionary).get("e", "")
 			var data: Variant = (d as Dictionary).get("d", [])
@@ -1288,18 +1521,69 @@ func end_session(reason := "left") -> void:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
 	in_session = false
+	peer_rtt = -1
+	_peer_pings.clear()
 	_outgoing = {}
 	_leave_room()
 	if was:
 		session_ended.emit(reason)
 
 
-func send_state(s: PackedFloat32Array) -> void:
-	if in_session:
-		var a := []
-		for v in s:
-			a.append(snappedf(v, 0.001))
-		_room_send({"k": "st", "s": a})
+## The fighter's state (RemoteFighter.pack) in short numbers: whole values as integers, the
+## position to the centimetre, angles to a thousandth of a radian, HP to a tenth; "t" is this
+## phone's clock (the other phone draws the fighter from it). A state like the last one goes out
+## once more (so the other phone sees it stand still) and then only every STATE_IDLE_MS.
+## Returns whether it went out.
+func send_state(s: PackedFloat32Array) -> bool:
+	if not in_session:
+		return false
+	var a := compact_state(s)
+	var now := Time.get_ticks_msec()
+	if a == _last_state:
+		_same_n += 1
+		if _same_n > 1 and now - _state_ms < STATE_IDLE_MS:
+			return false
+	else:
+		_same_n = 0
+		_last_state = a
+	_state_ms = now
+	_room_send({"k": "st", "s": a, "t": now})
+	return true
+
+
+static func compact_state(s: PackedFloat32Array) -> Array:
+	var a := []
+	for i in s.size():
+		var v := snappedf(s[i], 0.01 if i < 3 else (0.001 if i < 5 else 0.1))
+		if v == floorf(v) and absf(v) < 1.0e9:
+			a.append(int(v))
+		else:
+			a.append(v)
+	return a
+
+
+## A chat line in the match (CHAT on, NetChat.clean, at most one per NetChat.RATE_S): "" when it
+## went out, else why not ("WAIT" too soon, "OFF", "EMPTY").
+func send_chat(text: String) -> String:
+	if not in_session:
+		return "OFF"
+	if not bool(Game.settings.get("chat", true)):
+		return "OFF"
+	var line := NetChat.clean(text, NetChat.MATCH_MAX)
+	if line == "":
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
+		return "WAIT"
+	_chat_out_ms = now
+	_room_send({"k": "chat", "x": line})
+	return ""
+
+
+## One push-to-talk frame (NetVoice), sent only while the button is held.
+func send_voice(frame: PackedByteArray) -> void:
+	if in_session and NetVoice.frame_ok(frame):
+		_room_send({"k": "vo", "a": Marshalls.raw_to_base64(frame)})
 
 
 func send_event(kind: String, data: Array = []) -> void:
