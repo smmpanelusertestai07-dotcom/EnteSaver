@@ -28,6 +28,8 @@ extends TeamArena
 ##   "ko" / "el" / "rv" / "rend" / "round"                    host decisions (TeamArena's layouts)
 ##   "fin" [round, slot, kills, knocks, revives, damage, headshots, shots, hits, deaths]   once the
 ##                                           match is over, one per fighter the sender runs
+##   "rm" [takes]                            after the match: the other player tapped PLAY AGAIN
+##                                           TOGETHER / REMATCH on its results (Arena.ask_rematch)
 ##
 ## Trust, as in the 1 vs 1: each phone can lie about its own fighter (a modified build can ignore
 ## hits), and the host about its bots and the rounds; nobody else can send anything (room keys, a
@@ -196,8 +198,8 @@ func _on_net_state(s: PackedFloat32Array) -> void:
 
 func _on_net_event(kind: String, data: Array) -> void:
 	match kind:
-		"ready", "begin":
-			super(kind, data)            # (Arena: the host starts the first prep on both)
+		"ready", "begin", "rm":
+			super(kind, data)            # (Arena: the host starts the first prep on both; "rm": the results' PLAY AGAIN)
 		"tk":
 			if not am_host and data.size() == 3 and _num_ok(data[0]) and int(data[0]) == round_index and typeof(data[2]) == TYPE_STRING \
 					and phase != Phase.BREAK and _net_rate_ok("tk", 30.0, 30.0):

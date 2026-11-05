@@ -214,6 +214,12 @@ var quick_seen := {}           # id -> ms: seekers this search saw (only their q
 ## runs for (0: none, or the 1 vs 1 QUICK MATCH search).
 var session_team := {}
 var seek_team := 0
+## PLAY AGAIN TOGETHER / a team REMATCH asked for on the results (ResultsScreen): {"id", "size",
+## "coop"} while this player wants another team match with exactly that player, {} otherwise. The
+## results screen sets it on its tap and clears it when it gives up or closes. While it is set, that
+## player's fresh (not quick) team invite with that size and coop is shown to the results screen
+## (which takes it at once), friend or not (play_again_wanted, _on_team_invite).
+var play_again := {}
 const QUICK_SEEN_MAX := 64     # seekers remembered by a search (a flood of made-up ids cannot grow it)
 
 
@@ -894,9 +900,11 @@ func team_invite_proven(d: Dictionary, from: String) -> bool:
 ## A "tinv" in this phone's inbox. Unsigned, from a blocked player or naming no team: ignored. Busy
 ## (in a match, a challenge going out or waiting here): declined at once, as a duel. A quick one is
 ## taken at once, never shown, only while this phone searches that size (seek_team) and heard that
-## seeker, as NetMatch.allowed lets it; any other quick one is declined. A coop one is shown
-## (invited, invite_from().team) only when it comes from a friend this phone takes challenges from,
-## and only while the lobby listens (in a match nobody does); otherwise declined at once.
+## seeker, as NetMatch.allowed lets it; any other quick one is declined. Any other one is shown
+## (invited, invite_from().team) only when it comes from a friend, or is the play-again this phone's
+## results asked for (play_again_wanted: that player, size and coop), from a player this phone
+## takes challenges from (NetMatch.allowed), and only while someone listens (the lobby, or the
+## results asking for it; in a match nobody does); otherwise declined at once.
 func _on_team_invite(from: String, d: Dictionary) -> void:
 	if typeof(d.get("sec")) != TYPE_STRING or Game.is_blocked(from) or not team_invite_proven(d, from):
 		return
@@ -919,10 +927,20 @@ func _on_team_invite(from: String, d: Dictionary) -> void:
 	if bool(team.quick):
 		answer(seeking and seek_team == int(team.size) and quick_seen.has(from) and _room == "" and NetMatch.allowed(from, my_id))
 		return
-	if not Game.is_friend(from) or not NetMatch.allowed(from, my_id) or invited.get_connections().is_empty():
+	if not (Game.is_friend(from) or play_again_wanted(from, team)) or not NetMatch.allowed(from, my_id) \
+			or invited.get_connections().is_empty():
 		answer(false)
 		return
 	invited.emit(String(_incoming.name))
+
+
+## Whether a team invite from `from` naming `team` ({"size", "coop", "quick"}) is the play-again
+## this phone's results asked for: not quick, from exactly the player in play_again, with its size
+## and coop.
+func play_again_wanted(from: String, team: Dictionary) -> bool:
+	return not play_again.is_empty() and from != "" and String(play_again.get("id", "")) == from \
+		and int(play_again.get("size", 0)) == int(team.get("size", -1)) and bool(play_again.get("coop", false)) == bool(team.get("coop", false)) \
+		and not bool(team.get("quick", false))
 
 
 ## The team search (TeamMatch): like seek_start(), on the size's own topic ROOT/mm/t<size>, which
