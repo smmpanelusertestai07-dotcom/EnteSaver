@@ -262,7 +262,10 @@ func _draw_pick() -> void:
 	var ly := r.position.y + 0.11 * u
 	draw_rect(Rect2(Vector2(r.position.x + 0.025 * u, ly - 0.014 * u), Vector2(0.007 * u, 0.028 * u)), Color(HudDraw.YELLOW, a))
 	var lw := HudDraw.text(self, "WEAPON", Vector2(r.position.x + 0.045 * u, ly), int(0.03 * u), Color(1, 1, 1, a), 0, 0, "bold")
-	HudDraw.text_parts(self, [["BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)], ["SELECTED WEAPON", HudDraw.YELLOW]],
+	# (DUO / SQUAD: every fighter picks its own gun, TeamArena; a 1 vs 1: both use the one picked)
+	var own := arena is TeamArena
+	HudDraw.text_parts(self, [["EVERY FIGHTER PICKS " if own else "BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)],
+		["THEIR OWN WEAPON" if own else "SELECTED WEAPON", HudDraw.YELLOW]],
 		Vector2(r.position.x + 0.07 * u + lw, ly), int(0.021 * u), 0, 0, "semi", a)
 	for i in pick_options.size():
 		_draw_card(i, a, u)

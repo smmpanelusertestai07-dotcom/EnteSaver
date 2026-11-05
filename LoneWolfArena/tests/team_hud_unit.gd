@@ -260,6 +260,16 @@ func _test_results() -> void:
 	var them := {"id": "ab".repeat(16), "name": "ACE", "bundle": "default"}
 	Game.team_match = TeamArena.link_match(2, false, me, them, true, 7)
 	_check(ResultsScreen.other_player(Game.team_match) == {"id": them.id, "name": "ACE"}, "the other phone's player comes from the roster")
+	# An invite on the results is the rematch only from the old opponent with the team wanted: after
+	# a 1 vs 1 a TEAM INVITE from them is not (it would load the 1 vs 1 arena for a team session).
+	var duo := {"size": 2, "coop": false}
+	_check(ResultsScreen.is_rematch_invite({"id": them.id, "team": {}}, them.id, {})
+		and not ResultsScreen.is_rematch_invite({"id": them.id, "team": {"size": 2, "coop": true}}, them.id, {})
+		and ResultsScreen.is_rematch_invite({"id": them.id, "team": duo}, them.id, duo)
+		and not ResultsScreen.is_rematch_invite({"id": them.id, "team": {"size": 4, "coop": false}}, them.id, duo)
+		and not ResultsScreen.is_rematch_invite({"id": me.id, "team": duo}, them.id, duo)
+		and not ResultsScreen.is_rematch_invite({"id": them.id}, "", {}),
+		"the results take only the old opponent's invite of the wanted kind (no team invite after a 1 vs 1)")
 	var on := _results(_team_result(true, String(them.id)))
 	_check(on.find_child("PlayAgain", true, false) == null and on.find_child("Rematch", true, false) != null and on.find_child("Lobby", true, false) != null
 		and on.find_child("RematchStatus", true, false) != null and on.find_child("PlayAgainTogether", true, false) == null,

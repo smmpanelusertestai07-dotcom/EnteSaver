@@ -1147,6 +1147,11 @@ func waiting_for() -> String:
 	return String(_outgoing.get("name", ""))
 
 
+## The id of the player this phone's challenge or team invite waits for ("" when none).
+func waiting_for_id() -> String:
+	return String(_outgoing.get("id", ""))
+
+
 ## Blocking a player (LobbyProfile, before Game.block) ends what is going on with them here: the
 ## challenge this phone sent them (they could still accept it and start the match) is called
 ## off, theirs waiting for an answer is dropped unanswered (like any challenge from a blocked

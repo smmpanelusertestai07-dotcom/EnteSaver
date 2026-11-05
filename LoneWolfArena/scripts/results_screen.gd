@@ -871,10 +871,12 @@ func _agree() -> void:
 	var host_takes := i_take if host else _they_take
 	var i_invite := guest_takes if host else (not guest_takes and host_takes)
 	if _team_again and not guest_takes:
+		_stop_wanting()
 		_say("DUEL CHALLENGES FROM LEAVES THE HOST OUT: NO %s" % _word(), UI.BAD)
 		_set_rematch(_caption(), false)
 		return
 	if not guest_takes and not host_takes:
+		_stop_wanting()
 		_say("DUEL CHALLENGES ARE OFF ON BOTH PHONES: NO REMATCH", UI.BAD)
 		_set_rematch("REMATCH", false)
 		return
@@ -944,6 +946,13 @@ func _give_up(why: String) -> void:
 	_set_rematch(_caption(), true)
 
 
+## The rematch cannot be (a refusal shown): nothing goes out later either (_on_session_ended would
+## otherwise send it once the old session ends), and Cloud no longer takes their team invite.
+func _stop_wanting() -> void:
+	_want = false
+	_forget_play_again()
+
+
 ## Cloud stops showing that player's team invite here (Cloud.play_again: set by this screen's tap).
 func _forget_play_again() -> void:
 	if _team_again and Game.cloud != null and String(Game.cloud.play_again.get("id", "")) == _peer_id:
@@ -952,13 +961,14 @@ func _forget_play_again() -> void:
 
 ## A challenge came in here: the old opponent's is their rematch (taken at once when this player
 ## wants one too); anyone else's is declined (no lobby to show it). After a team match only that
-## player's team invite with the same size and coop is theirs.
+## player's team invite with the same size and coop is theirs; after a 1 vs 1 only their duel
+## challenge (a TEAM INVITE from them is not the rematch).
 func _on_invited(_who: String) -> void:
 	var cl := Game.cloud_service()
 	if not cl.has_invite():
 		return                           # (answered already)
 	var inv := cl.invite_from()
-	if String(inv.get("id", "")) != _peer_id or _loading or (_team_again and inv.get("team", {}) != _again_team):
+	if _loading or not is_rematch_invite(inv, _peer_id, _again_team if _team_again else {}):
 		cl.answer(false)
 		return
 	if _want or _starting:
@@ -967,6 +977,13 @@ func _on_invited(_who: String) -> void:
 		_they_want = true
 		_set_rematch("ACCEPT", true)
 		_say("%s %s" % [_name(), _wants()], UI.ACCENT)
+
+
+## Whether an invite that came in on these results is the rematch: from the old opponent, with the
+## team wanted (a team match's size and coop; after a 1 vs 1 none, a duel challenge).
+static func is_rematch_invite(inv: Dictionary, peer_id: String, wanted_team: Dictionary) -> bool:
+	var team: Variant = inv.get("team", {})
+	return peer_id != "" and String(inv.get("id", "")) == peer_id and team is Dictionary and team == wanted_team
 
 
 func _on_answered(accepted: bool, _who: String) -> void:
@@ -1043,7 +1060,9 @@ func _step_rematch() -> void:
 
 
 ## Leaving (LOBBY, back): the old opponent's challenge waiting here is declined (the lobby would not
-## show it), and Cloud no longer takes a team invite for this screen (Cloud.play_again).
+## show it), the fresh challenge or team invite this screen sent and nobody took yet is called off
+## (the player left for the lobby and is not pulled into a match from there), and Cloud no longer
+## takes a team invite for this screen (Cloud.play_again).
 func _exit_tree() -> void:
 	if not (_online or _team_again) or Game.cloud == null:
 		return
@@ -1053,6 +1072,8 @@ func _exit_tree() -> void:
 	var cl := Game.cloud_service()
 	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
 		cl.answer(false)
+	if _starting and not cl.in_session and cl.waiting_for_id() == _peer_id and _peer_id != "":
+		cl.cancel_invite()
 
 
 ## The XP bar fills over 0.9 s of real time (it never lags behind on slow frames).
