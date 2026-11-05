@@ -373,8 +373,8 @@ func _voice() -> void:
 
 func _settings() -> void:
 	_check(SettingsPanel.TABS[4] == "ONLINE" and SettingsPanel.TAB_KEYS[4] == ["chat", "friend_chat", "show_career", "voice_chat",
-		"challenges_from", "friend_requests", "direct_connect"],
-		"the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat, challenges, requests, direct connection")
+		"challenges_from", "friend_requests", "vibration", "direct_connect"],
+		"the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat, challenges, requests, vibration out of a match, direct connection")
 	_check(Game.DEFAULT_SETTINGS.chat == true and Game.DEFAULT_SETTINGS.friend_chat == true and Game.DEFAULT_SETTINGS.show_career == true
 		and Game.DEFAULT_SETTINGS.voice_chat == false, "chat and the public career on by default, voice off until asked for")
 	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
@@ -385,8 +385,8 @@ func _settings() -> void:
 	t.add_child(panel)
 	panel._show_tab(4)
 	_check(["Toggle_chat", "Toggle_friend_chat", "Toggle_show_career", "Toggle_voice_chat", "Toggle_challenges_from",
-		"Toggle_friend_requests", "Toggle_direct_connect"].all(func(n: String) -> bool:
-		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its seven settings")
+		"Toggle_friend_requests", "Toggle_vibration", "Toggle_direct_connect"].all(func(n: String) -> bool:
+		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its eight settings")
 	var duel := panel.find_child("Toggle_challenges_from", true, false)
 	(duel.get_child(2) as Button).pressed.emit()
 	_check(Game.settings.challenges_from == Game.CHALLENGES_NOBODY, "DUEL CHALLENGES FROM's third choice is NOBODY")
@@ -512,24 +512,27 @@ func _notices() -> void:
 	NetChat.reset_for_test()
 
 
-## SOUND: VOICE CHAT plays the other player's voice on its own bus; every slider is heard at once.
+## SOUND (no master volume, as the reference's): VOICE CHAT plays the other player's voice on its own
+## bus; every slider is heard at once; the Master bus stays at full volume.
 func _volumes() -> void:
 	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
 	var panel := SettingsPanel.new()
 	t.add_child(panel)
 	panel._show_tab(3)
 	var sliders := panel.find_children("*", "HSlider", true, false)
-	_check(SettingsPanel.TAB_KEYS[3] == ["vol_master", "vol_sfx", "vol_music", "vol_voice"] and sliders.size() == 4
-		and panel.find_child("Stepper_vol_voice", true, false) != null, "the SOUND tab: master, effects, music and voice chat")
-	if sliders.size() == 4:
-		(sliders[1] as HSlider).value = 30
-		(sliders[2] as HSlider).value = 20
-		(sliders[3] as HSlider).value = 0
+	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and sliders.size() == 3
+		and panel.find_child("Stepper_vol_voice", true, false) != null, "the SOUND tab: effects, music and voice chat")
+	if sliders.size() == 3:
+		(sliders[0] as HSlider).value = 30
+		(sliders[1] as HSlider).value = 20
+		(sliders[2] as HSlider).value = 0
 	var db := func(bus: String) -> float: return AudioServer.get_bus_volume_db(AudioServer.get_bus_index(bus))
 	_check(Game.settings.vol_sfx == 30 and absf(float(db.call("SFX")) - linear_to_db(0.3)) < 0.01
 		and Game.settings.vol_music == 20 and absf(float(db.call("Music")) - linear_to_db(0.2)) < 0.01,
 		"moving EFFECTS or MUSIC sets its bus at once, while the panel is open")
 	_check(Game.settings.vol_voice == 0 and AudioServer.is_bus_mute(AudioServer.get_bus_index("Voice")), "VOICE CHAT at 0 mutes the voice")
+	_check(is_zero_approx(float(db.call("Master"))) and not AudioServer.is_bus_mute(AudioServer.get_bus_index("Master")),
+		"the Master bus plays at full volume (no master setting)")
 	panel.free()
 	var voice := NetVoice.new()
 	t.add_child(voice)

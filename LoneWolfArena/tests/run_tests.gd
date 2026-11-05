@@ -30,6 +30,20 @@ class Unarmored extends Bot:
 		return 1.0
 
 
+## A Cloud that keeps what it would send to the relay instead of sending it: [topic, payload
+## size, retained] for each message, and every packet (DELETE MY DATA's checks).
+class RecordingCloud extends Cloud:
+	var published: Array = []
+	var packets: Array = []
+
+	func _publish(topic: String, payload: PackedByteArray, retain := false) -> void:
+		if _connected:
+			published.append([topic, payload.size(), retain])
+
+	func _send_packet(p: PackedByteArray) -> void:
+		packets.append(p)
+
+
 func _ready() -> void:
 	_test_damage()
 	_test_damage_shown()
@@ -40,11 +54,12 @@ func _ready() -> void:
 	_test_guard()
 	_test_signer_digests()
 	_test_settings_sanitize()
-	_test_settings_v5()
+	_test_settings_v6()
 	_test_fps_options()
 	_test_sensitivity_per_sight()
 	_test_controls_settings()
 	_test_settings_panel()
+	_test_delete_my_data()
 	_test_auto_graphics()
 	_test_perf_governor()
 	_test_modes()
@@ -430,52 +445,61 @@ func _test_settings_sanitize() -> void:
 	Game.settings = saved
 
 
-## The settings of version 5 (mode, AUTO graphics, FPS counter, vibration, crosshair colour and
-## size, fire-button / free-look / 2x sensitivity): defaults, ranges, on/off values, migration.
-func _test_settings_v5() -> void:
+## The settings of version 6, the reference's set: what is gone (FPS counter, crosshair colour and
+## size, fire-button drag, master volume), the vibration rows, the reference's defaults (joystick
+## DYNAMIC, free look button off) beside the owner's (LEFT FIRE always, RELOAD and SWITCH on),
+## ranges, on/off values and the migration of older files.
+func _test_settings_v6() -> void:
 	var saved := Game.settings.duplicate(true)
 	var d: Dictionary = Game.DEFAULT_SETTINGS
-	_check(d.mode == "training" and d.graphics_auto == true and d.show_fps == false and d.vibration == true
-		and d.crosshair_color == 0 and d.crosshair_size == 100 and d.sens_fire == 100 and d.sens_freelook == 100
-		and d.sens_2x == 100, "the new settings start as the game played before they existed")
-	_check(d.graphics == 1 and d.fps == 60 and d.sens_general == 100 and d.sens_reddot == 100 and d.sens_sniper == 71
-		and d.vol_master == 85 and d.vol_sfx == 90 and d.vol_music == 45 and d.difficulty == 1
-		and d.dynamic_joystick == false and d.last_pick == "ar", "the older settings keep their defaults")
-	for k in ["show_fps", "vibration", "crosshair_color", "crosshair_size", "sens_fire"]:
-		_check(d.has(k) and not Game.FIXED_SETTINGS.has(k), "%s is a setting now, no longer fixed" % k)
-	_check(Game.FIXED_SETTINGS.has("damage_numbers") and Game.FIXED_SETTINGS.has("dynamic_crosshair"), "the rest stays fixed")
-	_check(int(Game.SETTING_RANGES.crosshair_color[1]) == Game.CROSSHAIR_COLORS.size() - 1, "the crosshair colour range is the colour list")
-	_near(Game.CROSSHAIR_SCALE, lerpf(0.75, 1.35, 0.5), "crosshair size 100 % is the size the HUD drew before")
+	_check(Game.SETTINGS_VERSION == 6 and d.settings_version == 6, "settings version 6")
+	_check(d.mode == "training" and d.graphics_auto == true and d.graphics == 1 and d.fps == 60 and d.sens_general == 100
+		and d.sens_reddot == 100 and d.sens_2x == 100 and d.sens_sniper == 71 and d.sens_freelook == 100 and d.difficulty == 1
+		and d.vol_sfx == 90 and d.vol_music == 45 and d.vol_voice == 80 and d.last_pick == "ar", "the settings kept keep their defaults")
+	_check(d.dynamic_joystick == true and d.freelook_button == false, "the reference's defaults: the joystick follows the thumb, no free look button")
+	_check(d.left_fire == 0 and d.reload_button == true and d.switch_button == true, "the owner's: LEFT FIRE always, RELOAD and SWITCH on")
+	_check(d.vibrate_footsteps == true and d.vibrate_damage == false and d.vibrate_shooting == false and d.vibration == true,
+		"vibration as the reference's rows: enemy footsteps on, taking damage and shooting off, out of a match on")
+	for k in ["show_fps", "crosshair_color", "crosshair_size", "sens_fire", "vol_master"]:
+		_check(not d.has(k) and not Game.SETTING_RANGES.has(k) and not (k in Game.BOOL_SETTINGS), "%s is no longer a setting" % k)
+	_check(Game.FIXED_SETTINGS.show_fps == false and Game.FIXED_SETTINGS.sens_fire == 100 and Game.FIXED_SETTINGS.has("damage_numbers")
+		and Game.FIXED_SETTINGS.has("dynamic_crosshair"), "no FPS counter, FIRE drags at the view's own sensitivity: fixed")
+	_check(Game.crosshair_color() == Color.WHITE and is_equal_approx(Game.crosshair_scale(), Game.CROSSHAIR_SCALE),
+		"the crosshair is white at its standard size")
+	_near(Game.CROSSHAIR_SCALE, lerpf(0.75, 1.35, 0.5), "the crosshair keeps the size the HUD drew before")
+	_check(Game.VIBRATE_KEYS.values().all(func(k: String) -> bool: return d.has(k) and k in Game.BOOL_SETTINGS),
+		"every kind of buzz has its on/off setting")
+	# What each kind of buzz needs.
+	Game.settings = d.duplicate(true)
+	_check(Game.vibration_on("footsteps") and not Game.vibration_on("damage") and not Game.vibration_on("shooting")
+		and Game.vibration_on("lobby") and not Game.vibration_on("nope"), "a new install buzzes for footsteps and in the lobby only")
+	Game.settings.merge({"vibrate_damage": true, "vibrate_footsteps": false}, true)
+	_check(Game.vibration_on("damage") and not Game.vibration_on("footsteps"), "each row turns its own buzz on and off")
 	# Ranges and on/off values.
 	Game.settings = d.duplicate(true)
-	Game.settings.merge({"crosshair_size": 10, "crosshair_color": 9, "sens_freelook": 0, "sens_2x": 900, "sens_fire": -3,
-		"show_fps": "yes", "vibration": 0, "graphics_auto": [], "dynamic_joystick": true, "mode": "battle"}, true)
+	Game.settings.merge({"sens_freelook": 0, "sens_2x": 900, "vibrate_damage": "yes", "vibration": 0, "graphics_auto": [],
+		"dynamic_joystick": false, "mode": "battle", "vol_sfx": 140}, true)
 	Game._sanitize_settings()
 	var s := Game.settings
-	_check(s.crosshair_size == 50 and s.crosshair_color == 3, "crosshair size and colour are clamped (%s, %s)" % [s.crosshair_size, s.crosshair_color])
-	_check(s.sens_freelook == 1 and s.sens_2x == 200 and s.sens_fire == 1, "free look, 2x and fire-button sensitivity stay in 1..200")
-	_check(s.show_fps == false and s.vibration == true and s.graphics_auto == true and s.dynamic_joystick == true,
+	_check(s.sens_freelook == 1 and s.sens_2x == 200 and s.vol_sfx == 100, "free look and 2x stay in 1..200, a volume in 0..100")
+	_check(s.vibrate_damage == false and s.vibration == true and s.graphics_auto == true and s.dynamic_joystick == false,
 		"an on/off setting that is not true or false falls back to its default; a real one is kept")
 	_check(s.mode == "training", "an unknown mode falls back to TRAINING GROUND")
-	s.crosshair_size = 999
 	s.mode = 7
 	Game._sanitize_settings()
-	_check(s.crosshair_size == 150 and s.mode == "training", "crosshair size at most 150 %, a mode must be a mode's name")
-	_near(Game.crosshair_scale(), Game.CROSSHAIR_SCALE * 1.5, "the crosshair scale follows the size")
-	s.crosshair_size = 100
-	_near(Game.crosshair_scale(), Game.CROSSHAIR_SCALE, "crosshair scale at 100 %")
+	_check(s.mode == "training", "a mode must be a mode's name")
 	# A version 4 file (through JSON, as saved): the values that were fixed then have no say, free
 	# look and 2x start at the sensitivity they turned with, a picked graphics level keeps AUTO off.
 	var v4: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 4, "graphics": 2, "sens_general": 150,
 		"sens_reddot": 120, "sens_sniper": 60, "vibration": false, "show_fps": true, "crosshair_color": 2,
-		"crosshair_size": 50, "sens_fire": 30, "dynamic_joystick": true, "difficulty": 2, "damage_numbers": false, "bogus": 1}))
+		"crosshair_size": 50, "sens_fire": 30, "dynamic_joystick": false, "difficulty": 2, "damage_numbers": false, "bogus": 1}))
 	Game.settings = d.duplicate(true)
 	Game._apply_saved_settings(v4)
 	s = Game.settings
 	_check(s.settings_version == Game.SETTINGS_VERSION and s.graphics == 2 and s.sens_general == 150 and s.sens_reddot == 120
-		and s.sens_sniper == 60 and s.dynamic_joystick == true and s.difficulty == 2, "a version 4 file keeps its settings")
-	_check(s.vibration == true and s.show_fps == false and s.crosshair_color == 0 and s.crosshair_size == 100 and s.sens_fire == 100,
-		"a version 4 file's fixed values give way to what version 4 played with")
+		and s.sens_sniper == 60 and s.difficulty == 2, "a version 4 file keeps its settings")
+	_check(s.vibration == true and s.vibrate_footsteps == true and s.show_fps == false and s.sens_fire == 100 and s.dynamic_joystick == true
+		and not s.has("crosshair_color") and not s.has("crosshair_size"), "a version 4 file's fixed values give way to version 6's")
 	_check(s.sens_freelook == 150 and s.sens_2x == 120, "free look and 2x start at General and Red Dot (%s, %s)" % [s.sens_freelook, s.sens_2x])
 	_check(s.graphics_auto == false, "a player who picked a graphics level keeps it (AUTO off)")
 	_check(s.mode == "training" and s.damage_numbers == true and not s.has("bogus"), "fixed behaviour wins, unknown keys are dropped")
@@ -483,22 +507,57 @@ func _test_settings_v5() -> void:
 	Game.settings = d.duplicate(true)
 	Game._apply_saved_settings({"settings_version": 4, "graphics": 1})
 	_check(Game.settings.graphics_auto == true and Game.settings.sens_freelook == 100, "at the default graphics level AUTO stays on")
-	# A version 5 file keeps every new setting.
+	# A version 5 file: what version 6 dropped goes, a master volume turned down goes into the others,
+	# the joystick and free look take the reference's defaults, vibration off stays off everywhere.
 	var v5: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 5, "mode": "lonewolf", "graphics_auto": false,
 		"show_fps": true, "vibration": false, "crosshair_color": 3, "crosshair_size": 140, "sens_fire": 80,
-		"sens_freelook": 90, "sens_2x": 110, "sens_general": 150}))
+		"sens_freelook": 90, "sens_2x": 110, "sens_general": 150, "dynamic_joystick": false, "freelook_button": true,
+		"vol_master": 50, "vol_sfx": 90, "vol_music": 41, "vol_voice": 100, "left_fire": 1, "switch_button": false}))
 	Game.settings = d.duplicate(true)
 	Game._apply_saved_settings(v5)
 	s = Game.settings
-	_check(s.mode == "lonewolf" and s.graphics_auto == false and s.show_fps == true and s.vibration == false and s.crosshair_color == 3
-		and s.crosshair_size == 140 and s.sens_fire == 80 and s.sens_freelook == 90 and s.sens_2x == 110, "a version 5 file keeps the new settings")
-	# Older files migrate as before: v1's 0-100 sensitivities are dropped, before v4 the joystick resets.
+	_check(s.mode == "lonewolf" and s.graphics_auto == false and s.sens_freelook == 90 and s.sens_2x == 110 and s.sens_general == 150
+		and s.left_fire == 1 and s.switch_button == false, "a version 5 file keeps its settings")
+	_check(s.show_fps == false and s.sens_fire == 100 and not s.has("crosshair_color") and not s.has("crosshair_size")
+		and not s.has("vol_master"), "a version 5 file loses the FPS counter, crosshair, fire-button drag and master volume")
+	_check(s.vol_sfx == 45 and s.vol_music == 21 and s.vol_voice == 50, "a master volume at 50 goes into effects, music and voice (%s, %s, %s)"
+		% [s.vol_sfx, s.vol_music, s.vol_voice])
+	_check(s.dynamic_joystick == true and s.freelook_button == false, "every player gets the reference's joystick and free look default")
+	_check(s.vibration == false and s.vibrate_footsteps == false and s.vibrate_damage == false and s.vibrate_shooting == false,
+		"vibration turned off stays off in every row")
 	Game.settings = d.duplicate(true)
-	Game._apply_saved_settings({"settings_version": 1, "sens_general": 40, "sens_reddot": 40, "dynamic_joystick": true, "vol_music": 10})
+	Game._apply_saved_settings({"settings_version": 5, "vol_master": Game.OLD_MASTER_DEFAULT, "vol_sfx": 70, "vibration": true})
 	s = Game.settings
-	_check(s.sens_general == 100 and s.sens_freelook == 100 and s.sens_2x == 100 and s.dynamic_joystick == false and s.vol_music == 10,
+	_check(s.vol_sfx == 70 and s.vol_music == 45 and s.vibration == true and s.vibrate_footsteps == true and s.vibrate_damage == false,
+		"a master volume left at its default changes nothing; vibration on gets the reference's rows")
+	# Older files migrate as before: v1's 0-100 sensitivities are dropped.
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings({"settings_version": 1, "sens_general": 40, "sens_reddot": 40, "dynamic_joystick": false, "vol_music": 10})
+	s = Game.settings
+	_check(s.sens_general == 100 and s.sens_freelook == 100 and s.sens_2x == 100 and s.dynamic_joystick == true and s.vol_music == 10,
 		"a version 1 file migrates as before")
+	# A version 6 file keeps its choices.
+	var v6: Dictionary = JSON.parse_string(JSON.stringify({"settings_version": 6, "dynamic_joystick": false, "freelook_button": true,
+		"vibrate_damage": true, "vibrate_footsteps": false, "vibration": false, "vol_sfx": 33}))
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings(v6)
+	s = Game.settings
+	_check(s.dynamic_joystick == false and s.freelook_button == true and s.vibrate_damage == true and s.vibrate_footsteps == false
+		and s.vibration == false and s.vol_sfx == 33, "a version 6 file keeps the joystick, free look, vibration and volumes chosen")
+	# DELETE MY DATA's reset: a new install's settings, AUTO graphics measuring again (automated:
+	# AUTO guesses nothing).
+	var at := Game.autotest
+	var pending := Game.auto_graphics_pending
+	Game.autotest = "unit"
+	Game.settings.merge({"graphics_auto": false, "graphics": 3, "vibrate_damage": true, "mode": "lonewolf"}, true)
+	Game.reset_settings()
+	s = Game.settings
+	_check(s.graphics_auto == true and s.vibrate_damage == false and s.mode == "training" and s.show_fps == false
+		and s.sens_fire == 100 and s.settings_version == Game.SETTINGS_VERSION, "reset_settings: as on a new install")
+	Game.autotest = at
+	Game.auto_graphics_pending = pending
 	Game.settings = saved
+	Game.apply_settings()
 
 
 ## The frame rates offered per screen: 30 and 60 always, 90 and 120 only where the screen refreshes
@@ -587,9 +646,12 @@ func _test_controls_settings() -> void:
 	Game.settings.merge({"reload_button": "no", "left_fire": 5, "run_mode": -1, "freelook_button": 3}, true)
 	Game._sanitize_settings()
 	_check(Game.settings.reload_button == true and Game.settings.left_fire == 2 and Game.settings.run_mode == 0
-		and Game.settings.freelook_button == true, "on/off, left fire and run mode values are checked")
-	_check(d.run_mode == 2 and d.freelook_button == true and SettingsPanel.RUN_MODE_NAMES.size() == int(Game.SETTING_RANGES.run_mode[1]) + 1
-		and SettingsPanel.RUN_MODE_NOTES.size() == SettingsPanel.RUN_MODE_NAMES.size(), "run mode TAP / DRAG / MIXED (MIXED as before), free look on")
+		and Game.settings.freelook_button == false, "on/off, left fire and run mode values are checked")
+	_check(d.run_mode == 2 and d.freelook_button == false and SettingsPanel.RUN_MODE_NAMES.size() == int(Game.SETTING_RANGES.run_mode[1]) + 1
+		and SettingsPanel.RUN_MODE_NOTES.size() == SettingsPanel.RUN_MODE_NAMES.size(),
+		"run mode TAP / DRAG / MIXED (MIXED as before), the free look button off (the reference's default)")
+	_check(SettingsPanel.JOYSTICK_NAMES == ["DYNAMIC", "FIXED"] and SettingsPanel.JOYSTICK_NOTES.size() == 2 and d.dynamic_joystick == true,
+		"the joystick DYNAMIC (the default, as the reference's) or FIXED")
 	var hud2 := HUD.new()
 	Game.settings.merge({"run_mode": 1, "freelook_button": false}, true)
 	var drag_only := not hud2._button_visible("sprint") and not hud2._button_visible("freelook")
@@ -617,7 +679,9 @@ func _test_controls_settings() -> void:
 
 
 ## The settings screen: every setting a player can change is in exactly one tab (whose RESET puts it
-## back), the presets set all six sensitivities, and the screen's controls do what they say.
+## back), the presets set all five sensitivities, and the screen's controls do what they say: the
+## reference's groups (DISPLAY; CONTROLS with VIBRATION; ACCOUNT with the cache, DELETE MY DATA and
+## the two documents), HOW TO PLAY under the tabs, the pages over the panel that back closes first.
 func _test_settings_panel() -> void:
 	var shown := {}
 	var twice := []
@@ -634,24 +698,28 @@ func _test_settings_panel() -> void:
 	_check(shown.keys().all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k))
 		and SettingsPanel.NOT_SHOWN.all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k) and not shown.has(k)),
 		"the tabs and the not-shown list name real settings")
-	_check(["graphics_auto", "graphics", "fps", "show_fps", "visual_effects", "vibration"].all(func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[0]),
-		"BASIC: graphics (AUTO), frame rate, FPS counter, visual effects, vibration")
-	_check(["dynamic_joystick", "aim_precision", "left_fire", "crosshair_color", "crosshair_size"].all(func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]),
-		"CONTROLS: joystick, aim precision, left fire button, crosshair colour and size")
+	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT"] and SettingsPanel.ORDER == [0, 2, 1, 3, 4, 5],
+		"the tabs: DISPLAY, CONTROLS, SENSITIVITY, SOUND, ONLINE, ACCOUNT")
+	_check(SettingsPanel.TAB_KEYS[0] == ["graphics_auto", "graphics", "fps", "visual_effects"], "DISPLAY: graphics (AUTO), frame rate, visual effects")
+	_check(["dynamic_joystick", "aim_precision", "left_fire", "freelook_button", "vibrate_footsteps", "vibrate_damage", "vibrate_shooting"].all(
+		func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]), "CONTROLS: joystick, aim precision, left fire, free look and the vibration rows")
+	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and "vibration" in SettingsPanel.TAB_KEYS[4]
+		and (SettingsPanel.TAB_KEYS[5] as Array).is_empty(), "SOUND: effects, music, voice; ONLINE: the lobby's vibration; ACCOUNT: no setting")
+	_check(SettingsPanel.VIBRATION_ROWS.map(func(r: Array) -> String: return String(r[1])) == ["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"],
+		"VIBRATION: enemy footsteps, taking damage, shooting")
 	var sens: Array = SettingsPanel.TAB_KEYS[1]
-	_check(sens == SettingsPanel.SENS_ROWS.map(func(r: Array) -> String: return String(r[1])) and sens.size() == 6,
-		"SENSITIVITY shows its six rows in order")
+	_check(sens == SettingsPanel.SENS_ROWS.map(func(r: Array) -> String: return String(r[1])) and sens.size() == 5 and not ("sens_fire" in sens),
+		"SENSITIVITY shows its five rows in order (no fire-button drag)")
 	_check(SettingsPanel.PRESET_NAMES == ["STANDARD", "FAST"] and SettingsPanel.SENS_PRESETS.size() == 2, "two presets: STANDARD and FAST")
 	var dp: Dictionary = SettingsPanel.SENS_PRESETS.STANDARD
 	var fp: Dictionary = SettingsPanel.SENS_PRESETS.FAST
-	_check(dp.size() == 6 and sens.all(func(k: String) -> bool: return dp.has(k) and int(dp[k]) == int(Game.DEFAULT_SETTINGS[k])),
-		"the STANDARD preset is the defaults of all six")
-	var in_range := fp.size() == 6
+	_check(dp.size() == 5 and sens.all(func(k: String) -> bool: return dp.has(k) and int(dp[k]) == int(Game.DEFAULT_SETTINGS[k])),
+		"the STANDARD preset is the defaults of all five")
+	var in_range := fp.size() == 5
 	for k: String in sens:
 		var lim: Array = Game.SETTING_RANGES[k]
 		in_range = in_range and fp.has(k) and int(fp[k]) >= int(lim[0]) and int(fp[k]) <= int(lim[1])
-	_check(in_range and int(fp.sens_general) > int(dp.sens_general), "the FAST preset sets all six, faster, within range")
-	_check(SettingsPanel.COLOR_NAMES.size() == Game.CROSSHAIR_COLORS.size(), "every crosshair colour has a name")
+	_check(in_range and int(fp.sens_general) > int(dp.sens_general), "the FAST preset sets all five, faster, within range")
 	_check(SettingsPanel.PRECISION_NAMES.size() == int(Game.SETTING_RANGES.aim_precision[1]) + 1
 		and SettingsPanel.PRECISION_NOTES.size() == SettingsPanel.PRECISION_NAMES.size()
 		and SettingsPanel.LEFT_FIRE_NAMES.size() == int(Game.SETTING_RANGES.left_fire[1]) + 1, "every aim precision and left fire value has a choice")
@@ -661,6 +729,7 @@ func _test_settings_panel() -> void:
 	var saved_at := Game.autotest
 	Game.autotest = "unit"
 	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game.settings.merge(Game.FIXED_SETTINGS, true)
 	var panel := SettingsPanel.new()
 	add_child(panel)
 	panel._show_tab(1)
@@ -673,27 +742,36 @@ func _test_settings_panel() -> void:
 	panel._ask_reset()
 	(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
 	_check(panel._ask_layer == null and sens.all(func(k: String) -> bool: return Game.settings[k] == Game.DEFAULT_SETTINGS[k]),
-		"a confirmed RESET on SENSITIVITY restores all six")
+		"a confirmed RESET on SENSITIVITY restores all five")
 	panel._apply_preset(1)
 	_check(panel._preset_index() == 1 and Game.settings.sens_2x == fp.sens_2x and Game.settings.sens_freelook == fp.sens_freelook,
-		"the FAST preset applies all six")
+		"the FAST preset applies all five")
 	var slider: HSlider = (panel._sens_rows.sens_freelook as Control).get_meta("slider")
 	slider.value = 90
 	_check(Game.settings.sens_freelook == 90 and panel._preset_index() == -1, "a slider moved off the preset applies at once")
 	panel._show_tab(2)
 	panel._set_precision(2)
 	_check(Game.settings.aim_precision == 2 and panel._aim_note.text == SettingsPanel.PRECISION_NOTES[2], "aim precision applies and explains itself")
-	Game.settings.merge({"crosshair_color": 3, "crosshair_size": 140, "dynamic_joystick": true, "left_fire": 1}, true)
+	var joy := panel.find_child("Toggle_dynamic_joystick", true, false)
+	_check(joy != null and (joy.get_child(0) as Button).text == "DYNAMIC" and (joy.get_child(0) as Button).button_pressed,
+		"MOVEMENT: the joystick reads DYNAMIC first, picked by default")
+	panel._set_joystick(1)
+	_check(Game.settings.dynamic_joystick == false and panel._joy_note.text == SettingsPanel.JOYSTICK_NOTES[1], "FIXED keeps the stick in its place")
+	for r: Array in SettingsPanel.VIBRATION_ROWS:
+		_check(panel.find_child("Toggle_" + String(r[1]), true, false) != null, "CONTROLS has the vibration row %s" % r[0])
+	_check(panel.find_child("CrosshairColor", true, false) == null and panel.find_child("CrosshairSize", true, false) == null
+		and panel.find_child("CrosshairPreview", true, false) == null and panel.find_child("AimPrecision", true, false) != null
+		and panel.find_child("LeftFire", true, false) != null, "CONTROLS: aim precision and the left fire button, no crosshair colour or size")
+	Game.settings.merge({"dynamic_joystick": false, "left_fire": 1, "vibrate_damage": true, "freelook_button": true}, true)
 	panel._reset_tab()
-	_check(Game.settings.crosshair_color == 0 and Game.settings.crosshair_size == 100 and Game.settings.dynamic_joystick == false
-		and Game.settings.aim_precision == 0 and Game.settings.left_fire == 0, "RESET on CONTROLS restores joystick, aim precision, left fire and crosshair")
-	var colors := panel.find_child("CrosshairColor", true, false)
-	_check(colors != null and colors.get_child_count() == Game.CROSSHAIR_COLORS.size() and panel.find_child("CrosshairPreview", true, false) != null
-		and panel.find_child("AimPrecision", true, false) != null and panel.find_child("LeftFire", true, false) != null,
-		"CONTROLS offers aim precision, the left fire button, every crosshair colour and a preview")
+	_check(Game.settings.dynamic_joystick == true and Game.settings.aim_precision == 0 and Game.settings.left_fire == 0
+		and Game.settings.vibrate_damage == false and Game.settings.freelook_button == false,
+		"RESET on CONTROLS restores the joystick, aim precision, left fire, free look and the vibration rows")
 	panel._show_tab(0)
 	var gseg := panel.find_child("GraphicsChoice", true, false)
 	_check(gseg != null and gseg.get_child_count() == 5, "graphics: AUTO and the four levels")
+	_check(panel.find_child("Toggle_show_fps", true, false) == null and panel.find_child("Toggle_vibration", true, false) == null
+		and panel.find_child("ClearCache", true, false) == null, "DISPLAY: no FPS counter, vibration or cache rows")
 	panel._on_graphics(3)
 	_check(Game.settings.graphics == 2 and Game.settings.graphics_auto == false and panel._graphics_note.text.begins_with("Low"),
 		"picking HIGH turns AUTO off")
@@ -712,13 +790,24 @@ func _test_settings_panel() -> void:
 	Game.settings_changed.connect(count)
 	panel._apply("visual_effects", false)
 	_check(Game.settings.visual_effects == false and changes[0] == 1, "visual effects apply at once (the arena re-applies its effects)")
-	panel._apply("show_fps", true)
-	_check(changes[0] == 1, "a setting the HUD reads live does not re-apply the scene")
+	panel._apply("vibrate_shooting", true)
+	_check(changes[0] == 1 and Game.vibration_on("shooting"), "a setting the game reads live does not re-apply the scene")
 	Game.settings_changed.disconnect(count)
-	Game.settings.merge({"fps": 30, "vibration": false, "graphics_auto": false, "graphics": 3}, true)
+	Game.settings.merge({"fps": 30, "graphics_auto": false, "graphics": 3}, true)
 	panel._reset_tab()
-	_check(Game.settings.fps == 60 and Game.settings.show_fps == false and Game.settings.vibration == true and Game.settings.graphics_auto == true
-		and Game.settings.visual_effects == true, "RESET on BASIC: 60 FPS, no counter, effects and vibration on, AUTO graphics")
+	_check(Game.settings.fps == 60 and Game.settings.graphics_auto == true and Game.settings.visual_effects == true,
+		"RESET on DISPLAY: 60 FPS, effects on, AUTO graphics")
+	# ACCOUNT: the player ID, CLEAR CACHE, the links along the bottom; no RESET there.
+	panel._show_tab(5)
+	var reset := panel.find_child("Reset", true, false) as Control
+	_check(reset != null and not reset.visible and panel.find_child("PlayerIdValue", true, false) != null
+		and panel.find_child("CopyId", true, false) != null, "ACCOUNT: the player ID with COPY, no RESET")
+	var links := panel.find_child("AccountLinks", true, false) as Control
+	_check(links != null and links.find_child("DeleteData", false, false) != null and links.find_child("TermsLink", false, false) != null
+		and links.find_child("PrivacyLink", false, false) != null and not panel._hint.visible,
+		"ACCOUNT's bottom: DELETE MY DATA, the Terms of Use and the Privacy Notice in the hint's place")
+	for b in links.find_children("*", "Button", false, false):
+		_check((b as Control).get_combined_minimum_size().y >= UI.TOUCH_MIN, "the link %s is a full touch target" % b.name)
 	var clear_btn := panel.find_child("ClearCache", true, false) as Button
 	if clear_btn:
 		DirAccess.make_dir_recursive_absolute("user://shader_cache")
@@ -730,14 +819,167 @@ func _test_settings_panel() -> void:
 	if asked:
 		(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
 	_check(clear_btn != null and asked and not FileAccess.file_exists("user://shader_cache/panel_check.cache")
-		and panel._cache_note.text.begins_with("Freed"), "BASIC: CLEAR CACHE asks first, then says what it freed")
+		and panel._cache_note.text.begins_with("Freed"), "ACCOUNT: CLEAR CACHE asks first, then says what it freed")
+	(links.find_child("PrivacyLink", false, false) as Button).pressed.emit()
+	var sheet := panel.find_child("Sheet", false, false)
+	_check(sheet != null and sheet.find_child("DocScroll", true, false) != null and sheet.find_child("SheetOk", true, false) != null,
+		"the Privacy Notice opens as a page over the settings")
+	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	_check(panel._sheet == null and panel.is_inside_tree() and not panel.is_queued_for_deletion(), "back closes the page, not the settings")
+	(links.find_child("TermsLink", false, false) as Button).pressed.emit()
+	(panel._sheet.find_child("SheetOk", true, false) as Button).pressed.emit()
+	_check(panel._sheet == null, "the Terms of Use open too; OK closes them")
+	(links.find_child("DeleteData", false, false) as Button).pressed.emit()
+	_check(panel._ask_layer != null and panel._ask_layer.find_child("ConfirmOk", true, false) != null, "DELETE MY DATA asks first")
+	(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
+	var second := panel._ask_layer
+	_check(second != null and _label_under(second, "ARE YOU SURE?"), "and asks a second time")
+	(second.find_child("ConfirmCancel", true, false) as Button).pressed.emit()
+	_check(panel._ask_layer == null and panel.find_child("Erasing", false, false) == null and not panel.busy,
+		"CANCEL the second time deletes nothing")
+	# HOW TO PLAY under the tabs: a page with both modes on top; back closes it, not the settings.
+	(panel.find_child("HowToPlay", false, false) as Button).pressed.emit()
+	var modes := panel._sheet.find_child("HowToModes", true, false) if panel._sheet else null
+	_check(modes != null and modes.get_child_count() == Game.MODE_NAMES.size(), "HOW TO PLAY opens from the settings with the modes on top")
+	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	_check(panel._sheet == null and not panel.is_queued_for_deletion(), "back closes HOW TO PLAY first")
 	panel._ask_reset()
 	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
 	_check(panel._ask_layer == null and panel.is_inside_tree() and not panel.is_queued_for_deletion(), "back closes the question, not the settings")
+	panel.busy = true
+	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	panel._close()
+	_check(not panel.is_queued_for_deletion(), "while a task runs (busy) back and the X leave the settings open")
+	panel.busy = false
 	panel.free()
+	# In a match DELETE MY DATA is a note (the lobby's), the documents still open.
+	var in_match := SettingsPanel.new()
+	in_match.in_match = true
+	add_child(in_match)
+	in_match._show_tab(5)
+	_check(in_match.find_child("DeleteData", true, false) == null and in_match.find_child("DeleteNote", true, false) != null
+		and in_match.find_child("PrivacyLink", true, false) != null, "in a match DELETE MY DATA waits for the lobby")
+	in_match.free()
 	Game.settings = saved
 	Game.auto_graphics_pending = saved_pending
 	Game.autotest = saved_at
+	Game.apply_settings()
+
+
+## Whether a Label under `root` reads `text` (a section title is upper case).
+func _label_under(root: Node, text: String) -> bool:
+	for l in root.find_children("*", "Label", true, false):
+		if (l as Label).text == text:
+			return true
+	return false
+
+
+## DELETE MY DATA (Settings, ACCOUNT): Cloud.forget_me asks the relay to delete, with empty
+## retained messages, everything this id left there or has waiting there (the player card, friend
+## requests and answers either way, the last chat messages either way), then leaves it (DISCONNECT
+## last) and forgets the key; offline it tells the relay nothing but forgets all the same.
+## SettingsAccount.forget_everything resets the game's memory as on a new install (the guest login
+## comes back); erase_files deletes the saves, keys and caches, never another file.
+func _test_delete_my_data() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var saved_settings := Game.settings.duplicate(true)
+	var saved_cloud := Game.cloud
+	var saved_lan := Game.lan
+	var at := Game.autotest
+	var pending := Game.auto_graphics_pending
+	Game.autotest = "unit"          # nothing is written to user:// (and AUTO guesses nothing)
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var me := "me-key".sha256_text().left(32)
+	var f := "friend-f".sha256_text().left(32)
+	var o := "asked-o".sha256_text().left(32)
+	var i := "asker-i".sha256_text().left(32)
+	var w := "withdrawn-w".sha256_text().left(32)
+	Game.profile.friends[f] = {"name": "FRED"}
+	Game.profile.friend_out[o] = {"name": "OLGA", "t": 1}
+	Game.profile.friend_in[i] = {"name": "IGOR", "t": 1}
+	Game.profile.withdrawn = [w]
+	var cl := RecordingCloud.new()
+	cl.my_id = me
+	cl._connected = true
+	cl._want_lobby = true
+	cl.status = "online"
+	cl.relay_rtt = 40
+	cl.peers[f] = {"name": "FRED", "bundle": "default", "pk": "", "seen": 0}
+	cl.directory[o] = {"name": "OLGA", "bundle": "default", "pk": "", "ts": 1}
+	cl._dir_wants["window"] = true
+	cl.room_code = "123456"
+	var told := cl.forget_me()
+	var topics := {}
+	var empty_retained := not cl.published.is_empty()
+	for m: Array in cl.published:
+		topics[String(m[0])] = true
+		empty_retained = empty_retained and int(m[1]) == 0 and bool(m[2])
+	var r := Cloud.ROOT
+	var want := [r + "/p/" + me, r + "/fr/" + o + "/" + me, r + "/fa/" + me + "/" + o, r + "/fr/" + w + "/" + me,
+		r + "/fa/" + me + "/" + w, r + "/fr/" + me + "/" + i, r + "/fa/" + f + "/" + me, r + "/fm/" + f + "/" + me,
+		r + "/fm/" + me + "/" + f]
+	_check(told and empty_retained and topics.size() == want.size() and want.all(func(t: String) -> bool: return topics.has(t)),
+		"forget_me deletes the card, the requests and answers either way and the chat messages either way (%s)" % str(topics.keys()))
+	_check(not cl.packets.is_empty() and cl.packets.back() == PackedByteArray([0xE0, 0x00]), "then it leaves the relay (DISCONNECT last)")
+	_check(cl.my_id == "" and cl._key == null and cl._pk_pem == "" and not cl._want_lobby and not cl._connected and cl.peers.is_empty()
+		and cl.directory.is_empty() and cl._dir_wants.is_empty() and cl.room_code == "" and cl.status == "offline" and cl.relay_rtt == -1,
+		"and forgets the key, the id, the lists and the custom room")
+	var off := RecordingCloud.new()
+	off.my_id = me
+	_check(not off.forget_me() and off.published.is_empty() and off.my_id == "", "offline the relay is told nothing; the id goes all the same")
+	off.free()
+	cl.free()
+	# The game's memory, as on a new install.
+	var gone := RecordingCloud.new()
+	gone.my_id = me
+	gone._connected = true
+	Game.cloud = gone
+	Game.lan = null
+	NetChat.reset_for_test()
+	NetChat.add(f, 100, true, "SEE YOU")
+	Game.hud_layout = {"_v": 3, "fire_r": {"x": 0.5}}
+	Game.practice = true
+	Game.room_rules = {"rounds": 3}
+	Game.match_notice = ["T", "X"]
+	Game.settings.merge({"vibrate_damage": true, "dynamic_joystick": false, "mode": "lonewolf"}, true)
+	var told_all := SettingsAccount.forget_everything()
+	_check(told_all and gone.my_id == "" and not gone.published.is_empty(), "forget_everything tells the relay through the online service")
+	_check(Game.profile.hash() == Game.DEFAULT_PROFILE.hash() and not bool(Game.profile.guest_ok) and Game.hud_layout.is_empty()
+		and not Game.practice and Game.room_rules.is_empty() and Game.match_notice.is_empty() and not Game.online,
+		"forget_everything: a new profile (the guest login comes back), no HUD layout, nothing of the session")
+	_check(Game.settings.vibrate_damage == false and Game.settings.dynamic_joystick == true and Game.settings.mode == "training",
+		"forget_everything: a new install's settings")
+	_check(NetChat.messages(f).is_empty() and NetChat.unread_total() == 0, "forget_everything: no chats")
+	gone.free()
+	Game.cloud = saved_cloud
+	Game.lan = saved_lan
+	NetChat.reset_for_test()
+	# The files: every save, backup, leftover and key at the top, and the caches; nothing else.
+	var root := "user://erase_check"
+	var files := ["profile.json", "profile.json.bak", "settings.json", "settings.json.tmp", "hud_layout.json", "chat.json",
+		"net_identity.key", "net_identity_host.key", "notes.txt", "shader_cache/a1/s.cache", "logs/godot.log",
+		"logs/godot2026-11-01T10.00.00.log", "keep/inner.json"]
+	for rel: String in files:
+		var path := root.path_join(rel)
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		var fa := FileAccess.open(path, FileAccess.WRITE)
+		fa.store_string("{\"a\": 1}")
+		fa.close()
+	var n := SettingsAccount.erase_files(root)
+	var left := []
+	for rel: String in files:
+		if FileAccess.file_exists(root.path_join(rel)):
+			left.append(rel)
+	_check(n == 10 and left == ["notes.txt", "logs/godot.log", "keep/inner.json"],
+		"erase_files deletes the saves, backups, leftovers, keys and caches, nothing else (%d, left %s)" % [n, str(left)])
+	for rel: String in left:
+		DirAccess.remove_absolute(root.path_join(rel))
+	for dir: String in ["shader_cache/a1", "shader_cache", "logs", "keep", ""]:
+		DirAccess.remove_absolute(root.path_join(dir))
+	Game.profile = saved_profile
+	Game.settings = saved_settings
+	Game.autotest = at
+	Game.auto_graphics_pending = pending
 	Game.apply_settings()
 
 

@@ -82,6 +82,7 @@ var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
 var steps: Array[Dictionary] = []     # enemy footprints for the minimap: {p (x, z), dir, side, t}
 const STEP_SHOW := 2.2                # s a footprint stays on the minimap
+const STEP_BUZZ_M := 20.0             # an enemy's step this close buzzes (Game.vibrate "footsteps")
 var _vis_t := 0.0
 var _hp_lag := Fighter.MAX_HP
 var _hp_last := Fighter.MAX_HP
@@ -197,8 +198,11 @@ func reveal(f: Fighter, seconds := 2.5) -> void:
 
 
 ## Someone ran: a footprint where the step landed (left and right in turn), shown on the
-## minimap for a moment like the reference mode's footstep marks.
+## minimap for a moment like the reference mode's footstep marks; close by, a light buzz (the
+## vibration row ENEMY FOOTSTEPS).
 func footstep(f: Fighter) -> void:
+	if player and f.global_position.distance_to(player.global_position) < STEP_BUZZ_M:
+		Game.vibrate(15, "footsteps")
 	var v := Vector2(f.velocity.x, f.velocity.z)
 	var side := -1 if steps.is_empty() or int(steps[-1].side) > 0 else 1
 	steps.append({"p": Vector2(f.global_position.x, f.global_position.z), "dir": v.normalized() if v.length() > 0.1 else Vector2.UP,
@@ -250,7 +254,7 @@ func confirm_kill(pos: Vector3) -> void:
 	_kill_x_pos = pos
 	_kill_x_t = KILL_X_TIME
 	Audio.play("kill_confirm", 0.0)
-	Game.vibrate(60)
+	Game.vibrate(60, "shooting")
 
 
 ## Every shot shows its own number, what it really took from the target's HP (like the
@@ -332,7 +336,7 @@ func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fi
 	if _hurt_sound_t <= 0.0:
 		_hurt_sound_t = 0.12
 		Audio.play("hurt", -6.0, randf_range(0.95, 1.05))
-	Game.vibrate(35)
+	Game.vibrate(35, "damage")
 
 
 # ---------------------------------------------------------------- touch input

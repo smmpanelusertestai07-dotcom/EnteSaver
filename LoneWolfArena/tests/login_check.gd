@@ -16,8 +16,12 @@ extends Node
 ##   ages, and the player card still carries what the notice lists (Cloud.card_text, card2_text,
 ##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice), the direct connection
 ##   (NetDirect: its STUN servers, the IP address the opponent learns, OFF), PLAY WITHOUT INTERNET
-##   (scripts/lan.gd: what a host's beacon tells the local network, nothing leaves it). Change the
-##   notice (Login.privacy_sections) together with what goes online or on the local network.
+##   (scripts/lan.gd: what a host's beacon tells the local network, nothing leaves it), DELETE MY
+##   DATA (Cloud.forget_me). Change the notice (Login.privacy_sections) together with what goes
+##   online or on the local network;
+## - DELETE MY DATA from the lobby's settings (ACCOUNT): asked twice, a waiting screen that back
+##   does not close, the game's memory as a new install's, a notice that the relay could not be
+##   reached (only a dead local one is known here), and its OK opens the guest login.
 ## Returns the number of failed checks.
 
 var _fails := 0
@@ -32,6 +36,7 @@ func run(at: Node) -> int:
 	_check_create_profile()
 	await _check_routing()
 	await _check_confirm()
+	await _check_delete_my_data()
 	await _check_identity()
 	await _check_intro()
 	Game.profile = saved
@@ -74,7 +79,8 @@ func _check_texts() -> void:
 			"Turned off, your phone never sends its address", "Apart from the relay and the direct connection above",
 			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data",
 			"these games never leave the local network", "your name, outfit, player ID and public key", "pairing code",
-			"never to know where you are"]:
+			"never to know where you are", "DELETE MY DATA (Settings, ACCOUNT) deletes everything the game keeps on this phone",
+			"asks the relay to delete your player card", "the last chat message to and from each friend"]:
 		_check(notice.contains(what), "the Privacy Notice says: %s" % what)
 	# A host's beacon (Lan.beacon) tells the local network what the notice lists: name, outfit, player
 	# ID and public key, plus the protocol, its port and a random nonce. A beacon that says more needs
@@ -90,6 +96,8 @@ func _check_texts() -> void:
 	_check(terms.contains("Play fair") and terms.contains("provided as is") and terms.contains("nothing to buy"),
 		"the Terms of Use: fair play, as is, free")
 	_check(not (notice + terms).contains("http") and not (notice + terms).contains("www."), "the documents carry no web links")
+	_check(Cloud.new().has_method("forget_me") and terms.contains("DELETE MY DATA"),
+		"DELETE MY DATA is what the notice and the terms say it is (Cloud.forget_me)")
 
 
 func _check_art() -> void:
@@ -175,6 +183,88 @@ func _check_confirm() -> void:
 	var lobby := await _wait_scene("Lobby", 40.0)
 	await _frames(10)
 	_check(lobby != null and lobby.get("_modal") == null, "WELCOME opens the lobby, which does not ask for a name again")
+
+
+## DELETE MY DATA from the lobby (SETTINGS, ACCOUNT), with an online service that only knows a dead
+## local relay: asked twice, then a waiting screen that back does not close; a new install's memory;
+## the notice says the relay could not be reached; its OK opens the guest login. Automated runs
+## keep the files (Game.autotest): erase_files is checked by the unit tests.
+func _check_delete_my_data() -> void:
+	var old_lobby := get_tree().current_scene
+	var old := Game.cloud_service()
+	var t := 0.0
+	while old.my_id == "" and t < 60.0:          # (its key is made on a worker thread)
+		await _at.wait(0.2)
+		t += 0.2
+	OS.set_environment("LW_MQTT_URL", "ws://127.0.0.1:9")
+	old.free()
+	Game.cloud = null
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	Game.profile.merge({"name": "DOOMED", "name_set": true, "guest_ok": true, "xp": 1200}, true)
+	Game.settings.vibrate_damage = true
+	Game.goto_lobby()
+	var lobby: Lobby = null
+	t = 0.0
+	while lobby == null and t < 40.0:
+		await _at.wait(0.1)
+		t += 0.1
+		var sc := get_tree().current_scene
+		if sc is Lobby and sc != old_lobby and sc.is_node_ready():
+			lobby = sc
+	_check(lobby != null, "a new lobby for DELETE MY DATA")
+	if lobby == null:
+		return
+	t = 0.0
+	while Game.cloud.my_id == "" and t < 20.0:
+		await _at.wait(0.2)
+		t += 0.2
+	var id := Game.cloud.my_id
+	lobby._open_settings()
+	await _frames(3)
+	var panel := lobby._find_settings()
+	panel._show_tab(5)
+	await _frames(2)
+	var code := panel.find_child("PlayerIdValue", true, false) as Label
+	_check(code != null and id != "" and code.text == Cloud.friend_code(id), "ACCOUNT shows the player ID")
+	(panel.find_child("DeleteData", true, false) as Button).pressed.emit()
+	await _frames(2)
+	(panel.find_child("ConfirmOk", true, false) as Button).pressed.emit()
+	await _frames(2)
+	var sure := panel.find_child("Confirm", true, false)
+	_check(sure != null and _texts(sure).contains(Cloud.friend_code(id)), "the second question names the player ID")
+	(sure.find_child("ConfirmOk", true, false) as Button).pressed.emit()
+	await _frames(2)
+	var erasing := panel.find_child("Erasing", true, false)
+	_check(erasing != null and panel.busy, "a waiting screen while the data goes")
+	panel.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	lobby.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	await _frames(2)
+	_check(is_instance_valid(panel) and not panel.is_queued_for_deletion() and lobby.find_child("QuitDialog", true, false) == null,
+		"back does nothing while the data goes")
+	var ok := erasing.find_child("EraseOk", true, false) as Button if erasing else null
+	t = 0.0
+	while ok and not ok.visible and t < 20.0:
+		await _at.wait(0.2)
+		t += 0.2
+	_check(ok != null and ok.visible, "the deletion ends with a notice (%.1fs)" % t)
+	var said := (erasing.find_child("EraseText", true, false) as Label).text if erasing else ""
+	_check(said.contains("Everything Wolf Arena kept on this phone is deleted") and said.contains("could not be reached"),
+		"the notice says what was deleted, and that the relay could not be reached (%s)" % said)
+	_check(not bool(Game.profile.guest_ok) and Game.profile.name == "ROOKIE" and int(Game.profile.xp) == 0
+		and Game.cloud.my_id == "" and Game.settings.vibrate_damage == false, "a new install's profile and settings, no player ID")
+	if ok:
+		ok.pressed.emit()
+	var s := await _wait_scene("Login", 15.0)
+	_check(s != null and s.scene_file_path == "res://scenes/login.tscn", "OK opens the guest login")
+	OS.set_environment("LW_MQTT_URL", "")
+
+
+## Every label text under `root`, joined with "|".
+func _texts(root: Node) -> String:
+	var out := PackedStringArray()
+	for l in root.find_children("*", "Label", true, false):
+		out.append((l as Label).text)
+	return "|".join(out)
 
 
 func _check_identity() -> void:

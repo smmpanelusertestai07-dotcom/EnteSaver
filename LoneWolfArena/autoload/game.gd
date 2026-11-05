@@ -20,7 +20,7 @@ const DEFAULT_MODE := "training"
 ## room sets its own (see rounds_to_win()).
 const ROUNDS_TO_WIN := 5
 
-const SETTINGS_VERSION := 5
+const SETTINGS_VERSION := 6
 const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"mode": DEFAULT_MODE,
@@ -28,27 +28,28 @@ const DEFAULT_SETTINGS := {
 	"graphics_auto": true,        # the game picks the graphics level for the phone (see AUTO graphics)
 	"graphics_auto_done": false,  # AUTO has measured this phone (until then the next lobby or match does)
 	"fps": 60,
-	"show_fps": false,
 	"sens_general": 100,
 	"sens_reddot": 100,
 	"sens_2x": 100,               # aiming through a 2x scope (Player.sens_key)
 	"sens_sniper": 71,
 	"sens_freelook": 100,         # free look (the eye button)
-	"sens_fire": 100,             # a drag that starts on the fire button, % of the view's own
-	"dynamic_joystick": false,
+	"dynamic_joystick": true,     # the stick follows the thumb (the reference's default) or stays put
+	# Vibration (vibrate(), VIBRATE_KEYS), the reference's rows and defaults: in a match (CONTROLS)
+	# an enemy's footsteps close by, taking damage, shooting (heavy shots, a kill); out of a match
+	# (ONLINE) a duel challenge or a friend request in the lobby.
+	"vibrate_footsteps": true,
+	"vibrate_damage": false,
+	"vibrate_shooting": false,
 	"vibration": true,
-	"crosshair_color": 0,         # index into CROSSHAIR_COLORS
-	"crosshair_size": 100,        # % of the standard crosshair (CROSSHAIR_SCALE)
 	"aim_precision": 0,           # aim assist: 0 always, 1 not while aiming down a sight, 2 never (Player.assist_allowed)
 	"left_fire": 0,               # the left fire button: 0 always, 1 only while aiming, 2 off (HUD.LEFT_FIRE_OFF)
 	"reload_button": true,        # the RELOAD button up and left of FIRE (HUD)
 	"switch_button": true,        # the SWITCH button left of the weapon panel: gun <-> fists
 	"reload_on_crosshair": true,  # the reload's progress ring on the crosshair
 	"hold_fire_scope": true,      # sniper rifles: holding FIRE looks through the scope, letting go fires
-	"freelook_button": true,      # the free look (eye) button
+	"freelook_button": false,     # the free look (eye) button: off, as the reference ships it
 	"run_mode": 2,                # sprint: 0 TAP (the sprint button), 1 DRAG (push the stick past its ring), 2 MIXED (both)
 	"visual_effects": true,       # muzzle / explosion lights and full particle bursts (Effects.configure)
-	"vol_master": 85,
 	"vol_sfx": 90,
 	"vol_music": 45,
 	"vol_voice": 80,              # the other player's push-to-talk voice (NetVoice, bus "Voice")
@@ -68,35 +69,43 @@ const CHALLENGES_EVERYONE := 0
 const CHALLENGES_FRIENDS := 1
 const CHALLENGES_NOBODY := 2
 
-## Behaviour that is not a setting (the settings screen keeps to graphics, sensitivity,
-## joystick, custom HUD and sound): always these values, whatever an older settings file says.
+## Behaviour that is not a setting (the settings screen keeps to what the reference offers, plus
+## what the owner asked for): always these values, whatever an older settings file says. Version
+## 6 made two settings of version 5 fixed again: there is no FPS counter (the screenshot tours
+## turn show_fps on in memory) and a drag that starts on FIRE turns at the view's own sensitivity
+## (sens_fire 100 %, Player).
 const FIXED_SETTINGS := {
-	"damage_numbers": true, "dynamic_crosshair": true,
+	"damage_numbers": true, "dynamic_crosshair": true, "show_fps": false, "sens_fire": 100,
 }
 ## Settings that FIXED_SETTINGS held until version 4, whatever the file said: a file from then
 ## has no say in them, they start from their defaults (what version 4 played with).
 const FIXED_UNTIL_V4 := ["show_fps", "vibration", "crosshair_color", "crosshair_size", "sens_fire"]
+## The master volume of version 5 (dropped in version 6): one a player left here is not folded
+## into the other volumes (_migrate_settings).
+const OLD_MASTER_DEFAULT := 85
 
 ## Valid ranges of the numeric settings. Values outside them (an edited or corrupted settings
 ## file) are clamped on load and on save, so nothing can index past a list or overdrive a value.
 const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
-	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "sens_fire": [1, 200], "vol_master": [0, 100],
-	"vol_sfx": [0, 100], "vol_music": [0, 100], "difficulty": [0, 2], "crosshair_color": [0, 3],
-	"crosshair_size": [50, 150], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
+	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "vol_sfx": [0, 100], "vol_music": [0, 100],
+	"difficulty": [0, 2], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
 	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY],
 }
 ## On/off settings: anything but true or false falls back to the default.
-const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "show_fps", "dynamic_joystick", "vibration", "visual_effects",
-	"reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope", "freelook_button", "chat", "friend_chat", "show_career", "voice_chat",
-	"friend_requests", "direct_connect"]
+const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "dynamic_joystick", "vibrate_footsteps", "vibrate_damage",
+	"vibrate_shooting", "vibration", "visual_effects", "reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope",
+	"freelook_button", "chat", "friend_chat", "show_career", "voice_chat", "friend_requests", "direct_connect"]
+## What each kind of buzz (vibrate()) needs on: the reference's vibration rows (CONTROLS) and,
+## out of a match, the lobby's (ONLINE).
+const VIBRATE_KEYS := {"footsteps": "vibrate_footsteps", "damage": "vibrate_damage", "shooting": "vibrate_shooting",
+	"lobby": "vibration"}
 ## Every frame rate the setting can hold; the settings offer those the screen can show
 ## (fps_choices).
 const FPS_OPTIONS := [30, 60, 90, 120]
 
-## The crosshair's idle colour (it always turns red on an enemy).
-const CROSSHAIR_COLORS := [Color(1, 1, 1), Color(0.25, 1.0, 0.35), Color(1.0, 0.88, 0.2), Color(0.25, 0.9, 1.0)]
-## The crosshair's scale at crosshair_size 100: the size the HUD drew before it was a setting.
+## The crosshair's scale: the size the HUD drew before version 5 made it a setting (version 6 made
+## it fixed again, white like the reference's; it turns red on an enemy).
 const CROSSHAIR_SCALE := 1.05
 const DIFFICULTY_NAMES := ["EASY", "NORMAL", "HARD"]
 const GRAPHICS_NAMES := ["LOW", "MEDIUM", "HIGH", "EXTREME"]
@@ -283,7 +292,7 @@ func _migrate_settings(saved: Dictionary) -> void:
 		for k in ["sens_general", "sens_reddot", "sens_fire", "settings_version"]:
 			saved.erase(k)
 	if int(version) < 4:
-		# v4: the joystick stays put by default (the reference's default), as on a new install.
+		# v4: every player started on that version's default joystick (it stayed put).
 		saved.erase("dynamic_joystick")
 	if int(version) < 5:
 		# v5: the FPS counter, vibration, crosshair colour and size and the fire-button drag are
@@ -299,6 +308,35 @@ func _migrate_settings(saved: Dictionary) -> void:
 		var g: Variant = saved.get("graphics")
 		if (g is int or g is float) and int(g) != int(DEFAULT_SETTINGS.graphics):
 			saved["graphics_auto"] = false
+	if int(version) < 6:
+		# v6, the reference's settings: the FPS counter, the crosshair colour and size, the
+		# fire-button drag and the master volume are gone (the merge drops them). A master volume
+		# the player had turned from its default goes into the volumes left, so the game sounds as
+		# before. Every player gets the reference's defaults for the joystick (it follows the
+		# thumb) and the free look button (off). The one vibration switch becomes the reference's
+		# rows: off, every buzz stays off; on, their defaults (footsteps and the lobby on, taking
+		# damage and shooting off).
+		var master: Variant = saved.get("vol_master")
+		if (master is int or master is float) and int(master) != OLD_MASTER_DEFAULT:
+			var m := clampf(float(master), 0.0, 100.0) / 100.0
+			for k: String in ["vol_sfx", "vol_music", "vol_voice"]:
+				var v: Variant = saved.get(k, DEFAULT_SETTINGS[k])
+				if v is int or v is float:
+					saved[k] = roundi(clampf(float(v), 0.0, 100.0) * m)
+		saved.erase("dynamic_joystick")
+		saved.erase("freelook_button")
+		if saved.get("vibration") is bool and not bool(saved.vibration):
+			saved["vibrate_footsteps"] = false
+
+
+## Every setting as on a new install (DELETE MY DATA): the defaults, the fixed behaviour, AUTO
+## graphics measuring this phone again, applied at once.
+func reset_settings() -> void:
+	settings = DEFAULT_SETTINGS.duplicate(true)
+	_apply_saved_settings({})
+	if bool(settings.graphics_auto):
+		start_auto_graphics()
+	apply_settings()
 
 
 func _sanitize_settings() -> void:
@@ -697,14 +735,14 @@ func save_hud_layout(layout: Dictionary) -> void:
 	_save_json(HUD_PATH, hud_layout)
 
 
+## The crosshair's idle colour: white, as the reference's (the HUD turns it red on an enemy).
 func crosshair_color() -> Color:
-	return CROSSHAIR_COLORS[clampi(int(settings.crosshair_color), 0, CROSSHAIR_COLORS.size() - 1)]
+	return Color.WHITE
 
 
-## The crosshair's scale: crosshair_size is a percentage of the standard size.
+## The crosshair's scale (CROSSHAIR_SCALE: not a setting).
 func crosshair_scale() -> float:
-	var r: Array = SETTING_RANGES.crosshair_size
-	return CROSSHAIR_SCALE * float(clampi(int(settings.crosshair_size), int(r[0]), int(r[1]))) / 100.0
+	return CROSSHAIR_SCALE
 
 
 ## The frame rates the settings offer on a screen that refreshes `hz` times a second: 30 and 60
@@ -781,7 +819,7 @@ func _setup_audio_buses() -> void:
 
 func apply_settings() -> void:
 	Engine.max_fps = int(settings.fps)
-	_set_bus("Master", settings.vol_master)
+	_set_bus("Master", 100)               # no master volume since version 6: one each for effects, music, voice
 	_set_bus("Music", settings.vol_music)
 	_set_bus("SFX", settings.vol_sfx)
 	_set_bus("Voice", settings.vol_voice)
@@ -795,8 +833,15 @@ func _set_bus(bus_name: String, percent: float) -> void:
 		AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(lin, 0.001)))
 
 
-func vibrate(ms: int) -> void:
-	if settings.vibration and OS.has_feature("mobile"):
+## Whether a buzz of `kind` (a key of VIBRATE_KEYS) is on: its vibration row.
+func vibration_on(kind: String) -> bool:
+	return bool(settings.get(String(VIBRATE_KEYS.get(kind, "")), false))
+
+
+## A buzz of `ms` for `kind` (VIBRATE_KEYS: "footsteps", "damage", "shooting", "lobby") when its
+## row is on; phones only.
+func vibrate(ms: int, kind: String) -> void:
+	if vibration_on(kind) and OS.has_feature("mobile"):
 		Input.vibrate_handheld(ms)
 
 
