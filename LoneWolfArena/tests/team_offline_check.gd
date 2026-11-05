@@ -145,6 +145,19 @@ func _squad() -> void:
 	arena.rounds_to_win = 2
 	var a2 := arena.slot_fighter(2)
 	a2.take_damage(9999.0, "head", e4, e4.global_position)
+	# Bleeding out (a3's knock HP nearly gone): out, the kill of the one who knocked it.
+	var a3 := arena.slot_fighter(3)
+	var e4_kills := int(e4.stats.kills)
+	a3.take_damage(9999.0, "head", e4, e4.global_position)
+	a3.knock_hp = 1.0
+	a3.frozen = false
+	t = 0.0
+	while a3.alive and t < 3.0:
+		await at.wait(0.05)
+		t += 0.05
+	at.log_line("bled out: alive %s, cause %s, kills by %s %d -> %d" % [a3.alive, a3.last_hit_cause, e4.display_name, e4_kills, int(e4.stats.kills)])
+	if a3.alive or a3.last_hit_cause != "bleed" or int(e4.stats.kills) != e4_kills + 1:
+		_fail("a knocked fighter did not bleed out as the knocker's kill")
 	for e: Fighter in foes.slice(1):
 		e.take_damage(9999.0, "head", a1, a1.global_position)
 	await at.wait(0.3)

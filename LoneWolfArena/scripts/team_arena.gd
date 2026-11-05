@@ -381,7 +381,7 @@ func _start_prep() -> void:
 
 ## This phone's player picked (or the pick timer ran out).
 func _on_weapon_picked(id: String) -> void:
-	if not Weapons.DEFS.has(id):
+	if not id in Weapons.PICKABLE:
 		id = Weapons.DEFAULT_PICK
 	Game.settings.last_pick = id
 	Game.save_settings()
@@ -390,7 +390,7 @@ func _on_weapon_picked(id: String) -> void:
 
 
 func _set_pick(f: Fighter, id: String) -> void:
-	if f == null or not Weapons.DEFS.has(id):
+	if f == null or not id in Weapons.PICKABLE:
 		return
 	_picked[f.slot] = id
 	f.set_loadout(id)
@@ -548,9 +548,9 @@ func _update_revives(delta: float) -> void:
 		if f.reviving == null or not runs_here(f):
 			continue
 		var t := f.reviving
+		# (a reviver cannot shoot: Fighter.perform_shot; the player's FIRE cancels it)
 		var stop := not f.alive or f.knocked or not is_instance_valid(t) or not t.alive or not t.knocked \
-			or f.move_dir.length() > 0.2 or f.is_firing_recently() \
-			or f.global_position.distance_to(t.global_position) > REVIVE_CANCEL_M
+			or f.move_dir.length() > 0.2 or f.global_position.distance_to(t.global_position) > REVIVE_CANCEL_M
 		if f is Player and (f as Player).firing:
 			stop = true
 		if stop:
