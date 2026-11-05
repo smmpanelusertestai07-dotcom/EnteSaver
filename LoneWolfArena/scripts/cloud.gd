@@ -19,6 +19,10 @@ extends Node
 ## or was away (background, screen off) longer than the other phone waits, ends it as "connection
 ## lost" (it is the one that dropped out; a link that went quiet outside a match is replaced too).
 ## While a phone loads the match it sends a keep-alive, so a slow load is not taken for leaving.
+## The state can take a faster way: with DIRECT CONNECTION on for both players, the two phones open
+## a direct UDP path (NetDirect: candidates swapped in the room, hole punching, packets sealed with
+## keys derived from the room's) and the state goes over it while it works both ways (direct_up),
+## through the relay again after NetDirect.TIMEOUT_MS of silence; everything else stays here.
 ## Anyone can publish to a public broker, so invites are rate limited and the list is capped. The
 ## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere.
 ## Each player decides who reaches them (the ONLINE settings): DUEL CHALLENGES FROM everyone,
@@ -170,6 +174,16 @@ var _chat_in := [2.0, 0]       # the opponent's chat lines: [tokens, ms] (NetCha
 var _chat_out_ms := 0          # when this phone last sent one
 var _voice_in := [10.0, 0]     # the opponent's voice frames: [tokens, ms]
 var _fchat_ms := 0             # when this phone last sent a friend a chat message
+## The match's direct UDP path (NetDirect, DIRECT CONNECTION): null while off or outside a match.
+## The state goes over it while it works both ways; everything else stays on the relay.
+var direct: NetDirect = null
+var _direct_peer := false      # the other phone can go direct too (its "dh" or "dc" came)
+var _direct_sent := false      # this phone's candidates went out (for the current gathering)
+var _direct_hello_n := 0
+var _direct_hello_t := 0.0
+var _state_in_t := -1          # sender's clock on the newest state taken (either path): older ones are dropped
+var relay_states_out := 0      # states sent through the relay this session (tests)
+var relay_states_in := 0       # states taken from the relay this session (tests)
 
 
 func _ready() -> void:
@@ -321,6 +335,8 @@ func _notification(what: int) -> void:
 
 func _process(delta: float) -> void:
 	_check_away(Time.get_ticks_msec())       # before anything in the buffer is read
+	if direct != null:
+		_tick_direct(delta)
 	if _keygen != -1 and not _keygen_out.is_empty():
 		WorkerThreadPool.wait_for_task_completion(_keygen)
 		_keygen = -1
@@ -1489,18 +1505,22 @@ func _on_room(msg: PackedByteArray) -> void:
 				_chat_in = [2.0, Time.get_ticks_msec()]
 				_chat_out_ms = 0
 				queue.clear()
+				_direct_begin()
 				session_started.emit(is_host)
 		"st":
-			var s: Variant = (d as Dictionary).get("s", [])
-			if in_session and s is Array and (s as Array).size() == RemoteFighter.STATE_SIZE:
-				var out := PackedFloat32Array()
-				for v: Variant in s:
-					if typeof(v) != TYPE_FLOAT and typeof(v) != TYPE_INT:
-						return
-					out.append(float(v))
-				var t: Variant = (d as Dictionary).get("t")
-				last_state_sent_ms = int(t) if (t is float or t is int) and is_finite(float(t)) else -1
-				state_received.emit(out)
+			if _on_state_msg(d as Dictionary):
+				relay_states_in += 1
+		"dh":
+			# The other phone can go direct (DIRECT CONNECTION on there): ours go out once gathered.
+			if in_session and direct != null:
+				_direct_peer = true
+		"dc":
+			# Its candidates (checked: real unicast addresses, ports from 1024): punching starts.
+			if in_session and direct != null:
+				_direct_peer = true
+				var list := NetDirect.candidates_from((d as Dictionary).get("c"), direct.local_mode)
+				if not list.is_empty():
+					direct.set_peer_candidates(list, Time.get_ticks_msec())
 		"pi":
 			# The other phone measures its round trip: answered at once (not a flood of answers).
 			var i: Variant = (d as Dictionary).get("i")
@@ -1566,6 +1586,7 @@ func end_session(reason := "left") -> void:
 	peer_rtt = -1
 	_peer_pings.clear()
 	_outgoing = {}
+	_direct_end()
 	_leave_room()
 	if was:
 		session_ended.emit(reason)
@@ -1589,8 +1610,101 @@ func send_state(s: PackedFloat32Array) -> bool:
 		_same_n = 0
 		_last_state = a
 	_state_ms = now
-	_room_send({"k": "st", "s": a, "t": now})
+	if direct != null and direct.can_send(now):
+		direct.send_state(a, now, now)
+	else:
+		relay_states_out += 1
+		_room_send({"k": "st", "s": a, "t": now})
 	return true
+
+
+## A state from the other phone (the relay's "st" or the direct path's): STATE_SIZE numbers and
+## the sender's clock "t". One the other path brought already, or older than the newest taken, is
+## dropped. Returns whether it was taken (the arena then applies its own limits).
+func _on_state_msg(d: Dictionary) -> bool:
+	var s: Variant = d.get("s", [])
+	if not in_session or not s is Array or (s as Array).size() != RemoteFighter.STATE_SIZE:
+		return false
+	var out := PackedFloat32Array()
+	for v: Variant in s:
+		if typeof(v) != TYPE_FLOAT and typeof(v) != TYPE_INT:
+			return false
+		out.append(float(v))
+	var t: Variant = d.get("t")
+	var sent := int(t) if (t is float or t is int) and is_finite(float(t)) else -1
+	if sent >= 0:
+		if sent <= _state_in_t:
+			return false
+		_state_in_t = sent
+	last_state_sent_ms = sent
+	state_received.emit(out)
+	return true
+
+
+# ---------------------------------------------------------------- the direct path (NetDirect)
+
+## The session started: with DIRECT CONNECTION on (NetDirect.mode) the socket opens and gathering
+## starts; a hello ("dh") tells the other phone. Candidates go out only once its hello (or its
+## candidates) came, so a phone whose player turned it off never gets this phone's addresses.
+func _direct_begin() -> void:
+	_direct_end()
+	_state_in_t = -1
+	relay_states_out = 0
+	relay_states_in = 0
+	var m := NetDirect.mode()
+	if m == "off":
+		return
+	direct = NetDirect.new(is_host, _mac, m == "local")
+	if not direct.open(Time.get_ticks_msec()):
+		direct = null
+		return
+	_direct_sent = false
+	_direct_hello_n = 0
+	_direct_hello_t = 0.0
+
+
+func _direct_end() -> void:
+	if direct != null:
+		direct.close()
+	direct = null
+	_direct_peer = false
+
+
+func _tick_direct(delta: float) -> void:
+	if not in_session or _room == "":
+		_direct_end()
+		return
+	var now := Time.get_ticks_msec()
+	if not _direct_peer:
+		_direct_hello_t -= delta
+		if _direct_hello_t <= 0.0 and _direct_hello_n < 5:
+			_direct_hello_t = 2.0
+			_direct_hello_n += 1
+			_room_send({"k": "dh"})
+	if direct.wants_regather(now):
+		_direct_sent = false
+	if _direct_peer and direct.gathered and not _direct_sent:
+		_direct_sent = true
+		_room_send({"k": "dc", "c": direct.candidates})
+	for d: Dictionary in direct.poll(now, delta):
+		_on_state_msg(d)
+
+
+## Whether the state goes straight to the other phone right now (the match HUD's DIRECT tag).
+func direct_up() -> bool:
+	return direct != null and direct.can_send(Time.get_ticks_msec())
+
+
+## How the match state travels, for the tag under the match HUD's ping: "DIRECT" or "RELAY".
+func link_tag() -> String:
+	return "DIRECT" if direct_up() else "RELAY"
+
+
+## The match HUD's ping: the direct round trip while that path is up, else the room ping (NetPing).
+func match_ping() -> int:
+	if direct_up() and direct.rtt >= 0:
+		return direct.rtt
+	return NetPing.match_ms(peer_rtt, relay_rtt, status == "online")
 
 
 static func compact_state(s: PackedFloat32Array) -> Array:

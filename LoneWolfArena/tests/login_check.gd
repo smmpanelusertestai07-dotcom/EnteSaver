@@ -14,7 +14,8 @@ extends Node
 ##   skips, it ends by itself, and IntroSting.playing() follows it;
 ## - the Privacy Notice stays true to scripts/cloud.gd: every relay host, the card and request
 ##   ages, and the player card still carries what the notice lists (Cloud.card_text, card2_text,
-##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice). Change the notice
+##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice), the direct connection
+##   (NetDirect: its STUN servers, the IP address the opponent learns, OFF). Change the notice
 ##   (Login.privacy_sections) together with what goes online.
 ## Returns the number of failed checks.
 
@@ -44,6 +45,8 @@ func _check_texts() -> void:
 	for url: String in Cloud.BROKERS:
 		var host := url.get_slice("://", 1).get_slice("/", 0).get_slice(":", 0)
 		_check(notice.contains(host), "the Privacy Notice names the relay %s" % host)
+	for srv: Array in NetDirect.STUN_SERVERS:
+		_check(notice.contains(String(srv[0])), "the Privacy Notice names the STUN server %s" % srv[0])
 	_check(notice.contains("%d days after you were last online" % roundi(Cloud.CARD_MAX_AGE_S / 86400.0))
 		and notice.contains("dropped after %d days" % roundi(Cloud.REQUEST_MAX_AGE_S / 86400.0)),
 		"the Privacy Notice gives the card and request ages of cloud.gd")
@@ -66,6 +69,8 @@ func _check_texts() -> void:
 			"last %d chat messages with each friend" % NetChat.HISTORY_MAX, "only your friend's phone can read it",
 			"keeps your last unread message", "never a blocked player", "only while you hold TALK", "never stored",
 			"no microphone except while you hold TALK",
+			"On unless you turn DIRECT CONNECTION off", "your opponent's game learns your phone's IP address",
+			"Turned off, your phone never sends its address", "Apart from the relay and the direct connection above",
 			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data"]:
 		_check(notice.contains(what), "the Privacy Notice says: %s" % what)
 	var terms := ""

@@ -373,7 +373,8 @@ func _voice() -> void:
 
 func _settings() -> void:
 	_check(SettingsPanel.TABS[4] == "ONLINE" and SettingsPanel.TAB_KEYS[4] == ["chat", "friend_chat", "show_career", "voice_chat",
-		"challenges_from", "friend_requests"], "the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat, challenges, requests")
+		"challenges_from", "friend_requests", "direct_connect"],
+		"the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat, challenges, requests, direct connection")
 	_check(Game.DEFAULT_SETTINGS.chat == true and Game.DEFAULT_SETTINGS.friend_chat == true and Game.DEFAULT_SETTINGS.show_career == true
 		and Game.DEFAULT_SETTINGS.voice_chat == false, "chat and the public career on by default, voice off until asked for")
 	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
@@ -384,8 +385,8 @@ func _settings() -> void:
 	t.add_child(panel)
 	panel._show_tab(4)
 	_check(["Toggle_chat", "Toggle_friend_chat", "Toggle_show_career", "Toggle_voice_chat", "Toggle_challenges_from",
-		"Toggle_friend_requests"].all(func(n: String) -> bool:
-		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its six settings")
+		"Toggle_friend_requests", "Toggle_direct_connect"].all(func(n: String) -> bool:
+		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its seven settings")
 	var duel := panel.find_child("Toggle_challenges_from", true, false)
 	(duel.get_child(2) as Button).pressed.emit()
 	_check(Game.settings.challenges_from == Game.CHALLENGES_NOBODY, "DUEL CHALLENGES FROM's third choice is NOBODY")

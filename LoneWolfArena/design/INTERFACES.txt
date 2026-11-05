@@ -298,7 +298,14 @@ listed here. If a part needs something new from the core, add it in its own file
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
 - Online extras: ping `NetPing` (colours, bars; `NetPing.lobby_chip()` "PingChip" in the lobby's
   top bar: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
-  `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`). Match state: 20 a second
+  `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`; `Cloud.match_ping()` is the
+  direct round trip while the direct path is up, and HudNet's tag says DIRECT or RELAY). Direct path
+  `NetDirect` (scripts/net_direct.gd, setting direct_connect, last row of the ONLINE tab): one UDP
+  socket per match, candidates (own addresses + STUN `NetDirect.STUN_SERVERS`) swapped in the room
+  ("dh" hello, "dc" candidates, only when both have it on), sealed packets (direction byte, sequence,
+  AES + HMAC with keys derived from the room's), the state over it while it works both ways
+  (`Cloud.direct_up()`), back on the relay after `NetDirect.TIMEOUT_MS` of silence; events, chat and
+  voice stay on the relay; LW_DIRECT=local (tests) = loopback only, no STUN. Match state: 20 a second
   (`Cloud.state_interval`), `Cloud.compact_state`, unchanged states skipped (`STATE_IDLE_MS`), the
   sender's clock "t" (`Cloud.last_state_sent_ms`) for `RemoteFighter.apply_state(s, sent_ms)`, drawn
   by `NetSmoother` (DELAY_MS behind, EXTRAP_MS at most across a gap). Chat `NetChat` (text rules,
@@ -315,7 +322,7 @@ listed here. If a part needs something new from the core, add it in its own file
   puts `NetChat.unread_total()` on the ONLINE 1 VS 1 row (`FriendsButton`). Voice `NetVoice` (IMA
   ADPCM 8 kHz, `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"; played on the
   bus "Voice", setting vol_voice). Settings tab ONLINE (scripts/settings_online.gd): chat,
-  friend_chat, show_career, voice_chat (asks for RECORD_AUDIO), challenges_from
+  friend_chat, show_career, voice_chat (asks for RECORD_AUDIO), direct_connect (NetDirect), challenges_from
   (`Game.CHALLENGES_EVERYONE` / `_FRIENDS` / `_NOBODY`: `Cloud.challenge_allowed(from)`, the others
   declined at once, never shown) and friend_requests (off: `Cloud.requests_allowed()` false, new
   requests ignored and their waiting copies deleted, no popup). SOUND: vol_master, vol_sfx,

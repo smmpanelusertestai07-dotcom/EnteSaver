@@ -5,6 +5,7 @@ extends Node
 const GuardCode := preload("res://autoload/guard.gd")     # its static helpers, without the autoload
 const GameCode := preload("res://autoload/game.gd")       # (the same for Game's)
 const NetFeatureCheck := preload("res://tests/net_feature_check.gd")
+const DirectCheck := preload("res://tests/direct_check.gd")
 
 var _fails := 0
 var _passes := 0
@@ -58,6 +59,7 @@ func _ready() -> void:
 	_test_online_status()
 	_test_net_limits()
 	NetFeatureCheck.run(self)     # ping, smoothing, chat, card v3, voice codec (tests/net_feature_check.gd)
+	DirectCheck.run(self)         # the direct UDP path: STUN, sealed packets, fallback (tests/direct_check.gd)
 	_test_session_ends()
 	_test_safe_saves()
 	_test_clear_cache()
