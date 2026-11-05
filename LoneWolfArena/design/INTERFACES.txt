@@ -458,7 +458,66 @@ listed here. If a part needs something new from the core, add it in its own file
   `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.
 
 ## DUO / SQUAD: lobby (WP-B1: SELECT MODE sizes, START routing, TEAM bar and invites, TeamMatch, records)
-- (WP-B1 writes its notes here)
+- Records (autoload/game.gd): `Game.RECORD_MODES` {training, lonewolf, duo, squad} (id -> name: TRAINING
+  GROUND, LONE WOLF, LONE WOLF DUO, LONE WOLF SQUAD) is the one list `_sanitize_profile`,
+  `_history_entry`, `_mode_counts` and `mode_name()` use; START's `MODE_NAMES` stays {training,
+  lonewolf}. `DEFAULT_PROFILE.modes` has all four; a profile from before loads duo / squad as zeros.
+  A result's `mode_id` ("training" for TRAINING DUO / SQUAD, "duo" / "squad" online or for a team
+  search that found nobody) picks the numbers it counts in.
+- `record_match` reads, besides today's keys: `team` (true for a team match: HISTORY then keeps
+  `size` = `team_size` (2 / 4), `bots` (count) and `with` = the other human on the player's team,
+  from the result's `with` or else `Game.team_match`'s roster via `Game.team_mate_name()`), and
+  `ended` (true: the match could not go on, e.g. the coop guest whose host left after the first
+  fight: HISTORY result "ended", no win). `HISTORY_RESULTS` += "ended". 1 vs 1 entries keep their
+  ten keys. PROFILE: CAREER rows `CareerMode_<record mode>`; HISTORY rows read "DUO · VS BOTS",
+  "SQUAD · WITH <NAME>", "DUO · VS <NAME>" (`LobbyProfile.history_texts`), result word ENDED.
+- `Game.TEAMS_ONLINE` (const, true): the off switch. false hides the TEAM bar
+  (`LobbyTeam.bar_shown`), declines incoming team invites in the lobby (LobbyFriends._on_net_invited),
+  gives no team match for a session (`LobbyFriends.session_team_match` -> {}), and LONE WOLF with
+  DUO / SQUAD shows "ONLINE DUO / SQUAD: NEXT UPDATE" (START: a notice). TRAINING DUO / SQUAD play.
+- `Game.team_size` (setting team_size 1 / 2 / 4): SELECT MODE's chips `Size_1` SOLO, `Size_2` DUO,
+  `Size_4` SQUAD on both mode cards (a tap picks the card's mode and the size; DUO / SQUAD unset the
+  dummy, `Diff_DUMMY` is disabled in them: "DUMMY IS SOLO ONLY"). Mode card line:
+  `Lobby.mode_format()`; SELECT MODE card lines: `LobbyDialogs.mode_lines(m, size)`.
+- START (`Lobby.start_route(mode, size)`): training SOLO -> today's match (`Game.team_match = {}`);
+  training DUO / SQUAD -> `Game.team_match = TeamArena.offline_match(size, "training",
+  settings.difficulty)` then `Lobby.load_match()` (Game.online false, Loading.start_match);
+  lonewolf SOLO -> `Game.team_match = {}`, NetMatch.open; lonewolf DUO / SQUAD -> `TeamMatch.open
+  (lobby, size)`; online teams off -> a notice.
+- `Game.team_match` is set only by START, TeamMatch's fill and LobbyFriends._on_net_session
+  (`session_team_match`: `TeamArena.link_match(size, coop, host, guest, cloud.is_host,
+  (host_id + guest_id).hash())`, host / guest = {"id", "name", "bundle"} from the profile and
+  `Cloud.opponent`); it is cleared ({}) in Lobby._ready, every SOLO START, every session with an
+  empty `Cloud.session_team` (duels, the 1 vs 1 QUICK MATCH, custom rooms) and the LAN session
+  start (LobbyLan._on_session). Results' PLAY AGAIN (B2) keeps it: an offline team match replays.
+- TeamMatch (scripts/net_team_match.gd): `open(lobby, size)` starts (or brings back) the search:
+  `Cloud.team_seek_start(size)`, `send_seek(saw)` every SEEK_S but only while `Cloud.seek_team ==
+  size` (never on the 1 vs 1 topic), `seeker_seen` -> the lower id calls `Cloud.team_invite(id, size,
+  false, true)`; `Cloud.in_session` -> stop (the lobby loads it). After `TeamMatch.fill_s()`
+  (FILL_S 25, LW_FILL_S in tests) with no opponent, no invite out and none in: `Game.team_match =
+  TeamArena.offline_match(size, "duo" | "squad", 1)` and the match loads; its loading card says
+  "NO PLAYER FOUND: YOUR TEAM VS BOTS" (`Loading.team_info`, node MatchDesc). Popup nodes:
+  TeamStatus, TeamTimer, TeamFill ("BOTS IN 0:nn"), TeamNote, TeamCancel (X / back cancel).
+- TEAM bar (scripts/lobby_team.gd, `Lobby.team`): TeamBar under the player card, TeamHead "YOUR
+  DUO", TeamInvite ("+ INVITE"; "WAITING..." + the name while an invite waits), TeamBot_<3|4>. INVITE
+  -> TeamInviteList: profile friends (never blocked ones), the ones in `Cloud.peers` first with
+  TeamAsk_<code> -> `Cloud.team_invite(id, Game.team_size, true)` (false: "<NAME> COULD NOT BE
+  REACHED", TeamListNote); offline rows greyed, INVITE disabled; no friends: a note and TeamFriends
+  (opens FRIENDS). Then TeamWait "WAITING FOR <NAME>" + TeamWaitCancel (`Cloud.cancel_invite`); a no
+  (`Cloud.invite_answered(false, name)`, also the 25 s time-out) reads "<NAME> DECLINED" (LobbyFriends
+  hands answers on: `LobbyTeam.on_answered`).
+- Incoming TEAM INVITE: `LobbyFriends.invite_team(cloud)` = `Cloud.invite_from().team` ({} for a duel;
+  until WP-N's invite_from carries "team" it reads `Cloud._incoming.team`); the challenge popup is
+  titled TEAM INVITE, ChallengeText "<NAME> wants you in their DUO team: YOU TWO VS BOTS" (SQUAD: "...
+  their SQUAD: YOU TWO AND 2 BOTS VS BOTS"); ACCEPT / DECLINE / BLOCK and waiting behind an open
+  popup as a duel (`LobbyFriends.challenge_text`).
+- Needs from WP-N (Cloud): `session_team` set on BOTH phones before `session_started`;
+  `seek_team` = the size while team-seeking; `invite_from()` -> {"id", "name", "team"}; a declined or
+  timed-out team invite emits `invite_answered(false, name)` like a duel's.
+- Needs from WP-C: `TeamArena.TEAM_ROUNDS_TO_WIN` (the loading card's FIRST TO n via
+  `Loading.team_rounds_to_win()`, LW_ROUNDS_TO_WIN in tests); the result keys above.
+- Checks: tests/team_lobby_unit.gd (unit), tests/team_lobby_check.gd (one copy, LW_FILL_S=3,
+  LW_MQTT_URL=ws://127.0.0.1:9 so nothing leaves the machine; "TEAM LOBBY CHECK DONE bad=N").
 
 ## DUO / SQUAD: match HUD and results (WP-B2: HudTeam, kill feed, minimap, scoreboard, results)
 - (WP-B2 writes its notes here)

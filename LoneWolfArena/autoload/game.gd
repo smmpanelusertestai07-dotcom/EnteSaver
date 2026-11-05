@@ -16,6 +16,17 @@ const HUD_PATH := "user://hud_layout.json"
 ## expects one).
 const MODE_NAMES := {"training": "TRAINING GROUND", "lonewolf": "LONE WOLF"}
 const DEFAULT_MODE := "training"
+## What the profile counts matches as (CAREER's rows, HISTORY's "mode", the arena's "mode_id"): the
+## two modes above, then LONE WOLF's DUO and SQUAD (a team match against another player, a friend's
+## TEAM INVITE, or a team search that found nobody and was played against bots). TRAINING GROUND's
+## DUO and SQUAD count as TRAINING GROUND. Every list of modes in the records goes through this one
+## (_sanitize_profile, _history_entry, _mode_counts), so no mode's numbers are dropped at a load.
+const RECORD_MODES := {"training": "TRAINING GROUND", "lonewolf": "LONE WOLF", "duo": "LONE WOLF DUO",
+	"squad": "LONE WOLF SQUAD"}
+## DUO / SQUAD between two phones (the TEAM bar's invites, LONE WOLF's DUO / SQUAD search): the
+## release's off switch. false hides the TEAM bar, declines team invites, and LONE WOLF with DUO or
+## SQUAD says "ONLINE DUO / SQUAD: NEXT UPDATE"; TRAINING GROUND's DUO and SQUAD play either way.
+const TEAMS_ONLINE := true
 ## A match is first to ROUNDS_TO_WIN rounds (the reference mode: first to 5, best of 9); a custom
 ## room sets its own (see rounds_to_win()).
 const ROUNDS_TO_WIN := 5
@@ -131,7 +142,8 @@ const DEFAULT_PROFILE := {
 	# headshots = hits with a head pellet, damage dealt in HP, time_played in seconds.
 	"deaths": 0, "headshots": 0, "damage": 0, "shots": 0, "hits": 0, "rounds_won": 0, "rounds_lost": 0,
 	"time_played": 0,
-	"modes": {"training": {"matches": 0, "wins": 0, "kills": 0}, "lonewolf": {"matches": 0, "wins": 0, "kills": 0}},
+	"modes": {"training": {"matches": 0, "wins": 0, "kills": 0}, "lonewolf": {"matches": 0, "wins": 0, "kills": 0},
+		"duo": {"matches": 0, "wins": 0, "kills": 0}, "squad": {"matches": 0, "wins": 0, "kills": 0}},
 	"friends": {},               # id -> {"name"}: players who accepted a friend request (online)
 	"friend_in": {},             # id -> {"name", "t"}: friend requests to answer (t: unix time)
 	"friend_out": {},            # id -> {"name", "t"}: friend requests sent, not answered yet
@@ -143,9 +155,11 @@ const DEFAULT_PROFILE := {
 	# friend requests are ignored (see block())
 	"blocked": [],
 	# The last counted matches, newest first (record_match, MAX_HISTORY at most): [{"result" (won,
-	# lost, draw, or left: quit with QUIT MATCH, a defeat), "mode", "enemy" (name), "id" (an online
-	# opponent's id, else ""), "score" and
-	# "enemy_score" (rounds), "kills", "damage", "headshots", "t" (unix time)}].
+	# lost, draw, left: quit with QUIT MATCH, a defeat, or ended: a team match the host left, no
+	# win, no loss), "mode" (RECORD_MODES), "enemy" (name), "id" (an online opponent's id, else
+	# ""), "score" and "enemy_score" (rounds), "kills", "damage", "headshots", "t" (unix time)}];
+	# a DUO / SQUAD match also keeps "size" (2 | 4), "bots" (how many fighters were bots) and
+	# "with" (the friend on this player's team, "" when none).
 	"history": [],
 }
 ## Lifetime counters (whole numbers, 0..COUNTER_MAX) and the ones kept per mode (in "modes").
@@ -161,7 +175,7 @@ const MAX_REQUESTS := 50            # each of friend_in and friend_out
 const MAX_RECENT := 20
 const MAX_BLOCKED := 50
 const MAX_HISTORY := 20
-const HISTORY_RESULTS := ["won", "lost", "draw", "left"]
+const HISTORY_RESULTS := ["won", "lost", "draw", "left", "ended"]
 ## The name card backgrounds, in the order of their art assets/ui/banners/banner_<n>.png
 ## (tools/media/make_banners.py: EMBER RIDGE, GOLD RUSH, HIVE, CONTOUR, SHARDS, SCOPE; see
 ## Login.banner_texture).
@@ -382,7 +396,7 @@ func _sanitize_settings() -> void:
 
 ## A mode's player-facing name ("TRAINING GROUND", "LONE WOLF"), the current mode's by default.
 func mode_name(m := "") -> String:
-	return String(MODE_NAMES.get(m if m != "" else mode, MODE_NAMES[DEFAULT_MODE]))
+	return String(RECORD_MODES.get(m if m != "" else mode, MODE_NAMES[DEFAULT_MODE]))
 
 
 ## The rounds a match is played to ("FIRST TO n"): ROUNDS_TO_WIN, online a custom room's own
@@ -517,7 +531,7 @@ func _sanitize_profile() -> void:
 	profile.signature = clean_text(String(profile.get("signature", "")), SIGNATURE_MAX)
 	var modes := {}
 	var saved_modes: Variant = profile.get("modes")
-	for m: String in MODE_NAMES:
+	for m: String in RECORD_MODES:
 		var src: Variant = (saved_modes as Dictionary).get(m) if saved_modes is Dictionary else null
 		var c := {}
 		for k: String in MODE_COUNTERS:
@@ -553,7 +567,8 @@ func _sanitize_profile() -> void:
 
 ## One HISTORY entry from saved or untrusted data (see DEFAULT_PROFILE "history"): every value
 ## checked, names cleaned; {} when it is not one (an unknown result). A match played without
-## internet (PLAY WITHOUT INTERNET) also has "local": true.
+## internet (PLAY WITHOUT INTERNET) also has "local": true; a DUO / SQUAD match "size", "bots" and
+## "with" (1 vs 1 entries keep their ten keys).
 func _history_entry(e: Variant) -> Dictionary:
 	if not e is Dictionary:
 		return {}
@@ -564,13 +579,18 @@ func _history_entry(e: Variant) -> Dictionary:
 	var m: Variant = d.get("mode")
 	var who := clean_name(String(d.get("enemy"))) if typeof(d.get("enemy")) == TYPE_STRING else ""
 	var id: Variant = d.get("id")
-	var out := {"result": String(r), "mode": String(m) if typeof(m) == TYPE_STRING and MODE_NAMES.has(m) else DEFAULT_MODE,
+	var out := {"result": String(r), "mode": String(m) if typeof(m) == TYPE_STRING and RECORD_MODES.has(m) else DEFAULT_MODE,
 		"enemy": who if who != "" else "PLAYER", "id": String(id) if is_player_id(id) else "",
 		"score": _count(d.get("score"), 99), "enemy_score": _count(d.get("enemy_score"), 99),
 		"kills": _count(d.get("kills"), 999), "damage": _count(d.get("damage"), 999999),
 		"headshots": _count(d.get("headshots"), 9999), "t": _count(d.get("t"), UNIX_MAX)}
 	if d.get("local") == true:
 		out["local"] = true          # PLAY WITHOUT INTERNET (HISTORY shows LONE WOLF · LOCAL)
+	var size := _count(d.get("size"), 4)
+	if size in [2, 4]:               # DUO / SQUAD (HISTORY shows "DUO · VS BOTS", "SQUAD · WITH NAME")
+		out["size"] = size
+		out["bots"] = _count(d.get("bots"), size * 2 - 1)
+		out["with"] = clean_name(String(d.get("with"))) if typeof(d.get("with")) == TYPE_STRING else ""
 	return out
 
 
@@ -873,7 +893,7 @@ func vibrate(ms: int, kind: String) -> void:
 
 ## A fight counts as played once it starts, so leaving mid-fight (QUIT MATCH, closing the app)
 ## still records it, as a loss (QUIT MATCH also puts it into HISTORY as LEFT: Arena.record_left).
-## `m` is the mode it is played in (a key of MODE_NAMES): it counts in the totals and in that
+## `m` is the mode it is counted as (a key of RECORD_MODES): it counts in the totals and in that
 ## mode's numbers (profile.modes).
 func count_match(m := DEFAULT_MODE) -> void:
 	profile.matches = int(profile.matches) + 1
@@ -885,13 +905,17 @@ func count_match(m := DEFAULT_MODE) -> void:
 ## The end of a counted fight: wins, kills and XP, in the totals and in the numbers of the
 ## result's mode ("mode_id", see ResultsScreen); the profile page's CAREER counters, a HISTORY
 ## entry and, online, the opponent among the recent players. "left": the match was quit before
-## its end (HISTORY says LEFT; no win, whatever "won" says).
+## its end (HISTORY says LEFT; no win, whatever "won" says). "ended": a team match that could not
+## go on (the host left a TEAM INVITE match: HISTORY says ENDED, no win). A team match ("team":
+## true, "team_size", "bots") keeps its size, its bots and the friend on this player's team (from
+## Game.team_match) in HISTORY.
 func record_match(result: Dictionary) -> void:
 	last_result = result
 	var c := _mode_counts(String(result.get("mode_id", DEFAULT_MODE)))
 	var kills := int(result.get("kills", 0))
 	var left := bool(result.get("left", false))
-	var won := bool(result.get("won", false)) and not left
+	var ended := bool(result.get("ended", false)) and not left
+	var won := bool(result.get("won", false)) and not left and not ended
 	if won:
 		profile.wins = int(profile.wins) + 1
 		c.wins = int(c.wins) + 1
@@ -904,12 +928,16 @@ func record_match(result: Dictionary) -> void:
 		profile[k[0]] = mini(int(profile[k[0]]) + _count(result.get(k[1])), COUNTER_MAX)
 	profile.hits = mini(int(profile.hits), int(profile.shots))
 	profile.headshots = mini(int(profile.headshots), int(profile.hits))
-	var outcome := "left" if left else ("draw" if result.get("draw", false) else ("won" if won else "lost"))
-	var entry := _history_entry({"result": outcome,
+	var outcome := "left" if left else ("ended" if ended else ("draw" if result.get("draw", false) else ("won" if won else "lost")))
+	var raw := {"result": outcome,
 		"mode": result.get("mode_id"), "enemy": result.get("enemy"), "id": result.get("enemy_id"),
 		"score": result.get("score_player"), "enemy_score": result.get("score_bot"), "kills": result.get("kills"),
 		"damage": result.get("damage"), "headshots": result.get("headshots"), "t": int(Time.get_unix_time_from_system()),
-		"local": result.get("local", false)})
+		"local": result.get("local", false)}
+	if bool(result.get("team", false)):
+		raw.merge({"size": result.get("team_size", team_match.get("size", 0)), "bots": result.get("bots", 0),
+			"with": result.get("with", team_mate_name(team_match))})
+	var entry := _history_entry(raw)
 	var history: Array = profile.history
 	history.push_front(entry)
 	history.resize(mini(history.size(), MAX_HISTORY))
@@ -921,11 +949,34 @@ func record_match(result: Dictionary) -> void:
 	save_profile()
 
 
-## A mode's numbers in the profile (profile.modes[m]: matches, wins, kills); an unknown mode
-## counts as the default one.
+## A mode's numbers in the profile (profile.modes[m]: matches, wins, kills; m a key of
+## RECORD_MODES); an unknown mode counts as the default one.
 func _mode_counts(m: String) -> Dictionary:
 	var modes: Dictionary = profile.modes
-	return modes[m] if modes.has(m) else modes[DEFAULT_MODE]
+	if not modes.has(DEFAULT_MODE):
+		modes[DEFAULT_MODE] = {"matches": 0, "wins": 0, "kills": 0}
+	if RECORD_MODES.has(m) and not modes.has(m):
+		modes[m] = {"matches": 0, "wins": 0, "kills": 0}
+	return modes[m] if RECORD_MODES.has(m) else modes[DEFAULT_MODE]
+
+
+## The other player on this player's team in a team match (a TEAM INVITE: the friend), "" when the
+## team is this player and bots (`tm`: Game.team_match).
+func team_mate_name(tm: Dictionary) -> String:
+	var roster: Variant = tm.get("roster")
+	if not roster is Array:
+		return ""
+	var mine := int(tm.get("my_slot", 0))
+	var my_team := -1
+	for e: Variant in roster:
+		if e is Dictionary and int((e as Dictionary).get("slot", -1)) == mine:
+			my_team = int((e as Dictionary).get("team", 0))
+	for e: Variant in roster:
+		if e is Dictionary:
+			var d := e as Dictionary
+			if int(d.get("slot", -1)) != mine and int(d.get("team", -2)) == my_team and not bool(d.get("bot", true)):
+				return String(d.get("name", "PLAYER"))
+	return ""
 
 
 func level() -> int:

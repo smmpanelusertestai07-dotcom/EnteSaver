@@ -16,6 +16,10 @@ extends RefCounted
 ## every list (Game.block).
 ## The tab PLAY WITHOUT INTERNET (Tab_local) is LobbyLan's (scripts/lobby_lan.gd): two phones on the
 ## same Wi-Fi or one phone's hotspot, no internet at all (scripts/lan.gd).
+## A TEAM INVITE (a friend's invite into their DUO / SQUAD against bots: Cloud.invite_from().team)
+## shows in the same popup as a duel, titled TEAM INVITE; while Game.TEAMS_ONLINE is off it is
+## declined at once. A session a team invite started (Cloud.session_team) loads the team match
+## (Game.team_match = TeamArena.link_match), any other one the 1 vs 1 (Game.team_match = {}).
 ## Node names: Tab_<online|friends|room|local>, NetList, MyId, FriendSearch, FriendAccept,
 ## FriendDecline, RoomHead, RoomStart, RoomPin, Rule_<key>, RoomCreate, JoinCode, JoinPin,
 ## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card).
@@ -682,6 +686,9 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 ## answer, a text being typed): then it shows as soon as that one closes (the challenge waits 25 s
 ## for an answer, Cloud.INVITE_TIMEOUT_MS).
 func _on_net_invited(who: String) -> void:
+	if not invite_team(Game.cloud_service()).is_empty() and not Game.TEAMS_ONLINE:
+		Game.cloud_service().answer(false)      # online teams are off in this build
+		return
 	Audio.play("ui_select", 0.0)
 	if bool(Game.settings.get("vibration", true)):
 		Input.vibrate_handheld(250)
@@ -710,16 +717,38 @@ func _on_modal_closed() -> void:
 		_show_challenge(String(cloud.invite_from().get("name", "PLAYER")))
 
 
-## DUEL CHALLENGE: DECLINE, ACCEPT, and BLOCK for someone who keeps challenging (asked first). X
-## and Android back decline too, so the challenger hears at once.
+## The team of the challenge waiting here ({"size", "coop"}: a TEAM INVITE), {} for a duel.
+static func invite_team(cloud: Cloud) -> Dictionary:
+	var info := cloud.invite_from()
+	var t: Variant = info.get("team")
+	if t == null and not info.is_empty():
+		t = (cloud.get("_incoming") as Dictionary).get("team")     # (a Cloud whose invite_from has no "team" yet)
+	return t as Dictionary if t is Dictionary else {}
+
+
+## What the challenge popup says: [title, text]; a TEAM INVITE names the team and who plays whom.
+static func challenge_text(who: String, team: Dictionary) -> Array:
+	if team.is_empty():
+		return ["DUEL CHALLENGE", "%s challenges you to a 1 vs 1 duel" % who]
+	var size := int(team.get("size", 2))
+	var word := "DUO team" if size <= 2 else "SQUAD"
+	if not bool(team.get("coop", true)):
+		return ["TEAM INVITE", "%s wants a %s match: each of you with bot teammates" % [who, "DUO" if size <= 2 else "SQUAD"]]
+	return ["TEAM INVITE", "%s wants you in their %s: YOU TWO %sVS BOTS" % [who, word, "" if size <= 2 else "AND %d BOTS " % (size - 2)]]
+
+
+## DUEL CHALLENGE (or TEAM INVITE): DECLINE, ACCEPT, and BLOCK for someone who keeps challenging
+## (asked first). X and Android back decline too, so the challenger hears at once.
 func _show_challenge(who: String) -> void:
 	_net_list = null
-	var v := lobby.dialogs.open_modal("DUEL CHALLENGE", 680.0)
+	var words := challenge_text(who, invite_team(Game.cloud_service()))
+	var v := lobby.dialogs.open_modal(String(words[0]), 680.0)
 	var decline := func() -> void:
 		Game.cloud_service().answer(false)
 		lobby.dialogs.close_modal()
 	lobby.dialogs.modal.set_meta("on_back", decline)
-	var t := UI.label("%s challenges you to a 1 vs 1 duel" % who, 26, UI.TEXT, "heavy")
+	var t := UI.label(String(words[1]), 26, UI.TEXT, "heavy")
+	t.name = "ChallengeText"
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(t)
 	var row := HBoxContainer.new()
@@ -865,6 +894,7 @@ func _on_net_invite_failed(who: String) -> void:
 
 
 func _on_net_answered(accepted: bool, who: String) -> void:
+	lobby.team.on_answered(accepted, who)
 	if not accepted:
 		_net_note = "%s DECLINED (OR DID NOT ANSWER)" % who
 		_net_sig = "-"
@@ -878,12 +908,14 @@ func _on_room_changed() -> void:
 
 ## Both phones agreed (a challenge accepted, the host started a custom room): load the match. It
 ## is LONE WOLF whatever mode the lobby shows; the arena ignores TRAINING GROUND's dummy choice
-## (Game.practice) online, so that choice stays for later.
+## (Game.practice) online, so that choice stays for later. A session a TEAM INVITE started
+## (Cloud.session_team) is a team match (session_team_match), any other one the 1 vs 1.
 func _on_net_session(_host: bool) -> void:
 	var cloud := Game.cloud_service()
 	if lobby.start_btn.disabled:
 		cloud.end_session("left")       # a match against the bot is loading already: tell the other phone
 		return
+	Game.team_match = session_team_match(cloud)
 	Game.online = true
 	Game.session = cloud
 	Game.room_rules = cloud.session_rules.duplicate()
@@ -893,6 +925,23 @@ func _on_net_session(_host: bool) -> void:
 	lobby.start_btn.disabled = true
 	UI.set_caption(lobby.start_btn, "LOADING")
 	Loading.start_match(lobby)
+
+
+## The team match of the session that just started, as Game.team_match ({} for a 1 vs 1): both
+## phones build the same roster from the same inputs (the host / guest from this profile and
+## Cloud.opponent, the seed from the two ids; TeamArena.link_match).
+static func session_team_match(cloud: Cloud) -> Dictionary:
+	var st: Dictionary = cloud.session_team
+	if st.is_empty() or not Game.TEAMS_ONLINE:
+		return {}
+	var me := {"id": cloud.my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle)}
+	var other := {"id": String(cloud.opponent.get("id", "")), "name": String(cloud.opponent.get("name", "PLAYER")),
+		"bundle": String(cloud.opponent.get("bundle", "default"))}
+	var host := me if cloud.is_host else other
+	var guest := other if cloud.is_host else me
+	var size := 4 if int(st.get("size", 2)) == 4 else 2
+	return TeamArena.link_match(size, bool(st.get("coop", true)), host, guest, cloud.is_host,
+		(String(host.id) + String(guest.id)).hash())
 
 
 ## The session ended while the lobby is up, that is while its match loads: Game.online stays set

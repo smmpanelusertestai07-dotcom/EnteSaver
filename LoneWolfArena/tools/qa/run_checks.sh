@@ -113,6 +113,7 @@ if [ "${1:-}" != "quick" ]; then
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- as each saw it:"; cat "$0.host" "$0.guest"
     [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest"' "$LOGS/sync_host.txt"
   # --- DUO / SQUAD: WP-B1's steps (team_lobby) go right below this line ---
+  step team_lobby env LW_FILL_S=3 LW_MQTT_URL=ws://127.0.0.1:9 godot --headless --path . -- --autotest=script:res://tests/team_lobby_check.gd
 
   # --- DUO / SQUAD: WP-B2's steps (none planned) go right below this line ---
 

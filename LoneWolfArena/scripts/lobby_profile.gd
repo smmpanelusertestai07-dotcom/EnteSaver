@@ -6,9 +6,11 @@ extends RefCounted
 ## full-screen layer over the stage in the landscape layout of the reference's profile, in our own
 ## words: vertical tabs on the left, the open tab in the middle, this player's name card on the
 ## right. CAREER: the lifetime numbers with their rates and averages ("-" while there is nothing to
-## divide by), then one row per mode. HISTORY: the last Game.MAX_HISTORY counted matches, newest
-## first (profile "history", Game.record_match; a match quit with QUIT MATCH shows as LEFT); a row
-## against another player opens their card. NAME CARD: the banner and the profile picture,
+## divide by), then one row per mode the profile counts (Game.RECORD_MODES: TRAINING GROUND, LONE
+## WOLF, LONE WOLF DUO, LONE WOLF SQUAD). HISTORY: the last Game.MAX_HISTORY counted matches, newest
+## first (profile "history", Game.record_match; a match quit with QUIT MATCH shows as LEFT, a team
+## match the host ended as ENDED; a DUO / SQUAD row reads "DUO · VS BOTS", "SQUAD · WITH <NAME>"
+## or "DUO · VS <NAME>": history_texts); a row against another player opens their card. NAME CARD: the banner and the profile picture,
 ## saved at once; the name card shows them live. BLOCKED: the blocked players with UNBLOCK, by the
 ## name known for them (kept with the block) else their short ID; it follows blocks made elsewhere,
 ## and while it shows, the player cards are listened to (Cloud.start_directory), so names and cards
@@ -38,7 +40,7 @@ const TABS := [["career", "CAREER"], ["history", "HISTORY"], ["namecard", "NAME 
 ## tools/media/make_banners.py).
 const BANNER_NAMES := {"default": "EMBER RIDGE", "gold_rush": "GOLD RUSH", "hive": "HIVE", "contour": "CONTOUR",
 	"shards": "SHARDS", "scope": "SCOPE"}
-const RESULT_WORDS := {"won": "VICTORY", "lost": "DEFEAT", "draw": "DRAW", "left": "LEFT"}
+const RESULT_WORDS := {"won": "VICTORY", "lost": "DEFEAT", "draw": "DRAW", "left": "LEFT", "ended": "ENDED"}
 const MONTHS := ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 const MARGIN := 26.0
 const TOP := 88.0                  # the tabs, the open tab and the name card start here
@@ -283,6 +285,25 @@ static func _draw_chevron(b: Button) -> void:
 	var c := Vector2(b.size.x - 20, b.size.y * 0.5)
 	b.draw_polyline(PackedVector2Array([c + Vector2(-4, -8), c + Vector2(4, 0), c + Vector2(-4, 8)]),
 		UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.55), 2.5, true)
+
+
+## A HISTORY entry's two lines: [who it was against, the mode]. 1 vs 1: "VS  <NAME>" and the mode;
+## DUO / SQUAD ("size"): "DUO · VS BOTS", "SQUAD · WITH <NAME>" (a friend's TEAM INVITE), "DUO · VS
+## <NAME>" (a player the team search found), and the mode START played (TRAINING GROUND or LONE
+## WOLF).
+static func history_texts(e: Dictionary) -> Array:
+	var m := String(e.get("mode", ""))
+	var size := int(e.get("size", 1))
+	if not size in [2, 4]:
+		return ["VS  " + String(e.get("enemy", "PLAYER")), Game.mode_name(m)]
+	var word := "DUO" if size == 2 else "SQUAD"
+	var mate := String(e.get("with", ""))
+	var who := "VS BOTS"
+	if mate != "":
+		who = "WITH " + mate
+	elif Game.is_player_id(e.get("id", "")):
+		who = "VS " + String(e.get("enemy", "PLAYER"))
+	return ["%s · %s" % [word, who], Game.mode_name("training" if m == "training" else "lonewolf")]
 
 
 static func _result_color(r: String) -> Color:
@@ -532,7 +553,7 @@ func _fill_career() -> void:
 		grid.add_child(_stat_plate(String(s[0]), String(s[1]), String(s[2])))
 	_list.add_child(UI.spacer(4))
 	_list.add_child(_head_row("BY MODE", "MATCHES, WINS AND KILLS"))
-	for m: String in Game.MODE_NAMES:
+	for m: String in Game.RECORD_MODES:
 		_list.add_child(_mode_plate(m, mode_stats(p, m)))
 
 
@@ -597,7 +618,7 @@ func _fill_history() -> void:
 	_list.add_child(_head_row("LAST MATCHES", "NEWEST FIRST  ·  THE LAST %d" % Game.MAX_HISTORY))
 	if history.is_empty():
 		_list.add_child(_empty_plate("HistoryEmpty", "NO MATCHES YET",
-			"Your last %d matches show up here: TRAINING GROUND against the bot and LONE WOLF online. A match you quit counts as LEFT, a defeat. The target dummy is not counted." % Game.MAX_HISTORY))
+			"Your last %d matches show up here: TRAINING GROUND against bots, LONE WOLF online, SOLO, DUO and SQUAD. A match you quit counts as LEFT, a defeat. The target dummy is not counted." % Game.MAX_HISTORY))
 		return
 	var now := int(Time.get_unix_time_from_system())
 	for i in history.size():
@@ -678,11 +699,12 @@ func _history_content(e: Dictionary, now: int) -> HBoxContainer:
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	info.alignment = BoxContainer.ALIGNMENT_CENTER
 	info.add_theme_constant_override("separation", -2)
-	var who := UI.ellipsis(UI.label("VS  " + String(e.get("enemy", "PLAYER")), 21, UI.TEXT, "bold"))
+	var texts := history_texts(e)
+	var who := UI.ellipsis(UI.label(String(texts[0]), 21, UI.TEXT, "bold"))
 	who.name = "Enemy"
 	info.add_child(who)
 	var when := time_ago(int(e.get("t", 0)), now)
-	var sub := UI.ellipsis(UI.label(Game.mode_name(String(e.get("mode", ""))) + (" · LOCAL" if e.get("local", false) == true else "")
+	var sub := UI.ellipsis(UI.label(String(texts[1]) + (" · LOCAL" if e.get("local", false) == true else "")
 		+ ("  ·  " + when if when != "" else ""), 14,
 		UI.TEXT_DIM, "bold"))
 	sub.name = "When"

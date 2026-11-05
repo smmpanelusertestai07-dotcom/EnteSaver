@@ -212,6 +212,7 @@ func _on_session(_host: bool) -> void:
 	if lobby.start_btn.disabled:
 		lan.end_session("left")         # a match against the bot is loading already: tell the other phone
 		return
+	Game.team_match = {}                # PLAY WITHOUT INTERNET is the 1 vs 1 (no team matches over LAN yet)
 	lan.stop()
 	Game.online = true
 	Game.session = lan

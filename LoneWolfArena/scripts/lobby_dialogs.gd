@@ -6,8 +6,9 @@ extends RefCounted
 ## prompt, a confirmation (confirm()), a message with one OK (notice()) and the "Quit the game?"
 ## dialog. The lobby makes it (Lobby.dialogs) and its parts open popups through it; everything is
 ## built under the lobby's UI layer. (HOW TO PLAY is in SETTINGS: scripts/how_to_play.gd.)
-## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, Difficulty
-## with Diff_<EASY|NORMAL|HARD|DUMMY>, ModeStats, NameEdit, NameRandom, NamePreview, NameOk,
+## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, Sizes with
+## Size_<1|2|4> (SOLO, DUO, SQUAD: on both mode cards), Difficulty with
+## Diff_<EASY|NORMAL|HARD|DUMMY>, ModeStats, NameEdit, NameRandom, NamePreview, NameOk,
 ## ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt"
 ## and "ui name_ok" (the emulator test taps OK there).
 
@@ -17,8 +18,10 @@ const MODE_INFO := {
 	"lonewolf": {"tag": "ONLINE", "lines": ["1 VS 1 AGAINST ANOTHER PLAYER", "PLAYERS ONLINE, FRIENDS OR A CUSTOM ROOM"]},
 }
 ## TRAINING GROUND's opponents in SELECT MODE: the bot's levels (Game.DIFFICULTY_NAMES), then the
-## target dummy.
+## target dummy (SOLO only: a team match is always against bots).
 const DUMMY := "DUMMY"
+## SELECT MODE's size chips (Game.TEAM_SIZES): the players a team, on both mode cards.
+const SIZE_NAMES := {1: "SOLO", 2: "DUO", 4: "SQUAD"}
 
 ## A popup closed (also when another one replaces it): a challenge that waited shows then.
 signal modal_closed
@@ -152,8 +155,26 @@ func select_mode() -> void:
 	v.add_child(row)
 	for m: String in Game.MODE_NAMES:
 		row.add_child(_mode_choice(m))
-	v.add_child(UI.label("Both are played 1 vs 1 on CARGO CAGE, first to %d rounds; the gun is picked every 2 rounds." % Game.ROUNDS_TO_WIN,
-		16, UI.TEXT_DIM, "semi"))
+	v.add_child(UI.label("On CARGO CAGE. SOLO: 1 vs 1, first to %d rounds, the gun picked every 2 rounds. DUO / SQUAD: teams, first to %d, knock down and revive." % [
+		Game.ROUNDS_TO_WIN, TeamArena.TEAM_ROUNDS_TO_WIN], 16, UI.TEXT_DIM, "semi"))
+
+
+## What a mode's card in SELECT MODE says under its name for a team size (1 SOLO, 2 DUO, 4 SQUAD):
+## the lines of MODE_INFO for SOLO; DUO and SQUAD say who plays whom (TRAINING GROUND: the bot's
+## level; LONE WOLF: online, or "NEXT UPDATE" while Game.TEAMS_ONLINE is off).
+static func mode_lines(m: String, size: int, teams_online := Game.TEAMS_ONLINE) -> Array:
+	if size <= 1:
+		var info: Dictionary = MODE_INFO.get(m, MODE_INFO[Game.DEFAULT_MODE])
+		return info.lines
+	var word := String(SIZE_NAMES.get(size, "DUO"))
+	var mates := "A BOT" if size == 2 else "%d BOTS" % (size - 1)
+	if m == "lonewolf":
+		if not teams_online:
+			return ["ONLINE DUO / SQUAD: NEXT UPDATE", "PLAY DUO AND SQUAD IN TRAINING GROUND"]
+		return ["%s · %d VS %d ONLINE · EACH PLAYER + %s" % [word, size, size, mates],
+			"NOBODY FOUND IN %d S: YOUR TEAM VS BOTS" % roundi(TeamMatch.FILL_S)]
+	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	return ["%s · YOU + %s VS %d BOTS · BOT: %s" % [word, mates, size, level], "DUMMY IS SOLO ONLY"]
 
 
 ## One mode's card in SELECT MODE (node Mode_<m>): yellow outline and tick on the current mode;
@@ -163,11 +184,11 @@ func _mode_choice(m: String) -> Button:
 	var card := Button.new()
 	card.name = "Mode_" + m
 	card.focus_mode = Control.FOCUS_NONE
-	card.custom_minimum_size = Vector2(440, 372)
+	card.custom_minimum_size = Vector2(440, 400)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-	var art_h := 186.0
+	var art_h := 150.0
 	card.draw.connect(func() -> void:
 		var s := card.size
 		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.1, 0.095, 0.09, 0.97))
@@ -207,10 +228,12 @@ func _mode_choice(m: String) -> Button:
 	map_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(map_l)
 	v.add_child(head)
-	for line: String in info.lines:
+	for line: String in mode_lines(m, Game.team_size):
 		v.add_child(UI.label(line, 15, UI.TEXT_DIM, "bold"))
+	v.add_child(UI.spacer(8))
+	v.add_child(_size_chips(m))
 	if m == "training":
-		v.add_child(UI.spacer(8))
+		v.add_child(UI.spacer(6))
 		v.add_child(_opponent_chips())
 	var fill := UI.spacer(0)
 	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -227,8 +250,30 @@ func _mode_choice(m: String) -> Button:
 	return card
 
 
+## A mode card's team sizes (row Sizes: Size_1 SOLO, Size_2 DUO, Size_4 SQUAD); the current one
+## (Game.team_size) is lit. A tap picks the size with the card's mode and closes SELECT MODE; a team
+## is never against the target dummy, so DUO and SQUAD pick the bot again.
+func _size_chips(m: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "Sizes"
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var group := ButtonGroup.new()
+	for n: int in Game.TEAM_SIZES:
+		var b := _chip(String(SIZE_NAMES[n]), "Size_%d" % n, n == Game.team_size, group)
+		b.pressed.connect(func() -> void:
+			Audio.play("ui_select", -6.0)
+			Game.team_size = n
+			if n > 1:
+				Game.practice = false
+			_pick(m))
+		row.add_child(b)
+	return row
+
+
 ## TRAINING GROUND's opponent (row Difficulty): EASY, NORMAL and HARD bots, then the target dummy
-## (Diff_<name>); the current one is lit while TRAINING GROUND is the mode.
+## (Diff_<name>, SOLO only: greyed in DUO and SQUAD); the current one is lit while TRAINING GROUND
+## is the mode.
 func _opponent_chips() -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.name = "Difficulty"
@@ -244,11 +289,27 @@ func _opponent_chips() -> HBoxContainer:
 ## A chip for TRAINING GROUND's opponent: a bot level (idx into Game.DIFFICULTY_NAMES) or, with
 ## idx -1, the target dummy. A tap picks it with TRAINING GROUND and closes SELECT MODE.
 func _opponent_chip(text: String, idx: int, group: ButtonGroup) -> Button:
+	var b := _chip(text, "Diff_" + text, Game.practice if idx < 0 else (not Game.practice and idx == int(Game.settings.difficulty)), group)
+	if idx < 0 and Game.team_size > 1:
+		b.disabled = true                 # DUMMY IS SOLO ONLY (the card's line says so)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		Game.practice = idx < 0
+		if idx >= 0:
+			Game.settings.difficulty = idx
+		else:
+			Game.team_size = 1
+		_pick("training"))
+	return b
+
+
+## One chip of SELECT MODE (a size or an opponent): toggled in its group, lit when picked.
+func _chip(text: String, node_name: String, lit: bool, group: ButtonGroup) -> Button:
 	var b := Button.new()
-	b.name = "Diff_" + text
+	b.name = node_name
 	b.toggle_mode = true
 	b.button_group = group
-	b.button_pressed = Game.practice if idx < 0 else (not Game.practice and idx == int(Game.settings.difficulty))
+	b.button_pressed = lit
 	b.focus_mode = Control.FOCUS_NONE
 	b.text = text
 	b.custom_minimum_size = Vector2(96, UI.TOUCH_MIN)
@@ -267,12 +328,8 @@ func _opponent_chip(text: String, idx: int, group: ButtonGroup) -> Button:
 	b.add_theme_color_override("font_hover_color", UI.TEXT)
 	b.add_theme_color_override("font_pressed_color", UI.INK)
 	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		Game.practice = idx < 0
-		if idx >= 0:
-			Game.settings.difficulty = idx
-		_pick("training"))
+	b.add_theme_color_override("font_disabled_color", Color(UI.TEXT_DIM, 0.45))
+	b.add_theme_stylebox_override("disabled", UI.chamfer(Color(0, 0, 0, 0.3), 8, 1, Color(1, 1, 1, 0.08), 8.0, ["tl", "br"], 0.0))
 	return b
 
 

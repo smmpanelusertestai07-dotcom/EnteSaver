@@ -5,7 +5,7 @@ extends Node
 ## reference's layout: the bottom bar's captions bright, FRIENDS and the gear top-right, no left
 ## menu, stats chips, name plate or version; drag to turn the character, START position report),
 ## the modes (mode card, SELECT MODE with the opponent chips, the DUMMY chip, LONE WOLF's START opens
-## the QUICK MATCH search, CANCEL), name edit (pencil tap, long name ends in "..."), the player card (opens
+## the QUICK MATCH search, CANCEL; the size chips: DUO shows the TEAM bar, SOLO hides it), name edit (pencil tap, long name ends in "..."), the player card (opens
 ## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
 ## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
 ## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
@@ -504,6 +504,24 @@ func _tour_modes(lobby: Node) -> void:
 		await _settle(0.5)
 	_check(Game.mode == "training" and _label_text(card, "ModeName") == "TRAINING GROUND"
 		and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"), "TRAINING GROUND is picked again")
+	# DUO / SQUAD: the size chips on the mode cards; DUO shows the TEAM bar (+ INVITE), SOLO hides it.
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	var duo := popup.find_child("Mode_training", true, false).find_child("Size_2", true, false) as Control if popup else null
+	await _tap(duo)
+	await _settle(0.5)
+	var team_bar := lobby.find_child("TeamBar", true, false) as Control
+	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and team_bar != null
+		and team_bar.is_visible_in_tree() and team_bar.find_child("TeamInvite", true, false) != null, "DUO: the mode card says so, the TEAM bar shows + INVITE")
+	await _at.shot("m02f_lobby_duo_team_bar")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Mode_training", true, false).find_child("Size_1", true, false) as Control if popup else null)
+	await _settle(0.5)
+	_check(Game.team_size == 1 and not team_bar.is_visible_in_tree() and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
+		"SOLO again: no TEAM bar")
 
 
 ## A real tap on a SELECT MODE card's art (its upper part: the mode, never a chip).

@@ -7,17 +7,22 @@ extends Node3D
 ## the logo, the ping chip, FRIENDS and the settings gear top-right; the bar of main buttons
 ## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
 ## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
-## the opponent is picked too) and the big START. START plays the card's mode: TRAINING GROUND
-## shows the match loading overlay (Loading.start_match) and enters the arena; LONE WOLF searches
-## for a random opponent (QUICK MATCH, scripts/net_match.gd). WARDROBE opens the outfit picker
+## the opponent and the team size SOLO / DUO / SQUAD are picked too) and the big START. START plays
+## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
+## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
+## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
+## scripts/net_match.gd; DUO / SQUAD: the team search, scripts/net_team_match.gd). In DUO and SQUAD
+## the TEAM bar under the player card (LobbyTeam, scripts/lobby_team.gd) invites an online friend
+## into the team (TEAM INVITE: the two of them against bots). WARDROBE opens the outfit picker
 ## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
 ## are in SETTINGS (the gear).
 ## This file has the 3D stage, the top bar, the bottom bar, the mode card, START, the settings
 ## panel and input. Four parts have their own files: helpers the lobby makes, which build under
 ## `ui` and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, SELECT
 ## MODE with the opponent chips, the name editor, the quit dialog), LobbyFriends (`friends`:
-## ONLINE 1 VS 1, FRIENDS, custom rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE)
-## and LobbyProfile (`profile_ui`: PROFILE and another player's card).
+## ONLINE 1 VS 1, FRIENDS, custom rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE),
+## LobbyProfile (`profile_ui`: PROFILE and another player's card) and LobbyTeam (`team`: the TEAM
+## bar and its invites).
 ## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard, BottomBar,
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
 ## badge), SettingsButton, Bundle_<id>, EquipButton.
@@ -56,6 +61,7 @@ var dialogs := LobbyDialogs.new(self)
 var friends := LobbyFriends.new(self)
 var wardrobe_ui := LobbyWardrobe.new(self)
 var profile_ui := LobbyProfile.new(self)
+var team := LobbyTeam.new(self)
 ## The open popup, the wardrobe layer while it is open and the outfit it previews: the parts keep
 ## them, the screenshot tours read them here.
 var _modal: Control:
@@ -88,6 +94,7 @@ var _vp_scale := 1.0
 
 
 func _ready() -> void:
+	Game.team_match = {}             # a team match is set up by START or a team invite, never left over
 	_build_stage()
 	_build_ui()
 	if not bool(Game.profile.get("name_set", false)):
@@ -546,6 +553,7 @@ func _build_ui() -> void:
 	_build_top_bar(root)
 	_build_right_column(root)
 	_build_bottom_bar(root)
+	team.build(root)
 
 
 func _build_top_bar(root: Control) -> void:
@@ -858,16 +866,25 @@ func _refresh_mode() -> void:
 	_mode_label.text = Game.mode_name()
 	_mode_sub.text = mode_format()
 	mode_card.queue_redraw()
+	team.refresh()
 
 
-## The mode card's format line: LONE WOLF "1 VS 1 ONLINE"; TRAINING GROUND "BOT: <level>  ·  FIRST
-## TO n", or "TARGET DUMMY".
-static func mode_format() -> String:
+## The mode card's format line (short: the card's art is beside it): LONE WOLF "1 VS 1 ONLINE"
+## (DUO / SQUAD: "DUO  ·  2 VS 2 ONLINE", or "DUO: NEXT UPDATE" while Game.TEAMS_ONLINE is off);
+## TRAINING GROUND "BOT: <level>  ·  FIRST TO n" (DUO / SQUAD: "SQUAD  ·  BOT: <level>"), or
+## "TARGET DUMMY".
+static func mode_format(teams_online := Game.TEAMS_ONLINE) -> String:
+	var size := Game.team_size
+	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "SOLO"))
 	if Game.mode != "training":
-		return "1 VS 1 ONLINE"
+		if size == 1:
+			return "1 VS 1 ONLINE"
+		return "%s  ·  %d VS %d ONLINE" % [word, size, size] if teams_online else "%s: NEXT UPDATE" % word
+	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	if size > 1:
+		return "%s  ·  BOT: %s" % [word, level]
 	if Game.practice:
 		return "TARGET DUMMY"
-	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
 	return "BOT: %s  ·  FIRST TO %d" % [level, Game.rounds_to_win()]
 
 
@@ -878,16 +895,45 @@ func refresh_player_card() -> void:
 		_avatar_view.queue_redraw()
 
 
-## START plays the mode on the card: TRAINING GROUND loads the match against the bot (or the
-## target dummy) at once; LONE WOLF searches for a random opponent (QUICK MATCH, NetMatch: the
-## match loads once another searching player is found). Friends' duels and custom rooms are in
-## the ONLINE window (FRIENDS top-right).
+## START plays the mode on the card at its team size (start_route): TRAINING GROUND loads the
+## match at once (SOLO: against the bot or the target dummy; DUO / SQUAD: the player and bot
+## teammates against bots); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH, NetMatch;
+## DUO / SQUAD: TeamMatch, which plays against bots when nobody is found). The match loads once
+## another searching player is found. Friends' duels and custom rooms are in the ONLINE window
+## (FRIENDS top-right); a friend joins a DUO / SQUAD through the TEAM bar.
 func _start() -> void:
 	if start_btn.disabled:
 		return
-	if Game.mode == "lonewolf":
-		NetMatch.open(self)
-		return
+	var size := Game.team_size
+	match start_route(Game.mode, size):
+		"quick":
+			Game.team_match = {}
+			NetMatch.open(self)
+		"team_search":
+			TeamMatch.open(self, size)
+		"team_later":
+			dialogs.notice("ONLINE DUO / SQUAD", "Online DUO and SQUAD come in the next update. Play them now in TRAINING GROUND, you and bot teammates against bots.")
+		"training_team":
+			Game.team_match = TeamArena.offline_match(size, "training", int(Game.settings.difficulty))
+			load_match()
+		_:
+			Game.team_match = {}
+			load_match()
+
+
+## What START does for a mode and a team size: "training" (the 1 vs 1 against the bot or the
+## dummy), "training_team" (DUO / SQUAD against bots on this phone), "quick" (the 1 vs 1 QUICK
+## MATCH), "team_search" (the DUO / SQUAD search) or "team_later" (online teams switched off).
+static func start_route(m: String, size: int, teams_online := Game.TEAMS_ONLINE) -> String:
+	if m == "lonewolf":
+		if size <= 1:
+			return "quick"
+		return "team_search" if teams_online else "team_later"
+	return "training_team" if size > 1 else "training"
+
+
+## The match on this phone loads now (Game.team_match set by the caller: {} for the 1 vs 1).
+func load_match() -> void:
 	Game.online = false
 	start_btn.disabled = true
 	UI.set_caption(start_btn, "LOADING")
@@ -995,6 +1041,7 @@ func _process(delta: float) -> void:
 		start_btn.queue_redraw()
 	wardrobe_ui.process()
 	profile_ui.process(delta)
+	team.process(delta)
 
 
 ## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the
