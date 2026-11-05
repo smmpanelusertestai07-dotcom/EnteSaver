@@ -151,12 +151,14 @@ func run(at: Node) -> int:
 	_check(Game.profile.signature == "MOMENTUM WINS MATCHES WARRIOR" and _text(layer, "CardSignature") == "“MOMENTUM WINS MATCHES WARRIOR”"
 		and lobby.get("_modal") == null, "OK keeps the cleaned signature and the card shows it (%s)" % Game.profile.signature)
 	_check(_text_fits(layer.find_child("CardSignature", true, false) as Label), "a long signature fits the name card whole (no ...)")
-	# COPY: the whole player ID on the clipboard, COPIED for a moment.
-	await _tap(layer.find_child("CardCopy", true, false) as Control)
-	await _settle(0.2)
-	var copy := layer.find_child("CardCopy", true, false) as Button
-	var clip_ok := DisplayServer.clipboard_get() == cloud.my_id or not DisplayServer.has_feature(DisplayServer.FEATURE_CLIPBOARD)
-	_check(clip_ok and copy != null and copy.text == "COPIED", "COPY puts the whole player ID on the clipboard and says COPIED")
+	# COPY: the whole player ID on the clipboard, COPIED for a moment (a headless run has no
+	# clipboard, the engine would only complain: there it is left out).
+	if DisplayServer.has_feature(DisplayServer.FEATURE_CLIPBOARD):
+		await _tap(layer.find_child("CardCopy", true, false) as Control)
+		await _settle(0.2)
+		var copy := layer.find_child("CardCopy", true, false) as Button
+		_check(DisplayServer.clipboard_get() == cloud.my_id and copy != null and copy.text == "COPIED",
+			"COPY puts the whole player ID on the clipboard and says COPIED")
 	# BLOCKED: the name kept with the block (nothing else here knows TOXICTOM), the short ID for a
 	# block without one; UNBLOCK asks first. While it shows, the player cards are listened to.
 	await _tap(layer.find_child("ProfileTab_blocked", true, false) as Control)
