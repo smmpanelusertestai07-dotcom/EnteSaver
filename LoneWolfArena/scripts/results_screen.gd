@@ -276,10 +276,10 @@ func _build_table() -> void:
 	], true))
 	if not _enemy.is_empty():
 		var e := _enemy
-		# Under the opponent's name: ONLINE for another player, else BOT and its level.
+		# Under the opponent's name: ONLINE (LOCAL without internet) for another player, else BOT and its level.
 		var online := String(r.get("mode_id", "")) == "lonewolf"
 		table.add_child(_stat_row("EnemyRow", String(e.get("name", r.get("enemy", "BOT"))).to_upper(),
-			"ONLINE" if online else "BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
+			("LOCAL" if r.get("local", false) == true else "ONLINE") if online else "BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
 			[float(e.get("kills", 0)), "%d"], [float(e.get("damage", 0)), "%d"], [float(e.get("headshots", 0)), "%d"],
 			[float(e.get("accuracy", 0)), "%d%%"], [t, "time"], [float(e.get("hp", 0)), "%d"],
 		], false))

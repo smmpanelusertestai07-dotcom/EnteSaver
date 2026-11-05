@@ -247,10 +247,10 @@ func _show_tip() -> void:
 ## What the match card says about the match being loaded: {"mode", "badge", "chips", "desc"}.
 ## Online it is LONE WOLF (FIRST TO n, 1 VS 1 ONLINE, the opponent's name), else TRAINING GROUND
 ## against the bot (FIRST TO n, 1 VS BOT, its level) or the target dummy.
-static func match_info(online: bool, opponent: String, dummy: bool, difficulty: int, rounds: int) -> Dictionary:
+static func match_info(online: bool, opponent: String, dummy: bool, difficulty: int, rounds: int, local := false) -> Dictionary:
 	if online:
 		return {"mode": Game.mode_name("lonewolf"), "badge": "1 VS 1",
-			"chips": ["FIRST TO %d" % rounds, "1 VS 1 ONLINE", "VS " + opponent],
+			"chips": ["FIRST TO %d" % rounds, "1 VS 1 LOCAL" if local else "1 VS 1 ONLINE", "VS " + opponent],
 			"desc": "Win the duel before the zone closes in."}
 	if dummy:
 		return {"mode": Game.mode_name("training"), "badge": "TRAINING",
@@ -271,7 +271,7 @@ func _build_match() -> void:
 	var online := Game.online and Game.session != null
 	var opponent := String(Game.session.opponent.get("name", "")) if online else ""
 	var info := match_info(online, opponent if opponent != "" else "PLAYER", Game.practice and not online,
-		int(Game.settings.difficulty), Game.rounds_to_win(online))
+		int(Game.settings.difficulty), Game.rounds_to_win(online), online and Game.session is Lan)
 	# Mode + map card, top-left.
 	var card := PanelContainer.new()
 	card.name = "MatchCard"

@@ -682,7 +682,8 @@ func _history_content(e: Dictionary, now: int) -> HBoxContainer:
 	who.name = "Enemy"
 	info.add_child(who)
 	var when := time_ago(int(e.get("t", 0)), now)
-	var sub := UI.ellipsis(UI.label(Game.mode_name(String(e.get("mode", ""))) + ("  ·  " + when if when != "" else ""), 14,
+	var sub := UI.ellipsis(UI.label(Game.mode_name(String(e.get("mode", ""))) + (" · LOCAL" if e.get("local", false) == true else "")
+		+ ("  ·  " + when if when != "" else ""), 14,
 		UI.TEXT_DIM, "bold"))
 	sub.name = "When"
 	info.add_child(sub)

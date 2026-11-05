@@ -102,7 +102,7 @@ func _ready() -> void:
 	online = Game.online and Game.session != null and Game.session.in_session
 	practice = Game.practice and not online
 	mode = "lonewolf" if online else "training"
-	mode_name = Game.mode_name(mode)
+	mode_name = Game.mode_name(mode) + (" · LOCAL" if online and Game.local_match() else "")   # PLAY WITHOUT INTERNET
 	rounds_to_win = Game.rounds_to_win(online)
 	if Game.online and not online:
 		# The session ended while this phone was loading: back to the lobby, which says why (never
@@ -962,7 +962,8 @@ func _final_result() -> Dictionary:
 
 
 ## The match as the results screen and Game.record_match read it (ResultsScreen.setup). "difficulty"
-## is the bot's level, or ONLINE when the opponent is another player.
+## is the bot's level, or ONLINE (LOCAL: PLAY WITHOUT INTERNET) when the opponent is another player;
+## "local" marks a match on the local network (HISTORY shows it).
 func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
 	var st := player.stats
 	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
@@ -971,8 +972,9 @@ func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
 		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
 		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
 		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
-		"difficulty": "ONLINE" if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
-		"shots": int(st.shots), "hits": int(st.hits), "deaths": _deaths, "enemy_id": _enemy_id,
+		"difficulty": ("LOCAL" if Game.local_match() else "ONLINE") if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)],
+		"taken": int(st.taken), "shots": int(st.shots), "hits": int(st.hits), "deaths": _deaths, "enemy_id": _enemy_id,
+		"local": online and Game.local_match(),
 	}
 
 
