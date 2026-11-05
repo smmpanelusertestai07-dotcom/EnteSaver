@@ -156,7 +156,8 @@ listed here. If a part needs something new from the core, add it in its own file
   open popup, `back()` (its X and Android back: the popup's meta "on_back" Callable, else close),
   `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`); SELECT
   MODE `select_mode()`, HOW TO PLAY, the name editor, the quit dialog), `friends`
-  (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind)` with its list in `NetScroll`, custom
+  (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind, back)` with its list in `NetScroll`
+  (back: reopened under a closing player card, the list scrolls back to where it was), custom
   rooms, the online service's signals; `challenge(id)`, `add_friend(id)`), `wardrobe_ui`
   (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`) and
   `profile_ui` (`LobbyProfile`, below). Their scrolling lists (PROFILE's tabs, `NetScroll`) go

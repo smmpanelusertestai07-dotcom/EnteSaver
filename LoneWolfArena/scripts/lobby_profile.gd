@@ -1165,7 +1165,7 @@ func open_player(id: String, back_to := "") -> void:
 func _close_player() -> void:
 	_player_box = null
 	if _player_back != "":
-		lobby.friends.open(_player_back)
+		lobby.friends.open(_player_back, true)          # where the list was scrolled to
 		return
 	lobby.dialogs.close_modal()
 	if layer and tab == "blocked":
@@ -1276,7 +1276,7 @@ func _fill_player() -> void:
 ## DUEL 1 VS 1 on a player card: back to the ONLINE window, which then shows the challenge waiting
 ## for an answer (LobbyFriends.challenge; a second tap there or here cancels it).
 func _duel(id: String) -> void:
-	lobby.friends.open(_player_back if _player_back != "" else "online")
+	lobby.friends.open(_player_back if _player_back != "" else "online", _player_back != "")
 	lobby.friends.challenge(id)
 
 
@@ -1310,7 +1310,7 @@ func _ask_block(id: String, who: String, unblock: bool) -> void:
 	var done := func() -> void:
 		_block(id)
 		if back_to != "":
-			lobby.friends.open(back_to)
+			lobby.friends.open(back_to, true)
 			lobby.friends.note("%s BLOCKED" % who)        # they are gone from the list: say why
 		else:
 			reopen.call()

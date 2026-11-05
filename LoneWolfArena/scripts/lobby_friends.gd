@@ -25,6 +25,9 @@ var _room_rules := Cloud.ROOM_RULES.duplicate()     # the next custom room's rul
 var _room_pin_draft := ""              # the password typed before a rule button rebuilt the tab
 var _room_join_code := ""              # the room this phone asked to join (for its status line)
 var _dir_on := false                   # this window asked the cloud for the player cards
+var _place := {}                       # the tab and scroll a player's card was opened from: {"kind", "scroll"}
+var _scroll_back := -1                 # open(kind, true) scrolls the new list back there once it is laid out
+var _scroll_wait := 0
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -58,6 +61,11 @@ func on_lobby_exit() -> void:
 
 ## Every frame: the open list follows the service (players, requests, invites).
 func process(delta: float) -> void:
+	if _scroll_back >= 0 and _net_scroll and is_instance_valid(_net_scroll):
+		_scroll_wait -= 1
+		if _scroll_wait <= 0:                # two frames: the new list and the window are laid out
+			_net_scroll.scroll_vertical = _scroll_back
+			_scroll_back = -1
 	if _dir_on and not (lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal)):
 		_dir_on = false
 		Game.cloud_service().stop_directory("window")
@@ -75,8 +83,12 @@ func process(delta: float) -> void:
 ## online now, then every player with a card), FRIENDS (your ID, search, requests, friends) and
 ## CUSTOM ROOM. Players show up by name; DUEL 1 VS 1 sends a challenge, the other phone accepts
 ## or declines. The player cards are listened to only while this window is open.
-func open(kind := "online") -> void:
+## back: it opens again under a player's card that closed (X, back, BLOCK, DUEL 1 VS 1): the list
+## scrolls back to where that card was opened from, so a long ALL PLAYERS keeps the player's place.
+func open(kind := "online", back := false) -> void:
 	_net_kind = kind
+	_scroll_back = int(_place.scroll) if back and String(_place.get("kind", "")) == kind else -1
+	_scroll_wait = 2
 	var cloud := Game.cloud_service()
 	cloud.start_lobby()
 	cloud.start_directory("window")  # every registered player, online or not
@@ -450,7 +462,9 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 ## to this tab when it closes.
 func _who_button(id: String, text: String) -> Button:
 	var b := LobbyProfile.player_button(id, text)
-	b.pressed.connect(func() -> void: lobby.profile_ui.open_player(id, _net_kind))
+	b.pressed.connect(func() -> void:
+		_place = {"kind": _net_kind, "scroll": _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0}
+		lobby.profile_ui.open_player(id, _net_kind))
 	return b
 
 

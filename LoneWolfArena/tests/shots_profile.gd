@@ -321,6 +321,21 @@ func _tour_cards(lobby: Node, cloud: Cloud) -> void:
 			and still.find_child("PlayerCardPopup", true, false) == null,
 			"a finger swipe on a player's name scrolls the ONLINE list (%d px) and opens no card" % (ns.scroll_vertical - before))
 		await _at.shot("p09b_online_scrolled")
+		# A card opened from down the list and closed again: the list is back where it was.
+		var spot := ns.scroll_vertical
+		var down_btn := _visible_row_button(ns)
+		var tapped := down_btn != null                  # (the button goes with the list it was in)
+		if tapped:
+			await _tap(down_btn)
+			await _settle(0.5)
+			pop = lobby.get("_modal") as Control
+			_check(pop != null and pop.find_child("PlayerCardPopup", true, false) != null, "a tap on a name down the list opens the card")
+			_back()
+			await _settle(0.6)
+		win = lobby.get("_modal") as Control
+		var ns2: ScrollContainer = win.find_child("NetScroll", true, false) as ScrollContainer if win else null
+		_check(tapped and ns2 != null and spot > 0 and absi(ns2.scroll_vertical - spot) <= 2,
+			"closing the card brings the ONLINE list back where it was (%d, was %d)" % [ns2.scroll_vertical if ns2 else -1, spot])
 	_back()
 	await _settle(0.4)
 
@@ -411,6 +426,16 @@ func _done(saved_profile: Dictionary) -> int:
 	Game.profile = saved_profile
 	_at.log_line("PROFILE TOUR DONE fails=%d" % _fails)
 	return _fails
+
+
+## A player's name button that shows whole (top to bottom) inside the scrolled list `sc`, else null.
+func _visible_row_button(sc: ScrollContainer) -> Control:
+	var view := sc.get_global_rect()
+	for n in sc.find_children("Player_*", "Button", true, false):
+		var r := (n as Control).get_global_rect()
+		if r.position.y >= view.position.y + 4.0 and r.end.y <= view.end.y - 4.0:
+			return n as Control
+	return null
 
 
 ## The open PROFILE tab ("" when PROFILE is closed).
