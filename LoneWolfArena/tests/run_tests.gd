@@ -52,6 +52,7 @@ func _ready() -> void:
 	_test_session_ends()
 	_test_safe_saves()
 	_test_no_sprint_firing()
+	_test_move_speeds()
 	_test_lobby_ui_rules()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
@@ -1614,6 +1615,39 @@ func _test_no_sprint_firing() -> void:
 	p.set_sprint(true)
 	_check(not while_firing and p.sprinting, "no sprint while firing, back once FIRE is let go")
 	p.free()
+
+
+## Fists out, a fighter walks, runs, sprints and crouch-walks 15 % faster than with a rifle, clearly
+## faster than with any gun; the guns by class (SMG fastest, rifle = pistol, then shotgun, marksman,
+## sniper). Players and bots by the same rules.
+func _test_move_speeds() -> void:
+	_check(Weapons.move_mult(Weapons.DEFS.fists) == 1.15 and Weapons.move_mult(Weapons.DEFS.ar) == 1.0, "fists 1.15 x, rifles 1.0 x")
+	for f: Fighter in [Player.new(), Bot.new()]:
+		var who := "player" if f is Player else "bot"
+		var speeds := {}             # weapon id -> [walk, run, sprint, crouch]
+		for id: String in Weapons.PICKABLE + ["fists"]:
+			f.set_loadout("ar" if id == "fists" else id)
+			f.current = 1 if id == "fists" else 0
+			var row: Array[float] = []
+			for gait: String in ["walk", "run", "sprint", "crouch"]:
+				f.stance = Fighter.Stance.CROUCH if gait == "crouch" else Fighter.Stance.STAND
+				f.move_dir = Vector2(0, 0.3 if gait == "walk" else 1.0)
+				f.sprinting = gait == "sprint"
+				row.append(f.move_speed())
+			speeds[id] = row
+		var fist_ok := true
+		var guns_slower := true
+		for i in 4:
+			fist_ok = fist_ok and is_equal_approx(speeds.fists[i] / speeds.ar[i], 1.15)
+			for id: String in Weapons.PICKABLE:
+				guns_slower = guns_slower and speeds[id][i] * 1.05 < speeds.fists[i]
+		_check(fist_ok, "%s: fists out it moves 15 %% faster than with the rifle (%s vs %s)" % [who, speeds.fists, speeds.ar])
+		_check(guns_slower, "%s: no gun comes within 5 %% of the fists' speed" % who)
+		_near(speeds.ar[1], 4.6, "%s: with the rifle it runs as fast as before" % who)
+		_check(speeds.smg[1] > speeds.ar[1] and speeds.ar[1] == speeds.pistol[1] and speeds.pistol[1] > speeds.lever[1]
+			and speeds.lever[1] > speeds.sks[1] and speeds.sks[1] > speeds.sniper[1] and speeds.ak[1] == speeds.ar[1]
+			and speeds.bizon[1] == speeds.smg[1], "%s: SMG > rifle = pistol > shotgun > marksman > sniper, the same within a class" % who)
+		f.free()
 
 
 ## Names keep accented Latin letters as plain ones and say when nothing can be shown; a lobby

@@ -23,11 +23,13 @@ const MASK_SIGHT := LAYER_WORLD | LAYER_SHIELD
 const MAX_HP := 200.0
 const GRAVITY := 22.0
 const JUMP_V := 7.6              # apex ~1.3 m: a 1.2 m crate can be jumped onto
-const RUN_SPEED := 5.0
-const SPRINT_SPEED := 6.0
-const WALK_SPEED := 2.0
-const CROUCH_SPEED := 1.75
-const PRONE_SPEED := 0.75
+## Base speeds (m/s) with a rifle in hand, what the M4A1 always ran at; Weapons.CLASS_MOVE scales
+## them per weapon class (fists 1.15 x, an SMG a little faster, the heavy guns slower).
+const RUN_SPEED := 4.6
+const SPRINT_SPEED := 5.5
+const WALK_SPEED := 1.85
+const CROUCH_SPEED := 1.6
+const PRONE_SPEED := 0.7
 const ADS_MULT := 0.7
 const HEAL_MULT := 0.6
 const HEAL_WINDUP := 1.0
@@ -744,7 +746,7 @@ func move_speed() -> float:
 			elif deflect < 0.45:
 				speed = WALK_SPEED * deflect / 0.45      # a light push walks, a normal push runs
 	var d := weapon().def
-	speed *= float(d.get("move", 1.0))
+	speed *= Weapons.move_mult(d)
 	if ads:
 		speed *= ADS_MULT
 	if is_firing_recently():

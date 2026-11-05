@@ -107,6 +107,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `Weapons.DEFS[id]` with `name`, `class` (AR/SMG/SG/PISTOL/SNIPER/MELEE), `icon` (texture name in
   res://assets/ui/icons/, e.g. "weapon_ar"; missing icons fall back to the AR), `mag`, `reserve`,
   `crosshair` ("ring" | "wide" | "dot"), `scope`, `auto`. `Weapons.PICKABLE` = pick-grid order.
+  Movement by class: `Weapons.CLASS_MOVE` / `move_mult(def)` x `Fighter.RUN_SPEED` etc. (the rifle's
+  speeds): fists 1.15, SMG 1.06, rifle and pistol 1.0, shotgun 0.97, marksman 0.95, sniper 0.92.
 
 ## Map (scripts/map_builder.gd) -> used by arena.gd
 - `build(parent: Node3D)` creates the environment (`env: WorldEnvironment`, `sun: DirectionalLight3D`),
