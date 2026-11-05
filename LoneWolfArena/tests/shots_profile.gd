@@ -62,6 +62,7 @@ func run(at: Node) -> int:
 	# The player card opens PROFILE on CAREER.
 	var card := lobby.find_child("PlayerCard", true, false) as Control
 	_check(card != null and lobby.find_child("PlayerAvatar", true, false) != null, "the lobby's player card shows the profile picture")
+	_touch_targets(card, "the lobby's player card (its pencil)")
 	if card:
 		await _tap_at(card.get_global_rect().position + Vector2(34, 31))
 		await _settle(0.6)
@@ -80,6 +81,10 @@ func run(at: Node) -> int:
 		and _text(layer, "CardId") == "#" + Cloud.friend_code(cloud.my_id) and _text(layer, "CardSignature") == "“ALWAYS ONE MORE ROUND”"
 		and _text(layer, "CardSince").begins_with("PLAYING SINCE ") and _text(layer, "CardOutfit") == "NEON STRIKER",
 		"the name card: name, level, short player ID, signature, outfit, playing since")
+	var grid := layer.find_child("Career", true, false) as Control
+	var body0 := layer.find_child("ProfileBody", true, false) as Control
+	_check(grid != null and body0 != null and grid.get_global_rect().end.x <= body0.get_global_rect().end.x + 0.5,
+		"CAREER's plates (HEADSHOT RATE (PER HIT) the longest caption) fit the tab")
 	_touch_targets(layer, "CAREER")
 	await _at.shot("p01_career")
 	# HISTORY: every match, newest first; it scrolls.
@@ -134,13 +139,14 @@ func run(at: Node) -> int:
 	var sig_edit := lobby.find_child("SignatureEdit", true, false) as LineEdit
 	_check(sig_edit != null, "the signature's EDIT opens its editor")
 	if sig_edit:
-		sig_edit.text = "gg, wp! see you"
+		sig_edit.text = "momentum wins matches, warrior"         # a long one: 29 characters once cleaned
 		_touch_targets(lobby.get("_modal") as Node, "the signature editor")
 		await _at.shot("p03b_signature")
 		await _tap(lobby.find_child("SignatureOk", true, false) as Control)
 		await _settle(0.4)
-	_check(Game.profile.signature == "GG WP SEE YOU" and _text(layer, "CardSignature") == "“GG WP SEE YOU”" and lobby.get("_modal") == null,
-		"OK keeps the cleaned signature and the card shows it (%s)" % Game.profile.signature)
+	_check(Game.profile.signature == "MOMENTUM WINS MATCHES WARRIOR" and _text(layer, "CardSignature") == "“MOMENTUM WINS MATCHES WARRIOR”"
+		and lobby.get("_modal") == null, "OK keeps the cleaned signature and the card shows it (%s)" % Game.profile.signature)
+	_check(_text_fits(layer.find_child("CardSignature", true, false) as Label), "a long signature fits the name card whole (no ...)")
 	# COPY: the whole player ID on the clipboard, COPIED for a moment.
 	await _tap(layer.find_child("CardCopy", true, false) as Control)
 	await _settle(0.2)
@@ -442,6 +448,14 @@ func _visible_row_button(sc: ScrollContainer) -> Control:
 func _tab_of(lobby: Node) -> String:
 	var pui: Object = lobby.get("profile_ui")
 	return String(pui.get("tab")) if pui and pui.get("layer") != null else ""
+
+
+## Whether a label's whole text fits its width at its font size (nothing cut off by "...").
+func _text_fits(l: Label) -> bool:
+	if l == null:
+		return false
+	var w := l.get_theme_font("font").get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.get_theme_font_size("font_size")).x
+	return w <= l.size.x + 0.5
 
 
 ## Whether a Label under `root` says exactly `text`.

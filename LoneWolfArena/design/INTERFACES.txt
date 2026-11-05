@@ -243,6 +243,6 @@ listed here. If a part needs something new from the core, add it in its own file
   NameHint, Avatar_<id>, Banner_<id>, NameCard, PlayerId, GuestBadge, ConfirmButton, Welcome.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
   `StartButton`, `ModeCard`, `Mode_<mode>`, `Diff_<chip>`, `SettingsButton`, `BundlesButton`
-  (WARDROBE), `Bundle_<id>`, `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`
-  the name editor), `PlayerName`,
+  (WARDROBE), `Bundle_<id>`, `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`,
+  a 56 px touch target around its plate, the name editor), `PlayerName`,
   `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.

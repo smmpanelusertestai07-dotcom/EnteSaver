@@ -182,9 +182,9 @@ static func _num(p: Dictionary, k: String) -> int:
 
 
 ## CAREER's lifetime numbers from a profile, in the order shown (pairs: the page has two
-## columns): [key, caption, value text]. Headshot rate is headshots per hit, accuracy hits per
-## shot (Fighter.stats). A rate or an average with nothing to divide by shows "-": no division
-## by zero.
+## columns): [key, caption, value text]. Headshot rate is headshots per hit (its caption says so:
+## players often read it per kill), accuracy hits per shot (Fighter.stats). A rate or an average
+## with nothing to divide by shows "-": no division by zero.
 static func career_stats(p: Dictionary) -> Array:
 	var matches := _num(p, "matches")
 	var wins := _num(p, "wins")
@@ -203,7 +203,7 @@ static func career_stats(p: Dictionary) -> Array:
 		["kd", "K/D", kd_text(kills, deaths)],
 		["accuracy", "ACCURACY", percent(hits, _num(p, "shots"))],
 		["headshots", "HEADSHOTS", thousands(headshots)],
-		["headshot_rate", "HEADSHOT RATE", percent(headshots, hits)],
+		["headshot_rate", "HEADSHOT RATE (PER HIT)", percent(headshots, hits)],
 		["damage", "DAMAGE", thousands(damage)],
 		["avg_damage", "AVG DAMAGE / MATCH", "-" if matches == 0 else thousands(roundi(float(damage) / matches))],
 		["rounds_won", "ROUNDS WON", thousands(_num(p, "rounds_won"))],
@@ -912,13 +912,16 @@ func _build_card() -> void:
 	sig_row.add_theme_constant_override("separation", 12)
 	v.add_child(sig_row)
 	var sig := String(p.signature)
-	var sf := _field("SIGNATURE", "“%s”" % sig if sig != "" else "NO SIGNATURE YET", 19, "semi", UI.TEXT if sig != "" else UI.TEXT_DIM,
+	var sig_text := "“%s”" % sig if sig != "" else "NO SIGNATURE YET"
+	# The line beside EDIT (the card's inner width less EDIT and the gap) shrinks a long signature
+	# to fit, as the name does: other players see it whole on their wider popup.
+	var sig_w := _card_w - 32.0 - 56.0 - 12.0
+	var sf := _field("SIGNATURE", sig_text, fit_size(sig_text, "semi", 19, 14, sig_w - 4.0), "semi", UI.TEXT if sig != "" else UI.TEXT_DIM,
 		"CardSignature")
 	sf.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sig_row.add_child(sf)
 	var edit := lobby._pencil_button()
 	edit.name = "CardEditSignature"
-	edit.custom_minimum_size = Vector2(56, 56)
 	edit.pressed.connect(edit_signature)
 	sig_row.add_child(edit)
 	var outfit := CharacterModel.bundle_info(String(p.bundle))
@@ -1024,8 +1027,6 @@ func _banner_head(info: Dictionary, w: float, h: float, own: bool) -> Control:
 	if own:
 		var edit := lobby._pencil_button()
 		edit.name = "CardEditName"
-		edit.custom_minimum_size = Vector2(56, 56)
-		edit.size = Vector2(56, 56)
 		edit.position = Vector2(w - 12.0 - 56.0, 8)
 		edit.pressed.connect(lobby._edit_name)
 		head.add_child(edit)
@@ -1321,7 +1322,7 @@ func _ask_block(id: String, who: String, unblock: bool) -> void:
 ## Game.block_lifts), as that player can challenge and send requests again.
 static func block_question(who: String) -> String:
 	var t := ("Block %s? Their challenges and friend requests will be ignored, they stop being your friend and they are " +
-		"left out of your lists. You can unblock them in PROFILE, under BLOCKED.") % who
+		"left out of your lists. You can unblock them in PROFILE (tap your player card, top left), under BLOCKED.") % who
 	var lifted := Game.block_lifts()
 	if not lifted.is_empty():
 		t += " BLOCKED is full (%d): this lifts your oldest block, %s." % [Game.MAX_BLOCKED, who_label(String(lifted.id))]

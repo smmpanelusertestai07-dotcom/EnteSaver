@@ -610,9 +610,11 @@ func _build_top_bar(root: Control) -> void:
 	_name_label.position = Vector2(72, 4)
 	_name_label.size = Vector2(166, 30)
 	card.add_child(_name_label)
-	var edit := _pencil_button()
+	# The pencil: a 56 px touch target (a near miss would open PROFILE instead) around a plate that
+	# fits next to the name.
+	var edit := _pencil_button(Vector2(44, 38))
 	edit.name = "EditName"
-	edit.position = Vector2(244, 4)
+	edit.position = Vector2(238, 0)
 	edit.pressed.connect(_edit_name)
 	card.add_child(edit)
 	var lv_txt := UI.label("LV %d" % Game.level(), 14, UI.ACCENT, "bold")
@@ -665,16 +667,29 @@ func _build_top_bar(root: Control) -> void:
 	top_right.add_child(gear)
 
 
-func _pencil_button() -> Button:
+## The pencil (EDIT) button: a 56 px touch target (the 720 px canvas) with its plate drawn in the
+## middle, `plate` px (all of it by default; smaller where there is no room for a 56 px plate).
+func _pencil_button(plate := Vector2(56, 56)) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(44, 38)
-	b.size = Vector2(44, 38)
+	b.custom_minimum_size = Vector2(56, 56)
+	b.size = Vector2(56, 56)
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_stylebox_override("normal", UI.chamfer(Color(1, 1, 1, 0.08), 4, 1, Color(1, 1, 1, 0.25), 0.0, ["br"]))
-	b.add_theme_stylebox_override("hover", UI.chamfer(Color(1, 1, 1, 0.16), 4, 1, Color(1, 1, 1, 0.4), 0.0, ["br"]))
-	b.add_theme_stylebox_override("pressed", UI.chamfer(Color(UI.ACCENT, 0.4), 4, 1, UI.ACCENT, 0.0, ["br"]))
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var looks := {
+		"normal": UI.chamfer(Color(1, 1, 1, 0.08), 4, 1, Color(1, 1, 1, 0.25), 0.0, ["br"]),
+		"hover": UI.chamfer(Color(1, 1, 1, 0.16), 4, 1, Color(1, 1, 1, 0.4), 0.0, ["br"]),
+		"pressed": UI.chamfer(Color(UI.ACCENT, 0.4), 4, 1, UI.ACCENT, 0.0, ["br"]),
+	}
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	b.draw.connect(func() -> void:
+		var mode := b.get_draw_mode()
+		var look: StyleBox = looks.normal
+		if mode == BaseButton.DRAW_PRESSED or mode == BaseButton.DRAW_HOVER_PRESSED:
+			look = looks.pressed
+		elif mode == BaseButton.DRAW_HOVER:
+			look = looks.hover
+		var ps := plate.min(b.size)
+		look.draw(b.get_canvas_item(), Rect2(((b.size - ps) * 0.5).round(), ps))
 		var c := b.size * 0.5
 		var d := Vector2(1, -1).normalized()
 		var n := Vector2(1, 1).normalized()
