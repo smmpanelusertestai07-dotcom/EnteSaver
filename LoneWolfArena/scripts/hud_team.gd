@@ -42,6 +42,8 @@ static func attach(h: HUD, a: Node) -> HudTeam:
 	t.hud = h
 	t.arena = a
 	h.add_child(t)
+	if h.panels != null:
+		h.move_child(t, h.panels.get_index())     # under the weapon pick and the scoreboard
 	return t
 
 
@@ -360,8 +362,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
 		if t.pressed:
-			if not is_visible_in_tree():
-				return
+			if not is_visible_in_tree() or (hud.panels != null and hud.panels.visible):
+				return              # (the weapon pick or the scoreboard over it takes the taps)
 			var id := button_at(t.position)
 			if id != "":
 				_touch[t.index] = id
@@ -589,7 +591,7 @@ func _draw_knocked_self(vs: Vector2, u: float) -> void:
 	if p == null or not p.alive or not p.knocked:
 		return
 	var a := 0.22 + 0.08 * sin(_time * 4.0)
-	hud._edge_glow(vs, Color(0.75, 0.04, 0.04, a), vs.y * 0.2)
+	_edge_glow(vs, Color(0.75, 0.04, 0.04, a), vs.y * 0.2)
 	var rv := revive_progress(p)
 	if rv >= 0.0:
 		var who := reviver_of(p)
@@ -601,12 +603,23 @@ func _draw_knocked_self(vs: Vector2, u: float) -> void:
 			"%d s  ·  CRAWL TO A TEAMMATE" % ceili(frac * Fighter.BLEED_S))
 
 
+## A glow along the four screen edges, fading inwards over `t` px.
+func _edge_glow(vs: Vector2, col: Color, t: float) -> void:
+	var clear := Color(col, 0.0)
+	draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(vs.x, 0), Vector2(vs.x, t), Vector2(0, t)]), PackedColorArray([col, col, clear, clear]))
+	draw_polygon(PackedVector2Array([Vector2(0, vs.y - t), Vector2(vs.x, vs.y - t), Vector2(vs.x, vs.y), Vector2(0, vs.y)]),
+		PackedColorArray([clear, clear, col, col]))
+	draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(t, 0), Vector2(t, vs.y), Vector2(0, vs.y)]), PackedColorArray([col, clear, clear, col]))
+	draw_polygon(PackedVector2Array([Vector2(vs.x - t, 0), Vector2(vs.x, 0), Vector2(vs.x, vs.y), Vector2(vs.x - t, vs.y)]),
+		PackedColorArray([clear, col, col, clear]))
+
+
 ## The player reviving a teammate: REVIVING <NAME> with the progress.
 func _draw_reviving(vs: Vector2, u: float) -> void:
 	var rv := reviving()
 	if rv == null:
 		return
-	_bar(vs, u, 0.6, "REVIVING " + rv.display_name.to_upper(), HudDraw.HEAL_GREEN, maxf(revive_progress(rv), 0.0), HudDraw.HEAL_GREEN,
+	_bar(vs, u, 0.53, "REVIVING " + rv.display_name.to_upper(), HudDraw.HEAL_GREEN, maxf(revive_progress(rv), 0.0), HudDraw.HEAL_GREEN,
 		"STAY STILL")
 
 

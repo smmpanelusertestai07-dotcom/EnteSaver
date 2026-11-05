@@ -17,7 +17,7 @@ extends Control
 ##
 ## DUO / SQUAD: the host of an online TEAM INVITE match (Game.team_match online, coop, host) runs the
 ## bots, so its quitting ends the match for the teammate: the first tap on QUIT MATCH also shows
-## HOST_WARNING (node QuitWarning) over the button.
+## HOST_WARNING (label QuitWarning on a dark plate right of the button) while it waits for the second.
 
 signal closed
 
@@ -27,7 +27,7 @@ const HOST_WARNING := "YOU ARE THE HOST: QUITTING ENDS THE MATCH FOR YOUR TEAMMA
 
 var settings: SettingsPanel     # the settings shown (null once they closed)
 var _quit: Button
-var _warning: Label             # HOST_WARNING (the host of an online co-op team match), while QUIT is armed
+var _warning: Control           # HOST_WARNING's plate (the host of an online co-op team match), while QUIT is armed
 var _quit_armed := 0.0
 var _was_over := false          # online: the round was already over when last looked at
 var _opened_frame := -1
@@ -81,18 +81,23 @@ func _open_settings() -> void:
 	settings.add_child(_quit)
 	_quit_text("QUIT MATCH")
 	if host_of_team():
-		_warning = UI.outlined(UI.label(HOST_WARNING, 14, Color(1.0, 0.8, 0.45), "bold"), 3)
-		_warning.name = "QuitWarning"
-		_warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_warning.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-		_warning.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-		_warning.offset_left = 24.0
-		_warning.offset_right = SettingsPanel.MENU_W - 24.0
-		_warning.offset_top = -146.0 - UI.TOUCH_MIN - 70.0
-		_warning.offset_bottom = -146.0 - UI.TOUCH_MIN - 6.0
-		_warning.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_warning.visible = false
-		settings.add_child(_warning)
+		var plate := PanelContainer.new()
+		plate.name = "QuitWarningPlate"
+		plate.add_theme_stylebox_override("panel", UI.box(Color(0.07, 0.05, 0.04, 0.94), 6, 1, Color(1.0, 0.55, 0.5, 0.6), 10.0))
+		plate.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+		plate.offset_left = SettingsPanel.MENU_W + 8.0
+		plate.offset_right = SettingsPanel.MENU_W + 8.0 + 400.0
+		plate.offset_top = -146.0 - UI.TOUCH_MIN
+		plate.offset_bottom = -146.0
+		plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var l := UI.label(HOST_WARNING, 16, Color(1.0, 0.8, 0.45), "bold")
+		l.name = "QuitWarning"
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		plate.add_child(l)
+		plate.visible = false
+		_warning = plate
+		settings.add_child(plate)
 
 
 ## This phone hosts an online co-op team match (its bots run here: quitting ends it for the teammate).

@@ -419,6 +419,8 @@ func _on_down(index: int, pos: Vector2) -> void:
 		_touches[index] = {"kind": "ui", "id": "score"}
 		return
 	var id := _widget_at(pos, vs)
+	if team != null and not player.alive and id != "settings":
+		id = ""                 # out of a team round: the controls are hidden
 	if id != "":
 		_press(id, index)
 		if _touches.has(index) and String(_touches[index].kind) == "fire":     # (settings releases all)
@@ -836,9 +838,11 @@ func _draw() -> void:
 	_draw_damage_numbers(u)
 	if not match_over:
 		# The panel first: a button the player put over it stays in sight (and takes the taps there,
-		# see _widget_at); the gear sits on the panel's corner.
-		_draw_weapon_panel(vs)
-		_draw_controls(vs)
+		# see _widget_at); the gear sits on the panel's corner. DUO / SQUAD: out of the round (the
+		# camera on a teammate) only the gear stays.
+		if team == null or player.alive:
+			_draw_weapon_panel(vs)
+			_draw_controls(vs)
 		_draw_button("settings", vs)
 	_draw_hp_block(vs, u)
 	_draw_kill_feed(vs, u)
