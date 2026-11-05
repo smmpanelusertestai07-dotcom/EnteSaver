@@ -61,8 +61,11 @@ signal directory_changed               # a player card came in (the ALL PLAYERS 
 signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
 signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk audio (a NetVoice frame)
 signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
+signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching player's "seek" (NetMatch)
 
 const ROOT := "lonewolfarena/v1"
+## QUICK MATCH (NetMatch): searching players say so here every SEEK_S, never retained.
+const SEEK_TOPIC := ROOT + "/mm/seek"
 ## The relays, nearest to the players first (every phone settles on the same one, see
 ## _maybe_return_home). FreeMQTT runs in Mumbai (about 25 ms from Indian networks, measured with
 ## free public probes on 2026-11-05) and asks for the shared login its operator publishes on its
@@ -198,6 +201,8 @@ var _direct_hello_t := 0.0
 var _state_in_t := -1          # sender's clock on the newest state taken (either path): older ones are dropped
 var relay_states_out := 0      # states sent through the relay this session (tests)
 var relay_states_in := 0       # states taken from the relay this session (tests)
+var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
+var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
 
 
 func _ready() -> void:
@@ -642,6 +647,8 @@ func _parse() -> void:
 					if _want_lobby:
 						_subscribe(ROOT + "/lobby")
 						_announce_t = 0.0
+					if seeking:
+						_subscribe(SEEK_TOPIC)
 					if _room != "":
 						_subscribe(ROOT + "/r/" + _room)
 					if room_code != "":
@@ -668,6 +675,9 @@ func _parse() -> void:
 func _on_publish(topic: String, payload: PackedByteArray) -> void:
 	if topic.begins_with(ROOT + "/p/"):
 		_on_card(topic, payload)
+		return
+	if topic == SEEK_TOPIC:
+		_on_seek(payload)
 		return
 	if topic.begins_with(ROOT + "/fm/" + my_id + "/"):
 		if not payload.is_empty():
@@ -739,6 +749,11 @@ func _on_inbox(d: Dictionary) -> void:
 			inv.bundle = String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
 			inv.t = Time.get_ticks_msec()
 			_incoming = inv
+			if typeof(d.get("quick")) == TYPE_BOOL and bool(d.quick):
+				# QUICK MATCH: taken at once from a seeker this search saw (and may play), never
+				# shown; any other quick challenge is declined at once.
+				answer(seeking and quick_seen.has(from) and _room == "" and challenge_allowed(from, d) and invite_proven(d, from))
+				return
 			# The host of the custom room this phone asked to join starts the match: it knows the
 			# room's password, so it is accepted at once with the room's rules.
 			if join_state == "in" and typeof(d.get("rc")) == TYPE_STRING and _crypto.constant_time_compare(
@@ -792,6 +807,50 @@ func _on_inbox(d: Dictionary) -> void:
 				if state != join_state:
 					join_state = state
 					room_changed.emit()
+
+
+# ---------------------------------------------------------------- QUICK MATCH (NetMatch)
+
+## Starts listening to the other searching players (SEEK_TOPIC); seek_stop() ends it.
+func seek_start() -> void:
+	seeking = true
+	quick_seen.clear()
+	if _connected:
+		_subscribe(SEEK_TOPIC)
+
+
+func seek_stop() -> void:
+	if seeking and _connected:
+		_unsubscribe(SEEK_TOPIC)
+	seeking = false
+	quick_seen.clear()
+
+
+## One short-lived "seek" (not retained): this phone's id and the seekers it saw lately (`saw`),
+## so two seekers know they see each other. False while offline.
+func send_seek(saw: Array) -> bool:
+	if not _connected or my_id == "":
+		return false
+	_publish_json(SEEK_TOPIC, {"t": "seek", "id": my_id, "saw": saw.slice(0, 8)})
+	return true
+
+
+func _on_seek(payload: PackedByteArray) -> void:
+	if not seeking or payload.size() > 1024:
+		return
+	var d: Variant = JSON.parse_string(payload.get_string_from_utf8())
+	if not d is Dictionary or String((d as Dictionary).get("t", "")) != "seek" or typeof(d.get("id")) != TYPE_STRING:
+		return
+	var id := String(d.id).left(32)
+	if id == my_id or id == "" or Game.is_blocked(id):
+		return                       # never this phone itself, never a blocked player
+	var saw: Array = []
+	if d.get("saw") is Array:
+		for s: Variant in d.saw:
+			if typeof(s) == TYPE_STRING:
+				saw.append(String(s).left(32))
+	quick_seen[id] = Time.get_ticks_msec()
+	seeker_seen.emit(id, saw)
 
 
 ## Proof that the sender holds an invite's keys: an HMAC over what it says, the room and its id.

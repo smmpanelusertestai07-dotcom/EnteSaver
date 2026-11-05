@@ -8,8 +8,8 @@ extends Node3D
 ## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
 ## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
 ## the opponent is picked too) and the big START. START plays the card's mode: TRAINING GROUND
-## shows the match loading overlay (Loading.start_match) and enters the arena; LONE WOLF opens the
-## ONLINE window (a duel starts when a challenge is accepted). WARDROBE opens the outfit picker
+## shows the match loading overlay (Loading.start_match) and enters the arena; LONE WOLF searches
+## for a random opponent (QUICK MATCH, scripts/net_match.gd). WARDROBE opens the outfit picker
 ## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
 ## are in SETTINGS (the gear).
 ## This file has the 3D stage, the top bar, the bottom bar, the mode card, START, the settings
@@ -879,13 +879,14 @@ func refresh_player_card() -> void:
 
 
 ## START plays the mode on the card: TRAINING GROUND loads the match against the bot (or the
-## target dummy) at once; LONE WOLF opens the ONLINE window, where a duel starts once a player
-## accepts a challenge (or the host of a custom room starts it).
+## target dummy) at once; LONE WOLF searches for a random opponent (QUICK MATCH, NetMatch: the
+## match loads once another searching player is found). Friends' duels and custom rooms are in
+## the ONLINE window (FRIENDS top-right).
 func _start() -> void:
 	if start_btn.disabled:
 		return
 	if Game.mode == "lonewolf":
-		_open_friends("online")
+		NetMatch.open(self)
 		return
 	Game.online = false
 	start_btn.disabled = true

@@ -5,7 +5,7 @@ extends Node
 ## reference's layout: the bottom bar's captions bright, FRIENDS and the gear top-right, no left
 ## menu, stats chips, name plate or version; drag to turn the character, START position report),
 ## the modes (mode card, SELECT MODE with the opponent chips, the DUMMY chip, LONE WOLF's START opens
-## the ONLINE window), name edit (pencil tap, long name ends in "..."), the player card (opens
+## the QUICK MATCH search, CANCEL), name edit (pencil tap, long name ends in "..."), the player card (opens
 ## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
 ## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
 ## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
@@ -428,7 +428,7 @@ func run(at: Node) -> int:
 
 ## The two modes in the lobby: the mode card shows TRAINING GROUND (the default) against the NORMAL
 ## bot; SELECT MODE offers both, with TRAINING GROUND's opponent chips (the bot's level or the
-## DUMMY) on its card; LONE WOLF's START opens the ONLINE window instead of a match; back to
+## DUMMY) on its card; LONE WOLF's START opens the QUICK MATCH search (CANCEL stops it); back to
 ## TRAINING GROUND at the end.
 func _tour_modes(lobby: Node) -> void:
 	var card := lobby.find_child("ModeCard", true, false) as Control
@@ -479,18 +479,22 @@ func _tour_modes(lobby: Node) -> void:
 	_check(_label_text(card, "ModeName") == "LONE WOLF" and _label_text(card, "ModeFormat") == "1 VS 1 ONLINE",
 		"the LONE WOLF card says 1 VS 1 ONLINE")
 	await _at.shot("m02c_lobby_lone_wolf")
-	# LONE WOLF's START opens the ONLINE window (no match loads by itself).
+	# LONE WOLF's START searches for a random opponent (QUICK MATCH: SEARCHING..., the time, CANCEL;
+	# no match loads by itself); CANCEL stops the search.
 	var start := lobby.get("start_btn") as Button
 	await _tap(start)
-	await _settle(0.6)
+	await _settle(1.2)
 	var online := lobby.get("_modal") as Control
-	_check(online != null and online.find_child("Tab_online", true, false) != null and not start.disabled,
-		"LONE WOLF's START opens the ONLINE window")
+	var quick := lobby.get_node_or_null("NetMatch") as NetMatch
+	_check(online != null and online.find_child("QuickCancel", true, false) != null and quick != null and quick.searching
+		and not start.disabled and Game.cloud_service().seeking, "LONE WOLF's START opens the QUICK MATCH search")
 	_check(_find_overlay() == null, "LONE WOLF's START loads no match")
 	await _at.shot("m02d_lone_wolf_start")
 	if online:
-		await _tap(online.find_child("Close", true, false) as Control)
+		await _tap(online.find_child("QuickCancel", true, false) as Control)
 		await _settle(0.4)
+	_check(lobby.get("_modal") == null and quick != null and not quick.searching and not Game.cloud_service().seeking,
+		"QUICK MATCH's CANCEL stops the search")
 	# And back to TRAINING GROUND (a tap on its card, away from the chips).
 	await _tap(card)
 	await _settle(0.5)

@@ -36,6 +36,8 @@
 #                          no STUN) comes up, carries the state, and falls back to the relay when
 #                          the guest's UDP is blocked mid-match
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
+#   tests/quick_check.gd   QUICK MATCH: a lone search never pairs with itself and CANCEL stops it; two
+#                          searching copies find each other and play the match (lower id hosts)
 #   tests/drop_check.gd    online matches that end early: a slow load is waited for, a quit before
 #                          the first fight counts nowhere, the phone that was away gets LEFT and
 #                          the other the win; a load that freezes 8 s is no disconnect
@@ -94,6 +96,11 @@ if [ "${1:-}" != "quick" ]; then
     LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd > "$0" 2>&1 &
     h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/room_host.txt"
+  step quick bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47818 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47818
+    LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/quick_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/quick_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/quick_host.txt"
   step drop bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47812 > /dev/null 2>&1 & m=$!
     sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47812
     LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd > "$0" 2>&1 &
