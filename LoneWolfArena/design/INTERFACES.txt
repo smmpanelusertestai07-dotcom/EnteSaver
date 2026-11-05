@@ -128,6 +128,12 @@ listed here. If a part needs something new from the core, add it in its own file
   ("reddot" | "sniper" | "none"), `healing`, `heal_progress()`, `medkits`, `shields`,
   `grenades`, `crosshair_on_target` (crosshair turns red), `current_spread()` (deg),
   `camera`, `firing`, `assist_target`, `hold_fire` (prep: cannot shoot)
+- camera: over the right shoulder (`Player.CAM_SHOULDER` right of the head and `CAM_RAISE` up, in
+  the view's axes, `CAM_DIST` behind); a sphere of `CAM_RADIUS` swept from the head to that pivot
+  and by the spring arm behind it, against `CAM_MASK` (the map and deployed walls), keeps it out
+  of walls; the own model is hidden with the camera within `HEAD_CLEAR` of the head (and in the
+  scope) and see-through within `FADE_DIST` or while `covers_crosshair()` (a hit zone or the gun
+  within `COVER_GAP` of the crosshair's ray: it would hide what the crosshair is on)
 - signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`;
   a shot reports `hit_landed` once for its head part (headshot true) and once for its body part,
   each the HP the target really lost, `killed` with the last (`Fighter.land_hits(hits)` lands
