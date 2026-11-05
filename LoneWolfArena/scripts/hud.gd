@@ -197,6 +197,8 @@ func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_i
 ## "<reviver> REVIVED <teammate>"; LEFT "<who> LEFT" (victim "").
 func add_team_feed(killer: String, killer_ally: bool, victim: String, victim_ally: bool, weapon_name: String,
 		weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
+	if verb == "REVIVED" or verb == "LEFT":
+		weapon_name = ""              # (no gun to name)
 	add_kill_feed(killer, victim, weapon_name, weapon_icon, headshot, mine, verb)
 	var k: Dictionary = _kill_feed[0]
 	k["kc"] = side_color(killer_ally)

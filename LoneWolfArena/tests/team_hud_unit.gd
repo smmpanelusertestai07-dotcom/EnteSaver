@@ -197,6 +197,9 @@ func _test_feed() -> void:
 	k = hud._kill_feed[0]
 	_check(k.get("kc") == HudTeam.ORANGE_TEXT and k.get("vc") == HudTeam.BLUE_TEXT and k.get("verb_col") == HudDraw.FEED_HEAD,
 		"an enemy taking out a teammate: orange then blue, a headshot in the headshot colour")
+	hud.add_team_feed("ME", true, "MATE", true, "VIPER AR", "", false, true, "REVIVED")
+	_check(String(hud._kill_feed[0].weapon) == "" and hud._kill_feed[0].get("verb_col") == HUD.FEED_VERB_COLORS.REVIVED,
+		"REVIVED in green, no gun named")
 	hud.add_team_feed("MATE", true, "", true, "", "", false, false, "LEFT")
 	_check(hud._kill_feed[0].get("verb_col") == HUD.FEED_VERB_COLORS.LEFT and String(hud._kill_feed[0].verb) == "LEFT", "LEFT in grey")
 	_check(hud._kill_feed.size() == 3, "the feed keeps three lines")

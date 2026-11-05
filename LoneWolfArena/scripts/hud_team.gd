@@ -492,13 +492,20 @@ func _draw_panel(u: float) -> void:
 		y += rh
 
 
-## Numbered blue tags over the teammates who stand (knocked ones get the marker instead).
+## Numbered blue tags over the teammates who stand (knocked ones get the marker instead); none over
+## the minimap, the weapon panel, the score bar or the teammates panel.
 func _draw_tags(u: float) -> void:
 	var p := player()
 	var cam: Camera3D = p.camera if p != null else null
 	if cam == null:
 		return
 	var vs := size
+	var mr := HudLayout.minimap_rect(hud.layout.minimap, vs)
+	mr.size.y += mr.size.x * HudLayout.STRIP_H + 4.0
+	var wp := HudLayout.weapon_main(hud.layout.weapons, vs)
+	for r: Rect2 in HudLayout.weapon_slots(hud.layout.weapons, vs):
+		wp = wp.merge(r)
+	var fixed: Array[Rect2] = [mr, wp, hud.score_rect(), panel_rect()]
 	for f: Fighter in members(my_team()):
 		if f == p or status(f) != "up":
 			continue
@@ -506,6 +513,11 @@ func _draw_tags(u: float) -> void:
 		if at == null:
 			continue
 		var c: Vector2 = at
+		var covered := false
+		for r in fixed:
+			covered = covered or r.grow(0.02 * u).has_point(c)
+		if covered:
+			continue
 		var dist := cam.global_position.distance_to(f.global_position)
 		var k := clampf(1.25 - dist / 40.0, 0.7, 1.15)
 		var r := 0.017 * u * k
