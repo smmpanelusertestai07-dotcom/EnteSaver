@@ -96,8 +96,14 @@ listed here. If a part needs something new from the core, add it in its own file
   ("reddot" | "sniper" | "none"), `healing`, `heal_progress()`, `medkits`, `shields`,
   `grenades`, `crosshair_on_target` (crosshair turns red), `current_spread()` (deg),
   `camera`, `firing`, `assist_target`, `hold_fire` (prep: cannot shoot)
-- signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`
-- `Fighter.take_damage(amount, zone, attacker, from_pos, cause := "")`: cause "frag" for a frag
+- signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`;
+  a shot reports `hit_landed` once for its head part (headshot true) and once for its body part,
+  each the HP the target really lost, `killed` with the last (`Fighter.land_hits(hits)` lands
+  [target, zone, damage before armour, point] hits without a scene: the unit tests)
+- `Fighter.take_damage(amount, zone, attacker, from_pos, cause := "")` returns the HP it really took:
+  `hit_points(amount, zone)` (after `armor_mult(zone)`, whole points but for the zone and falls),
+  never more than was left; a `RemoteFighter` returns what the hit will take on the other phone as
+  this phone's hits leave its HP (`hp_left`). Cause "frag" for a frag
   (kept as `last_hit_cause`; the kill feed then reads FRAG). `Player.drawn_position()`: where the
   body is drawn this frame (between the last two physics ticks at 90 / 120 FPS; the camera and the
   own model follow it).

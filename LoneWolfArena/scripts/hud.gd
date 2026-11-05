@@ -30,7 +30,6 @@ const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
 const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
 const DMG_LIFE := 0.95
-const DMG_MERGE := 0.32            # hits on the same target within this much GAME time add up into one number
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
 const KILL_BANNER_TIME := 2.8
@@ -64,6 +63,7 @@ var _pressed := {}                 # widget id -> seconds of press highlight
 var _held := {}                    # fire buttons held down
 var _hit_t := 0.0
 var _hit_head := false
+var _hit_tick := -1                # physics frame of the last hit report (a shot reports its head and body parts)
 var _head_icon_t := 0.0
 var _kill_x_t := 0.0
 var _kill_x_pos := Vector3.ZERO
@@ -220,14 +220,20 @@ func release_all() -> void:
 
 # ---------------------------------------------------------------- hit feedback
 
+## A shot reports its head part and its body part separately (Fighter._after_shot, head first), each
+## the HP it really took: two numbers, one marker and one sound per shot.
 func _on_hit_landed(target: Fighter, amount: float, headshot: bool, pos: Vector3, killed: bool) -> void:
+	var tick := Engine.get_physics_frames()
+	var same_shot := tick == _hit_tick
+	_hit_tick = tick
 	_hit_t = 0.22
-	_hit_head = headshot
+	_hit_head = headshot or (same_shot and _hit_head)
 	if headshot:
 		_head_icon_t = 0.7
 	if Game.settings.damage_numbers:
 		_add_damage_number(target, amount, headshot, pos)
-	Audio.play("hit_head" if headshot else "hit_body", -2.0 if headshot else -6.0)
+	if not same_shot:
+		Audio.play("hit_head" if headshot else "hit_body", -2.0 if headshot else -6.0)
 	if killed:
 		confirm_kill(pos if target == null else target.chest_position())
 
@@ -241,27 +247,14 @@ func confirm_kill(pos: Vector3) -> void:
 	Game.vibrate(60)
 
 
-## Rapid hits on the same target (automatic fire, shotgun pellets) add up into one number that
-## grows and pops at each hit, like the reference; body and head damage keep separate numbers.
-## The merge window is GAME time (physics ticks), so it follows the fire rate at any frame rate.
-## A new number is placed beside the ones still showing (a row like the reference's "22 22 22",
-## then a row above), never on top of them; every number then rises at the same speed, so the
-## row keeps its shape.
+## Every shot shows its own number, what it really took from the target's HP (like the
+## reference's "43 43 43" for a rifle's hits; numbers that added several shots up read as one hit
+## doing far more than the gun does). A shotgun shell's pellets add up into the shell's number,
+## its head part a number of its own. A new number is placed beside the ones still showing (a row,
+## then a row above), never on top of them; every number then rises at the same speed, so the row
+## keeps its shape.
 func _add_damage_number(target: Fighter, amount: float, headshot: bool, pos: Vector3) -> void:
-	var tick := Engine.get_physics_frames()
-	var merge_ticks := roundi(DMG_MERGE * Engine.physics_ticks_per_second)
-	for i in range(_dmg_numbers.size() - 1, -1, -1):
-		var n: Dictionary = _dmg_numbers[i]
-		if n.target == target and bool(n.head) == headshot and tick - int(n.tick) <= merge_ticks:
-			n.amount = float(n.amount) + amount
-			n.tick = tick
-			n.hits = int(n.hits) + 1
-			n.t = minf(float(n.t), 0.15)
-			n.bump = 0.14
-			return
-	# tick0 / tick: physics frame of the first / latest hit in this number, hits: how many
-	var nn := {"pos": pos + Vector3(0, 0.2, 0), "amount": amount, "head": headshot, "t": 0.0, "tick0": tick, "tick": tick,
-		"hits": 1, "bump": 0.0, "target": target, "off": Vector2.ZERO}
+	var nn := {"pos": pos + Vector3(0, 0.2, 0), "amount": amount, "head": headshot, "t": 0.0, "target": target, "off": Vector2.ZERO}
 	nn.off = _dmg_free_offset(nn)
 	_dmg_numbers.append(nn)
 	if _dmg_numbers.size() > 8:
@@ -627,7 +620,6 @@ func _process(delta: float) -> void:
 	tips_time = maxf(tips_time - real, 0.0)
 	for n in _dmg_numbers:
 		n.t += real
-		n.bump = maxf(float(n.bump) - real, 0.0)
 	_dmg_numbers = _dmg_numbers.filter(func(n: Dictionary) -> bool: return float(n.t) < DMG_LIFE)
 	for d in _dmg_dirs:
 		d.t -= real
@@ -1205,8 +1197,7 @@ func _draw_damage_numbers(u: float) -> void:
 		var head := bool(n.head)
 		var amount := float(n.amount)
 		var a := clampf(1.0 - (t - 0.6) / 0.35, 0.0, 1.0)
-		# pop when it appears and again at every hit that adds to it
-		var pop := 1.0 + clampf(0.12 - t, 0.0, 0.12) * 4.0 + float(n.bump) * 1.6
+		var pop := 1.0 + clampf(0.12 - t, 0.0, 0.12) * 4.0          # pops when it appears
 		var fs := int(_dmg_size(amount, head, u) * pop)
 		var col := HudDraw.DMG_HEAD if head else HudDraw.DMG_BODY
 		var txt := str(maxi(roundi(amount), 1))

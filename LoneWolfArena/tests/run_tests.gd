@@ -21,8 +21,15 @@ func _near(a: float, b: float, what: String, eps := 0.001) -> void:
 	_check(absf(a - b) <= eps, "%s (got %f, want %f)" % [what, a, b])
 
 
+## A fighter without armour (Lone Wolf gives both level 2 every round; the tests try both).
+class Unarmored extends Bot:
+	func armor_mult(_zone: String) -> float:
+		return 1.0
+
+
 func _ready() -> void:
 	_test_damage()
+	_test_damage_shown()
 	_test_spread()
 	_test_weapon_state()
 	_test_hud_layout()
@@ -92,6 +99,88 @@ func _test_damage() -> void:
 		_check(def.get("attach") is Array, "%s lists its attachments" % id)
 		for v in Weapons.bars(def).values():
 			_check(float(v) > 0.0 and float(v) <= 1.0, "%s bars inside 0..1" % id)
+
+
+## The damage shown is the damage done. For every gun and the fists, against a bot with and without
+## armour, shot after shot until it falls (head, body and leg pellets mixed, near and far, the last
+## shot more than it had left): every number as the HUD shows it is what the shot took, the
+## head-coloured one only the head pellets' part, and all of them add up to exactly the 200 HP lost,
+## as do the stats (results DAMAGE, CAREER). Online, hits on the other phone's fighter show no more
+## than it has left as this phone's hits leave it.
+func _test_damage_shown() -> void:
+	var zones := ["body", "head", "limb", "body", "body"]
+	for armored: bool in [true, false]:
+		for id: String in Weapons.PICKABLE + ["fists"]:
+			var d: Dictionary = Weapons.DEFS[id]
+			var shooter := Bot.new()
+			var target: Bot = Bot.new() if armored else Unarmored.new()
+			for f: Bot in [shooter, target]:
+				f.process_mode = Node.PROCESS_MODE_DISABLED
+				add_child(f)
+			shooter.set_loadout(id)
+			var shown := []               # [the number as the HUD shows it, head colour]
+			shooter.hit_landed.connect(func(_t: Fighter, amount: float, head: bool, _p: Vector3, _k: bool) -> void:
+				shown.append([maxi(roundi(amount), 1), head]))
+			var parts_ok := true
+			var shots := 0
+			while target.alive and shots < 200:
+				var hits := []
+				var want := {"head": 0.0, "body": 0.0}
+				for i in int(d.pellets):
+					var zone: String = zones[(shots + i) % zones.size()]
+					var dist: float = [2.0, 9.0, 24.0][shots % 3]
+					var raw := Weapons.damage_at(d, float(d.damage), dist) * Weapons.zone_mult(d, zone, dist) * Weapons.pen_mult(d, zone)
+					hits.append([target, zone, raw, Vector3.ZERO])
+					want["head" if zone == "head" else "body"] += target.hit_points(raw, zone)
+				var n0 := shown.size()
+				var hp0 := target.hp
+				shooter.land_hits(hits)
+				var got := {"head": 0, "body": 0}
+				for k in range(n0, shown.size()):
+					got["head" if shown[k][1] else "body"] += int(shown[k][0])
+				if target.alive:
+					parts_ok = parts_ok and got.head == roundi(want.head) and got.body == roundi(want.body)
+				parts_ok = parts_ok and got.head + got.body == roundi(hp0 - target.hp)
+				shots += 1
+			var total := 0
+			for s: Array in shown:
+				total += int(s[0])
+			var what := "%s vs a bot %s" % [d.name, "in armour" if armored else "without armour"]
+			_check(not target.alive and total == roundi(Fighter.MAX_HP),
+				"%s: the numbers shown add up to the 200 HP it lost (%d in %d shots)" % [what, total, shots])
+			_check(parts_ok, "%s: each shot shows what it took, the head part alone in head colour" % what)
+			_check(roundi(float(shooter.stats.damage)) == total, "%s: the stats count what the numbers showed (%d)" % [what, roundi(float(shooter.stats.damage))])
+			shooter.free()
+			target.free()
+	# Online: the other phone applies the hits; this phone shows what they will take there.
+	var me := Bot.new()
+	me.is_player = true
+	var other := RemoteFighter.new()
+	for f: Bot in [me, other]:
+		f.process_mode = Node.PROCESS_MODE_DISABLED
+		add_child(f)
+	me.set_loadout("ak")
+	other.set_loadout("ak")
+	var sum := [0.0]
+	me.hit_landed.connect(func(_t: Fighter, amount: float, _h: bool, _p: Vector3, _k: bool) -> void: sum[0] += amount)
+	for i in 30:
+		me.land_hits([[other, "head" if i % 3 == 0 else "body", 46.0 * (2.5 if i % 3 == 0 else 1.0), Vector3.ZERO]])
+	_check(is_equal_approx(sum[0], Fighter.MAX_HP) and other.hp_left == 0.0,
+		"online: the numbers stop at the HP the other phone has left (%d)" % roundi(sum[0]))
+	var state := RemoteFighter.pack(other)
+	state[8] = Fighter.MAX_HP
+	other.apply_state(state)
+	_check(other.hp_left == 0.0, "online: a report sent before the hits got there does not give the HP back")
+	other._hit_sent_at = -99.0
+	state[8] = 120.0
+	other.apply_state(state)
+	var resynced := other.hp_left == 120.0
+	state[8] = 150.0
+	other._hit_sent_at = Time.get_ticks_msec() / 1000.0
+	other.apply_state(state)
+	_check(resynced and other.hp_left == 150.0, "online: back in step with its reports once they caught up, heals count")
+	me.free()
+	other.free()
 
 
 ## Hits of `id` (all pellets, no falloff) that take 200 HP through Lv2 armour on `zone`.

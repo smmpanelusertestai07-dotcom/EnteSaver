@@ -287,17 +287,18 @@ func gun() -> WeaponState:
 # ---------------------------------------------------------------- damage
 
 ## cause: what dealt it when it was not the attacker's gun ("frag"); the kill feed names it.
+## Returns the HP it really took (what the damage numbers, the stats and the results count): a hit
+## after armour in whole points (hit_points), never more than the HP that was left.
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
 	if not alive or round_over or (invulnerable and not OS.has_feature("template")):     # invulnerable: a test switch only
 		return 0.0
 	last_hit_cause = cause
-	# Armour is read from the constants (a per-fighter value could be frozen in memory).
-	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, INF if endless_hp else hp)
+	var dmg := clampf(hit_points(amount, zone), 0.0, INF if endless_hp else hp)
 	if endless_hp:
 		stats.taken += dmg
 		last_damage_time = _now()
 		damaged.emit(dmg, from_pos, zone == "head", attacker)
-		if attacker != null and dmg > 0.0:
+		if attacker != null and dmg > 0.0 and model:
 			model.play_hit()
 		return dmg
 	hp -= dmg
@@ -311,9 +312,24 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	if hp <= 0.001:
 		hp = 0.0
 		die(attacker, zone == "head")
-	elif attacker != null and dmg > 0.0:
+	elif attacker != null and dmg > 0.0 and model:
 		model.play_hit()
 	return dmg
+
+
+## What a hit of `amount` (before armour) takes in this zone: after the armour (armor_mult), and a
+## bullet, pellet, punch or frag in whole points, so the numbers shown add up to the HP lost (the
+## zone and falls keep their fractions: they hurt a little every frame).
+func hit_points(amount: float, zone: String) -> float:
+	var dmg := amount * armor_mult(zone)
+	return dmg if zone == "zone" or zone == "fall" else roundf(dmg)
+
+
+## The share of a hit's damage that gets through this fighter's armour in a zone. Lone Wolf gives
+## both fighters level 2 helmet and vest every round; read from the constants (a per-fighter value
+## could be frozen in memory). Tests override it for a fighter without armour.
+func armor_mult(zone: String) -> float:
+	return Weapons.after_armor(1.0, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
 
 
 func die(killer: Fighter, headshot := false) -> void:
@@ -331,7 +347,8 @@ func die(killer: Fighter, headshot := false) -> void:
 	set_deferred("collision_mask", LAYER_WORLD)
 	for hb in hitboxes:
 		hb.collision_layer = 0
-	model.play_death()
+	if model:
+		model.play_death()
 	died.emit(self, killer, headshot)
 
 
@@ -429,11 +446,7 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	last_shot_time = _now()
 	var d := w.def
 	var muzzle := model.muzzle_position()
-	var total := 0.0
-	var any_head := false
-	var killed := false
-	var hit_target: Fighter = null
-	var last_pos := Vector3.ZERO
+	var tally := new_tally()
 	var pellets := int(d.pellets)
 	for i in pellets:
 		var dir := Weapons.spread_dir(base_dir, spread, rng)
@@ -462,22 +475,14 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 			var zone: String = col.get_meta("zone")
 			var dist := ray_origin.distance_to(end_pos)
 			var dmg := Weapons.damage_at(d, float(d.damage), dist) * Weapons.zone_mult(d, zone, dist) * Weapons.pen_mult(d, zone)
-			var dealt := target.take_damage(dmg, zone, self, global_position)
+			land(tally, target, zone, dmg, end_pos)
 			Effects.hit_spark(self, end_pos, -dir, zone == "head")
-			if dealt > 0.0:
-				total += dealt
-				hit_target = target
-				last_pos = end_pos
-				if zone == "head":
-					any_head = true
-				if not target.alive:
-					killed = true
 		elif col != null and col.has_method("take_bullet"):
 			col.take_bullet(Weapons.damage_at(d, float(d.damage), ray_origin.distance_to(end_pos)), self)
 			Effects.shield_hit(self, end_pos, normal)
 		else:
 			Effects.impact(self, end_pos, normal)
-	_after_shot(w, hit_target, total, any_head, last_pos, killed)
+	_after_shot(w, tally)
 	model.on_fire()
 	Effects.muzzle_flash(self, muzzle, aim_forward(), int(d.pellets) > 1)
 	var pitch := float(d.get("pitch", 1.0))
@@ -490,15 +495,56 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	return true
 
 
-func _after_shot(w: WeaponState, hit_target: Fighter, total: float, any_head: bool, last_pos: Vector3, killed: bool) -> void:
-	if hit_target != null:
+## One shot's (or punch's) damage so far: what its pellets took from the fighter they hit, the body
+## part (arms and legs too) and the head part apart, where each part last landed, and whether the
+## shot killed.
+static func new_tally() -> Dictionary:
+	return {"target": null, "body": 0.0, "head": 0.0, "body_pos": Vector3.ZERO, "head_pos": Vector3.ZERO, "killed": false}
+
+
+## A pellet (bullet, punch) that met `target`: `amount` is its damage before armour; the tally gets
+## what the target's HP really lost (take_damage). Returns that.
+func land(tally: Dictionary, target: Fighter, zone: String, amount: float, pos: Vector3) -> float:
+	var dealt := target.take_damage(amount, zone, self, global_position)
+	if dealt > 0.0:
+		var part := "head" if zone == "head" else "body"
+		tally.target = target
+		tally[part] = float(tally[part]) + dealt
+		tally[part + "_pos"] = pos
+		if not target.alive:
+			tally.killed = true
+	return dealt
+
+
+## A shot's hits as [target, zone, damage before armour, point] (the screen-free path of a shot:
+## the unit tests' way to land exactly these hits).
+func land_hits(hits: Array) -> void:
+	var tally := new_tally()
+	for h: Array in hits:
+		land(tally, h[0], String(h[1]), float(h[2]), h[3])
+	_after_shot(weapon(), tally)
+
+
+## Counts a shot and reports what it took: hit_landed once for its head part (shown orange-red,
+## the headshot marker) and once for its body part, each the HP really lost, so a shotgun shell
+## with one pellet on the head shows that pellet as the headshot and the rest as a body hit; the
+## kill goes with the last report.
+func _after_shot(w: WeaponState, tally: Dictionary) -> void:
+	var target: Fighter = tally.target
+	if target != null:
+		var body := float(tally.body)
+		var head := float(tally.head)
+		var killed := bool(tally.killed)
 		stats.hits += 1
-		stats.damage += total
-		if any_head:
+		stats.damage += body + head
+		if head > 0.0:
 			stats.headshots += 1
 		if killed:
 			stats.kills += 1
-		hit_landed.emit(hit_target, total, any_head, last_pos, killed)
+		if head > 0.0:
+			hit_landed.emit(target, head, true, tally.head_pos, killed and body <= 0.0)
+		if body > 0.0:
+			hit_landed.emit(target, body, false, tally.body_pos, killed)
 	fired.emit(w)
 
 
@@ -508,24 +554,16 @@ func _melee(w: WeaponState, base_dir: Vector3) -> bool:
 	stats.shots += 1
 	var origin := eye_position()
 	var res := trace(origin, base_dir, MELEE_RANGE)
-	var hit_target: Fighter = null
-	var total := 0.0
-	var head := false
-	var killed := false
-	var pos := origin + base_dir * MELEE_RANGE
+	var tally := new_tally()
 	if not res.is_empty() and res.collider is Area3D and (res.collider as Area3D).has_meta("fighter"):
-		hit_target = (res.collider as Area3D).get_meta("fighter")
+		var hit_target: Fighter = (res.collider as Area3D).get_meta("fighter")
 		var zone: String = (res.collider as Area3D).get_meta("zone")
-		head = zone == "head"
-		pos = res.position
-		total = hit_target.take_damage(float(w.def.damage) * Weapons.zone_mult(w.def, zone) * Weapons.pen_mult(w.def, zone), zone, self, global_position)
-		killed = not hit_target.alive
-		Effects.hit_spark(self, pos, -base_dir, head)
-	if total <= 0.0:
-		hit_target = null
+		var pos: Vector3 = res.position
+		land(tally, hit_target, zone, float(w.def.damage) * Weapons.zone_mult(w.def, zone) * Weapons.pen_mult(w.def, zone), pos)
+		Effects.hit_spark(self, pos, -base_dir, zone == "head")
 	model.on_punch()
 	Audio.play_at("jump", global_position, -8.0, 1.5)
-	_after_shot(w, hit_target, total, head, pos, killed)
+	_after_shot(w, tally)
 	return true
 
 

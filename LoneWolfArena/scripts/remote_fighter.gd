@@ -12,6 +12,14 @@ var _net_yaw := 0.0
 var _net_pitch := 0.0
 var _net_floor := true
 var _net_heal := false
+## Its HP as this phone's own hits leave it: its reports come back a round trip late, so a hit
+## shows (and counts) what it will really take there, never more than is left (hit_points: the
+## same armour and whole points its phone applies). Back in step with its reports once no hit
+## has been sent for RESYNC_S, or at once when they show less (the zone, a fall).
+var hp_left := MAX_HP
+var _hp_reported := MAX_HP
+var _hit_sent_at := -99.0
+const RESYNC_S := 0.8
 
 
 ## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; flags: 1 sprint, 2 ads,
@@ -28,6 +36,8 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_net_yaw = yaw
 	_net_pitch = 0.0
 	_net_heal = false
+	hp_left = hp
+	_hp_reported = hp
 
 
 func apply_state(s: PackedFloat32Array) -> void:
@@ -57,6 +67,11 @@ func apply_state(s: PackedFloat32Array) -> void:
 	if wi != current:
 		switch_weapon(wi)
 	hp = clampf(s[8], 0.0, MAX_HP)
+	if hp > _hp_reported:
+		hp_left = minf(hp_left + hp - _hp_reported, MAX_HP)      # it healed
+	_hp_reported = hp
+	if hp < hp_left or _now() - _hit_sent_at > RESYNC_S:
+		hp_left = hp
 
 
 func _physics_process(delta: float) -> void:
@@ -90,11 +105,13 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	if not alive or round_over or attacker == null or attacker == self or not attacker.is_player:
 		return 0.0
 	last_hit_cause = cause
-	var dmg := maxf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0)
+	var dmg := clampf(hit_points(amount, zone), 0.0, hp_left)
+	hp_left -= dmg
+	_hit_sent_at = _now()
 	if arena and arena.has_method("net_hit"):
 		arena.net_hit(amount, zone, from_pos)
 	damaged.emit(dmg, from_pos, zone == "head", attacker)
-	if dmg > 0.0:
+	if dmg > 0.0 and model:
 		model.play_hit()
 	return dmg
 

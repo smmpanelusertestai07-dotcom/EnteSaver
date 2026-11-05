@@ -928,7 +928,7 @@ func scoreboard_rows() -> Array:
 		var st: Dictionary = f.stats
 		var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
 		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": roundi(f.hp),
-			"kills": int(st.kills), "damage": int(st.damage), "headshots": int(st.headshots),
+			"kills": int(st.kills), "damage": roundi(st.damage), "headshots": int(st.headshots),
 			"accuracy": roundi(acc), "rounds": int(score["player" if f == player else "bot"]),
 			"weapon": String(f.gun().def.name)})
 	return rows
@@ -967,7 +967,7 @@ func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
 	var st := player.stats
 	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
 	return {
-		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": int(st.damage),
+		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": roundi(st.damage),
 		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
 		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
 		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,

@@ -75,8 +75,9 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   for shotguns, a dot for the sniper, a small circle for the fists); the rifles' circle widens with
   movement/firing; turns RED only when a shot would hit (the crosshair's ray meets the enemy before
   cover); red-dot reticle when aiming (ADS), full scope for the sniper.
-- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; hits on the
-  same target within 0.32 s add up into one number, separate numbers line up side by side.
+- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; every shot its
+  own number, the HP it really took (a shotgun shell's pellets add up, its head part a number of
+  its own); numbers still showing line up side by side.
 - Hit marker: white X; headshot: orange X + head icon; kill: big red X on the enemy and the
   elimination badge (our emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
 - Damage direction: red arc segments around the centre; low HP: red vignette pulse.
