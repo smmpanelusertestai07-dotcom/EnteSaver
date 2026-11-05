@@ -1905,13 +1905,17 @@ func end_session(reason := "left") -> void:
 ## The fighter's state (RemoteFighter.pack) in short numbers: whole values as integers, the
 ## position to the centimetre, angles to a thousandth of a radian, HP to a tenth; "t" is this
 ## phone's clock (the other phone draws the fighter from it). A state like the last one goes out
-## once more (so the other phone sees it stand still) and then only every STATE_IDLE_MS.
-## Returns whether it went out.
+## once more (so the other phone sees it stand still) and then only every STATE_IDLE_MS. At most
+## one state goes out a millisecond: a slow frame runs several physics steps back to back, and a
+## second state with the same "t" would be thrown away on the other phone (it takes only a newer
+## "t", _on_state_msg), so it is not sent at all. Returns whether it went out.
 func send_state(s: PackedFloat32Array) -> bool:
 	if not in_session:
 		return false
 	var a := compact_state(s)
 	var now := Time.get_ticks_msec()
+	if now <= _state_ms:
+		return false
 	if a == _last_state:
 		_same_n += 1
 		if _same_n > 1 and now - _state_ms < STATE_IDLE_MS:

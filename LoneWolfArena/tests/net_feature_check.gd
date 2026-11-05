@@ -117,12 +117,24 @@ func _state() -> void:
 	_check(JSON.stringify({"k": "st", "s": c, "t": 123456789}).length() < 80, "a state message stays short")
 	var cl := Cloud.new()
 	cl.in_session = true
-	var sent := [cl.send_state(s), cl.send_state(s), cl.send_state(s)]
+	var sent := [cl.send_state(s)]
+	cl._state_ms -= 50                  # (the next physics tick, 50 ms on)
+	sent.append(cl.send_state(s))
+	cl._state_ms -= 50
+	sent.append(cl.send_state(s))
 	_check(sent == [true, true, false], "a state like the last goes out once more, then is skipped (%s)" % str(sent))
 	cl._state_ms -= Cloud.STATE_IDLE_MS + 10
 	_check(cl.send_state(s), "an unchanged state still goes out every STATE_IDLE_MS")
 	s[0] += 0.5
+	cl._state_ms -= 50
 	_check(cl.send_state(s), "a changed state goes out at once")
+	# A slow frame runs physics steps back to back: a second state in the same millisecond would
+	# carry the same "t", which the other phone throws away, so it never goes out.
+	var out_before := cl.relay_states_out
+	s[0] += 0.5
+	cl._state_ms = Time.get_ticks_msec() + 1000        # (this millisecond, and the clock not yet past it)
+	_check(not cl.send_state(s) and cl.relay_states_out == out_before, "no second state in the same millisecond")
+	cl._state_ms -= 2000
 	cl.in_session = false
 	_check(not cl.send_state(s), "no state outside a match")
 	# The arena's own limit on states (30 a second) still lets 20 a second through.

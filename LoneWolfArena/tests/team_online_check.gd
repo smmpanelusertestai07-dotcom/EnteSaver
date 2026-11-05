@@ -193,7 +193,10 @@ func _coop() -> bool:
 			_fail("no \"fin\" came for slot %d" % f.slot)
 	var table := _table(arena)
 	at.log_line("table: " + table)
-	await at.wait(1.0)                   # (both phones stopped sending states at the match's end)
+	# Both copies stop sending states at the match's end, the guest a little after the host (it
+	# hears the end through the relay), and on a busy machine the relay or a long frame can hold a
+	# last state back past a fixed wait: the counts are taken once no state has come in for 2 s.
+	await _until_states_settle(15.0)
 	# Each copy's table, and the states it sent and took through the relay: the step compares the
 	# tables and wants every state one copy sent taken by the other (a lossless mock: 100%).
 	var out := OS.get_environment("LW_TEAM_OUT")
@@ -402,8 +405,8 @@ func _duel() -> void:
 		_fail("the duel is not the 1 vs 1 against the other phone (phase %s, opponent %s)" % [str(arena.get("phase")), str(arena.get("bot"))])
 	else:
 		at.log_line("the duel after the team matches is the 1 vs 1 (arena.tscn)")
-	if host:
-		await at.wait(6.0)               # (the duel stays up while the guest, a little behind, checks it too)
+	# Neither copy leaves the duel (which ends it on the other one) before both have checked it.
+	await _barrier("duel")
 
 
 ## Sends an invite (send: a Callable that returns whether it went out) until the other copy takes
@@ -428,6 +431,42 @@ func _invite_until_taken(send: Callable, what: String) -> bool:
 		await at.wait(1.5)
 	cloud.invite_answered.disconnect(on_answer)
 	return sent
+
+
+## Both copies meet here before going on: each leaves a mark next to its LW_TEAM_OUT ("<out without
+## .host / .guest>.<what>_<role>") and waits for the other copy's mark (at most `seconds`), so the
+## one ahead never ends something the other is still checking; without LW_TEAM_OUT a fixed 6 s.
+func _barrier(what: String, seconds := 30.0) -> void:
+	var out := OS.get_environment("LW_TEAM_OUT")
+	if out == "":
+		await at.wait(6.0)
+		return
+	var base := out.trim_suffix(".host").trim_suffix(".guest")
+	var role := "host" if OS.get_environment("LW_NET_ROLE") == "host" else "guest"
+	var mine := "%s.%s_%s" % [base, what, role]
+	var theirs := "%s.%s_%s" % [base, what, "guest" if role == "host" else "host"]
+	var f := FileAccess.open(mine, FileAccess.WRITE)
+	if f:
+		f.store_string("1")
+		f.close()
+	if not await _until(func() -> bool: return FileAccess.file_exists(theirs), seconds):
+		at.log_line("the other copy never reached \"%s\" (%.0f s)" % [what, seconds])
+	await at.wait(1.0)
+
+
+## Waits until no state has come in through the relay for 2 s (at most `seconds`): the other copy
+## has stopped sending, and every state it sent is in.
+func _until_states_settle(seconds: float) -> void:
+	var last := -1
+	var quiet := 0.0
+	var t := 0.0
+	while quiet < 2.0 and t < seconds:
+		if cloud.relay_states_in != last:
+			last = cloud.relay_states_in
+			quiet = 0.0
+		await at.wait(0.25)
+		quiet += 0.25
+		t += 0.25
 
 
 func _until(cond: Callable, seconds: float) -> bool:
