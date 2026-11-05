@@ -1815,6 +1815,17 @@ func _test_blocking() -> void:
 	cl._next_broker()
 	_check(cl._broker_i == (relay_before + 1) % cl._brokers.size() and cl._fail_n == 0,
 		"a relay that refuses the phone (CONNACK 5) is left for the next relay at once")
+	_check(relay_before != 0 or cl._home_bad_ms >= 0, "the first relay failing the phone is remembered (may_return_home)")
+	# Networks that let only port 443 out still reach a relay; each login as its relay publishes it.
+	_check(String(Cloud.BROKERS[1]).contains(":443/") and Cloud.BROKERS.size() >= 4,
+		"a relay on port 443 comes right after the first one (%s)" % str(Cloud.BROKERS))
+	_check(Cloud.connect_flags([]) == 0x02 and Cloud.connect_flags(["freemqtt", "public"]) == 0xC2
+		and Cloud.connect_flags(["demo", ""]) == 0x82, "CONNECT's flags: no login, user and password, user only")
+	for url: String in Cloud.BROKER_LOGINS:
+		_check(url in Cloud.BROKERS and (Cloud.BROKER_LOGINS[url] as Array).size() == 2, "the login of %s is for a relay in the list" % url)
+	_check(Cloud.may_return_home(10000, -1) and not Cloud.may_return_home(10000 + Cloud.HOME_RETRY_MS - 1, 10000)
+		and Cloud.may_return_home(10000 + Cloud.HOME_RETRY_MS + 1, 10000),
+		"a phone the first relay failed stays on the one it reached for HOME_RETRY_MS")
 	cl._ws = null
 	cl.free()
 	them.free()

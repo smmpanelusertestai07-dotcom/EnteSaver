@@ -70,11 +70,21 @@ const SEEK_TOPIC := ROOT + "/mm/seek"
 ## The relays, nearest to the players first (every phone settles on the same one, see
 ## _maybe_return_home). FreeMQTT runs in Mumbai (about 25 ms from Indian networks, measured with
 ## free public probes on 2026-11-05) and asks for the shared login its operator publishes on its
-## home page for everyone (not an account, not a secret); HiveMQ (Frankfurt) and EMQX (Europe /
-## US) take over if it is down.
-const BROKERS := ["wss://broker.freemqtt.com:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt", "wss://broker.emqx.io:8084/mqtt"]
-## Relays that refuse anonymous clients: [user, password], both published by the relay itself.
-const BROKER_LOGINS := {"wss://broker.freemqtt.com:8084/mqtt": ["freemqtt", "public"]}
+## home page for everyone (not an account, not a secret). Some networks (public Wi-Fi, offices,
+## colleges) let only port 443 out: shiftr.io's public relay listens there, so it comes second
+## (checked on 2026-11-05 from a network open only on 443: connected, a retained message relayed
+## in 132 ms), then HiveMQ (Frankfurt) and EMQX (Europe / US), and last the TBMQ demo relay, also
+## on 443. All are free and need no account.
+const BROKERS := ["wss://broker.freemqtt.com:8084/mqtt", "wss://public.cloud.shiftr.io:443/mqtt",
+	"wss://broker.hivemq.com:8884/mqtt", "wss://broker.emqx.io:8084/mqtt", "wss://demo.tbmq.io:443/mqtt"]
+## Relays that refuse anonymous clients: [user, password], both published by the relay itself for
+## everyone (an empty password is left out of CONNECT).
+const BROKER_LOGINS := {"wss://broker.freemqtt.com:8084/mqtt": ["freemqtt", "public"],
+	"wss://public.cloud.shiftr.io:443/mqtt": ["public", "public"], "wss://demo.tbmq.io:443/mqtt": ["demo", ""]}
+## A phone that could not reach the first relay (three tries, or it refused the phone) stays on the
+## one it reached for this long before trying the first again when alone there: a network that
+## blocks the first relay's port would otherwise keep it offline most of the time.
+const HOME_RETRY_MS := 300000
 ## The lobby announcement's period: light on the free relays (whose terms ask for light use); a
 ## player new to this phone gets an answer within ANNOUNCE_REPLY_S instead (_on_lobby).
 const ANNOUNCE_S := 5.0
@@ -141,6 +151,7 @@ var join_state := ""           # custom room this phone joins: "", "asking", "in
 var _brokers: Array = BROKERS
 var _broker_i := 0
 var _fail_n := 0               # failed connects in a row on the current broker
+var _home_bad_ms := -1         # when the first relay last failed this phone (may_return_home), -1 never
 var _alone_t := 0.0            # seconds on a backup broker with nobody else in the lobby
 var _ws: WebSocketPeer
 var _connected := false        # CONNACK received
@@ -326,6 +337,8 @@ func _connect() -> void:
 func _next_broker() -> void:
 	_fail_n += 1
 	if _fail_n >= 3:
+		if _broker_i == 0 and _brokers.size() > 1:
+			_home_bad_ms = Time.get_ticks_msec()        # (the first relay is out of reach from here for now)
 		_broker_i = (_broker_i + 1) % _brokers.size()
 		_fail_n = 0
 	_retry_t = 2.0
@@ -438,7 +451,7 @@ func _process(delta: float) -> void:
 		_reconnect()
 		return
 	if _broker_i != 0 and not in_session and _room == "" and room_code == "" and _outgoing.is_empty() \
-			and _join.is_empty() and peers.is_empty():
+			and _join.is_empty() and peers.is_empty() and may_return_home(Time.get_ticks_msec(), _home_bad_ms):
 		_alone_t += delta
 		if _alone_t > 20.0:
 			_alone_t = 0.0
@@ -579,14 +592,32 @@ func _send_packet(p: PackedByteArray) -> void:
 func _send_connect() -> void:
 	var body := _str("MQTT")
 	var login: Array = BROKER_LOGINS.get(String(_brokers[_broker_i]) if not _brokers.is_empty() else "", [])
-	# level 4, clean session (0x02) plus user name and password (0xC0) when the relay wants its login, keep-alive 60 s
-	body.append_array(PackedByteArray([4, 0xC2 if login.size() == 2 else 0x02, 0, 60]))
+	# level 4, keep-alive 60 s; the flags: clean session plus the relay's login (connect_flags)
+	body.append_array(PackedByteArray([4, connect_flags(login), 0, 60]))
 	body.append_array(_str("lw" + my_id.left(20)))           # MQTT allows 23-character client ids
-	if login.size() == 2:
+	if login.size() == 2 and String(login[0]) != "":
 		body.append_array(_str(String(login[0])))
-		body.append_array(_str(String(login[1])))
+		if String(login[1]) != "":
+			body.append_array(_str(String(login[1])))
 	_send_packet(_packet(0x10, body))
 	_sent_connect = true
+
+
+## CONNECT's flags for a relay's login ([user, password] or none): clean session (0x02), a user
+## name (0x80) when there is one, a password (0x40) only with a user name and when not empty.
+static func connect_flags(login: Array) -> int:
+	var f := 0x02
+	if login.size() == 2 and String(login[0]) != "":
+		f |= 0x80
+		if String(login[1]) != "":
+			f |= 0x40
+	return f
+
+
+## Whether a phone alone on a backup relay goes back to the first now: not within HOME_RETRY_MS of
+## the first one failing it (home_bad_ms: when it last did, -1 never).
+static func may_return_home(now: int, home_bad_ms: int) -> bool:
+	return home_bad_ms < 0 or now - home_bad_ms > HOME_RETRY_MS
 
 
 func _next_pid() -> PackedByteArray:
