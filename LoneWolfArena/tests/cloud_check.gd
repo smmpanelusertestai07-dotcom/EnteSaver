@@ -2,7 +2,8 @@ extends Node
 ## Internet 1 vs 1 end to end (Cloud, end-to-end encrypted) through tests/mqtt_mock.gd
 ## (tools/qa/run_checks.sh starts both, LW_MQTT_URL points Cloud at it): LW_NET_ROLE=host sees
 ## the guest's announcement in the lobby, challenges it; the guest
-## accepts; both load the arena, exchange their players' state, the host lands a lethal hit on
+## accepts; both load the arena, exchange their players' state, the host floods the guest with
+## walls, frags and shots (the guest makes only one round's items), the host lands a lethal hit on
 ## its copy of the guest, the guest's phone applies it and reports its death, and both show the
 ## result (host VICTORY, guest DEFEAT), which each one's profile keeps: a LONE WOLF entry in
 ## HISTORY with the other phone's id and name (its row opens their card), the deaths and rounds in
@@ -58,6 +59,26 @@ func run(autotest: Node) -> int:
 	at.log_line("remote at %s, its spawn %s, remote hp %.0f" % [str(b.global_position), str(their_spawn), b.hp])
 	if not (b is RemoteFighter) or b.global_position.distance_to(their_spawn) > 3.0:
 		_fail("the remote player does not follow the other phone's state")
+	# A tampered phone could send walls, frags and shots without end: the other phone makes only
+	# what one player has in a round (Arena.spawn_cap) and its shots no faster than the gun.
+	if host:
+		var c: Vector3 = map.zone_center
+		for i in 40:
+			Game.session.send_event("wall", [c.x + 0.1 * i, 0.0, c.z, 0.0])
+			Game.session.send_event("grenade", [c.x, 1.0, c.z, 0.0, 2.0, 0.0])
+		for i in 60:
+			Game.session.send_event("shot", [c.x, 1.5, c.z, 1.0, 0.0, 0.0])
+		await at.wait(2.5)
+	else:
+		await at.wait(2.0)
+		var spawned: Dictionary = arena.get("_net_spawns")
+		var walls := 0
+		for n in arena.get_children():
+			walls += 1 if n is ShieldWall else 0
+		at.log_line("after a flood of walls and frags: %d walls here, used %s" % [walls, str(spawned)])
+		if walls != Fighter.START_SHIELDS or int(spawned.get("wall", 0)) != Fighter.START_SHIELDS \
+				or int(spawned.get("grenade", 0)) != Fighter.START_GRENADES:
+			_fail("a flood of walls and frags from the other phone was not held to one round's items")
 	# The host takes every round (LW_ROUNDS_TO_WIN sets how many): each next round must start on
 	# both phones with both players back up at full HP, and the match end with the host's win.
 	var round_now := 1

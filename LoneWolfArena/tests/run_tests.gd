@@ -46,6 +46,7 @@ func _ready() -> void:
 	_test_blocking()
 	_test_id_search()
 	_test_online_status()
+	_test_net_limits()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -1376,3 +1377,54 @@ func _test_online_status() -> void:
 	Game.cloud = saved_cloud
 	Game.profile = saved_profile
 	Game.autotest = at
+
+
+## What the other phone's messages may make on this one (Arena._on_net_event): walls and frags
+## only within the round's items (a custom room's unlimited ones up to ROOM_SPAWN_CAP), at real
+## spots in the hall, while the round is fought and no faster than a hand; shots no faster than
+## the gun fires.
+func _test_net_limits() -> void:
+	var a: Node3D = load("res://scripts/arena.gd").new()
+	var saved_rules := Game.room_rules
+	Game.room_rules = {}
+	var spot := Vector3(2.0, 0.0, 3.0)
+	a.phase = 0
+	a.prep_left = 6.0
+	_check(not a._remote_spawn_allowed("wall", spot), "no wall from the other phone early in the prep")
+	a.phase = 1
+	var outside := 0
+	for p: Vector3 in [Vector3(1.0e6, 0.0, 0.0), Vector3(NAN, 0.0, 0.0), Vector3(0.0, 40.0, 0.0), Vector3(INF, 0.0, 0.0)]:
+		outside += 1 if a._remote_spawn_allowed("wall", p) else 0
+	_check(outside == 0, "no wall outside the hall or at a point that is not a number")
+	_check(not a._in_hall(a._net_vec(["1", 2.0, 3.0], 0)) and a._in_hall(a._net_vec([1, 0.0, 3.0], 0)),
+		"event data that is not a number is no point")
+	var walls := 0
+	var frags := 0
+	for i in 20:
+		walls += 1 if a._remote_spawn_allowed("wall", spot) else 0
+		frags += 1 if a._remote_spawn_allowed("grenade", spot) else 0
+	_check(walls == Fighter.START_SHIELDS and frags == Fighter.START_GRENADES,
+		"a round takes only the walls and frags a player has (%d walls, %d frags)" % [walls, frags])
+	a._net_spawns.clear()
+	a._net_buckets.clear()
+	a.online = true
+	Game.room_rules = {"walls": true, "frags": true}
+	var burst := 0
+	for i in 50:
+		burst += 1 if a._remote_spawn_allowed("wall", spot) else 0
+	_check(burst == 3 and a.spawn_cap("wall") == a.ROOM_SPAWN_CAP, "unlimited walls come no faster than a hand (%d at once)" % burst)
+	var total := burst
+	for i in 200:
+		a._net_buckets["wall"] = [3.0, Time.get_ticks_msec()]       # as if seconds had passed
+		total += 1 if a._remote_spawn_allowed("wall", spot) else 0
+	_check(total == a.ROOM_SPAWN_CAP, "unlimited walls stop at %d a round (got %d)" % [a.ROOM_SPAWN_CAP, total])
+	a.phase = 2
+	a._net_spawns.clear()
+	a._net_buckets.clear()
+	_check(not a._remote_spawn_allowed("grenade", spot), "no frag from the other phone once the match is over")
+	var shots := 0
+	for i in 100:
+		shots += 1 if a._remote_shot_allowed() else 0
+	_check(shots > 0 and shots <= 8, "shot reports come no faster than the gun fires (%d at once)" % shots)
+	Game.room_rules = saved_rules
+	a.free()

@@ -45,6 +45,9 @@ const PRONE_HEIGHT := 0.7
 const STANCE_TIME := [0.0, 0.2, 0.45]
 const MELEE_RANGE := 2.0
 const THROW_RELEASE := 0.43      # s from the throw input to the grenade leaving the hand
+const START_MEDKITS := 2         # the items every round starts with
+const START_SHIELDS := 2
+const START_GRENADES := 1
 
 var display_name := "PLAYER"
 var is_player := false
@@ -104,9 +107,9 @@ var hold_fire := false           # prep phase: may move, may not shoot or use it
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
-var _medkits := SecureNum.new(2)
-var _shields := SecureNum.new(2)
-var _grenades := SecureNum.new(1)
+var _medkits := SecureNum.new(START_MEDKITS)
+var _shields := SecureNum.new(START_SHIELDS)
+var _grenades := SecureNum.new(START_GRENADES)
 var _heal_t := 0.0
 var _heal_used := false
 var _throwing := false
@@ -338,9 +341,9 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_throwing = false
 	_throw_target = Vector3.INF
 	hp = MAX_HP
-	medkits = 2
-	shields = 2
-	grenades = 1
+	medkits = START_MEDKITS
+	shields = START_SHIELDS
+	grenades = START_GRENADES
 	ads = false
 	sprinting = false
 	move_dir = Vector2.ZERO

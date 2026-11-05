@@ -23,8 +23,9 @@
 #   tests/guard_check.gd   a detection made before a match voids it
 #   tests/cloud_check.gd   online 1 vs 1 with two copies of the game (LW_NET_ROLE host / guest)
 #                          through tests/mqtt_mock.gd: find, challenge, accept, two rounds
-#                          (end-to-end encrypted), lethal hits and the result on both, which
-#                          each one's HISTORY keeps with the other's id
+#                          (end-to-end encrypted), a flood of walls and frags held to one round's
+#                          items, lethal hits and the result on both, which each one's HISTORY
+#                          keeps with the other's id
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail

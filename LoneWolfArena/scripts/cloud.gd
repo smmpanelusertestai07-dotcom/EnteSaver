@@ -54,6 +54,7 @@ const MAX_MESSAGE := 4096
 const MAX_PEERS := 40
 const INBOX_RATE := 4.0        # inbox messages handled per second (each invite costs an RSA decrypt)
 const JOIN_TIMEOUT_MS := 15000 # a custom-room join attempt gives up after this
+const MAX_QUEUED := 32         # room events kept for the arena while it loads (queue)
 const ROOM_RULES := {"rounds": 5, "ammo": false, "walls": false, "frags": false}
 const CARD_REFRESH_S := 1800.0             # this phone's card is published again (last seen) every 30 min
 const CARD_MAX_AGE_S := 60 * 86400         # cards not refreshed for 60 days are not listed
@@ -1160,7 +1161,8 @@ func _on_room(msg: PackedByteArray) -> void:
 			if String(ev) == "bye":
 				end_session("left")
 			elif event_received.get_connections().is_empty():
-				queue.append([String(ev), data])
+				if queue.size() < MAX_QUEUED:          # (only "ready" comes before the arena listens)
+					queue.append([String(ev), data])
 			else:
 				event_received.emit(String(ev), data)
 

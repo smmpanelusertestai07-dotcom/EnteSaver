@@ -76,6 +76,11 @@ var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 var _counted := false            # Game.count_match counted this match (its first fight began)
+## A custom room's unlimited walls or frags: at most this many per round and player (spawn_cap).
+const ROOM_SPAWN_CAP := 30
+var _net_buckets := {}           # kind of message from the other phone -> [tokens, ms] (_net_rate_ok)
+var _net_spawns := {}            # "wall" / "grenade" -> how many the other phone's player used this round
+var _my_spawns := {}             # the same for this phone's player (online, held to spawn_cap)
 
 
 func _ready() -> void:
@@ -171,8 +176,10 @@ func _net_begin() -> void:
 
 
 func _on_net_state(s: PackedFloat32Array) -> void:
-	# The last value is the sender's round: a packet from before a round's reset is dropped.
-	if s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index and phase != Phase.BREAK:
+	# The last value is the sender's round: a packet from before a round's reset is dropped. The
+	# other phone sends 10 a second; far more is a flood (each can switch the gun and the stance).
+	if s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index and phase != Phase.BREAK \
+			and _net_rate_ok("state", 30.0, 30.0):
 		(bot as RemoteFighter).apply_state(s)
 
 
@@ -192,8 +199,13 @@ func _on_net_event(kind: String, data: Array) -> void:
 					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT):
 				_apply_pick(String(data[0]))
 		"shot":
-			if data.size() == 6:
-				remote.remote_shot(Vector3(float(data[0]), float(data[1]), float(data[2])), Vector3(float(data[3]), float(data[4]), float(data[5])))
+			# Its shots: muzzle flash, tracer, impact and sound here, while the round is fought and
+			# never faster than its gun (or fists) fire.
+			if data.size() == 6 and phase == Phase.FIGHT:
+				var origin := _net_vec(data, 0)
+				var dir := _net_vec(data, 3)
+				if _in_hall(origin) and dir.is_finite() and _remote_shot_allowed():
+					remote.remote_shot(origin, dir)
 		"hit":
 			# Only while the round is fought, never faster than this round's gun can fire, and never
 			# more than one bullet (pellet), punch or frag of it can do: a tampered phone cannot
@@ -201,27 +213,33 @@ func _on_net_event(kind: String, data: Array) -> void:
 			if data.size() == 5 and String(data[1]) in ["head", "body", "limb"] and phase == Phase.FIGHT \
 					and _remote_hit_allowed():
 				var zone := String(data[1])
-				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote, Vector3(float(data[2]), float(data[3]), float(data[4])))
+				var hit_from := _net_vec(data, 2)
+				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote,
+					hit_from if _in_hall(hit_from) else remote.global_position)
 		"died":
 			if remote.alive and data.size() == 1:
 				player.stats.kills += 1
 				remote.die(player, bool(data[0]))
 		"grenade":
 			if data.size() == 6:
-				var g := Grenade.new()
-				g.thrower = remote
-				g.cosmetic = true          # the thrower's phone deals its damage
-				add_child(g)
-				g.global_position = Vector3(float(data[0]), float(data[1]), float(data[2]))
-				g.linear_velocity = Vector3(float(data[3]), float(data[4]), float(data[5])).limit_length(30.0)
+				var at := _net_vec(data, 0)
+				var vel := _net_vec(data, 3)
+				if vel.is_finite() and _remote_spawn_allowed("grenade", at):
+					var g := Grenade.new()
+					g.thrower = remote
+					g.cosmetic = true          # the thrower's phone deals its damage
+					add_child(g)
+					g.global_position = at
+					g.linear_velocity = vel.limit_length(30.0)
 		"wall":
 			if data.size() == 4:
-				var wall := ShieldWall.new()
-				add_child(wall)
-				var pos := Vector3(float(data[0]), float(data[1]), float(data[2]))
-				var yaw := float(data[3])
-				wall.global_position = pos
-				wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
+				var pos := _net_vec(data, 0)
+				var yaw := float(data[3]) if (data[3] is float or data[3] is int) else NAN
+				if is_finite(yaw) and _remote_spawn_allowed("wall", pos):
+					var wall := ShieldWall.new()
+					add_child(wall)
+					wall.global_position = pos
+					wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
 		"timeup":
 			if data.size() == 3 and not Game.session.is_host and int(data[2]) == round_index:
 				_timeout(float(data[0]), float(data[1]))
@@ -245,10 +263,6 @@ func _on_net_ended(_reason: String) -> void:
 	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
 
 
-var _hit_tokens := 0.0
-var _hit_tokens_t := 0
-
-
 ## The most one reported hit can do in this zone: a bullet (one pellet) of this round's gun at
 ## point-blank range, a punch, or (on the body) a frag at its centre, before the armour.
 func _max_remote_hit(zone: String) -> float:
@@ -270,14 +284,64 @@ func _round_gun() -> String:
 func _remote_hit_allowed() -> bool:
 	var d: Dictionary = Weapons.DEFS[_round_gun()]
 	var rate := maxf(float(d.pellets) / maxf(float(d.interval), 0.05), 1.0 / 0.45) * 1.5 + 3.0
-	var burst := maxf(float(d.pellets) * 3.0, 12.0)
-	var now := Time.get_ticks_msec()
-	_hit_tokens = minf(burst, _hit_tokens + float(now - _hit_tokens_t) / 1000.0 * rate)
-	_hit_tokens_t = now
-	if _hit_tokens < 1.0:
+	return _net_rate_ok("hit", rate, maxf(float(d.pellets) * 3.0, 12.0))
+
+
+## Shot reports (one per trigger pull, pellets included): the round's gun or the fists, whichever
+## fires faster, with the same headroom.
+func _remote_shot_allowed() -> bool:
+	var interval := minf(float(Weapons.DEFS[_round_gun()].interval), float(Weapons.DEFS.fists.interval))
+	return _net_rate_ok("shot", 1.5 / maxf(interval, 0.05) + 2.0, 8.0)
+
+
+## A wall or grenade of the other phone's player: while the round is fought (or about to be: the
+## guest's prep ends a moment after the host's), at a real spot in the hall, within the items that
+## player has this round (spawn_cap) and no faster than a hand can use them. Anything else is
+## dropped: each one is a body, a mesh, effects and sounds on this phone, so a tampered phone could
+## otherwise flood it until it stalls.
+func _remote_spawn_allowed(kind: String, pos: Vector3) -> bool:
+	if not (phase == Phase.FIGHT or (phase == Phase.PREP and prep_left < 2.0)) or not _in_hall(pos):
 		return false
-	_hit_tokens -= 1.0
+	if int(_net_spawns.get(kind, 0)) >= spawn_cap(kind) or not _net_rate_ok(kind, 2.5, 3.0):
+		return false
+	_net_spawns[kind] = int(_net_spawns.get(kind, 0)) + 1
 	return true
+
+
+## The walls ("wall") or frags ("grenade") one player may use in a round: the round's starting
+## items, or a custom room's unlimited ones up to ROOM_SPAWN_CAP (this phone's player keeps to the
+## same number, see _apply_room_rules, so both phones show the same walls).
+func spawn_cap(kind: String) -> int:
+	if online and bool(Game.room_rules.get("walls" if kind == "wall" else "frags", false)):
+		return ROOM_SPAWN_CAP
+	return Fighter.START_SHIELDS if kind == "wall" else Fighter.START_GRENADES
+
+
+## Token bucket per kind of message from the other phone: `burst` at once, then `rate` a second;
+## false (drop it) when they come faster.
+func _net_rate_ok(kind: String, rate: float, burst: float) -> bool:
+	var now := Time.get_ticks_msec()
+	var b: Array = _net_buckets.get(kind, [burst, now])
+	var tokens := minf(burst, float(b[0]) + float(now - int(b[1])) / 1000.0 * rate)
+	var ok := tokens >= 1.0
+	_net_buckets[kind] = [tokens - 1.0 if ok else tokens, now]
+	return ok
+
+
+## Three values of an event's data from index i on, as a point or a direction; NaN for what is not
+## a number, which every check rejects.
+static func _net_vec(data: Array, i: int) -> Vector3:
+	var out := Vector3()
+	for k in 3:
+		var v: Variant = data[i + k]
+		out[k] = float(v) if (v is float or v is int) else NAN
+	return out
+
+
+## A point the other phone may name: a real number inside the hall (with a margin), not far above
+## or below its floor.
+func _in_hall(p: Vector3) -> bool:
+	return p.is_finite() and map_rect.grow(2.0).has_point(Vector2(p.x, p.z)) and p.y > -3.0 and p.y < 15.0
 
 
 ## Called by RemoteFighter for every hit this phone's player lands on it.
@@ -292,11 +356,13 @@ func net_shot(origin: Vector3, dir: Vector3) -> void:
 
 func net_grenade(pos: Vector3, vel: Vector3) -> void:
 	if online:
+		_my_spawns["grenade"] = int(_my_spawns.get("grenade", 0)) + 1
 		Game.session.send_event("grenade", [pos.x, pos.y, pos.z, vel.x, vel.y, vel.z])
 
 
 func net_wall(pos: Vector3, fwd: Vector3) -> void:
 	if online:
+		_my_spawns["wall"] = int(_my_spawns.get("wall", 0)) + 1
 		Game.session.send_event("wall", [pos.x, pos.y, pos.z, atan2(-fwd.x, -fwd.z)])
 
 
@@ -458,10 +524,12 @@ func _apply_room_rules() -> void:
 	if not online or Game.room_rules.is_empty() or player == null:
 		return
 	var r: Dictionary = Game.room_rules
-	if bool(r.get("walls", false)) and player.shields < 9:
-		player.shields = 9
-	if bool(r.get("frags", false)) and player.grenades < 9:
-		player.grenades = 9
+	var walls := mini(9, spawn_cap("wall") - int(_my_spawns.get("wall", 0)))
+	if bool(r.get("walls", false)) and player.shields < walls:
+		player.shields = walls
+	var frags := mini(9, spawn_cap("grenade") - int(_my_spawns.get("grenade", 0)))
+	if bool(r.get("frags", false)) and player.grenades < frags:
+		player.grenades = frags
 	if bool(r.get("ammo", false)):
 		for w: WeaponState in player.weapons:
 			if not w.infinite() and w.reserve < 300:
@@ -469,6 +537,8 @@ func _apply_room_rules() -> void:
 
 
 func _start_prep() -> void:
+	_net_spawns.clear()
+	_my_spawns.clear()
 	_apply_room_rules()
 	phase = Phase.PREP
 	var pick_round := (round_index - 1) % 2 == 0
