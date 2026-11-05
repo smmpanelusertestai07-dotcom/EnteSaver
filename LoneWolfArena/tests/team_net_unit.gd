@@ -253,6 +253,123 @@ func _privacy() -> void:
 		"the Privacy Notice tells of team invites and the searches")
 
 
-## TeamArenaNet's own limits (filled in with the arena).
+## TeamArenaNet's limits on what the other phone says, on a stand-in match (not in the tree: its
+## _ready would build the arena). Coop DUO: slot 0 the host's player, 1 the guest's, 2 and 3 bots.
 func _arena_net() -> void:
-	pass
+	var holder := Node3D.new()
+	t.add_child(holder)
+	var guest := _stand_in(holder, false)
+	var g: Array = guest.slots
+	var mine: Fighter = g[1]
+	var bot: Fighter = g[2]
+	_check(guest.runs_here(mine) and not guest.runs_here(g[0]) and not guest.runs_here(bot) and g[0] is RemoteFighter and bot is RemoteFighter,
+		"the guest runs only its own player")
+	# A hit far over the attacker's gun is held to one bullet of it (x 1.02, before the armour).
+	var most := guest.max_hit_by(bot, "limb")
+	guest._on_net_event("hit", [1, 2, 5000.0, "limb", 0.0, 1.0, 0.0])
+	var took := Fighter.MAX_HP - mine.hp
+	_check(took > 0.0 and took <= mine.hit_points(most, "limb") + 0.01, "a hit over the attacker's gun is clamped (%.1f taken, %.1f at most)" % [took, most])
+	mine.hp = Fighter.MAX_HP
+	guest._on_net_event("hit", [1, 0, 30.0, "body", 0.0, 1.0, 0.0])
+	guest._on_net_event("hit", [2, 3, 30.0, "body", 0.0, 1.0, 0.0])
+	guest._on_net_event("hit", [1, 2, NAN, "body", 0.0, 1.0, 0.0])
+	guest._on_net_event("hit", [1, 2, 30.0, "feet", 0.0, 1.0, 0.0])
+	_check(mine.hp == Fighter.MAX_HP, "no hit from a teammate, on a fighter the other phone runs, of NaN or in no zone")
+	guest.phase = TeamArenaNet.Phase.BREAK
+	guest._on_net_event("hit", [1, 2, 30.0, "body", 0.0, 1.0, 0.0])
+	_check(mine.hp == Fighter.MAX_HP, "no hit outside the fight")
+	guest.phase = TeamArenaNet.Phase.FIGHT
+	var n := 0
+	for i in 60:
+		var before := mine.hp
+		mine.hp = Fighter.MAX_HP
+		guest._on_net_event("hit", [1, 2, 1.0, "limb", 0.0, 1.0, 0.0])
+		n += 1 if mine.hp < Fighter.MAX_HP else 0
+		mine.hp = before
+	_check(n > 0 and n < 40, "a burst of hits is held to the attacker's rate (%d of 60 taken)" % n)
+	# Decisions: only the host's; the guest's player's own "dn" goes to the host.
+	guest._on_net_event("ko", [1, 2, false, "laser"])
+	_check(not mine.knocked, "a decision naming no known cause is ignored")
+	guest._on_net_event("ko", [1, 2, false, "gun"])
+	_check(mine.knocked and mine.alive, "the host's \"ko\" is applied on the guest")
+	var host := _stand_in(holder, true)
+	var h: Array = host.slots
+	host._on_net_event("ko", [0, 2, false, "gun"])
+	host._on_net_event("el", [2, 0, false, "gun"])
+	host._on_net_event("rend", [1, 0, 1, 0, false])
+	_check(not (h[0] as Fighter).knocked and (h[2] as Fighter).alive and host.phase == TeamArenaNet.Phase.FIGHT,
+		"decisions sent by the guest are ignored by the host")
+	host._on_net_event("dn", [2, 1, 1, false, "gun", false])
+	host._on_net_event("dn", [0, 1, 2, false, "gun", false])
+	_check(not (h[2] as Fighter).knocked and not (h[0] as Fighter).knocked, "a \"dn\" for a slot the guest does not run is ignored")
+	host._on_net_event("dn", [1, 2, 2, false, "gun", false])
+	_check(not (h[1] as Fighter).knocked, "a \"dn\" for another round is ignored")
+	host._on_net_event("dn", [1, 1, 2, true, "gun", false])
+	_check((h[1] as Fighter).knocked and (h[1] as Fighter).alive, "the guest's \"dn\" makes the host's referee knock its player")
+	host._on_net_event("rvd", [1, 0, 1])
+	_check((h[1] as Fighter).knocked, "a revive by a knocked fighter (or of an UP one) is refused")
+	# The bots' states in one "tk".
+	var packed := TeamArenaNet.pack_bots([h[2], h[3]])
+	var back := TeamArenaNet.unpack_bots(packed, [2, 3], 1)
+	var same: bool = back.size() == 2
+	if same:
+		var a := RemoteFighter.pack(h[2], 1)
+		for i in RemoteFighter.STATE_SIZE:
+			same = same and absf(float(back[2][i]) - a[i]) <= (0.006 if i < 3 else (0.0006 if i < 5 else 0.06))
+	_check(same, "pack_bots / unpack_bots round trip (%s)" % packed)
+	_check(TeamArenaNet.unpack_bots(packed, [3], 1).is_empty(), "a \"tk\" naming a slot that is not a bot is refused")
+	_check(TeamArenaNet.unpack_bots("2:1,2,nan,0,0,0,0,0,100", [2], 1).is_empty() and TeamArenaNet.unpack_bots("2:1,2,3,0,0,0,0,0", [2], 1).is_empty()
+		and TeamArenaNet.unpack_bots("2:1,2,3,0,0,0,0,0,inf", [2], 1).is_empty() and TeamArenaNet.unpack_bots("2:1,2,3,0,0,0,0,0,1;2:1,2,3,0,0,0,0,0,1", [2], 1).is_empty(),
+		"a \"tk\" with NaN, a missing number or a slot twice is refused")
+	_check(TeamArenaNet.unpack_bots("2:" + "1,".repeat(2000) + "1", [2], 1).is_empty(), "an over-long \"tk\" is refused")
+	# A SQUAD's worst case: six bots, every number as long as it gets.
+	var six := []
+	for i in 6:
+		var b := Bot.new()
+		b.slot = i + 2
+		b.set_loadout("ar")
+		b.process_mode = Node.PROCESS_MODE_DISABLED
+		holder.add_child(b)
+		b.global_position = Vector3(-21.99, 10.55, -15.99)
+		b.aim_yaw = -3.1415
+		b.aim_pitch = -1.2345
+		b.knocked = true
+		b.knock_hp = 33.33
+		six.append(b)
+	var squad := TeamArenaNet.pack_bots(six)
+	_check(squad.length() <= 1000 and TeamArenaNet.unpack_bots(squad, [2, 3, 4, 5, 6, 7], 1).size() == 6, "a SQUAD \"tk\" is %d characters (at most 1000)" % squad.length())
+	_check(TeamArenaNet.fin_from([1, 1, 2, 1, 0, 120, 1, 10, 5, 0]).size() > 0 and TeamArenaNet.fin_from([1, 1, 2, 1, 0, 120, 1, 10, 50, 0]).is_empty()
+		and TeamArenaNet.fin_from([1, 1, -2, 1, 0, 120, 1, 10, 5, 0]).is_empty() and TeamArenaNet.fin_from([1, 1, 2]).is_empty(),
+		"a \"fin\" with more hits than shots, a negative number or too few numbers is refused")
+	guest.free()
+	host.free()
+	holder.queue_free()
+
+
+## A coop DUO TeamArenaNet as one phone sees it in the fight (not in the tree), with its fighters
+## under `holder` (in the tree, not processing).
+func _stand_in(holder: Node3D, as_host: bool) -> TeamArenaNet:
+	var a := TeamArenaNet.new()
+	a.am_host = as_host
+	a.coop = true
+	a.guest_slot = 1
+	a.my_slot = 0 if as_host else 1
+	a.round_index = 1
+	a.phase = TeamArenaNet.Phase.FIGHT
+	var teams := {}
+	var list: Array[Fighter] = []
+	for s in 4:
+		a.roster.append({"slot": s, "team": 0 if s < 2 else 1, "bot": s >= 2, "name": "F%d" % s})
+		var f: Fighter = Bot.new() if a.runs_slot(s) else RemoteFighter.new()
+		f.slot = s
+		f.team = 0 if s < 2 else 1
+		f.set_loadout("ar")
+		f.process_mode = Node.PROCESS_MODE_DISABLED
+		holder.add_child(f)
+		f.global_position = Vector3(float(s), 1.0, 0.0)
+		list.append(f)
+		teams[s] = f.team
+	a.slots = list
+	a.fighters = list.duplicate()
+	a.referee.setup(teams)
+	return a

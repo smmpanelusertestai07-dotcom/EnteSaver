@@ -4,6 +4,11 @@ extends Bot
 ## results treat it the same). It has no AI: it follows the state that phone sends (Cloud: 20
 ## times a second, drawn a little in the past between the states: NetSmoother), shows its shots, and never loses HP by itself: hits on it are sent
 ## to its phone, which applies them and reports its HP and its death back.
+## In an online DUO / SQUAD match (TeamArenaNet) every fighter the other phone runs is one of
+## these: its player, and on the guest also the host's bots (their states come packed in the
+## host's "tk"). Hits on it come from this phone's player or, on the host, its bots (net_local),
+## never from a teammate, and go out through arena.net_hit_by; knocked, it shows the knock HP its
+## phone reports.
 
 const STATE_SIZE := 10
 
@@ -24,11 +29,14 @@ var _smooth := NetSmoother.new()
 
 
 ## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; flags: 1 sprint, 2 ads,
-## 4 healing, 8 on the floor.
+## 4 healing, 8 on the floor; DUO / SQUAD only (never in the 1 vs 1): 16 knocked (the hp value is
+## then the knock HP), 32 reviving a teammate.
 static func pack(f: Fighter, round_index := 1) -> PackedFloat32Array:
-	var flags := (1 if f.sprinting else 0) | (2 if f.ads else 0) | (4 if f.healing else 0) | (8 if f.is_on_floor() else 0)
+	var flags := (1 if f.sprinting else 0) | (2 if f.ads else 0) | (4 if f.healing else 0) | (8 if f.is_on_floor() else 0) \
+		| (16 if f.knocked else 0) | (32 if f.reviving != null else 0)
 	var at := f.global_position
-	return PackedFloat32Array([at.x, at.y, at.z, f.aim_yaw, f.aim_pitch, float(f.stance), float(flags), float(f.current), f.hp, float(round_index)])
+	return PackedFloat32Array([at.x, at.y, at.z, f.aim_yaw, f.aim_pitch, float(f.stance), float(flags), float(f.current),
+		f.knock_hp if f.knocked else f.hp, float(round_index)])
 
 
 func reset_for_round(pos: Vector3, yaw: float) -> void:
@@ -61,13 +69,19 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 	if on_floor and not _net_floor:
 		Audio.play_at("land", pos, -9.0)       # back on its feet after a jump or a drop
 	_net_floor = on_floor
-	var heal := (flags & 4) != 0
+	var heal := (flags & 4) != 0 or (flags & 32) != 0      # (a revive plays the healing motion)
 	if heal != _net_heal:
 		_net_heal = heal
 		model.play_heal(heal)
 	var wi := clampi(int(s[7]), 0, weapons.size() - 1)
 	if wi != current:
 		switch_weapon(wi)
+	if (flags & 16) != 0:
+		# Knocked on its phone: the number is its knock HP (shown once the referee's word knocked
+		# it here too); its HP is 0 meanwhile.
+		if knocked:
+			knock_hp = clampf(s[8], 0.0, KNOCK_HP)
+		return
 	hp = clampf(s[8], 0.0, MAX_HP)
 	if hp > _hp_reported:
 		hp_left = minf(hp_left + hp - _hp_reported, MAX_HP)      # it healed
@@ -108,15 +122,20 @@ func _physics_process(delta: float) -> void:
 	_footsteps(delta, _net_floor)
 
 
-## Hits from this phone's player are sent to the other phone; its HP comes back in its state.
+## Hits from this phone's player (DUO / SQUAD: from any fighter running here, never a teammate) are
+## sent to the other phone; its HP comes back in its state.
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
-	if not alive or round_over or attacker == null or attacker == self or not attacker.is_player:
+	if not alive or round_over or attacker == null or attacker == self or not (attacker.is_player or attacker.net_local) \
+			or attacker.ally_of(self):
 		return 0.0
 	last_hit_cause = cause
-	var dmg := clampf(hit_points(amount, zone), 0.0, hp_left)
-	hp_left -= dmg
+	var dmg := clampf(hit_points(amount, zone), 0.0, knock_hp if knocked else hp_left)
+	if not knocked:
+		hp_left -= dmg
 	_hit_sent_at = _now()
-	if arena and arena.has_method("net_hit"):
+	if arena and arena.has_method("net_hit_by"):
+		arena.net_hit_by(self, attacker, amount, zone, from_pos)
+	elif arena and arena.has_method("net_hit"):
 		arena.net_hit(amount, zone, from_pos)
 	damaged.emit(dmg, from_pos, zone == "head", attacker)
 	if dmg > 0.0 and model:

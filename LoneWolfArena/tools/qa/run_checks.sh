@@ -122,6 +122,16 @@ if [ "${1:-}" != "quick" ]; then
   step team_offline timeout 170 godot --headless --path . -- --autotest=script:res://tests/team_offline_check.gd
 
   # --- DUO / SQUAD: WP-N's steps (team_online: two copies, mock port 47820) go right below this line ---
+  # tests/team_online_check.gd: a TEAM INVITE (coop DUO vs bots) and a random DUO between two copies;
+  # both copies' result tables must match, and every state one sent through the relay the other took.
+  step team_online bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47820 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47820 LW_FILL_S=3
+    LW_NET_ROLE=host LW_TEAM_OUT="$0.host" timeout 170 godot --headless --path . -- --autotest=script:res://tests/team_online_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest LW_TEAM_OUT="$0.guest" timeout 170 godot --headless --path . -- --autotest=script:res://tests/team_online_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- tables:"; cat "$0.host" "$0.guest"
+    read -r ho hi < "$0.host.st"; read -r go gi < "$0.guest.st"
+    echo "relay states: host sent $ho, guest took $gi; guest sent $go, host took $hi"
+    [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest" && [ -n "$ho" ] && [ "$ho" = "$gi" ] && [ "$go" = "$hi" ]' "$LOGS/team_online_host.txt"
 
   # --- DUO / SQUAD: the integration's steps (team_invite_e2e, mock port 47822) go right below this line ---
 fi

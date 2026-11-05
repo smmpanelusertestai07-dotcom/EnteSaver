@@ -648,3 +648,34 @@ listed here. If a part needs something new from the core, add it in its own file
     `Cloud.QUICK_SEEN_MAX` (64) seekers: the one heard longest ago makes room.
 - Privacy Notice (Login.privacy_sections): names TEAM INVITES (size encrypted) and the random-match
   searches (player ID and the seen IDs); tests/team_net_unit.gd checks the wording.
+- TeamArenaNet (scripts/team_arena_net.gd, scenes/team_arena_net.tscn): Game.team_match from
+  TeamArena.link_match (the lobby builds it from Cloud.session_team when the session starts),
+  Game.online true, Game.session the Cloud. `am_host` (Cloud.is_host), `coop`, `guest_slot` (1 in
+  coop, `size` against the other player); `runs_slot(slot)`: the host runs every slot but the
+  guest's. Seams: is_referee() = am_host; _fighter_for gives a RemoteFighter for the other phone's
+  slots and sets net_local on the rest; _net_tick sends the player's state (Cloud.send_state) and on
+  the host one "tk" a state tick (pack_bots: "slot:x,y,z,yaw,pitch,stance,flags,weapon,hp;...",
+  at most TK_MAX, a SQUAD's six bots about 300 characters; idle bots go twice, then every
+  Cloud.STATE_IDLE_MS); the guest's _report_down / _report_revive become "dn" / "rvd"; _announce
+  sends the host's decisions and picks, and from the guest only its own player's "pick" / "rvs" /
+  "rvx"; net_*_by send "shot" / "grenade" / "wall" / "hit" with the slot first. "ready" / "begin"
+  are Arena's. The host checks "dn" (the guest's own slot, this round, UP for a fresh down and
+  KNOCKED for a finished one, never a teammate's kill) and "rvd" (an "rvs" seen REVIVE_S - 0.6 s
+  before, both UP / KNOCKED on one team, within REVIVE_RANGE + 1 m) and then calls the base
+  (referee_down / referee_revive); a guest report that wipes a team starts the settle a one-way
+  trip shorter. Hits: see the trust notes at the top of the script (max_hit_by, per-slot buckets).
+- RemoteFighter: takes hits from the player or a net_local fighter (never a teammate) and sends
+  them through arena.net_hit_by when the arena has it (else the 1 vs 1's net_hit). pack() adds
+  flags 16 knocked (the hp number is then the knock HP) and 32 reviving; apply_state shows them
+  (the reviving motion is the healing one). 1 vs 1 packets and behaviour are unchanged.
+- The end: once phase END (not called off) each phone sends "fin" for every fighter it runs;
+  final_stats[slot] fills from the other phone's, and the results wait for all of them
+  (FINAL_WAIT_S at most). The session ending (_on_net_ended): "connection lost" or before the first
+  fight: as the 1 vs 1 (the notice names the other player); against the other player: a forfeit
+  win; coop, on the host: referee_leave(guest_slot), "<NAME> LEFT", the bots play on; coop, on the
+  guest: back to the lobby, "THE HOST LEFT - THE MATCH ENDED", recorded with result["ended"].
+- Not done tonight: PLAY AGAIN TOGETHER ("rm" is ignored in team matches), 3-4 phones, rejoin.
+- Checks: tests/team_net_unit.gd (invites, searches, the notice, stand-in arenas for hits / dn /
+  decisions / tk / fin); tests/team_online_check.gd (step team_online, mock port 47820: coop invite
+  vs bots with a knock and a revive across the phones, a random DUO with the guest's pause menu and
+  quit, a plain duel after them; both tables must match and every relay state must arrive).
