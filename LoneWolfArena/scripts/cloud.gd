@@ -203,11 +203,14 @@ var relay_states_out := 0      # states sent through the relay this session (tes
 var relay_states_in := 0       # states taken from the relay this session (tests)
 var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
 var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
-## DUO / SQUAD over this 1 vs 1 session (PLAN_TEAMS; WP-N fills these in): the team of the session a
-## team invite started ({"size": 2 | 4, "coop": bool}: coop = both players on one team against bots,
-## else each with bot teammates against the other), {} for a 1 vs 1; the team search's size (0: none).
+## DUO / SQUAD over this 1 vs 1 session: the team of the session a team invite ("tinv") started, on
+## both phones ({"size": 2 | 4, "coop": bool}: coop = both players on one team against bots, else
+## each with bot teammates against the other), {} for a 1 vs 1. Set when the invite goes out or is
+## accepted, cleared when it is called off and by end_session. seek_team: the size the team search
+## runs for (0: none, or the 1 vs 1 QUICK MATCH search).
 var session_team := {}
 var seek_team := 0
+const QUICK_SEEN_MAX := 64     # seekers remembered by a search (a flood of made-up ids cannot grow it)
 
 
 func _ready() -> void:
@@ -653,7 +656,7 @@ func _parse() -> void:
 						_subscribe(ROOT + "/lobby")
 						_announce_t = 0.0
 					if seeking:
-						_subscribe(SEEK_TOPIC)
+						_subscribe(_seek_topic())
 					if _room != "":
 						_subscribe(ROOT + "/r/" + _room)
 					if room_code != "":
@@ -681,8 +684,9 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 	if topic.begins_with(ROOT + "/p/"):
 		_on_card(topic, payload)
 		return
-	if topic == SEEK_TOPIC:
-		_on_seek(payload)
+	if topic == SEEK_TOPIC or topic.begins_with(ROOT + "/mm/t"):
+		if topic == _seek_topic():          # only the search running here (1 vs 1, or that team size)
+			_on_seek(payload)
 		return
 	if topic.begins_with(ROOT + "/fm/" + my_id + "/"):
 		if not payload.is_empty():
@@ -757,7 +761,7 @@ func _on_inbox(d: Dictionary) -> void:
 			if typeof(d.get("quick")) == TYPE_BOOL and bool(d.quick):
 				# QUICK MATCH: taken at once from a seeker this search saw (and may play), never
 				# shown; any other quick challenge is declined at once.
-				answer(seeking and quick_seen.has(from) and _room == "" and challenge_allowed(from, d) and invite_proven(d, from))
+				answer(seeking and seek_team == 0 and quick_seen.has(from) and _room == "" and challenge_allowed(from, d) and invite_proven(d, from))
 				return
 			# The host of the custom room this phone asked to join starts the match: it knows the
 			# room's password, so it is accepted at once with the room's rules.
@@ -771,6 +775,8 @@ func _on_inbox(d: Dictionary) -> void:
 				answer(false)
 				return
 			invited.emit(String(_incoming.name))
+		"tinv":
+			_on_team_invite(from, d)
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
 				_incoming = {}
@@ -814,28 +820,130 @@ func _on_inbox(d: Dictionary) -> void:
 					room_changed.emit()
 
 
-# ---------------------------------------------------------------- DUO / SQUAD (WP-N fills these in)
+# ---------------------------------------------------------------- DUO / SQUAD
 
-## A team invite ("tinv", which builds before 1.4.0 ignore): a friend into this player's team against
-## bots (coop), or a team QUICK MATCH challenge (quick). False when it did not go out. Step-0 stub.
-func team_invite(_peer_id: String, _size: int, _coop: bool, _quick := false) -> bool:
-	return false
+## A team invite ("tinv", a kind builds before 1.4.0 ignore, so they never take it for a duel): a
+## friend into this player's team against bots (coop), or a team QUICK MATCH challenge (quick: each
+## player with bot teammates against the other). Like invite(): the other phone's public key wraps
+## a fresh room name and the room's keys, and one more byte with the team (team_byte), so the relay
+## sees only that one player sent another a team invite; the whole is signed (team_invite_text).
+## The session it starts is a 1 vs 1 session (this phone hosts) whose session_team says the team.
+## False when it did not go out.
+func team_invite(peer_id: String, size: int, coop: bool, quick := false) -> bool:
+	if team_byte(size, coop, quick) < 0 or in_session or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
+		return false
+	var pub := CryptoKey.new()
+	if pub.load_from_string(String(peers[peer_id].pk), true) != OK:
+		return false
+	var sec := _crypto.generate_random_bytes(80)
+	sec.append(team_byte(size, coop, quick))
+	var wrapped := _crypto.encrypt(pub, sec)
+	if wrapped.is_empty():
+		return false
+	var info: Dictionary = peers[peer_id]
+	_outgoing = {"id": peer_id, "name": info.name, "bundle": info.bundle, "room": sec.slice(0, 16).hex_encode(),
+		"aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "t": Time.get_ticks_msec()}
+	is_host = true
+	session_rules = {}
+	session_team = {"size": size, "coop": coop}
+	_enter_room(_outgoing)
+	var sec_text := Marshalls.raw_to_base64(wrapped)
+	_publish_json(ROOT + "/u/" + peer_id, {"t": "tinv", "from": my_id, "name": String(Game.profile.name),
+		"bundle": String(Game.profile.bundle), "sec": sec_text, "pk": _pk_pem, "sig": _sign(team_invite_text(my_id, peer_id, sec_text))})
+	return true
 
 
-## The team search: listens to ROOT/mm/t<size> instead of the 1 vs 1 seekers (send_seek then
-## publishes there). Step-0 stubs.
-func team_seek_start(_size: int) -> void:
-	pass
+## The byte after a team invite's 80 key bytes: the size (2 or 4) | coop << 3 | quick << 4; -1 for a
+## team that cannot be (another size, or a quick challenge into one's own team).
+static func team_byte(size: int, coop: bool, quick: bool) -> int:
+	if size not in [2, 4] or (coop and quick):
+		return -1
+	return size | (8 if coop else 0) | (16 if quick else 0)
+
+
+## The team a team invite's last byte names ({"size", "coop", "quick"}), {} when it names none.
+static func team_from_byte(b: int) -> Dictionary:
+	var t := {"size": b & 7, "coop": (b & 8) != 0, "quick": (b & 16) != 0}
+	return t if b >= 0 and b < 32 and team_byte(int(t.size), bool(t.coop), bool(t.quick)) == b else {}
+
+
+## What a team invite signs: who sends it, to whom, and the wrapped room keys with the team.
+static func team_invite_text(from: String, to: String, sec: String) -> String:
+	return "tinv|%s|%s|%s" % [from, to, sec]
+
+
+## A team invite signed by its sender's key, whose hash is the id it claims (always required).
+func team_invite_proven(d: Dictionary, from: String) -> bool:
+	for k in ["pk", "sig", "sec"]:
+		if typeof(d.get(k)) != TYPE_STRING:
+			return false
+	return String(d.pk).length() <= 1200 and from == String(d.pk).sha256_text().left(32) \
+		and verify_signed(String(d.pk), team_invite_text(from, my_id, String(d.sec)), String(d.sig))
+
+
+## A "tinv" in this phone's inbox. Unsigned, from a blocked player or naming no team: ignored. Busy
+## (in a match, a challenge going out or waiting here): declined at once, as a duel. A quick one is
+## taken at once, never shown, only while this phone searches that size (seek_team) and heard that
+## seeker, as NetMatch.allowed lets it; any other quick one is declined. A coop one is shown
+## (invited, invite_from().team) only when it comes from a friend this phone takes challenges from,
+## and only while the lobby listens (in a match nobody does); otherwise declined at once.
+func _on_team_invite(from: String, d: Dictionary) -> void:
+	if typeof(d.get("sec")) != TYPE_STRING or Game.is_blocked(from) or not team_invite_proven(d, from):
+		return
+	var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.sec)))
+	if sec.size() != 81:
+		return
+	var team := team_from_byte(sec[80])
+	if team.is_empty():
+		return
+	var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80),
+		"team": {"size": int(team.size), "coop": bool(team.coop)}}
+	if in_session or not _outgoing.is_empty() or not _incoming.is_empty():
+		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
+		return
+	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+	inv.name = who if who != "" else "PLAYER"
+	inv.bundle = String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
+	inv.t = Time.get_ticks_msec()
+	_incoming = inv
+	if bool(team.quick):
+		answer(seeking and seek_team == int(team.size) and quick_seen.has(from) and _room == "" and NetMatch.allowed(from, my_id))
+		return
+	if not Game.is_friend(from) or not NetMatch.allowed(from, my_id) or invited.get_connections().is_empty():
+		answer(false)
+		return
+	invited.emit(String(_incoming.name))
+
+
+## The team search (TeamMatch): like seek_start(), on the size's own topic ROOT/mm/t<size>, which
+## builds before 1.4.0 never listen to (send_seek then publishes there). team_seek_stop() ends it.
+func team_seek_start(size: int) -> void:
+	if size not in [2, 4]:
+		return
+	if seeking and _connected:
+		_unsubscribe(_seek_topic())
+	seek_team = size
+	seeking = true
+	quick_seen.clear()
+	if _connected:
+		_subscribe(_seek_topic())
 
 
 func team_seek_stop() -> void:
-	pass
+	seek_stop()
+
+
+## The topic the running search uses: the 1 vs 1 seekers', or the team size's.
+func _seek_topic() -> String:
+	return SEEK_TOPIC if seek_team == 0 else ROOT + "/mm/t%d" % seek_team
 
 
 # ---------------------------------------------------------------- QUICK MATCH (NetMatch)
 
 ## Starts listening to the other searching players (SEEK_TOPIC); seek_stop() ends it.
 func seek_start() -> void:
+	if seek_team != 0:
+		team_seek_stop()               # (a team search running: its topic is left first)
 	seeking = true
 	quick_seen.clear()
 	if _connected:
@@ -844,8 +952,9 @@ func seek_start() -> void:
 
 func seek_stop() -> void:
 	if seeking and _connected:
-		_unsubscribe(SEEK_TOPIC)
+		_unsubscribe(_seek_topic())
 	seeking = false
+	seek_team = 0
 	quick_seen.clear()
 
 
@@ -854,7 +963,7 @@ func seek_stop() -> void:
 func send_seek(saw: Array) -> bool:
 	if not _connected or my_id == "":
 		return false
-	_publish_json(SEEK_TOPIC, {"t": "seek", "id": my_id, "saw": saw.slice(0, 8)})
+	_publish_json(_seek_topic(), {"t": "seek", "id": my_id, "saw": saw.slice(0, 8)})
 	return true
 
 
@@ -872,6 +981,12 @@ func _on_seek(payload: PackedByteArray) -> void:
 		for s: Variant in d.saw:
 			if typeof(s) == TYPE_STRING:
 				saw.append(String(s).left(32))
+	if not quick_seen.has(id) and quick_seen.size() >= QUICK_SEEN_MAX:
+		var oldest := ""
+		for k: String in quick_seen:
+			if oldest == "" or int(quick_seen[k]) < int(quick_seen[oldest]):
+				oldest = k
+		quick_seen.erase(oldest)       # (the one heard longest ago makes room)
 	quick_seen[id] = Time.get_ticks_msec()
 	seeker_seen.emit(id, saw)
 
@@ -902,6 +1017,7 @@ func invite(peer_id: String, extra := {}) -> bool:
 		"aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "t": Time.get_ticks_msec()}
 	is_host = true
 	session_rules = {}
+	session_team = {}
 	_enter_room(_outgoing)
 	var sec_text := Marshalls.raw_to_base64(wrapped)
 	var msg := {"t": "inv", "from": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle),
@@ -918,6 +1034,7 @@ func cancel_invite(tell := true) -> void:
 		_publish_json(ROOT + "/u/" + String(_outgoing.id), {"t": "can", "from": my_id, "mac": _tag(_outgoing, "can", my_id)})
 	_outgoing = {}
 	if not in_session:
+		session_team = {}
 		_leave_room()
 
 
@@ -960,9 +1077,11 @@ func has_invite() -> bool:
 	return not _incoming.is_empty()
 
 
-## Who the challenge waiting for an answer here comes from: {"id", "name"} ({} when none).
+## Who the challenge waiting for an answer here comes from: {"id", "name", "team"} ({} when none);
+## "team" is {} for a duel, {"size", "coop"} for a TEAM INVITE.
 func invite_from() -> Dictionary:
-	return {} if _incoming.is_empty() else {"id": String(_incoming.id), "name": String(_incoming.name)}
+	return {} if _incoming.is_empty() else {"id": String(_incoming.id), "name": String(_incoming.name),
+		"team": (_incoming.get("team", {}) as Dictionary).duplicate()}
 
 
 func waiting_for() -> String:
@@ -1056,6 +1175,7 @@ func answer(accept: bool, rules := {}) -> void:
 		return
 	is_host = false
 	session_rules = rules
+	session_team = (inv.get("team", {}) as Dictionary).duplicate()
 	_enter_room(inv)
 	_accept_ms = Time.get_ticks_msec()
 	_publish_json(ROOT + "/u/" + String(inv.id), {"t": "acc", "from": my_id, "mac": _tag(inv, "acc", my_id)})
@@ -1762,6 +1882,7 @@ func end_session(reason := "left") -> void:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
 	in_session = false
+	session_team = {}
 	peer_rtt = -1
 	_peer_pings.clear()
 	_outgoing = {}

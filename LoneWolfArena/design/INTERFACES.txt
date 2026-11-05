@@ -467,4 +467,27 @@ listed here. If a part needs something new from the core, add it in its own file
 - (WP-C writes its notes here)
 
 ## DUO / SQUAD: between two phones (WP-N: team_arena_net, Cloud team invites and seeks, RemoteFighter)
-- (WP-N writes its notes here)
+- Cloud (additive; the 1 vs 1 paths are unchanged):
+  - `team_invite(peer_id, size, coop, quick := false) -> bool`: like `invite()` (needs the peer
+    listed, nothing going out, connected; this phone hosts). Inbox JSON {"t": "tinv", "from",
+    "name", "bundle", "sec", "pk", "sig"}: the same fields as a duel challenge. The RSA part is the
+    80 key bytes plus one team byte (`Cloud.team_byte`: size | coop << 3 | quick << 4;
+    `team_from_byte` reads it back, {} for anything else), so the relay never sees the size.
+    `sig` signs `Cloud.team_invite_text(from, to, sec)` ("tinv|..."): required, and a duel's
+    signature does not pass for it (nor the other way round). acc / dec / can are the duel's.
+  - Receiving one (`_on_team_invite`): unsigned, blocked, or no team byte: ignored. Busy: "dec" at
+    once. quick: taken at once only while `seeking`, `seek_team == size`, the sender in
+    `quick_seen` and `NetMatch.allowed`; else "dec". coop: only from a friend that DUEL
+    CHALLENGES FROM lets through (`NetMatch.allowed`) and while `invited` has a listener (the
+    lobby); else "dec". Shown through `invited` like a duel; `invite_from()` now also returns
+    "team": {} for a duel, {"size", "coop"} for a TEAM INVITE.
+  - `session_team`: {"size", "coop"} on both phones of a session a "tinv" started (set when it
+    goes out / is accepted, so it is there on `session_started`); {} for a duel; cleared by
+    `cancel_invite` (before the session), `invite()` and `end_session`.
+  - `team_seek_start(size)` / `team_seek_stop()`: the search on ROOT/mm/t<size> (`seek_team`);
+    `send_seek(saw)` publishes on the running search's topic and only that topic's seeks are heard
+    (`seeker_seen`, `quick_seen`). `seek_start()` (1 vs 1) leaves a team search first; a 1 vs 1
+    quick challenge is never taken during a team search. `quick_seen` keeps at most
+    `Cloud.QUICK_SEEN_MAX` (64) seekers: the one heard longest ago makes room.
+- Privacy Notice (Login.privacy_sections): names TEAM INVITES (size encrypted) and the random-match
+  searches (player ID and the seen IDs); tests/team_net_unit.gd checks the wording.
