@@ -311,7 +311,12 @@ func run(at: Node) -> int:
 		var rs := await _results_scene(r)
 		await _settle(2.8)
 		await at.shot("m16_results_%s" % String(r.kind))
-		_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
+		if String(r.kind) == "online":
+			_check(rs.find_child("Rematch", true, false) != null and rs.find_child("AddFriend", true, false) != null
+				and rs.find_child("PlayAgain", true, false) == null and rs.find_child("Lobby", true, false) != null,
+				"online results: REMATCH and ADD FRIEND (not PLAY AGAIN) + LOBBY")
+		else:
+			_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
 		_check(rs.find_child("EnemyRow", true, false) != null, "the opponent's row comes from the scoreboard (%s)" % r.kind)
 		_check(_find_label(rs, String(r.mode)) != null, "the results name the mode %s (%s)" % [r.mode, r.kind])
 		if String(r.kind) == "online":
@@ -487,7 +492,7 @@ func _sample(kind: String) -> Dictionary:
 		"enemy": "SHADOWHUNTER77" if online else "BOT VIPER", "mode": Game.mode_name("lonewolf" if online else "training"),
 		"mode_id": "lonewolf" if online else "training", "map": "CARGO CAGE", "weapon": String(Weapons.DEFS[Weapons.DEFAULT_PICK].name),
 		"score_player": int(n[0]), "score_bot": int(n[1]), "hp_left": int(n[5]), "difficulty": "ONLINE" if online else "NORMAL",
-		"taken": 88 if won else 200}
+		"taken": 88 if won else 200, "enemy_id": "shadowhunter77".sha256_text().left(32) if online else ""}
 	return r
 
 

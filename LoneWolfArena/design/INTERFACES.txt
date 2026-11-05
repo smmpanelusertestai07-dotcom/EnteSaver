@@ -192,7 +192,16 @@ listed here. If a part needs something new from the core, add it in its own file
   shown; the opponent's orange row
   (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match
   overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`); Android back = LOBBY (ignored while
-  PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag.
+  PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag. An internet LONE
+  WOLF match (enemy_id, not local) has `Rematch` in PLAY AGAIN's place, `AddFriend` (not friends
+  yet: `Cloud.request_friend`) and the line `RematchStatus`: REMATCH while the session is up sends
+  "rm" [takes their challenges] (`Arena.ask_rematch`; the other screen says "<NAME> WANTS A
+  REMATCH", `Arena.rematch_asked` / `rematch_wanted` / `rematch_they_take`); once both want it both
+  call `Arena.leave_session()` (the arena then leaves the new session alone and Game.online to it)
+  and a fresh `Cloud.invite` goes from the phone whose challenge the other takes (the old host when
+  both do, `Arena.hosted()`), which the other screen takes (`Cloud.invited` there: the old
+  opponent's challenge is the rematch, anyone else's is declined); `session_started` loads the
+  match. With the session gone a tap sends the fresh challenge itself. Off after a forfeit.
 - `PauseMenu.new()` (Control, works while paused): signal `closed`. Hides `arena.hud` while open
   (restored on close and exit). It ignores a back request in the frame it opens (the engine hands
   the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with

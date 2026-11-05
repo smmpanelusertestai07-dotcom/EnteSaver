@@ -124,7 +124,9 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 - Result: mode/map text top-left (TRAINING GROUND or LONE WOLF), our medal with gold "VICTORY" /
   grey "DEFEAT" / white "DRAW" / red "INVALID", round score plates, stats table (ELIMINATIONS,
   DAMAGE, HEADSHOTS, ACCURACY, TIME, HP LEFT; the opponent's row says BOT · <level>, or ONLINE
-  for a player), honour tag, XP bar, PLAY AGAIN / LOBBY.
+  for a player, LEFT after they quit, with "<NAME> LEFT THE MATCH" under the table), honour tag,
+  XP bar, PLAY AGAIN / LOBBY; an internet match: ADD FRIEND / REMATCH / LOBBY with a status line
+  above them ("<NAME> WANTS A REMATCH").
 - Crosshair sizes (radius, the reference's M1887 circle is ~0.07 h across): rifle ring 0.028 h (grows
   with the spread up to 0.06 h), shotgun ring 0.035 h fixed, fists a dot in a 0.0175 h ring; lines
   ~1.4 px with a soft shadow.

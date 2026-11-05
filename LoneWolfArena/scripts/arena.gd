@@ -9,6 +9,10 @@ extends Node3D
 
 enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two rounds
 
+## Online, after the match: the other player wants a rematch (their REMATCH, event "rm"); the
+## results screen offers to accept it.
+signal rematch_asked
+
 const PREP_TIME := 10.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
 const BREAK_TIME := 3.5
@@ -106,6 +110,9 @@ var _their_final := {}
 var _final_sent := false
 var _net_host := false           # this phone hosts the online match (Game.session.is_host at its start)
 var _net_left := false           # this arena is done with its session (leave_session / _exit_tree)
+var _rematch_sent := false       # "rm" went out (ask_rematch)
+var rematch_wanted := false      # the other player asked for a rematch ("rm", after the match)
+var rematch_they_take := true    # ... and their phone takes this one's challenges (their "rm" says)
 
 
 func _ready() -> void:
@@ -320,6 +327,13 @@ func _on_net_event(kind: String, data: Array) -> void:
 				_their_final = f
 				if not _net_host and phase != Phase.END:
 					_conclude_from_host()
+		"rm":
+			# After the match: the other player tapped REMATCH (the results screen asks this one);
+			# [whether their phone takes this one's challenges] (DUEL CHALLENGES FROM).
+			if phase == Phase.END and not rematch_wanted and data.size() <= 1:
+				rematch_wanted = true
+				rematch_they_take = not (data.size() == 1 and data[0] is bool and not bool(data[0]))
+				rematch_asked.emit()
 		"round":
 			# The host starts each next round and sends the score as it counts it.
 			if data.size() == 3 and not Game.session.is_host and phase == Phase.BREAK and int(data[0]) == round_index + 1:
@@ -1154,6 +1168,27 @@ func _shown_hp(f: Fighter) -> int:
 	if online and not _net_host and _their_final.has("host_hp") and int(_their_final.host_hp) >= 0:
 		return int(_their_final.guest_hp if f == player else _their_final.host_hp)
 	return roundi(f.hp) if f.alive else 0
+
+## The results' REMATCH: tells the other phone ("rm", with whether this phone takes their
+## challenges: `takes`) while the match's session is still up; false when it is not (the results
+## then send a fresh challenge).
+func ask_rematch(takes := true) -> bool:
+	if not session_up() or phase != Phase.END:
+		return false
+	if not _rematch_sent:
+		_rematch_sent = true
+		Game.session.send_event("rm", [takes])
+	return true
+
+
+## Whether this phone hosted the online match (its results send the fresh challenge of a rematch).
+func hosted() -> bool:
+	return online and _net_host
+
+
+## Whether the online match's session is still up (both phones on their results).
+func session_up() -> bool:
+	return online and not _net_left and Game.session != null and Game.session.in_session
 
 
 
