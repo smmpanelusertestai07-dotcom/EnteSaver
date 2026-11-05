@@ -34,30 +34,41 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 - Lighting: neutral bright daylight + fluorescent ambience, soft shadows, vivid colours.
 - Performance budget (phone): <= 220 draw calls and <= 250k primitives per frame in the arena.
 
-## 3. In-match HUD (default layout, 16:9 .. 20:9)
-Positions of the movable widgets are those of the reference's default layout, measured on a 20:9
-recording (no left fire, reload, scoreboard or free-look buttons), and live in code:
-`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor, so the
-layout keeps its look on 16:9; y and sizes in screen heights). The table quotes them on 20:9.
+## 3. In-match HUD (default layout, 16:9 .. 22:9)
+Positions of the movable widgets start from the reference's default layout, measured on a 20:9
+recording (no reload, scoreboard or free-look buttons there), and live in code:
+`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor l / c / r,
+so the layout keeps its look on 16:9; y and sizes in screen heights). The table quotes them on
+20:9; the unit tests check that no two default touch areas overlap from 16:10 to 22:9 (the gear
+on the weapon panel's corner aside). Our own decisions where it departs from the reference:
+- the shield wall button sits on the left edge above the medkit (the right thumb is busy with
+  FIRE, SCOPE and the jumps; the left one is free while the stick is not held);
+- the settings gear sits outside the weapon panel, in the screen's top-right corner beside it;
+- PRONE sits under the weapon panel, left of SCOPE: the reference's place (top, right of the
+  score bar, centre-anchored) is under the right-anchored panel on screens below about 18:9;
+- a LEFT FIRE button (hold to fire with the left thumb) and a FREE LOOK eye are added;
+- a camera cutout on a short side moves the edge-anchored widgets in by its width.
 | Element | Position (x, y) | Size | Style |
 |---|---|---|---|
 | Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above, player arrow, enemy red dot when revealed; safe-zone strip under it |
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
 | Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
 | Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
-| Weapon panel | top-right 0.887, 0.158 (right edge on the screen edge; main slot y 0 .. 0.155, three slots under it) | slot 0.152 h | main slot (big mag + small /reserve, RELOAD / RELOADING, gun silhouette, underline bar, top-right corner cut; tap = reload) over three square slots (gun, empty, fists) |
+| Weapon panel | top-right 0.861, 0.158, anchor r (main slot y 0.003 .. 0.155, three slots under it) | slot 0.152 h | main slot (big mag + small /reserve, RELOAD / RELOADING, gun silhouette, underline bar, top-right corner cut; tap = reload) over three square slots (gun, empty, fists; against the target dummy the empty one reads CHANGE GUN) |
 | HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
-| Joystick | 0.18, 0.66 | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |
-| Sprint | 0.181, 0.438 | 0.131 | running-figure glyph |
-| Medkit | left edge 0.0375, 0.678 | 0.104 | kit glyph + count badge |
-| Fire | 0.798, 0.68 | 0.26 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
-| Shield wall | over the fire button 0.754, 0.384 | 0.11 | wall glyph + count badge |
-| Scope / ADS | 0.835, 0.40 | 0.104 | reticle glyph |
-| Jump | right of the fire button 0.906, 0.519 | 0.166 | leaping-figure silhouette |
-| Crouch | right, below 0.922, 0.834 | 0.166 | crouching-figure silhouette |
-| Prone | top, right of the score bar 0.673, 0.073 | 0.104 | lying-figure silhouette |
-| Grenade | bottom 0.678, 0.912 | 0.13 | grenade silhouette + count |
-| Settings / pause | top-right corner 0.963, 0.027, in the weapon panel's main slot corner | 0.046 (touch radius >= 0.036 h) | small gear on a soft dark disk, drawn over the panel and winning a touch there; the gun silhouette sits under it |
+| Joystick | 0.18, 0.71, anchor l | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |
+| Sprint | 0.181, 0.438, anchor l | 0.131 | running-figure glyph |
+| Medkit | left edge 0.0375, 0.678, anchor l | 0.104 | kit glyph + count badge |
+| Shield wall | left edge 0.0375, 0.53, anchor l (above the medkit) | 0.11 | wall glyph + count badge |
+| Left fire | 0.09, 0.39, anchor l | 0.15 | bullet glyph; hold to fire (it does not aim); setting: always or only while aiming |
+| Fire | 0.798, 0.68, anchor r | 0.26 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
+| Scope / ADS | 0.835, 0.40, anchor r | 0.104 | reticle glyph |
+| Free look | 0.945, 0.375, anchor r | 0.09 | eye glyph; hold and drag to turn the camera around the character |
+| Jump | right of the fire button 0.906, 0.519, anchor r | 0.166 | leaping-figure silhouette |
+| Crouch | right, below 0.922, 0.834, anchor r | 0.166 | crouching-figure silhouette |
+| Prone | under the weapon panel, left of SCOPE 0.762, 0.385, anchor r | 0.104 | lying-figure silhouette |
+| Grenade | bottom 0.678, 0.912, anchor c | 0.13 | grenade silhouette + count |
+| Settings / pause | top-right corner 0.9865, 0.035, anchor r, beside the weapon panel's corner | 0.046 (touch radius >= 0.036 h, a tap counts to 1.15 x it) | small gear on a soft dark disk, drawn over the panel's corner and winning a touch there |
 | Scoreboard | (no button) | - | a tap on the score bar opens it |
 - Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
 - Crosshair: WHITE by default, a thin circle + small centre dot (fixed with four short outer ticks
@@ -74,17 +85,17 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 ## 4. Game feel (numbers)
 | Item | Target |
 |---|---|
-| Run / sprint / walk | 5.0 / 6.0 / 2.0 m/s (sprint = joystick pushed past the ring for 0.3 s) |
+| Run / sprint / walk | 5.0 / 6.0 / 2.0 m/s, times the gun's carry factor 0.88..0.98 (sprint = joystick pushed past the ring for 0.12 s, or the sprint button; never while aiming, healing or firing) |
 | Crouch / prone | 1.75 / 0.75 m/s; stance change 0.2 s / 0.45 s |
-| ADS / firing speed | x0.70 / x0.85 (SMG x0.95) |
+| ADS / firing speed | x0.70 / firing x0.80-0.85 for ARs and shotguns (SMGs x0.93-0.95, pistols x0.90-0.92, DMR x0.75, snipers x0.60) |
 | Jump | apex ~1.3 m (can climb 1.2 m crates), gravity 22 m/s2 |
 | Fall damage | none up to 4 m, then 12 HP per extra metre |
-| Head multiplier | pistols/snipers 5.5, ARs 4.0, SMGs 3.5, shotgun pellets 3.0 (decays to 80 % at range for SMG/SG) |
-| Armour | helmet Lv2 45 %, vest Lv2 50 % |
+| Head multiplier | pistols 4.0 (HAWK .50) / 3.4 (M1917), snipers 3.0-3.2, ARs and the DMR 2.5-2.6, SMGs 2.2, shotgun pellets 2.0-2.2, fists 1.5 (decays to 80 % at range for SMGs and shotguns); legs x0.75-0.8 (values: weapons.gd) |
+| Armour | helmet Lv2 35 %, vest Lv2 35 % (Weapons.HELMET_REDUCTION / VEST_REDUCTION) |
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
-| Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
-| Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; strength 0.9 x the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); on target the look slows to 0.4 and follows 100 % of the target's motion; an upward drag from the chest takes fixed shares of the screen at any distance: 4 % to the head band (+-0.2 m), the head band 26 % (the stop), a 0.25 m lip 8 %, then free (x strength); a mostly upward drag keeps 35 % of its sideways part; firing pulls sideways onto the body and, once a drag stops (net drag over 3 ticks < 0.4 % of the screen, so jitter does not count), holds what the drag chose (head, from the lip too; body; or nothing over the head) against the recoil; bloom counts a quarter on target; the first shot waits up to 0.15 s for a drag that starts with the press (0.15 s more while a slight overshoot is pulled back), first bullet after a pause at half spread (values: player.gd ASSIST) |
+| Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest takes a third off it; a frag kill reads FRAG in the kill feed |
+| Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; strength 0.9 x the weapon's assist factor (SMGs 1.15, shotguns 1.2, DMR 0.8, snipers 0.5); on target the look slows to 0.4 and follows 100 % of the target's motion; an upward drag from the chest takes fixed shares of the screen at any distance: 4 % to the head band (+-0.15 m, the head's hit zone), the head band 26 % (the stop), a 0.25 m lip 8 %, then free (x strength); a mostly upward drag keeps 35 % of its sideways part; firing pulls sideways onto the body and, once a drag stops (net drag over 3 ticks < 0.4 % of the screen, so jitter does not count), holds what the drag chose (head, from the lip too; body; or nothing over the head) against the recoil; bloom counts a quarter on target; the first shot waits up to 0.15 s for a drag that starts with the press (0.15 s more while a slight overshoot is pulled back), first bullet after a pause at half spread (values: player.gd ASSIST) |
 | Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; drag sweep from the chest: body, then >= 15 % of the screen on the head, then over the head; while firing: a jittering thumb and a 2 % flick stay on the body, 15 %, 30 % and slanted (22 % up, 12 % sideways) flicks end on the head, 50 % goes over; first bullet: a 12 % flick with the press = head (its line passing < 0.07 m beside the head's middle), no drag = body; on-target % with assist > without; red crosshair only on the body |
 
 ## 5. Screens
