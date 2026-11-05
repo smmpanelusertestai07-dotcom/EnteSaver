@@ -31,7 +31,7 @@ listed here. If a part needs something new from the core, add it in its own file
   phone's events may make here is capped (`spawn_cap(kind)`: its walls and frags per round).
 - Online the HOST decides every round: each phone reports its own player's death ("died":
   [headshot, cause, round], cause `Arena.death_cause()`: "gun" / "frag" (the other's kill: the
-  only kill credit), "zone", "fall", "left"); the host decides `DEATH_SETTLE_S` after the first
+  only kill credit), "zone", "fall", "self" (its own frag), "left"); the host decides `DEATH_SETTLE_S` after the first
   death it learns of (both down by then: a draw) or at its time-out (higher HP), and sends "rend"
   [round, winner, host score, guest score, timed out, headshot, killer]; the guest shows exactly
   that (score, banner, the match's end) and starts each round on the host's "begin" / "round",

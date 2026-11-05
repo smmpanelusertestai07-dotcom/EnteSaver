@@ -243,7 +243,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 					and (phase == Phase.FIGHT or phase == Phase.BREAK):
 				var cause := String(data[1]) if data.size() == 3 else "gun"      # (1.1.0 sent only the headshot)
 				var by_me := cause in ["gun", "frag"]
-				remote.last_hit_cause = cause if cause in ["frag", "zone", "fall", "left"] else ""
+				remote.last_hit_cause = cause if cause in ["frag", "zone", "fall", "left", "self"] else ""
 				if by_me:
 					player.stats.kills += 1
 				remote.die(player if by_me else null, bool(data[0]) and by_me)
@@ -871,6 +871,8 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "LEFT")
 	elif cause == "zone" or cause == "fall":
 		hud.add_kill_feed(cause.to_upper(), victim.display_name, cause.to_upper(), "", false, false)
+	elif cause == "self":
+		hud.add_kill_feed(victim.display_name, victim.display_name, "FRAG", "item_grenade", false, false)
 	else:
 		var frag := cause == "frag"
 		hud.add_kill_feed(killer.display_name, victim.display_name, "FRAG" if frag else String(killer.weapon().def.name),
@@ -892,12 +894,14 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 
 
 ## What took a fighter out: "gun" (or fists) and "frag" are the other fighter's kill; "zone",
-## "fall" and "left" (it left the match) are nobody's.
+## "fall", "self" (its own frag) and "left" (it left the match) are nobody's.
 static func death_cause(victim: Fighter, killer: Fighter) -> String:
 	var c := victim.last_hit_cause
-	if c in ["left", "zone", "fall"]:
+	if c in ["left", "zone", "fall", "self"]:
 		return c
-	if killer == null or not is_instance_valid(killer) or killer == victim:
+	if killer == victim:
+		return "self"
+	if killer == null or not is_instance_valid(killer):
 		return "zone"
 	return "frag" if c == "frag" else "gun"
 

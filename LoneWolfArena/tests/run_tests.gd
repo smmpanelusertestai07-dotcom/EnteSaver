@@ -1746,7 +1746,7 @@ func _test_release_fixes() -> void:
 	var v := Bot.new()
 	var k := Bot.new()
 	for c: Array in [["zone", null, "zone"], ["fall", null, "fall"], ["left", null, "left"], ["frag", k, "frag"], ["", k, "gun"],
-			["", null, "zone"], ["", v, "zone"]]:
+			["", null, "zone"], ["frag", v, "self"]]:
 		v.last_hit_cause = String(c[0])
 		var got := String(arena_script.call("death_cause", v, c[1]))
 		_check(got == String(c[2]), "a death by %s is a %s death (%s)" % [str(c[0]), str(c[2]), got])
