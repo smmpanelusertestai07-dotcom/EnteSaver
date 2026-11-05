@@ -909,8 +909,8 @@ func _on_room_changed() -> void:
 ## (Cloud.session_team) is a team match (session_team_match), any other one the 1 vs 1.
 func _on_net_session(_host: bool) -> void:
 	var cloud := Game.cloud_service()
-	if lobby.start_btn.disabled:
-		cloud.end_session("left")       # a match against the bot is loading already: tell the other phone
+	if lobby.start_btn.disabled or (not cloud.session_team.is_empty() and not Game.TEAMS_ONLINE):
+		cloud.end_session("left")       # a match is loading already (or online teams are off): tell the other phone
 		return
 	Game.team_match = session_team_match(cloud)
 	Game.online = true

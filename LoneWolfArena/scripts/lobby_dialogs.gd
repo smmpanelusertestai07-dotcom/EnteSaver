@@ -228,8 +228,9 @@ func _mode_choice(m: String) -> Button:
 	map_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(map_l)
 	v.add_child(head)
-	for line: String in mode_lines(m, Game.team_size):
-		v.add_child(UI.label(line, 15, UI.TEXT_DIM, "bold"))
+	var lines := mode_lines(m, Game.team_size)
+	for i in maxi(lines.size(), 2):         # two lines on both cards: their chips line up
+		v.add_child(UI.label(String(lines[i]) if i < lines.size() else " ", 15, UI.TEXT_DIM, "bold"))
 	v.add_child(UI.spacer(8))
 	v.add_child(_size_chips(m))
 	if m == "training":
