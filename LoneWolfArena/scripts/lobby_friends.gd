@@ -719,10 +719,7 @@ func _on_modal_closed() -> void:
 
 ## The team of the challenge waiting here ({"size", "coop"}: a TEAM INVITE), {} for a duel.
 static func invite_team(cloud: Cloud) -> Dictionary:
-	var info := cloud.invite_from()
-	var t: Variant = info.get("team")
-	if t == null and not info.is_empty():
-		t = (cloud.get("_incoming") as Dictionary).get("team")     # (a Cloud whose invite_from has no "team" yet)
+	var t: Variant = cloud.invite_from().get("team")
 	return t as Dictionary if t is Dictionary else {}
 
 
