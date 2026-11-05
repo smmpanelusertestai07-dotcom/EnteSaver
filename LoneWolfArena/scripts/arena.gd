@@ -709,6 +709,8 @@ func _physics_process(delta: float) -> void:
 			_net_t = 0.0
 			Game.session.send_state(RemoteFighter.pack(player, round_index))
 	match phase:
+		Phase.PREP when online and not _net_begun:
+			pass        # online the first prep starts on both phones together (_net_begin), never alone
 		Phase.PREP:
 			if _bot_pick_t > 0.0:
 				_bot_pick_t -= delta
