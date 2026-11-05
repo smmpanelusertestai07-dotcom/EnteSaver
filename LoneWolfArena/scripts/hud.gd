@@ -174,9 +174,10 @@ func close_weapon_pick() -> void:
 	panels.close_pick()
 
 
-func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool) -> void:
+## verb: what the line says instead of ELIMINATED / HEADSHOT ("LEFT": killer is then the one who left).
+func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
 	_kill_feed.push_front({"killer": killer, "victim": victim, "weapon": weapon_name, "icon": weapon_icon,
-		"head": headshot, "mine": mine, "t": FEED_LIFE})
+		"head": headshot, "mine": mine, "t": FEED_LIFE, "verb": verb})
 	if _kill_feed.size() > 3:
 		_kill_feed.pop_back()
 
@@ -1377,7 +1378,8 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		var a := clampf(t / 0.5, 0.0, 1.0) * clampf((FEED_LIFE - t) / 0.15, 0.0, 1.0)
 		var head := bool(k.head)
 		var parts := [[String(k.killer) + "  ", Color(1, 1, 1) if not bool(k.mine) else Color(0.75, 0.9, 1.0)],
-			[("HEADSHOT" if head else "ELIMINATED") + "  ", HudDraw.FEED_HEAD if head else HudDraw.FEED_ELIM],
+			[(String(k.get("verb", "")) if String(k.get("verb", "")) != "" else ("HEADSHOT" if head else "ELIMINATED")) + "  ",
+				HudDraw.FEED_HEAD if head else HudDraw.FEED_ELIM],
 			[String(k.victim), Color(1, 1, 1)]]
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])

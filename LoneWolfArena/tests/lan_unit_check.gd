@@ -173,6 +173,9 @@ func _pairing(host_key: CryptoKey, guest_key: CryptoKey) -> void:
 	h._ok = true
 	h._on_room(g._room_packet({"k": "join"}))
 	h._process(0.016)
+	# (well into the match: a frame gap in the first LOAD_STALL_MS after the arena listens is the load)
+	h._frame_ms = maxi(h._frame_ms, Cloud.LOAD_STALL_MS + 2000)      # (a clock early in a test run)
+	h._listen_ms = h._frame_ms - Cloud.LOAD_STALL_MS - 1000
 	h._check_away(h._frame_ms + Cloud.AWAY_MS + 500)
 	_check(not h.in_session and heard.ended.size() == 2 and heard.ended[1] == "connection lost",
 		"a phone away about as long as the other waits ends the local match as connection lost (%s)" % str(heard.ended))

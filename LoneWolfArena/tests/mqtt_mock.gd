@@ -3,19 +3,23 @@ extends SceneTree
 ## UNSUBSCRIBE, PUBLISH to every matching subscriber, sender included, RETAINED messages kept per
 ## topic and handed to later subscribers (an empty one deletes it), PINGREQ) standing in for the
 ## public brokers Cloud uses, for tests/cloud_check.gd and tests/room_check.gd:
-##   godot --headless -s res://tests/mqtt_mock.gd -- 47810
-## Quits after 180 s.
+##   godot --headless -s res://tests/mqtt_mock.gd -- 47810 [latency_ms]
+## latency_ms (tests/sync_check.gd): each PUBLISH reaches its subscribers this much later (in order),
+## so phone to phone takes that long and a round trip twice that. Quits after 180 s.
 
 var _server := TCPServer.new()
 var _clients: Array = []      # [WebSocketPeer, rx buffer]
 var _subs := {}               # topic filter -> {client index: true}
 var _retained := {}           # topic -> the whole PUBLISH packet kept for later subscribers
 var _t := 0.0
+var _latency_ms := 0
+var _late: Array = []          # [due tick ms, client index, packet] while latency_ms holds them
 
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	var port := int(args[0]) if args.size() > 0 else 47810
+	_latency_ms = int(args[1]) if args.size() > 1 else 0
 	if _server.listen(port, "127.0.0.1") != OK:
 		print("MOCK cannot listen")
 		quit(1)
@@ -24,6 +28,10 @@ func _initialize() -> void:
 
 func _process(delta: float) -> bool:
 	_t += delta
+	var now := Time.get_ticks_msec()
+	while not _late.is_empty() and int(_late[0][0]) <= now:
+		var l: Array = _late.pop_front()
+		_send(int(l[1]), l[2])
 	while _server.is_connection_available():
 		var ws := WebSocketPeer.new()
 		ws.supported_protocols = PackedStringArray(["mqtt"])
@@ -108,7 +116,10 @@ func _parse(i: int) -> void:
 						for j in _subs[f]:
 							if not sent.has(j):
 								sent[j] = true
-								_send(j, whole)
+								if _latency_ms > 0:
+									_late.append([Time.get_ticks_msec() + _latency_ms, j, whole])
+								else:
+									_send(j, whole)
 			0xC0:
 				_send(i, PackedByteArray([0xD0, 0]))
 			0xE0:

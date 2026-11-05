@@ -7,10 +7,12 @@ extends Node
 ##    keep-alives hold the session, so the host's arena waits instead of calling it off. The guest
 ##    then quits in the first prep (QUIT MATCH): the match never began, so the host counts no win,
 ##    no XP and no match, and its lobby says the other player left.
-## 2. A second challenge; 1 s into the first fight the guest freezes for 9 s (an app in the
-##    background, a phone out of signal). The host takes the silence for leaving: a forfeit, its
-##    VICTORY. The guest, back, knows it was the one away: CONNECTION LOST, the match counts as
-##    LEFT (a defeat), never a second win.
+## 2. A second challenge; as its arena appears the guest freezes 8 s (a phone's first load compiles
+##    its shaders): neither phone takes that for leaving, the match begins. 1 s into the first
+##    fight the guest freezes for 9 s (an app in the background, a phone out of signal). The host
+##    takes the silence for leaving: a forfeit, its VICTORY, with the real score (no round added).
+##    The guest, back, knows it was the one away: CONNECTION LOST, the match counts as LEFT (a
+##    defeat), never a second win.
 ## Prints "DROP CHECK DONE bad=N".
 
 var bad := 0
@@ -91,7 +93,12 @@ func run(autotest: Node) -> int:
 	arena = await _match()
 	if arena == null:
 		return _done("match 2 did not load")
+	if not host:
+		at.log_line("guest: the arena's first frames freeze 8 s")
+		OS.delay_msec(8000)
 	await at.wait_for_phase(arena, 1, 40.0)
+	if not is_instance_valid(arena) or not cloud.in_session:
+		return _done("a load that froze 8 s was taken for a disconnect")
 	if not is_instance_valid(arena) or arena.get("phase") != 1:
 		return _done("match 2 never reached its fight")
 	await at.wait(1.0)
@@ -104,6 +111,9 @@ func run(autotest: Node) -> int:
 			str(h.get("result")), int(Game.profile.wins)])
 		if not bool(arena.get("_forfeit")) or h.get("result") != "won" or int(Game.profile.wins) != 1:
 			_fail("the host did not win when the guest dropped out")
+		var sc: Dictionary = arena.get("score")
+		if int(sc.player) != 0 or int(sc.bot) != 0 or int(h.get("score", -1)) != 0:
+			_fail("the forfeit added a round to the score (%s)" % str(sc))
 		await at.wait(2.0)
 	else:
 		at.log_line("guest: frozen for 9 s")

@@ -440,6 +440,10 @@ func _finish_boot() -> void:
 		Game.mark("boot loaded %d files in %.1fs" % [keep.size(), _t])
 	else:
 		Game.mark("boot timeout: %d files still loading" % pending.size())
+	# The arena's shaders compile now, under the boot screen, not in a match's first frames (an
+	# online match waits for a loading phone only so long). Under the root: it outlives the boot.
+	if not hold_for_test and Game.autotest == "" and DisplayServer.get_name() != "headless":
+		root.add_child.call_deferred(ShaderWarmup.new())
 
 
 func _process(delta: float) -> void:

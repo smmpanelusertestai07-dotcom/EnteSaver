@@ -1,6 +1,8 @@
 class_name PauseMenu
 extends Control
-## In-match pause menu (the tree is paused while it is open), in the reference system-dialog
+## In-match pause menu (offline the tree is paused while it is open; online it is an overlay: the
+## match runs on, its chips (score, time left, HP) stay live, the fighter just takes no input, and
+## the menu closes itself when the round or the match ends), in the reference system-dialog
 ## look: a full-width dark band across the middle (0.30 .. 0.70 H) with PAUSED and a yellow
 ## underline, the match state (the arena's mode_name, map, FIRST TO n, score, time left, HP) on
 ## the left and RESUME (yellow),
@@ -14,10 +16,12 @@ extends Control
 
 signal closed
 
-const QUIT_CONFIRM_S := 3.0
+const QUIT_CONFIRM_S := 6.0     # real seconds the second tap may take (a slow phone, a slow touch)
 
 var _quit: Button
 var _quit_armed := 0.0
+var _vals := {}                 # chip caption -> its value Label (kept live online)
+var _was_over := false          # online: the round was already over when last looked at
 var _band: Control
 var _opened_frame := -1
 var _hud: CanvasItem
@@ -75,6 +79,7 @@ func _ready() -> void:
 	# the target dummy there is no score and the clock counts up.
 	var arena := get_tree().current_scene
 	var dummy: bool = arena != null and arena.get("practice") == true
+	_was_over = arena != null and arena.get("phase") == 3          # opened between rounds
 	var mode_row := HBoxContainer.new()
 	mode_row.add_theme_constant_override("separation", 12)
 	var mode_name: Variant = arena.get("mode_name") if arena else null
@@ -135,7 +140,9 @@ func _chip(cap: String, value: String) -> PanelContainer:
 	var c := UI.label(cap, 15, UI.TEXT_DIM, "bold")
 	c.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	h.add_child(c)
-	h.add_child(UI.label(value, 24, UI.TEXT, "number"))
+	var v := UI.label(value, 24, UI.TEXT, "number")
+	h.add_child(v)
+	_vals[cap] = v
 	p.add_child(h)
 	return p
 
@@ -174,15 +181,34 @@ func _on_quit() -> void:
 		get_tree().paused = false
 		Game.goto_lobby()
 		return
-	_quit_armed = QUIT_CONFIRM_S
+	_quit_armed = Time.get_ticks_msec() + QUIT_CONFIRM_S * 1000.0
 	_quit.text = "TAP AGAIN TO QUIT"
 
 
-func _process(delta: float) -> void:
-	if _quit_armed > 0.0:
-		_quit_armed -= delta
-		if _quit_armed <= 0.0:
-			_quit.text = "QUIT MATCH"
+func _process(_delta: float) -> void:
+	if _quit_armed > 0.0 and Time.get_ticks_msec() >= _quit_armed:     # (real time: not the slow motion)
+		_quit_armed = 0.0
+		_quit.text = "QUIT MATCH"
+	var arena := get_tree().current_scene
+	if arena == null or arena.get("online") != true or _closing:
+		return
+	# Online the match goes on: the chips follow it, and the end of a round or of the match closes
+	# the menu (the round result and the results screen are never drawn under it).
+	var phase := int(arena.get("phase"))
+	var over := phase == 2 or phase == 3
+	if (over and not _was_over) or phase == 2:
+		_close()
+		return
+	_was_over = over
+	var sc: Variant = arena.get("score")
+	if sc is Dictionary and _vals.has("SCORE"):
+		(_vals.SCORE as Label).text = "%d : %d" % [int((sc as Dictionary).get("player", 0)), int((sc as Dictionary).get("bot", 0))]
+	if _vals.has("TIME LEFT"):
+		var t := maxf(float(arena.get("time_left")), 0.0)
+		(_vals["TIME LEFT"] as Label).text = "%d:%02d" % [int(t) / 60, int(t) % 60]
+	var p: Variant = arena.get("player")
+	if p is Node and _vals.has("HP"):
+		(_vals.HP as Label).text = str(roundi(float((p as Node).get("hp"))))
 
 
 func _close() -> void:

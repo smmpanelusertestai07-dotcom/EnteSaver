@@ -29,6 +29,18 @@ listed here. If a part needs something new from the core, add it in its own file
   LEFT as with QUIT MATCH. Either way a match whose first fight had not begun counts nowhere; those
   go back to the lobby, which shows `Game.match_notice` ([title, text]) once. What the other
   phone's events may make here is capped (`spawn_cap(kind)`: its walls and frags per round).
+- Online the HOST decides every round: each phone reports its own player's death ("died":
+  [headshot, cause, round], cause `Arena.death_cause()`: "gun" / "frag" (the other's kill: the
+  only kill credit), "zone", "fall", "self" (its own frag), "left"); the host decides `DEATH_SETTLE_S` after the first
+  death it learns of (both down by then: a draw) or at its time-out (higher HP), and sends "rend"
+  [round, winner, host score, guest score, timed out, headshot, killer]; the guest shows exactly
+  that (score, banner, the match's end) and starts each round on the host's "begin" / "round",
+  one-way trip earlier (`peer_rtt` / 2, or `relay_rtt` before that is measured). The host takes
+  that trip off the guest's death reports, so "first one down" is fair. A forfeit win keeps the
+  real score (no round added).
+- Cloud: a frame gap while a match loads or in the first `Cloud.LOAD_STALL_MS` after its arena
+  listens is the load (shader compiles), not this phone away (`Cloud.load_stall`); an app pause
+  still counts. The other phone, told by "ka" keep-alives that it loads, waits that much longer.
 
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
@@ -37,7 +49,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id))`
   must call `on_pick` exactly once (tap SELECT, or the timer runs out -> current choice);
   `close_weapon_pick()` closes it without a callback.
-- `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool)`
+- `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
+  (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
 - `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),
   `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
   kill, which the other phone reports as its death)
@@ -146,6 +159,9 @@ listed here. If a part needs something new from the core, add it in its own file
   then calls `Game.goto_login()` (after `TIMEOUT_S` at the latest; loads still running then are
   handed to the `LoadingCache` node, a `Loading.Cache`, which collects them as they finish).
   Automated runs skip it; `Loading.hold_for_test = true` keeps it up for a screenshot tour.
+  Once the loads are in, a `ShaderWarmup` (scripts/shader_warmup.gd, under the root) draws the
+  arena and a fighter off-screen for a few frames so their shaders compile there, not in a
+  match's first frames (`ShaderWarmup.kept` holds the materials; not in automated or headless runs).
 - `IntroSting` (scripts/intro_sting.gd): the launch sting, `IntroSting.play_over(host)` puts it
   over the boot screen in its own CanvasLayer `IntroLayer` (layer 90) while the boot loads run;
   the boot screen leaves only once `IntroSting.playing(host)` is false. 2.4 s (`LENGTH`), synced
@@ -171,7 +187,10 @@ listed here. If a part needs something new from the core, add it in its own file
   (restored on close and exit). It ignores a back request in the frame it opens (the engine hands
   the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with
   `in_match = true`. `Arena.open_pause()` opens one at most (online the tree is not paused, so
-  an open menu is what blocks a second one).
+  an open menu is what blocks a second one). Online it is an overlay: the match runs on (its
+  SCORE / TIME LEFT / HP chips stay live), and the end of a round or of the match closes it
+  (`Arena.close_pause()`, also before the results). QUIT MATCH's second tap may come up to
+  `PauseMenu.QUIT_CONFIRM_S` real seconds later.
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
