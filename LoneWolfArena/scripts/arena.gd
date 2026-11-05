@@ -78,6 +78,7 @@ var _enemy_id := ""              # the online opponent's player id (the result's
 var _counted := false            # Game.count_match counted this match (its first fight began)
 var _called_off := false         # online: the session ended with no result to show (_on_net_ended)
 var _left_scene := false
+var _graphics_on := []           # [graphics, visual effects] apply_graphics last set up
 ## A custom room's unlimited walls or frags: at most this many per round and player (spawn_cap).
 const ROOM_SPAWN_CAP := 30
 var _net_buckets := {}           # kind of message from the other phone -> [tokens, ms] (_net_rate_ok)
@@ -221,12 +222,17 @@ func _on_net_event(kind: String, data: Array) -> void:
 					and _remote_hit_allowed():
 				var zone := String(data[1])
 				var hit_from := _net_vec(data, 2)
-				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote,
-					hit_from if _in_hall(hit_from) else remote.global_position)
+				if not _in_hall(hit_from):
+					hit_from = remote.global_position
+				# A hit says where it came from: its shooter for a bullet or a punch, the blast for a
+				# frag (which lands away from the thrower), so the kill feed can name the frag.
+				var frag := zone == "body" and hit_from.distance_to(remote.global_position) > 2.5
+				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote, hit_from, "frag" if frag else "")
 		"died":
 			if remote.alive and data.size() == 1:
 				player.stats.kills += 1
 				remote.die(player, bool(data[0]))
+				hud.confirm_kill(remote.chest_position())     # the kill's sound and buzz, as against the bot
 		"grenade":
 			if data.size() == 6:
 				var at := _net_vec(data, 0)
@@ -524,8 +530,18 @@ func _render_minimap() -> void:
 
 # ---------------------------------------------------------------- settings
 
+## The graphics level and the visual effects on the match (at start and on Game.settings_changed).
+## Only a change of those two sets them up again: any other save (the gun pick saves last_pick, the
+## pause menu's sensitivity) leaves the frame-rate governor's lowered resolution and measurements
+## alone.
 func apply_graphics() -> void:
 	var g := int(Game.settings.graphics)
+	if hud:
+		hud.reload_layout()
+	var wanted := [g, bool(Game.settings.visual_effects)]
+	if wanted == _graphics_on:
+		return
+	_graphics_on = wanted
 	var vp := get_viewport()
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = [0.7, 0.85, 1.0, 1.0][clampi(g, 0, 3)]
@@ -539,8 +555,6 @@ func apply_graphics() -> void:
 	Effects.configure(g, bool(Game.settings.visual_effects))
 	if map:
 		map.apply_quality(g)
-	if hud:
-		hud.reload_layout()
 
 
 # ---------------------------------------------------------------- match flow
@@ -608,6 +622,13 @@ func _on_weapon_picked(id: String) -> void:
 	_apply_pick(id)
 	if online:
 		Game.session.send_event("pick", [id, round_index])
+
+
+## The target dummy: the weapon pick opens again during the fight (the HUD's CHANGE GUN slot), so
+## guns can be compared without leaving the match; both fighters get the new gun at once.
+func repick() -> void:
+	if practice and phase == Phase.FIGHT and not hud.panels.pick_open:
+		hud.open_weapon_pick(Weapons.PICKABLE, _round_gun(), PREP_TIME, _on_weapon_picked)
 
 
 func _apply_pick(id: String) -> void:
@@ -812,7 +833,10 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		Game.session.send_event("died", [headshot])
 	var weapon_icon := ""
 	var weapon_name := "ZONE"
-	if killer and is_instance_valid(killer):
+	if killer and is_instance_valid(killer) and victim.last_hit_cause == "frag":
+		weapon_icon = "item_grenade"
+		weapon_name = "FRAG"
+	elif killer and is_instance_valid(killer):
 		weapon_icon = String(killer.weapon().def.icon)
 		weapon_name = String(killer.weapon().def.name)
 	hud.add_kill_feed(killer.display_name if killer else "ZONE", victim.display_name, weapon_name, weapon_icon, headshot, killer == player)

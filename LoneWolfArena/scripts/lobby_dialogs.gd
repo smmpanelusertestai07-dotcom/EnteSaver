@@ -18,7 +18,7 @@ const MODE_INFO := {
 ## HOW TO PLAY. Texts may hold {rounds} (Game.ROUNDS_TO_WIN). MODES spans the width on top, the
 ## other groups fill two columns under it.
 const HOW_TO_MODES := ["MODES", [
-	["v_crosshair", "TRAINING GROUND", "1 vs a bot (EASY, NORMAL or HARD), first to {rounds} rounds on CARGO CAGE. Or the TARGET DUMMY: it never goes down, no zone, no clock, nothing counted."],
+	["v_crosshair", "TRAINING GROUND", "1 vs a bot (EASY, NORMAL or HARD), first to {rounds} rounds on CARGO CAGE. Or the TARGET DUMMY: it never goes down, no zone, no clock, nothing counted; CHANGE GUN on the weapon panel switches guns."],
 	["v_player", "LONE WOLF", "1 vs 1 online against another player, first to {rounds}. START opens the ONLINE list: duel a player online, a friend or a CUSTOM ROOM."],
 ]]
 const HOW_TO := [

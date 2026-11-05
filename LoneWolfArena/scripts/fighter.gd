@@ -104,6 +104,7 @@ var last_shot_time := -99.0
 var invulnerable := false
 var stance_lock := 0.0           # s until the stance change finishes (can't fire meanwhile)
 var hold_fire := false           # prep phase: may move, may not shoot or use items
+var last_hit_cause := ""         # the last damage's cause when not a gun ("frag": see take_damage)
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
@@ -283,9 +284,11 @@ func gun() -> WeaponState:
 
 # ---------------------------------------------------------------- damage
 
-func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3) -> float:
+## cause: what dealt it when it was not the attacker's gun ("frag"); the kill feed names it.
+func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
 	if not alive or round_over or (invulnerable and not OS.has_feature("template")):     # invulnerable: a test switch only
 		return 0.0
+	last_hit_cause = cause
 	# Armour is read from the constants (a per-fighter value could be frozen in memory).
 	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, INF if endless_hp else hp)
 	if endless_hp:
@@ -801,7 +804,7 @@ func _physics_process(delta: float) -> void:
 	if now_floor:
 		_peak_y = global_position.y
 	_was_air = not now_floor
-	_footsteps(delta)
+	_footsteps(delta, now_floor)
 	var local_v := flat.inverse() * velocity
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, now_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
@@ -818,8 +821,11 @@ func _process(_delta: float) -> void:
 	_update_hitboxes()
 
 
-func _footsteps(delta: float) -> void:
-	if not is_on_floor():
+## Step sounds (and, for anyone but this phone's player, the minimap's footprints) at the pace of
+## the horizontal speed; on_floor: the fighter stands on something (an online opponent's comes
+## with its state, it never runs move_and_slide here).
+func _footsteps(delta: float, on_floor: bool) -> void:
+	if not on_floor:
 		return
 	var hs := horizontal_speed()
 	if hs < 1.4:

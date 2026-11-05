@@ -77,7 +77,7 @@ func _explode() -> void:
 		if not hit.is_empty():
 			continue
 		var dmg := lerpf(MAX_DAMAGE, EDGE_DAMAGE, clampf(d / 5.0, 0.0, 1.0)) * clampf((RADIUS - d) / 1.0, 0.0, 1.0)
-		var dealt := f.take_damage(dmg, "body", thrower, pos)
+		var dealt := f.take_damage(dmg, "body", thrower, pos, "frag")
 		if thrower and is_instance_valid(thrower) and f != thrower and dealt > 0.0:
 			thrower.stats.damage += dealt
 			thrower.hit_landed.emit(f, dealt, false, target, not f.alive)

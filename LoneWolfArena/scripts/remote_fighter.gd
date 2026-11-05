@@ -45,7 +45,10 @@ func apply_state(s: PackedFloat32Array) -> void:
 	var flags := int(s[6])
 	sprinting = (flags & 1) != 0
 	ads = (flags & 2) != 0
-	_net_floor = (flags & 8) != 0
+	var on_floor := (flags & 8) != 0
+	if on_floor and not _net_floor:
+		Audio.play_at("land", pos, -9.0)       # back on its feet after a jump or a drop
+	_net_floor = on_floor
 	var heal := (flags & 4) != 0
 	if heal != _net_heal:
 		_net_heal = heal
@@ -64,7 +67,8 @@ func _physics_process(delta: float) -> void:
 		_net_yaw = aim_yaw
 	var prev := global_position
 	if global_position.distance_to(_net_pos) > 4.0:
-		global_position = _net_pos          # too far behind (a hitch): jump
+		global_position = _net_pos          # too far behind (a hitch): jump (no run, no step sound)
+		prev = global_position
 	else:
 		global_position = global_position.lerp(_net_pos, 1.0 - exp(-14.0 * delta))
 	velocity = (global_position - prev) / maxf(delta, 0.0001)
@@ -76,12 +80,16 @@ func _physics_process(delta: float) -> void:
 	var local_v := Basis(Vector3.UP, aim_yaw).inverse() * velocity
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, _net_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
+	# Its steps as loud as a bot's (a run carries, a walk or a crouch only close by) and its
+	# footprints on the minimap: the other phone sends no steps, they follow its movement here.
+	_footsteps(delta, _net_floor)
 
 
 ## Hits from this phone's player are sent to the other phone; its HP comes back in its state.
-func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3) -> float:
+func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
 	if not alive or round_over or attacker == null or attacker == self or not attacker.is_player:
 		return 0.0
+	last_hit_cause = cause
 	var dmg := maxf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0)
 	if arena and arena.has_method("net_hit"):
 		arena.net_hit(amount, zone, from_pos)

@@ -38,7 +38,11 @@ listed here. If a part needs something new from the core, add it in its own file
   must call `on_pick` exactly once (tap SELECT, or the timer runs out -> current choice);
   `close_weapon_pick()` closes it without a callback.
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool)`
-- `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills)
+- `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),
+  `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
+  kill, which the other phone reports as its death)
+- the target dummy (`arena.practice`): the weapon panel's middle slot reads CHANGE GUN and calls
+  `arena.repick()`, which opens the weapon pick during the fight
 - `reveal(f: Fighter, seconds)` (enemy shows on the minimap), `match_over: bool`, `tips_time: float`
 - `editor_mode`, `selected_id`, `layout` (used by the HUD editor)
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
@@ -93,6 +97,10 @@ listed here. If a part needs something new from the core, add it in its own file
   `grenades`, `crosshair_on_target` (crosshair turns red), `current_spread()` (deg),
   `camera`, `firing`, `assist_target`, `hold_fire` (prep: cannot shoot)
 - signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`
+- `Fighter.take_damage(amount, zone, attacker, from_pos, cause := "")`: cause "frag" for a frag
+  (kept as `last_hit_cause`; the kill feed then reads FRAG). `Player.drawn_position()`: where the
+  body is drawn this frame (between the last two physics ticks at 90 / 120 FPS; the camera and the
+  own model follow it).
 - `Weapons.HELMET_REDUCTION` / `VEST_REDUCTION` (Lv2 armour; show level 2 icons)
 
 ## Weapons (scripts/weapons.gd)
@@ -162,7 +170,10 @@ listed here. If a part needs something new from the core, add it in its own file
   `_apply_quality()` (measuring only). AUTO graphics: `Game.start_auto_graphics()` (a first guess
   from `PerfGovernor.device_level()`, then `Game.auto_graphics_pending` until a scene's governor
   measured the frames and called `Game.finish_auto_graphics(level)`), `Game.stop_auto_graphics()`.
-  Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`.
+  Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`;
+  the bullet holes are one MultiMesh per scene (`Effects.MAX_HOLES`, `hole_count()`). The arena
+  sets the graphics up again only when the graphics level or visual effects change (another save,
+  such as the gun pick's, keeps the governor's state).
 - Aim settings on `Player`: `sight_of(def)` ("sniper", "2x", "reddot", "none"), `sens_key(def,
   aiming)` (the sensitivity setting a view turns with), `assist_allowed(aim_precision, aiming)`.
 - Lobby Android back closes the top layer (popup: `dialogs.back()`, the popup's own way back;

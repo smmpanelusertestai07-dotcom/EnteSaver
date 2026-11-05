@@ -51,6 +51,7 @@ func _ready() -> void:
 	_test_net_limits()
 	_test_session_ends()
 	_test_safe_saves()
+	_test_no_sprint_firing()
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -1599,3 +1600,16 @@ func _test_safe_saves() -> void:
 	for p: String in [path, path + ".bak"]:
 		DirAccess.remove_absolute(p)
 	_check(GameCode.read_json(path).is_empty(), "no save reads as nothing")
+
+
+## The stick pushed past the ring asks for a sprint every frame: firing keeps it off (and with it
+## the firing slowdown), letting go of FIRE brings it back.
+func _test_no_sprint_firing() -> void:
+	var p := Player.new()
+	p.firing = true
+	p.set_sprint(true)
+	var while_firing := p.sprinting
+	p.firing = false
+	p.set_sprint(true)
+	_check(not while_firing and p.sprinting, "no sprint while firing, back once FIRE is let go")
+	p.free()

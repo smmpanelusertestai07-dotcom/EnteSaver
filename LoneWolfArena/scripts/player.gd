@@ -89,6 +89,8 @@ var ready_item := ""                  # "wall" or "grenade" in hand: FIRE puts i
 var _item_held := false               # FIRE is down with an item in hand (it goes on the release)
 var _wall_ghost: MeshInstance3D       # where the wall in hand would stand
 var arc_normal := Vector3.UP          # the surface the last grenade_arc() ends on
+var _tick_from := Vector3.INF         # the body's place before and after the last physics tick: at
+var _tick_to := Vector3.INF           # 90 or 120 frames a second the camera and the model are drawn between
 
 
 func _ready() -> void:
@@ -412,8 +414,10 @@ func toggle_prone() -> void:
 	set_stance(Stance.STAND if stance == Stance.PRONE else Stance.PRONE)
 
 
+## Sprint on or off (the HUD asks every frame while the stick is pushed past the ring): never
+## while aiming, healing or firing, so firing keeps its slowdown; it comes back once FIRE is let go.
 func set_sprint(on: bool) -> void:
-	sprinting = on and stance == Stance.STAND and not ads and not healing
+	sprinting = on and stance == Stance.STAND and not ads and not healing and not firing
 
 
 func do_reload() -> void:
@@ -823,7 +827,26 @@ func _zone_on(f: Fighter) -> String:
 	return "body" if _body_miss_angle(f) <= deg_to_rad(float(ASSIST.bubble_deg)) else ""
 
 
+## The body moves in physics ticks (60 a second). The tick's start and end are kept, so frames in
+## between (90 or 120 FPS) draw the camera and the own model where the body is at that moment, not
+## where the last tick left it (which held still for a frame and then jumped: judder at 90 FPS).
+func _physics_process(delta: float) -> void:
+	_tick_from = global_position
+	super(delta)
+	_tick_to = global_position
+
+
+## Where the body is drawn this frame: at more frames than ticks a second, between the last tick's
+## start and end; else (and when it was moved outside a tick: a new round's spawn) where it is.
+func drawn_position() -> Vector3:
+	if Engine.max_fps <= Engine.physics_ticks_per_second or _tick_to != global_position or _tick_from == Vector3.INF:
+		return global_position
+	return _tick_from.lerp(_tick_to, clampf(Engine.get_physics_interpolation_fraction(), 0.0, 1.0))
+
+
 func _process(delta: float) -> void:
+	if model != null:
+		model.position = global_basis.inverse() * (drawn_position() - global_position)
 	super._process(delta)
 	if rig == null:
 		return
@@ -845,7 +868,7 @@ func _process(delta: float) -> void:
 		var to := watch.global_position + Vector3.UP * _cam_y
 		rig.global_position = rig.global_position.lerp(to, 1.0 - exp(-8.0 * delta))
 	else:
-		rig.global_position = global_position + Vector3.UP * _cam_y
+		rig.global_position = drawn_position() + Vector3.UP * _cam_y
 	var sx := (randf() - 0.5) * shake * 0.6
 	var sy := (randf() - 0.5) * shake * 0.6
 	if victory_cam or not alive:

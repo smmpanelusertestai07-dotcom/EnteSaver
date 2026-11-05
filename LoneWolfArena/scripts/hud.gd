@@ -229,10 +229,16 @@ func _on_hit_landed(target: Fighter, amount: float, headshot: bool, pos: Vector3
 		_add_damage_number(target, amount, headshot, pos)
 	Audio.play("hit_head" if headshot else "hit_body", -2.0 if headshot else -6.0)
 	if killed:
-		_kill_x_pos = pos if target == null else target.chest_position()
-		_kill_x_t = KILL_X_TIME
-		Audio.play("kill_confirm", 0.0)
-		Game.vibrate(60)
+		confirm_kill(pos if target == null else target.chest_position())
+
+
+## The player's own kill (a shot or a frag; online the other phone reports it as its death): the
+## red X there, the kill sound and a short buzz.
+func confirm_kill(pos: Vector3) -> void:
+	_kill_x_pos = pos
+	_kill_x_t = KILL_X_TIME
+	Audio.play("kill_confirm", 0.0)
+	Game.vibrate(60)
 
 
 ## Rapid hits on the same target (automatic fire, shotgun pellets) add up into one number that
@@ -394,7 +400,7 @@ func _widget_at(pos: Vector2, vs: Vector2) -> String:
 	if HudLayout.weapon_main(panel, vs).grow(4).has_point(pos):
 		return "weapons:main"
 	var slots := HudLayout.weapon_slots(panel, vs)
-	for i in [0, 2]:
+	for i in ([0, 1, 2] if _can_repick() else [0, 2]):
 		if slots[i].grow(4).has_point(pos):
 			return "weapons:%d" % i
 	return ""
@@ -454,6 +460,9 @@ func _press(id: String, index: int) -> void:
 				player.select_weapon(0)
 		"weapons:0":
 			player.select_weapon(0)
+		"weapons:1":
+			release_all()
+			arena.call("repick")
 		"weapons:2":
 			player.select_weapon(1)
 
@@ -948,6 +957,15 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 			HudDraw.icon(self, HudDraw.tex("v_fist"), r.get_center() + Vector2(0, -s * 0.1), Vector2(r.size.y, r.size.y) * 0.5,
 				Color(1, 1, 1, (1.0 if sel else 0.8) * o))
 			_infinity(r.get_center() + Vector2(0, r.size.y * 0.3), s * 0.13, Color(1, 1, 1, 0.9 * o))
+		elif _can_repick():
+			# The target dummy: the empty slot changes the gun (the weapon pick opens again).
+			HudDraw.text(self, "CHANGE", r.get_center() + Vector2(0, -s * 0.12), int(s * 0.2), Color(1, 1, 1, 0.9 * o), 1, 2, "bold")
+			HudDraw.text(self, "GUN", r.get_center() + Vector2(0, s * 0.14), int(s * 0.2), Color(HudDraw.YELLOW, 0.95 * o), 1, 2, "bold")
+
+
+## TRAINING GROUND's target dummy lets the gun be changed during the fight (Arena.repick).
+func _can_repick() -> bool:
+	return not editor_mode and arena != null and bool(arena.get("practice")) and arena.has_method("repick")
 
 
 ## "∞" drawn as a lemniscate (the UI fonts are latin subsets).

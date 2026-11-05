@@ -68,9 +68,24 @@ func run(autotest: Node) -> int:
 			Game.session.send_event("grenade", [c.x, 1.0, c.z, 0.0, 2.0, 0.0])
 		for i in 60:
 			Game.session.send_event("shot", [c.x, 1.5, c.z, 1.0, 0.0, 0.0])
-		await at.wait(2.5)
+		# Meanwhile the guest runs: its steps sound here and leave footprints on the minimap.
+		var hud: HUD = arena.get("hud")
+		var footprints := 0
+		for i in 10:
+			await at.wait(0.25)
+			footprints = maxi(footprints, hud.steps.size())
+		at.log_line("the running guest's footprints here: %d" % footprints)
+		if footprints == 0:
+			_fail("the other phone's player ran without a step heard or seen")
 	else:
-		await at.wait(2.0)
+		var hud: HUD = arena.get("hud")
+		hud.process_mode = Node.PROCESS_MODE_DISABLED     # (its joystick would stop the run)
+		for i in 24:
+			p.move_dir = Vector2(0, 1)
+			await at.wait(0.05)
+		p.move_dir = Vector2.ZERO
+		hud.process_mode = Node.PROCESS_MODE_INHERIT
+		await at.wait(0.8)
 		var spawned: Dictionary = arena.get("_net_spawns")
 		var walls := 0
 		for n in arena.get_children():
