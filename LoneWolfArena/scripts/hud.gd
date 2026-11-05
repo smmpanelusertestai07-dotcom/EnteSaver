@@ -142,8 +142,8 @@ func bind(p: Player, a: Node) -> void:
 	player.damaged.connect(_on_damaged)
 	_hp_lag = player.hp
 	_hp_last = player.hp
-	if bool(a.get("online")):
-		HudNet.attach(self)          # ping, chat and voice of an online match (scripts/hud_net.gd)
+	# The ping chip in every match; chat and voice in an online one (scripts/hud_net.gd).
+	HudNet.attach(self, bool(a.get("online")))
 
 
 # ---------------------------------------------------------------- arena -> HUD API

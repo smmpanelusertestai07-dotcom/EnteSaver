@@ -71,7 +71,7 @@ func _ping() -> void:
 		and NetPing.color(200) == NetPing.RED and NetPing.color(-1) == NetPing.GREY, "ping colours: green < 100, yellow < 200, red, grey offline")
 	_check(NetPing.bars(40) == 4 and NetPing.bars(150) == 3 and NetPing.bars(250) == 2 and NetPing.bars(400) == 1 and NetPing.bars(-1) == 0,
 		"signal bars: 4, 3, 2, 1 and none offline")
-	_check(NetPing.label(87) == "87 ms" and NetPing.label(-1) == "--- ms" and NetPing.label(123456) == "9999 ms", "the ping's text")
+	_check(NetPing.label(87) == "87 ms" and NetPing.label(-1) == "-- ms" and NetPing.label(123456) == "9999 ms", "the ping's text")
 	_check(NetPing.smooth(-1, 180) == 180 and NetPing.smooth(180, 220) == 200 and NetPing.smooth(200, -1) == 200
 		and NetPing.smooth(-1, 50000) == NetPing.MAX_MS, "a sample: the first as it is, then averaged; none ignored; capped")
 	_check(NetPing.match_ms(140, 230, true) == 140 and NetPing.match_ms(-1, 230, true) == 230 and NetPing.match_ms(140, 230, false) == -1,

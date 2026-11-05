@@ -43,7 +43,7 @@ static func bars(ms: int) -> int:
 
 
 static func label(ms: int) -> String:
-	return "--- ms" if ms < 0 else "%d ms" % mini(ms, MAX_MS)
+	return "-- ms" if ms < 0 else "%d ms" % mini(ms, MAX_MS)
 
 
 ## The shown value after a new sample: the first sample as it is, then the mean of the last value

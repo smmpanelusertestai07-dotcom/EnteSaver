@@ -1,6 +1,8 @@
 class_name HudNet
 extends Control
-## The online match's own HUD layer (HUD.bind adds it when the arena is online: HudNet.attach):
+## The match HUD's network layer (HUD.bind adds it to every match: HudNet.attach). Offline
+## (TRAINING GROUND, `net` false) it is only the ping chip: the relay's round trip while this
+## phone is connected to it (Cloud.relay_ping), else a grey "--", with no tag. Online (and LOCAL):
 ##  - top right, in the column under the gear beside the weapon panel: the round trip to the other
 ##    phone (NetPing: Cloud.match_ping: the direct round trip while the direct path is up, else
 ##    Cloud.peer_rtt, the relay's Cloud.relay_rtt until the other phone answered), with a small
@@ -30,12 +32,15 @@ var _note_t := 0.0
 var _time := 0.0
 var _field: LineEdit
 var _panel_note: Label
+## An online (or LOCAL) match: chat, voice and the other phone's round trip; false: the ping only.
+var net := true
 
 
-static func attach(h: HUD) -> HudNet:
+static func attach(h: HUD, online := true) -> HudNet:
 	var n := HudNet.new()
 	n.name = "HudNet"
 	n.hud = h
+	n.net = online
 	h.add_child(n)
 	return n
 
@@ -44,7 +49,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var cloud := Game.session
-	if cloud == null:
+	if cloud == null or not net:
 		return
 	cloud.chat_received.connect(_on_chat)
 	if bool(Game.settings.voice_chat):
@@ -59,7 +64,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	var cloud := Game.session
-	if cloud:
+	if cloud and net:
 		if cloud.chat_received.is_connected(_on_chat):
 			cloud.chat_received.disconnect(_on_chat)
 		if voice and cloud.voice_received.is_connected(voice.play_frame):
@@ -71,6 +76,8 @@ func _exit_tree() -> void:
 
 
 func shown(id: String) -> bool:
+	if not net:
+		return false
 	match id:
 		"chat", "mute":
 			return bool(Game.settings.chat)
@@ -273,6 +280,8 @@ func _process(delta: float) -> void:
 
 
 func ping_ms() -> int:
+	if not net:
+		return Game.cloud.relay_ping() if Game.cloud != null else -1
 	var cloud := Game.session
 	if cloud == null:
 		return -1
@@ -283,7 +292,7 @@ func ping_ms() -> int:
 ## phone (NetDirect), else "RELAY".
 func link_tag() -> String:
 	var cloud := Game.session
-	return cloud.link_tag() if cloud != null else ""
+	return cloud.link_tag() if cloud != null and net else ""
 
 
 func _draw() -> void:
@@ -325,7 +334,7 @@ func _draw_ping() -> void:
 			var bh := 6.0 + 3.5 * i
 			var c := col if i < NetPing.bars(ms) else NetPing.UNLIT
 			draw_rect(Rect2(x0 + i * (bw + 2.5), top + 22.0 - bh, bw, bh), c)
-		HudDraw.text(self, "---" if ms < 0 else str(mini(ms, 999)), Vector2(box.get_center().x, top + 37.0), 17, col, 1, 3)
+		HudDraw.text(self, "--" if ms < 0 else str(mini(ms, 999)), Vector2(box.get_center().x, top + 37.0), 17, col, 1, 3)
 		HudDraw.text(self, "MS", Vector2(box.get_center().x, top + 54.0), 12, Color(UI.TEXT, 0.85), 1, 3)
 		_draw_tag(Vector2(box.get_center().x, box.end.y + 11.0), 1)
 	else:

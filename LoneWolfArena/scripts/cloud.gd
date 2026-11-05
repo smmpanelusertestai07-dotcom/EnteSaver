@@ -1863,6 +1863,12 @@ func link_tag() -> String:
 	return "DIRECT" if direct_up() else "RELAY"
 
 
+## The relay's round trip while this phone is connected to it, else -1 (the ping chip of a match
+## without the other phone: TRAINING GROUND).
+func relay_ping() -> int:
+	return relay_rtt if _connected else -1
+
+
 ## The match HUD's ping: the direct round trip while that path is up, else the room ping (NetPing).
 func match_ping() -> int:
 	if direct_up() and direct.rtt >= 0:
