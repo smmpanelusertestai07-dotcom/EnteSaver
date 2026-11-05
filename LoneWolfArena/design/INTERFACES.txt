@@ -305,7 +305,8 @@ listed here. If a part needs something new from the core, add it in its own file
   ("dh" hello, "dc" candidates, only when both have it on), sealed packets (direction byte, sequence,
   AES + HMAC with keys derived from the room's), the state over it while it works both ways
   (`Cloud.direct_up()`), back on the relay after `NetDirect.TIMEOUT_MS` of silence; events, chat and
-  voice stay on the relay; LW_DIRECT=local (tests) = loopback only, no STUN. Match state: 20 a second
+  voice stay on the relay; LW_DIRECT=local (tests) = loopback only, no STUN; a Cloud subclass whose
+  room already runs over the local network overrides `Cloud.direct_allowed()` to false. Match state: 20 a second
   (`Cloud.state_interval`), `Cloud.compact_state`, unchanged states skipped (`STATE_IDLE_MS`), the
   sender's clock "t" (`Cloud.last_state_sent_ms`) for `RemoteFighter.apply_state(s, sent_ms)`, drawn
   by `NetSmoother` (DELAY_MS behind, EXTRAP_MS at most across a gap). Chat `NetChat` (text rules,

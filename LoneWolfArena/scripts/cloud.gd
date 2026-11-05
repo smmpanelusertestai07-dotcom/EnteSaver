@@ -1652,7 +1652,7 @@ func _direct_begin() -> void:
 	relay_states_out = 0
 	relay_states_in = 0
 	var m := NetDirect.mode()
-	if m == "off":
+	if m == "off" or not direct_allowed():
 		return
 	direct = NetDirect.new(is_host, _mac, m == "local")
 	if not direct.open(Time.get_ticks_msec()):
@@ -1661,6 +1661,13 @@ func _direct_begin() -> void:
 	_direct_sent = false
 	_direct_hello_n = 0
 	_direct_hello_t = 0.0
+
+
+## Whether this session's matches may try the direct path: those through the internet relay do. A
+## session whose room already runs straight between the phones (a local-network one) returns false,
+## so it never asks a STUN server or sends an address.
+func direct_allowed() -> bool:
+	return true
 
 
 func _direct_end() -> void:
