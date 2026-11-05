@@ -24,6 +24,13 @@ const RUN_AUTHORED := 2.0
 const RUNX_AUTHORED := 5.0
 const CROUCH_AUTHORED := 1.0
 const PRONE_AUTHORED := 0.30
+## The moving cycle has the full blend weight from this share of the stance's base speed; below it
+## it is mixed with the idle, which shortens the stride by the same factor.
+const FULL_BLEND := 0.6
+## After a fall the knees give: a short dip toward the crouch pose; hops shorter than LAND_MIN_AIR
+## (a stair edge, a slope's flicker) land without one.
+const LAND_TIME := 0.34
+const LAND_MIN_AIR := 0.22
 ## Minimum time between two hit flinches, so automatic fire does not lock the upper body.
 const FLINCH_GAP := 0.6
 ## Medkit pack held in the left hand while healing (the clip presses it to the belly): offset in
@@ -89,6 +96,10 @@ var _prone_amt := 0.0
 var _air := 0.0
 var _heal_amt := 0.0
 var _fists_amt := 0.0
+var _fwd_sign := 1.0                    # -1: crouch-walk / crawl play backwards (backing up)
+var _air_time := 0.0
+var _land_left := 0.0
+var _land_peak := 0.0
 var _holster: Node3D           # the gun on the back while the fists are out
 var _healing := false
 var _aim_dir := Vector3.FORWARD
@@ -333,6 +344,10 @@ func _build_tree() -> void:
 		crouch.add_blend_point(_anim_node("crouch_fwd"), p, -1, StringName("move%d" % k))
 		k += 1
 	var prone := AnimationNodeBlendSpace1D.new()
+	# Every cycle keeps running at weight 0, so a change of direction blends legs in step (no pop).
+	loco.sync = true
+	crouch.sync = true
+	prone.sync = true
 	prone.add_blend_point(_anim_node("prone_idle" if anim.has_animation("prone_idle") else "crouch_idle"), 0.0, -1, &"idle")
 	prone.add_blend_point(_anim_node("prone_fwd" if anim.has_animation("prone_fwd") else "crouch_fwd"), 1.0, -1, &"move")
 	root.add_node("loco", loco, Vector2(0, 0))
@@ -446,28 +461,28 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	var speed := v.length()
 	_speed = lerpf(_speed, speed, 1.0 - exp(-10.0 * delta))
 	var dir := v / speed if speed > 0.05 else Vector2.ZERO
-	var ref := Fighter.RUN_SPEED
-	if stance == Fighter.Stance.CROUCH:
-		ref = Fighter.CROUCH_SPEED
-	elif stance == Fighter.Stance.PRONE:
-		ref = Fighter.PRONE_SPEED
-	_loco = _loco.lerp(dir * clampf(speed / (ref * 0.6), 0.0, 1.0), 1.0 - exp(-10.0 * delta))
+	_loco = _loco.lerp(dir * gait_weight(speed, stance, _run_authored), 1.0 - exp(-10.0 * delta))
+	# Crouch-walk and crawl only have a forward cycle: backing up plays it backwards (no moonwalk);
+	# the sign eases through 0, so a reversal slows the legs down instead of popping them.
+	if speed > 0.15:
+		_fwd_sign = move_toward(_fwd_sign, -1.0 if v.y < -0.3 * speed else 1.0, delta * 6.0)
+	_track_landing(on_floor, delta)
 	_crouch_amt = move_toward(_crouch_amt, 1.0 if stance == Fighter.Stance.CROUCH else 0.0, delta * 5.0)
 	_prone_amt = move_toward(_prone_amt, 1.0 if stance == Fighter.Stance.PRONE else 0.0, delta * 2.6)
 	_air = move_toward(_air, 0.0 if on_floor else 1.0, delta * 6.0)
 	_heal_amt = move_toward(_heal_amt, 1.0 if _healing else 0.0, delta * 4.0)
 	if tree and tree.active:
 		tree.set("parameters/loco/blend_position", _loco)
-		tree.set("parameters/crouch/blend_position", _loco)
-		tree.set("parameters/prone/blend_position", clampf(_speed / PRONE_AUTHORED, 0.0, 1.0))
-		tree.set("parameters/crouch_blend/blend_amount", _crouch_amt)
+		# (standing, the crouch space only shows through a landing dip: its idle, bent knees)
+		tree.set("parameters/crouch/blend_position", _loco if _crouch_amt > 0.02 else Vector2.ZERO)
+		tree.set("parameters/prone/blend_position", gait_weight(_speed, Fighter.Stance.PRONE, _run_authored))
+		tree.set("parameters/crouch_blend/blend_amount", maxf(_crouch_amt, land_dip()))
 		tree.set("parameters/prone_blend/blend_amount", _prone_amt)
 		tree.set("parameters/air_blend/blend_amount", _air)
-		# (the long strides also slow down for a walk, the short jog only speeds up)
-		var run_scale := clampf(_speed / _run_authored, 0.6, 1.6) if _run_authored > RUN_AUTHORED else clampf(_speed / RUN_AUTHORED, 1.0, 3.2)
-		tree.set("parameters/loco_ts/scale", run_scale if _speed > 0.3 else 1.0)
-		tree.set("parameters/crouch_ts/scale", clampf(_speed / CROUCH_AUTHORED, 1.0, 2.4) if _speed > 0.2 else 1.0)
-		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 2.6) if _speed > 0.08 else 1.0)
+		# The feet cover the real speed (any weapon class, the fists, walk to sprint).
+		tree.set("parameters/loco_ts/scale", gait_scale(_speed, Fighter.Stance.STAND, _run_authored))
+		tree.set("parameters/crouch_ts/scale", gait_scale(_speed, Fighter.Stance.CROUCH, _run_authored) * _fwd_sign)
+		tree.set("parameters/prone_ts/scale", gait_scale(_speed, Fighter.Stance.PRONE, _run_authored) * _fwd_sign)
 		if anim.has_animation("heal"):
 			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
 		if anim.has_animation("fists_run_a"):
@@ -487,6 +502,48 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
 	if weapon_node and weapon_id != "":
 		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
+
+
+## Speed (m/s) at which a stance's moving cycle was authored (x), and the speed from which it has
+## the full blend weight (y).
+static func gait_speeds(stance: int, run_authored: float) -> Vector2:
+	match stance:
+		Fighter.Stance.CROUCH:
+			return Vector2(CROUCH_AUTHORED, Fighter.CROUCH_SPEED * FULL_BLEND)
+		Fighter.Stance.PRONE:
+			return Vector2(PRONE_AUTHORED, PRONE_AUTHORED)
+	return Vector2(run_authored, Fighter.RUN_SPEED * FULL_BLEND)
+
+
+## Share of the moving cycle in the blend at a speed (the rest is the idle).
+static func gait_weight(speed: float, stance: int, run_authored: float) -> float:
+	return clampf(speed / gait_speeds(stance, run_authored).y, 0.0, 1.0)
+
+
+## Time scale of the moving cycle: weight x scale x authored speed = speed, so the feet neither
+## slide nor skate at any speed; close to standstill it eases back to 1 (the idle's own pace).
+static func gait_scale(speed: float, stance: int, run_authored: float) -> float:
+	var g := gait_speeds(stance, run_authored)
+	return lerpf(1.0, minf(maxf(speed, g.y) / g.x, 3.5), clampf(speed / 0.4, 0.0, 1.0))
+
+
+## Counts the time off the floor; touching down after a real fall starts the landing dip.
+func _track_landing(on_floor: bool, delta: float) -> void:
+	if not on_floor:
+		_air_time += delta
+		return
+	if _air_time >= LAND_MIN_AIR:
+		_land_left = LAND_TIME
+		_land_peak = clampf(0.2 + _air_time * 0.45, 0.25, 0.6)
+	_air_time = 0.0
+	_land_left = maxf(_land_left - delta, 0.0)
+
+
+## 0..~0.6: how far the knees give right now (a smooth bump over LAND_TIME, no pop in or out).
+func land_dip() -> float:
+	if _land_left <= 0.0:
+		return 0.0
+	return _land_peak * sin(PI * (1.0 - _land_left / LAND_TIME))
 
 
 ## 0..1: which fist leads (0 = the left one). Read from the feet, so the arms swing against

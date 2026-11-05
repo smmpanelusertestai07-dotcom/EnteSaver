@@ -19,6 +19,7 @@ func run(autotest: Node) -> int:
 	at = autotest
 	await at.wait(0.5)
 	_check_clips_and_toes()
+	_check_gait_playback()
 	await _check_swap_and_flinch()
 	await _check_throw()
 	at.log_line("ANIM CHECK DONE bad=%d" % bad)
@@ -71,6 +72,67 @@ func _check_clips_and_toes() -> void:
 		_expect(lo > -0.035, "%s toes stay above the floor (lowest tip %.3f m)" % [clip, lo])
 	m1.queue_free()
 	m2.queue_free()
+
+
+## The feet keep up with the body: for every weapon class (the fists too) and every gait, the moving
+## cycle's blend share x time scale x authored speed is the real speed (no foot sliding). Backing
+## up crouched plays the crouch-walk backwards (no moonwalk); a fall ends in a short knee dip that
+## eases in and out, a stair-edge hop in none.
+func _check_gait_playback() -> void:
+	var m := _model()
+	var ra := CharacterModel.RUNX_AUTHORED if m.anim.has_animation("runx_fwd") else CharacterModel.RUN_AUTHORED
+	var gaits := [["walk", Fighter.Stance.STAND, Fighter.WALK_SPEED], ["slow walk", Fighter.Stance.STAND, Fighter.WALK_SPEED * 0.5],
+		["run", Fighter.Stance.STAND, Fighter.RUN_SPEED], ["sprint", Fighter.Stance.STAND, Fighter.SPRINT_SPEED],
+		["crouch-walk", Fighter.Stance.CROUCH, Fighter.CROUCH_SPEED], ["slow crouch-walk", Fighter.Stance.CROUCH, Fighter.CROUCH_SPEED * 0.4],
+		["crawl", Fighter.Stance.PRONE, Fighter.PRONE_SPEED]]
+	var worst := 0.0
+	for cls in Weapons.CLASS_MOVE:
+		for g in gaits:
+			var st := int(g[1])
+			var speed := float(g[2]) * float(Weapons.CLASS_MOVE[cls])
+			var feet := CharacterModel.gait_weight(speed, st, ra) * CharacterModel.gait_scale(speed, st, ra) * CharacterModel.gait_speeds(st, ra).x
+			var err := absf(feet - speed) / speed
+			worst = maxf(worst, err)
+			if err > 0.04:
+				_expect(false, "%s %s: feet %.2f m/s, body %.2f m/s" % [cls, g[0], feet, speed])
+	_expect(worst <= 0.04, "feet follow the body for every class and gait (worst off by %.1f %%)" % (worst * 100.0))
+	var dt := 1.0 / 60.0
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED * float(Weapons.CLASS_MOVE["MELEE"])), Fighter.Stance.STAND, true, dt)
+	var fast := float(m.tree.get("parameters/loco_ts/scale"))
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED * float(Weapons.CLASS_MOVE["SNIPER"])), Fighter.Stance.STAND, true, dt)
+	var slow := float(m.tree.get("parameters/loco_ts/scale"))
+	_expect(fast > slow * 1.2, "the fists' run cycle plays faster than the sniper rifle's (%.2f vs %.2f)" % [fast, slow])
+	for _i in 60:
+		m.update_locomotion(Vector2(0, -1.4), Fighter.Stance.CROUCH, true, dt)
+	var back := float(m.tree.get("parameters/crouch_ts/scale"))
+	for _i in 60:
+		m.update_locomotion(Vector2(0, 1.4), Fighter.Stance.CROUCH, true, dt)
+	var fwd := float(m.tree.get("parameters/crouch_ts/scale"))
+	_expect(back < -0.9 and fwd > 0.9, "the crouch-walk plays backwards backing up (%.2f), forwards again after (%.2f)" % [back, fwd])
+	for _i in 60:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	for _i in 3:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, false, dt)
+	var hop := 0.0
+	for _i in 30:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		hop = maxf(hop, m.land_dip())
+	_expect(hop == 0.0, "a stair-edge hop lands without a dip")
+	for _i in 40:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, false, dt)
+	var dip := 0.0
+	var first := -1.0
+	for _i in 40:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		if first < 0.0:
+			first = m.land_dip()
+		dip = maxf(dip, m.land_dip())
+	_expect(dip > 0.3 and first < 0.15 and m.land_dip() == 0.0,
+		"a fall ends in a short knee dip (peak %.2f, eases in from %.2f, over in 0.67 s)" % [dip, first])
+	_expect(float(m.tree.get("parameters/crouch_blend/blend_amount")) < 0.01, "standing straight again after the dip")
+	m.queue_free()
 
 
 func _check_swap_and_flinch() -> void:
