@@ -14,8 +14,9 @@ extends Node
 ##   skips, it ends by itself, and IntroSting.playing() follows it;
 ## - the Privacy Notice stays true to scripts/cloud.gd: every relay host, the card and request
 ##   ages, and the player card still carries what the notice lists (Cloud.card_text, card2_text,
-##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice). Change the notice
-##   (Login.privacy_sections) together with what goes online.
+##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice), PLAY WITHOUT INTERNET
+##   (scripts/lan.gd: what a host's beacon tells the local network, nothing leaves it). Change the
+##   notice (Login.privacy_sections) together with what goes online or on the local network.
 ## Returns the number of failed checks.
 
 var _fails := 0
@@ -66,8 +67,18 @@ func _check_texts() -> void:
 			"last %d chat messages with each friend" % NetChat.HISTORY_MAX, "only your friend's phone can read it",
 			"keeps your last unread message", "never a blocked player", "only while you hold TALK", "never stored",
 			"no microphone except while you hold TALK",
-			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data"]:
+			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data",
+			"these games never leave the local network", "your name, outfit, player ID and public key", "pairing code",
+			"never to know where you are"]:
 		_check(notice.contains(what), "the Privacy Notice says: %s" % what)
+	# A host's beacon (Lan.beacon) tells the local network what the notice lists: name, outfit, player
+	# ID and public key, plus the protocol, its port and a random nonce. A beacon that says more needs
+	# the notice changed.
+	var lan := Lan.new()
+	var told := lan.beacon().keys()
+	lan.free()
+	told.sort()
+	_check(told == ["bundle", "id", "lw", "name", "nonce", "pk", "port", "t"], "a host's beacon carries what the notice lists (%s)" % str(told))
 	var terms := ""
 	for sct: Array in Login.terms_sections():
 		terms += String(sct[0]) + "\n" + String(sct[1]) + "\n"

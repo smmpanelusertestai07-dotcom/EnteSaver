@@ -14,7 +14,9 @@ extends RefCounted
 ## A tap on a player's name in a list (ONLINE, ALL PLAYERS, the FRIENDS tab's friends and search
 ## results) opens their player card (LobbyProfile.open_player); blocked players are left out of
 ## every list (Game.block).
-## Node names: Tab_<online|friends|room>, NetList, MyId, FriendSearch, FriendAccept,
+## The tab PLAY WITHOUT INTERNET (Tab_local) is LobbyLan's (scripts/lobby_lan.gd): two phones on the
+## same Wi-Fi or one phone's hotspot, no internet at all (scripts/lan.gd).
+## Node names: Tab_<online|friends|room|local>, NetList, MyId, FriendSearch, FriendAccept,
 ## FriendDecline, RoomHead, RoomStart, RoomPin, Rule_<key>, RoomCreate, JoinCode, JoinPin,
 ## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card).
 
@@ -39,8 +41,12 @@ var _badge_t := 0.0
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
+var lan: LobbyLan                      # the tab PLAY WITHOUT INTERNET
+
+
 func _init(owner_lobby: Lobby) -> void:
 	lobby = owner_lobby
+	lan = LobbyLan.new(self)
 
 
 ## The lobby is up: listen to the online service and go online; an online match that was called
@@ -58,6 +64,7 @@ func on_lobby_ready() -> void:
 
 ## The lobby is leaving the tree.
 func on_lobby_exit() -> void:
+	lan.on_lobby_exit()
 	var cloud := Game.cloud
 	if cloud == null:
 		return
@@ -86,6 +93,8 @@ func process(delta: float) -> void:
 	if _dir_on and not (lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal)):
 		_dir_on = false
 		Game.cloud_service().stop_directory("window")
+	if Game.lan and (Game.lan.role != "" or Game.lan.getting_ready()) and not (_net_kind == "local" and _net_list and is_instance_valid(_net_list)):
+		lan.on_tab_closed()             # the tab PLAY WITHOUT INTERNET closed: HOST / JOIN stop
 	if _net_list and is_instance_valid(_net_list):
 		_net_refresh_t -= delta
 		if _net_refresh_t <= 0.0:
@@ -114,8 +123,9 @@ func open(kind := "online", back := false) -> void:
 	var v := lobby.dialogs.open_modal("ONLINE 1 VS 1", 980.0)
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 10)
-	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"]]:
-		var b := UI.button(String(t[1]), 19, "primary" if t[0] == kind else "dark", Vector2(205, 56))
+	for t: Array in [["online", "ONLINE", 175], ["friends", "FRIENDS", 175], ["room", "CUSTOM ROOM", 205],
+			["local", "PLAY WITHOUT INTERNET", 300]]:
+		var b := UI.button(String(t[1]), 19 if t[0] != "local" else 16, "primary" if t[0] == kind else "dark", Vector2(int(t[2]), 56))
 		b.name = "Tab_" + String(t[0])
 		var tk := String(t[0])
 		b.pressed.connect(func() -> void:
@@ -127,6 +137,7 @@ func open(kind := "online", back := false) -> void:
 		"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
 		"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
 		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
+		"local": LobbyLan.GUIDE,
 	}
 	var info := UI.label(String(notes[kind]), 17, UI.TEXT_DIM, "semi")
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -137,6 +148,8 @@ func open(kind := "online", back := false) -> void:
 		_build_friends_tab(v)
 	elif kind == "room":
 		_build_room_tab(v)
+	elif kind == "local":
+		lan.build(v)
 	_net_scroll = ScrollContainer.new()
 	_net_scroll.name = "NetScroll"
 	_net_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -370,6 +383,17 @@ func _lift_for_keyboard(le: LineEdit, on: bool) -> void:
 func _refresh_friends() -> void:
 	if _net_list == null or not is_instance_valid(_net_list):
 		return
+	if _net_kind == "local":
+		_net_status.text = lan.status_text()
+		var lsig := lan.signature()
+		if lsig != _net_sig:
+			_net_sig = lsig
+			for c in _net_list.get_children():
+				_net_list.remove_child(c)
+				c.queue_free()
+			lan.fill(_net_list)
+			UI.drag_scroll(_net_scroll, _net_list)
+		return
 	var cloud := Game.cloud_service()
 	var waiting := cloud.waiting_for()
 	var peers: Dictionary = cloud.peers
@@ -382,7 +406,7 @@ func _refresh_friends() -> void:
 			"connecting":
 				_net_status.text = "CONNECTING..."
 			_:
-				_net_status.text = "NO INTERNET: RETRYING..."
+				_net_status.text = "NO INTERNET: RETRYING... OR TAP PLAY WITHOUT INTERNET"
 	elif waiting != "":
 		_net_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
 	elif _net_note != "":
@@ -841,3 +865,9 @@ func _disconnect_net(cloud: Cloud) -> void:
 		for c: Dictionary in cloud.get_signal_connection_list(sig):
 			if (c.callable as Callable).get_object() == self:
 				cloud.disconnect(sig, c.callable)
+
+
+## The tab PLAY WITHOUT INTERNET changed what it shows (LobbyLan): built again while it is open.
+func redraw_local() -> void:
+	if _net_kind == "local" and lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal) and _net_list and is_instance_valid(_net_list):
+		open("local")

@@ -22,6 +22,11 @@
 #   tests/rounds_check.gd  a match over rounds: resets, alternating gun pick, the final result,
 #                          HISTORY and CAREER after it; a match left with QUIT MATCH is LEFT
 #   tests/guard_check.gd   a detection made before a match voids it
+#   tests/lan_check.gd     PLAY WITHOUT INTERNET with two copies of the game (LW_NET_ROLE host /
+#                          guest) through the lobby's tab: HOST shows a code, JOIN finds the host,
+#                          a wrong code is refused, the right one pairs; two rounds (end-to-end
+#                          encrypted on the local network), the local ping, lethal hits, the
+#                          result on both and HISTORY marked local
 #   tests/cloud_check.gd   online 1 vs 1 with two copies of the game (LW_NET_ROLE host / guest)
 #                          through tests/mqtt_mock.gd: find, challenge, accept, two rounds
 #                          (end-to-end encrypted), a flood of walls and frags held to one round's
@@ -70,6 +75,10 @@ if [ "${1:-}" != "quick" ]; then
   step soak env LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
   step rounds env LW_ROUNDS_TO_WIN=2 godot --headless --path . -- --autotest=script:res://tests/rounds_check.gd
   step guard godot --headless --path . -- --autotest=script:res://tests/guard_check.gd
+  step lan bash -c 'export LW_ROUNDS_TO_WIN=2
+    LW_NET_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd; g=$?
+    wait $h; r=$?; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/lan_host.txt"
   step cloud bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47810 > /dev/null 2>&1 & m=$!
     sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810 LW_ROUNDS_TO_WIN=2
     LW_NET_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &

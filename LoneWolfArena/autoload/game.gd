@@ -177,13 +177,15 @@ var shots_dir := ""
 ## this session; an online match ignores it.
 var practice := false
 ## The next arena run is a match against another phone (LONE WOLF): `session` is the Cloud
-## (internet, see scripts/cloud.gd) that connected the two.
+## (internet, see scripts/cloud.gd) or the Lan (PLAY WITHOUT INTERNET, scripts/lan.gd: a Cloud whose
+## room runs over the local network) that connected the two.
 var online := false
 var session: Cloud
 ## The custom room's rules the next online match is played with ({} = a plain duel); see
 ## Cloud.ROOM_RULES.
 var room_rules := {}
 var cloud: Cloud
+var lan: Lan
 ## [title, text] the lobby shows once when it opens again: why an online match was called off (the
 ## connection was lost, or the other player left before it began); [] = nothing to say.
 var match_notice: Array = []
@@ -195,6 +197,19 @@ func cloud_service() -> Cloud:
 		cloud = Cloud.new()
 		add_child(cloud)
 	return cloud
+
+
+## PLAY WITHOUT INTERNET's service (made on first use; it outlives scene changes).
+func lan_service() -> Lan:
+	if lan == null:
+		lan = Lan.new()
+		add_child(lan)
+	return lan
+
+
+## The match against another phone is on the local network (PLAY WITHOUT INTERNET).
+func local_match() -> bool:
+	return online and session is Lan
 
 signal settings_changed
 
@@ -472,7 +487,8 @@ func _sanitize_profile() -> void:
 
 
 ## One HISTORY entry from saved or untrusted data (see DEFAULT_PROFILE "history"): every value
-## checked, names cleaned; {} when it is not one (an unknown result).
+## checked, names cleaned; {} when it is not one (an unknown result). A match played without
+## internet (PLAY WITHOUT INTERNET) also has "local": true.
 func _history_entry(e: Variant) -> Dictionary:
 	if not e is Dictionary:
 		return {}
@@ -483,11 +499,14 @@ func _history_entry(e: Variant) -> Dictionary:
 	var m: Variant = d.get("mode")
 	var who := clean_name(String(d.get("enemy"))) if typeof(d.get("enemy")) == TYPE_STRING else ""
 	var id: Variant = d.get("id")
-	return {"result": String(r), "mode": String(m) if typeof(m) == TYPE_STRING and MODE_NAMES.has(m) else DEFAULT_MODE,
+	var out := {"result": String(r), "mode": String(m) if typeof(m) == TYPE_STRING and MODE_NAMES.has(m) else DEFAULT_MODE,
 		"enemy": who if who != "" else "PLAYER", "id": String(id) if is_player_id(id) else "",
 		"score": _count(d.get("score"), 99), "enemy_score": _count(d.get("enemy_score"), 99),
 		"kills": _count(d.get("kills"), 999), "damage": _count(d.get("damage"), 999999),
 		"headshots": _count(d.get("headshots"), 9999), "t": _count(d.get("t"), UNIX_MAX)}
+	if d.get("local") == true:
+		out["local"] = true          # PLAY WITHOUT INTERNET (HISTORY shows LONE WOLF · LOCAL)
+	return out
 
 
 ## A whole number 0..hi from a saved value (anything but a number counts as 0).
@@ -817,7 +836,8 @@ func record_match(result: Dictionary) -> void:
 	var entry := _history_entry({"result": outcome,
 		"mode": result.get("mode_id"), "enemy": result.get("enemy"), "id": result.get("enemy_id"),
 		"score": result.get("score_player"), "enemy_score": result.get("score_bot"), "kills": result.get("kills"),
-		"damage": result.get("damage"), "headshots": result.get("headshots"), "t": int(Time.get_unix_time_from_system())})
+		"damage": result.get("damage"), "headshots": result.get("headshots"), "t": int(Time.get_unix_time_from_system()),
+		"local": result.get("local", false)})
 	var history: Array = profile.history
 	history.push_front(entry)
 	history.resize(mini(history.size(), MAX_HISTORY))

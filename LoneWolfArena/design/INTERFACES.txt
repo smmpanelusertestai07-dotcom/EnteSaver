@@ -86,8 +86,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
   `player moved`, `pause opened`, `pause closed`, `<player|bot> eliminated`, `time up`,
   `round over`, `round <n>`, `match over: <won|lost|draw>`, `results shown`,
-  `online match: <host|guest>` (a LONE WOLF online 1 vs 1, see scripts/cloud.gd: the game's
-  only transport; there is no local-network play),
+  `online match: <host|guest>` (a LONE WOLF 1 vs 1 against another phone, online through
+  scripts/cloud.gd or PLAY WITHOUT INTERNET through scripts/lan.gd),
   `signature <state>` (Guard, "ok" when the package manager confirms a signer listed in the
   build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
@@ -296,6 +296,17 @@ listed here. If a part needs something new from the core, add it in its own file
 - No credits screen: `Licences.publish()` prints the licence notices the shipped parts need
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
+- PLAY WITHOUT INTERNET (`Lan`, scripts/lan.gd, `Game.lan_service()`): a `Cloud` whose room runs
+  over the local network (same Wi-Fi or one phone's hotspot), so `Game.session` is a Lan for these
+  matches and the arena, HUD, chat, voice and ping use Cloud's own session code. `host()` (a
+  `code` of `Lan.CODE_DIGITS` digits, the beacon on UDP `DISCOVERY_PORT`), `seek()` (`hosts`,
+  signal `hosts_changed`), `join(host_id, code)` (signal `pair_failed(why)`: "code", "busy",
+  "gone"), `stop()`; `read_beacon`, `pairing_key`, `room_keys`, `pair_message`, `check_pair` are
+  what the unit tests (tests/lan_unit_check.gd) drive. `Game.local_match()`: the arena's
+  `mode_name` is "LONE WOLF · LOCAL", the result and its HISTORY entry carry "local": true (the
+  row reads LONE WOLF · LOCAL), the match card reads 1 VS 1 LOCAL, the results' opponent row
+  LOCAL. The lobby's tab is `LobbyLan` (scripts/lobby_lan.gd, the ONLINE window's `Tab_local`:
+  `LanHost`, `LanJoin`, `LanStop`, `LanCode`, `LanHost_<n>`, `LanCodeField`, `LanConnect`).
 - Online extras: ping `NetPing` (colours, bars; `NetPing.lobby_chip()` "PingChip" in the lobby's
   top bar: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
   `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`). Match state: 20 a second

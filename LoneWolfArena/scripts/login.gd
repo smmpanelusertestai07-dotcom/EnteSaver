@@ -143,9 +143,16 @@ static func privacy_sections() -> Array:
 		["Voice chat", "Off unless you turn VOICE CHAT on (Settings, ONLINE), which asks for the microphone. The "
 			+ "microphone is used only while you hold TALK in an online match: the sound goes straight to the other "
 			+ "phone, end-to-end encrypted, and is never stored or recorded, here or anywhere else."],
+		["Play without internet", "PLAY WITHOUT INTERNET connects two phones on the same Wi-Fi, or on one phone's "
+			+ "hotspot, straight to each other: no relay, no internet, and these games never leave the local network. "
+			+ "While you HOST, phones on that network can see your name, outfit, player ID and public key so they can "
+			+ "find you; nobody joins without the pairing code your screen shows. The match, chat and voice included, "
+			+ "is end-to-end encrypted with keys only the two phones hold. The game uses the Wi-Fi permissions only to "
+			+ "find the other phone, never to know where you are."],
 		["What the game never does", "No account, no e-mail address or phone number, no ads, no analytics or "
 			+ "tracking, no location, no contacts or camera, no microphone except while you hold TALK, and nothing "
-			+ "to buy. Apart from the relay above, nothing leaves your phone."],
+			+ "to buy. Apart from the relay above and the phone you play with on your own network, nothing leaves "
+			+ "your phone."],
 		["Remove everything", ("Uninstall the game, or clear its data (Android Settings, Apps, Wolf Arena, Storage). "
 			+ "That deletes everything the game keeps on this phone, your player ID included, for good. Your last "
 			+ "player card stays on the relay: other players' games stop showing it %d days after you were last "
