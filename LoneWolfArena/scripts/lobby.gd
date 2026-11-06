@@ -996,6 +996,9 @@ func on_group_changed() -> void:
 			Game.team_size = n
 			_refresh_mode()
 	elif gid != "" and gid != _group_gid:
+		# (set first: set_group_mode emits group_changed at once, which comes back here; with the
+		# gid not yet remembered that recursed without end, the crash on the first INVITE)
+		_group_gid = gid
 		LobbyTeam.cloud_call("set_group_mode", [Game.mode, Game.team_size])
 	_group_gid = gid
 	var list := LobbyTeam.members()
