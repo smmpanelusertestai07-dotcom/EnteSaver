@@ -2612,17 +2612,17 @@ func _on_groster(d: Dictionary) -> void:
 			_group_close(false)
 			group_changed.emit()
 		return
-	var status := String(d.get("status", "idle")) if typeof(d.get("status")) == TYPE_STRING else "idle"
-	if status not in ["idle", "searching", "starting", "in_match"]:
-		status = "idle"
+	var g_status := String(d.get("status", "idle")) if typeof(d.get("status")) == TYPE_STRING else "idle"
+	if g_status not in ["idle", "searching", "starting", "in_match"]:
+		g_status = "idle"
 	var mode := String(d.get("mode", "lonewolf")).left(16) if typeof(d.get("mode")) == TYPE_STRING else "lonewolf"
 	var before := JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed])
 	_grp.joining = false
 	group.members = list
-	group.status = status
+	group.status = g_status
 	group.mode = mode
 	group.size = size
-	search_needed = 2 * size if status == "searching" and size in [2, 4] else 0
+	search_needed = 2 * size if g_status == "searching" and size in [2, 4] else 0
 	search_found = list.size() if search_needed > 0 else 0
 	if JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed]) != before:
 		group_changed.emit()
@@ -2658,12 +2658,12 @@ func _tick_group(delta: float, now: int) -> void:
 			gone.append(String(m.id))
 	for id: String in gone:
 		_group_drop(id)
-	var invited: Dictionary = _grp.invited
-	for id: String in invited.keys():
-		if now - int(invited[id]) > INVITE_TIMEOUT_MS:
-			invited.erase(id)
+	var pending: Dictionary = _grp.invited
+	for id: String in pending.keys():
+		if now - int(pending[id]) > INVITE_TIMEOUT_MS:
+			pending.erase(id)
 			group_changed.emit()
-	if (group.members as Array).size() <= 1 and invited.is_empty() and search_needed == 0:
+	if (group.members as Array).size() <= 1 and pending.is_empty() and search_needed == 0:
 		_group_close(false)              # nobody joined and no invite waits: no group
 		group_changed.emit()
 
