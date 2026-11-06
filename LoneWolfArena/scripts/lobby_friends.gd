@@ -20,9 +20,16 @@ extends RefCounted
 ## shows in the same popup as a duel, titled TEAM INVITE; while Game.TEAMS_ONLINE is off it is
 ## declined at once. A session a team invite started (Cloud.session_team) loads the team match
 ## (Game.team_match = TeamArena.link_match), any other one the 1 vs 1 (Game.team_match = {}).
+## GROUPS (design/GROUPS.txt, through LobbyTeam's guarded Cloud group API): a GROUP INVITE
+## (Cloud.group_invited) shows "<NAME> invites you to their group" with ACCEPT / DECLINE / BLOCK and
+## waits behind a busy popup as a duel does; LONE WOLF DUO / SQUAD's search shows SEARCHING PLAYERS
+## n/N (Cloud.search_found / search_needed), the time searched and CANCEL (Cloud.group_search_stop):
+## real players only, no bots. Cloud.group_changed redraws the lobby's group parts (Lobby.on_group_changed).
 ## Node names: Tab_<online|friends|room|local>, NetList, MyId, FriendSearch, FriendAccept,
 ## FriendDecline, RoomHead, RoomStart, RoomPin, Rule_<key>, RoomCreate, JoinCode, JoinPin,
-## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card).
+## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card),
+## GroupInvitePopup (GroupInviteText, GroupInviteBlock, DeclineButton, AcceptButton), GroupSearch
+## (GroupSearchCount, GroupSearchTimer, GroupSearchNote, GroupSearchCancel).
 
 var lobby: Lobby
 var _net_kind := "online"
@@ -44,6 +51,13 @@ var _badge_n := -1                     # the unread count the ONLINE 1 VS 1 row 
 var _badge_t := 0.0
 var _kb_field: LineEdit = null         # the text field the popup is lifted for (_lift_for_keyboard)
 var _kb_seen := false                  # the on-screen keyboard was up for it (_follow_keyboard)
+var _group_api: Object                 # where the group signals were connected (LobbyTeam.api())
+var _search_modal: Control             # the open SEARCHING PLAYERS popup
+var _search_count: Label
+var _search_timer: Label
+var _search_t := 0.0
+var _search_sec := -1
+var _search_seen := false              # the search was counting (needed > 0) once
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -89,6 +103,7 @@ func on_lobby_exit() -> void:
 ## Every frame: the open list follows the service (players, requests, invites); the unread badge.
 func process(delta: float) -> void:
 	_follow_keyboard()
+	_follow_search(delta)
 	_badge_t -= delta
 	if _badge_t <= 0.0:
 		_badge_t = 0.5
@@ -711,11 +726,166 @@ func _popup_busy() -> bool:
 	return false
 
 
-## A popup closed: a challenge that waited behind it shows now.
+## A popup closed: a challenge (or a GROUP INVITE) that waited behind it shows now.
 func _on_modal_closed() -> void:
 	var cloud := Game.cloud_service()
-	if cloud.has_invite() and not lobby.start_btn.disabled and (lobby.dialogs.modal == null or not is_instance_valid(lobby.dialogs.modal)):
+	var free := not lobby.start_btn.disabled and (lobby.dialogs.modal == null or not is_instance_valid(lobby.dialogs.modal))
+	if cloud.has_invite() and free:
 		_show_challenge(String(cloud.invite_from().get("name", "PLAYER")))
+		return
+	var gi: Variant = LobbyTeam.cloud_call("group_invite_from", [], {})
+	if free and gi is Dictionary and not (gi as Dictionary).is_empty():
+		_show_group_invite(String((gi as Dictionary).get("name", "PLAYER")))
+
+
+# ---------------------------------------------------------------- groups
+
+## What GROUP INVITE says.
+static func group_invite_text(who: String) -> String:
+	return "%s invites you to their group" % who
+
+
+## A GROUP INVITE came in (Cloud.group_invited): the popup at once, unless the open one is busy or a
+## match loads; then it shows when that popup closes (_on_modal_closed), as a duel challenge does.
+func _on_group_invited(who: String) -> void:
+	Audio.play("ui_select", 0.0)
+	if bool(Game.settings.get("vibration", true)):
+		Input.vibrate_handheld(250)
+	if _popup_busy() or lobby.start_btn.disabled:
+		return
+	_show_group_invite(who)
+
+
+## GROUP INVITE: "<NAME> invites you to their group", BLOCK (asked first), DECLINE (also X and
+## back) and ACCEPT (Cloud.answer_group_invite(true): this player joins the group; no match starts).
+func _show_group_invite(who: String) -> void:
+	_net_list = null
+	var v := lobby.dialogs.open_modal("GROUP INVITE", 680.0)
+	v.name = "GroupInvitePopup"
+	var decline := func() -> void:
+		LobbyTeam.cloud_call("answer_group_invite", [false])
+		lobby.dialogs.close_modal()
+	lobby.dialogs.modal.set_meta("on_back", decline)
+	var t := UI.label(group_invite_text(who), 26, UI.TEXT, "heavy")
+	t.name = "GroupInviteText"
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(600, 0)
+	v.add_child(t)
+	var sub := UI.label("Up to 4 players. The leader picks the mode and starts: real players only, no bots.", 17, UI.TEXT_DIM, "semi")
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.custom_minimum_size = Vector2(600, 0)
+	v.add_child(sub)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 12)
+	var block := UI.button("BLOCK", 18, "dark", Vector2(140, 56))
+	block.name = "GroupInviteBlock"
+	block.pressed.connect(_ask_block_group_inviter.bind(who))
+	var no := UI.button("DECLINE", 20, "light", Vector2(190, 56))
+	no.name = "DeclineButton"
+	no.pressed.connect(decline)
+	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 56))
+	yes.name = "AcceptButton"
+	yes.pressed.connect(func() -> void:
+		LobbyTeam.cloud_call("answer_group_invite", [true])
+		lobby.dialogs.close_modal())
+	row.add_child(block)
+	row.add_child(no)
+	row.add_child(yes)
+	v.add_child(row)
+
+
+## BLOCK on a GROUP INVITE, asked first: declined and the player blocked; CANCEL goes back to it.
+func _ask_block_group_inviter(who: String) -> void:
+	var gi: Variant = LobbyTeam.cloud_call("group_invite_from", [], {})
+	var id := String((gi as Dictionary).get("id", "")) if gi is Dictionary else ""
+	var back := func() -> void:
+		var still: Variant = LobbyTeam.cloud_call("group_invite_from", [], {})
+		if still is Dictionary and not (still as Dictionary).is_empty():
+			_show_group_invite(who)
+		else:
+			lobby.dialogs.close_modal()
+	lobby.dialogs.confirm("BLOCK PLAYER", LobbyProfile.block_question(who), "BLOCK", func() -> void:
+		LobbyTeam.cloud_call("answer_group_invite", [false])
+		if id != "":
+			Game.block(id, who), back, true)
+
+
+## LONE WOLF DUO / SQUAD searching for real players (after Cloud.group_start said ""): SEARCHING
+## PLAYERS n/N, the time searched, CANCEL (also X and back: Cloud.group_search_stop). No bots: it
+## waits until every place is taken. The session that starts closes it (_on_net_session).
+func open_search(size: int) -> void:
+	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
+	var v := lobby.dialogs.open_modal("LONE WOLF %s" % word, 640.0)
+	v.name = "GroupSearch"
+	_search_modal = lobby.dialogs.modal
+	_search_modal.set_meta("on_back", cancel_search)
+	_search_count = UI.label("", 30, UI.ACCENT, "heavy")
+	_search_count.name = "GroupSearchCount"
+	_search_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(_search_count)
+	_search_timer = UI.label("0:00", 40, UI.TEXT)
+	_search_timer.name = "GroupSearchTimer"
+	_search_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(_search_timer)
+	var line := UI.label("%s: %d VS %d, real players only. Your group stays one team; the match starts when every place is taken." % [
+		word, size, size], 17, UI.TEXT_DIM, "semi")
+	line.name = "GroupSearchNote"
+	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	line.custom_minimum_size = Vector2(560, 0)
+	v.add_child(line)
+	var cancel := UI.button("CANCEL", 22, "dark", Vector2(240, 56))
+	cancel.name = "GroupSearchCancel"
+	cancel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	cancel.pressed.connect(cancel_search)
+	v.add_child(cancel)
+	_search_t = 0.0
+	_search_sec = -1
+	_search_seen = false
+	_follow_search(0.0)
+
+
+## CANCEL: the search stops and its popup closes.
+func cancel_search() -> void:
+	var m := _search_modal
+	_search_modal = null
+	LobbyTeam.cloud_call("group_search_stop")
+	if m and is_instance_valid(m) and lobby.dialogs.modal == m:
+		lobby.dialogs.close_modal()
+
+
+## The search popup follows Cloud.search_found / search_needed every frame (texts change only when
+## the numbers or the second do); its popup gone another way (not a match starting) stops the
+## search, as QUICK MATCH's does; a search that ended (needed back to 0) closes it.
+func _follow_search(delta: float) -> void:
+	if _search_modal == null:
+		return
+	var cloud := Game.cloud_service()
+	if not is_instance_valid(_search_modal) or _search_modal.is_queued_for_deletion() or lobby.dialogs.modal != _search_modal:
+		_search_modal = null
+		if not cloud.in_session:
+			LobbyTeam.cloud_call("group_search_stop")
+		return
+	_search_t += delta
+	var a := LobbyTeam.api()
+	var found: Variant = a.get("search_found") if a else 0
+	var needed: Variant = a.get("search_needed") if a else 0
+	var f := int(found) if found is int else 0
+	var n := int(needed) if needed is int else 0
+	if n > 0:
+		_search_seen = true
+	elif _search_seen and not cloud.in_session:
+		_search_modal = null               # the search ended (not with a match): nothing to wait for
+		lobby.dialogs.close_modal()
+		return
+	var count := LobbyTeam.search_text(f, n)
+	if _search_count.text != count:
+		_search_count.text = count
+	var sec := int(_search_t)
+	if sec != _search_sec:
+		_search_sec = sec
+		_search_timer.text = "%d:%02d" % [sec / 60, sec % 60]
 
 
 ## The team of the challenge waiting here ({"size", "coop"}: a TEAM INVITE), {} for a duel.
@@ -974,6 +1144,13 @@ func _connect_net(cloud: Cloud) -> void:
 	cloud.session_started.connect(_on_net_session)
 	cloud.session_ended.connect(_on_net_ended)
 	cloud.friend_chat_changed.connect(_on_friend_message)
+	# The group signals (GROUPS.txt 3, CORE's): guarded until Cloud has them.
+	_group_api = LobbyTeam.api()
+	if _group_api and _group_api.has_signal("group_changed"):
+		_group_api.connect("group_changed", lobby.on_group_changed)
+	if _group_api and _group_api.has_signal("group_invited"):
+		_group_api.connect("group_invited", _on_group_invited)
+	lobby.on_group_changed.call_deferred()      # a group from before this lobby (back from a match)
 
 
 ## Drops this object's connections (the handlers above) from the service, which outlives the lobby.
@@ -983,6 +1160,15 @@ func _disconnect_net(cloud: Cloud) -> void:
 		for c: Dictionary in cloud.get_signal_connection_list(sig):
 			if (c.callable as Callable).get_object() == self:
 				cloud.disconnect(sig, c.callable)
+	if _group_api and is_instance_valid(_group_api):
+		for sig in ["group_changed", "group_invited"]:
+			if not _group_api.has_signal(sig):
+				continue
+			for c: Dictionary in _group_api.get_signal_connection_list(sig):
+				var o := (c.callable as Callable).get_object()
+				if o == self or o == lobby:
+					_group_api.disconnect(sig, c.callable)
+	_group_api = null
 
 
 ## The tab PLAY WITHOUT INTERNET changed what it shows (LobbyLan): built again while it is open.
