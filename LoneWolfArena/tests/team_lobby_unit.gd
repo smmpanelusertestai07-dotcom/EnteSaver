@@ -78,7 +78,7 @@ func _routing() -> void:
 		and LobbyDialogs.mode_lines("lonewolf", 1) == LobbyDialogs.MODE_INFO.lonewolf.lines, "SELECT MODE's SOLO lines are today's")
 	var duo: Array = LobbyDialogs.mode_lines("training", 2)
 	_check(String(duo[0]) == "DUO · YOU + A BOT VS 2 BOTS · BOT: NORMAL" and "DUMMY IS SOLO ONLY" in duo, "TRAINING DUO's card lines (%s)" % str(duo))
-	_check(String(LobbyDialogs.mode_lines("lonewolf", 4, true)[0]).begins_with("SQUAD · 4 VS 4 ONLINE")
+	_check(String(LobbyDialogs.mode_lines("lonewolf", 4, true)[0]) == "SQUAD · 4 VS 4 · REAL PLAYERS"
 		and String(LobbyDialogs.mode_lines("lonewolf", 2, false)[0]) == "ONLINE DUO / SQUAD: NEXT UPDATE", "LONE WOLF DUO / SQUAD card lines")
 	_check(TeamMatch.fill_s() >= 1.0 and TeamMatch.FILL_S == 25.0, "the team search plays bots after FILL_S (LW_FILL_S in tests)")
 	_check(Loading.team_rounds_to_win() >= 1, "a team match is first to TEAM_ROUNDS_TO_WIN (LW_ROUNDS_TO_WIN in tests)")
@@ -183,11 +183,10 @@ func _history_texts() -> void:
 	_check(LobbyProfile.RESULT_WORDS.ended == "ENDED", "HISTORY says ENDED")
 
 
+## (The TEAM bar became the GROUP bar: tests/group_lobby_unit.gd.)
 func _team_bar() -> void:
-	_check(not LobbyTeam.bar_shown(1, true) and LobbyTeam.bar_shown(2, true) and LobbyTeam.bar_shown(4, true)
-		and not LobbyTeam.bar_shown(2, false) and not LobbyTeam.bar_shown(4, false), "the TEAM bar: DUO / SQUAD only, never with online teams off")
-	_check(LobbyTeam.tiles_for(1) == [] and LobbyTeam.tiles_for(2) == ["invite"] and LobbyTeam.tiles_for(4) == ["invite", "bot", "bot"],
-		"DUO: + INVITE; SQUAD: + INVITE and two BOT tiles")
+	_check(LobbyTeam.bar_shown("lonewolf", false, true) and not LobbyTeam.bar_shown("lonewolf", false, false),
+		"the GROUP bar in LONE WOLF, never with online teams off")
 
 
 func _invites() -> void:

@@ -11,9 +11,11 @@ extends Node3D
 ## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
 ## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
 ## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
-## scripts/net_match.gd; DUO / SQUAD: the team search, scripts/net_team_match.gd). In DUO and SQUAD
-## the TEAM bar under the player card (LobbyTeam, scripts/lobby_team.gd) invites an online friend
-## into the team (TEAM INVITE: the two of them against bots). WARDROBE opens the outfit picker
+## scripts/net_match.gd; DUO / SQUAD: Cloud.group_start, real players only, design/GROUPS.txt). In
+## LONE WOLF the GROUP bar under the player card (LobbyTeam, scripts/lobby_team.gd) invites online
+## friends into a group of up to 4; the other members stand on the podium beside the hero, smaller,
+## with name plates and a LEADER mark (show_group_members); only the leader's START works (a member
+## sees GroupWaitLeader "WAITING FOR <LEADER> TO START" in its place). WARDROBE opens the outfit picker
 ## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
 ## are in SETTINGS (the gear).
 ## This file has the 3D stage, the top bar, the bottom bar, the mode card, START, the settings
@@ -25,7 +27,8 @@ extends Node3D
 ## bar and its invites).
 ## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard, BottomBar,
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
-## badge), SettingsButton, Bundle_<id>, EquipButton.
+## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader; 3D: GroupMembers with
+## GroupModel_<1..3> (CharacterModel), each with NamePlate and, on the leader, LeaderMark.
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -40,6 +43,15 @@ const CAM_FOV := 38.0
 const HERO_X := 0.5
 const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
+## The group's other members on the podium (GROUPS.txt 1): smaller than the hero, left and right
+## behind it on the podium, the third behind on the right on the floor (clear of the GROUP bar on
+## the left and of the mode card); each turned a little toward the middle.
+const MEMBER_SCALE := 0.86
+const MEMBER_SPOTS := [Vector3(-0.62, PODIUM_TOP, -0.5), Vector3(0.62, PODIUM_TOP, -0.5), Vector3(1.45, 0.0, -1.55)]
+const MEMBER_YAWS := [PI - 0.02, PI - 0.5, PI - 0.62]
+## Name plate and LEADER mark heights over a member's feet (the model's own units, before its scale).
+const PLATE_Y := 2.02
+const MARK_Y := 2.24
 const SKYLINE := "res://assets/ui/lobby_skyline.png"
 ## The art each mode shows (mode card, SELECT MODE): [texture, the part of it to show]. LONE
 ## WOLF is the two fighters facing off, TRAINING GROUND our hero aiming at a far-off target.
@@ -91,6 +103,17 @@ const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISA
 
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
+## The group's other members on the podium: the node GroupMembers, id -> CharacterModel, id -> spot.
+var group_view: Node3D
+var _member_models := {}
+var _member_slot := {}
+var _group_gid := ""
+## In START's place for a member: WAITING FOR <LEADER> TO START (or the group's search).
+var _wait_leader: PanelContainer
+var _wait_label: Label
+var _gate_t := 0.0
+var _gate_member := false
+var _gate_leader_name := ""
 
 
 func _ready() -> void:
@@ -254,6 +277,9 @@ func _build_stage() -> void:
 	model.rotation.y = MODEL_YAW
 	model.setup(String(Game.profile.bundle), false)
 	model.play_lobby()
+	group_view = Node3D.new()
+	group_view.name = "GroupMembers"
+	add_child(group_view)
 	# Lights: warm key from the side with the only shadow (a gradient across the body), cool +
 	# warm rims, soft fill.
 	var key := SpotLight3D.new()
@@ -784,6 +810,23 @@ func _build_right_column(root: Control) -> void:
 	start_btn.offset_bottom = -12
 	start_btn.pressed.connect(_start)
 	root.add_child(start_btn)
+	# A member's phone shows who starts in START's place (GROUPS.txt 1).
+	_wait_leader = PanelContainer.new()
+	_wait_leader.name = "GroupWaitLeader"
+	_wait_leader.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_wait_leader.offset_left = -342
+	_wait_leader.offset_top = -90
+	_wait_leader.offset_right = -12
+	_wait_leader.offset_bottom = -12
+	_wait_leader.add_theme_stylebox_override("panel", UI.chamfer(Color(0.02, 0.02, 0.025, 0.8), 12, 2, Color(UI.ACCENT, 0.7), 10.0, ["tl", "br"]))
+	_wait_leader.mouse_filter = Control.MOUSE_FILTER_STOP
+	_wait_leader.visible = false
+	_wait_label = UI.label("", 21, UI.ACCENT, "heavy")
+	_wait_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_wait_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_wait_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_wait_leader.add_child(_wait_label)
+	root.add_child(_wait_leader)
 	# Mode card above it: the mode START plays (name, map, format, the mode's art); a tap opens
 	# SELECT MODE.
 	mode_card = Button.new()
@@ -902,15 +945,18 @@ func refresh_player_card() -> void:
 ## another searching player is found. Friends' duels and custom rooms are in the ONLINE window
 ## (FRIENDS top-right); a friend joins a DUO / SQUAD through the TEAM bar.
 func _start() -> void:
-	if start_btn.disabled:
-		return
+	if start_btn.disabled or LobbyTeam.is_member():
+		return                          # (a member's START is the leader's: GroupWaitLeader shows instead)
 	var size := Game.team_size
 	match start_route(Game.mode, size):
 		"quick":
+			if LobbyTeam.in_group():
+				dialogs.notice("LONE WOLF 1 VS 1", "EXIT GROUP to play 1 VS 1, or pick DUO or SQUAD in SELECT MODE to play with your group.")
+				return
 			Game.team_match = {}
 			NetMatch.open(self)
 		"team_search":
-			TeamMatch.open(self, size)
+			start_group(size)
 		"team_later":
 			dialogs.notice("ONLINE DUO / SQUAD", "Online DUO and SQUAD come in the next update. Play them now in TRAINING GROUND, you and bot teammates against bots.")
 		"training_team":
@@ -921,9 +967,184 @@ func _start() -> void:
 			load_match()
 
 
+## LONE WOLF DUO / SQUAD (GROUPS.txt 1): the leader (or a solo, who leads itself) starts the group's
+## match or its search for real players (Cloud.group_start); a text back is a notice (a group of 3 in
+## DUO...). Searching: the popup SEARCHING PLAYERS n/N (LobbyFriends.open_search).
+func start_group(size: int) -> void:
+	Game.team_match = {}
+	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
+	var why: Variant = LobbyTeam.cloud_call("group_start", [size])
+	if why == null:
+		dialogs.notice("ONLINE %s" % word, "Online groups are not available in this build.")
+		return
+	if String(why) != "":
+		dialogs.notice("LONE WOLF %s" % word, String(why))
+		return
+	friends.open_search(size)
+
+
+## The group changed (Cloud.group_changed): a member's mode card follows the leader's choice, the
+## leader's choice goes to a new group, then the GROUP bar, the podium and START's place follow.
+func on_group_changed() -> void:
+	var g := LobbyTeam.group()
+	var gid := String(g.get("gid", ""))
+	if LobbyTeam.is_member():
+		var m := String(g.get("mode", Game.mode))
+		var n := int(g.get("size", Game.team_size))
+		if Game.MODE_NAMES.has(m) and n in Game.TEAM_SIZES and (m != Game.mode or n != Game.team_size):
+			Game.mode = m
+			Game.team_size = n
+			_refresh_mode()
+	elif gid != "" and gid != _group_gid:
+		LobbyTeam.cloud_call("set_group_mode", [Game.mode, Game.team_size])
+	_group_gid = gid
+	var list := LobbyTeam.members()
+	_gate_member = LobbyTeam.is_member()
+	_gate_leader_name = LobbyTeam.leader_name(list)
+	team.on_group_changed()
+	show_group_members(list)
+	update_start_gate()
+
+
+## START or, for a member, who starts (and the group's search) in its place. Polled 4 times a
+## second for the search's count; outside a group (or as the leader) it reads nothing more.
+func update_start_gate() -> void:
+	if _wait_leader == null:
+		return
+	var text := ""
+	if _gate_member:
+		var a := LobbyTeam.api()
+		var found: Variant = a.get("search_found") if a else 0
+		var needed: Variant = a.get("search_needed") if a else 0
+		text = LobbyTeam.start_gate_text(true, false, _gate_leader_name,
+			Vector2i(int(found) if found is int else 0, int(needed) if needed is int else 0))
+	if _wait_label.text != text:
+		_wait_label.text = text
+	_wait_leader.visible = text != ""
+	start_btn.visible = text == ""
+
+
+## Which of the 3 spots each other member takes: a member keeps theirs while in the group, a new one
+## takes the first free spot; at most MEMBER_SPOTS.size(). `ids`: the other members, join order.
+static func member_slots(old: Dictionary, ids: Array) -> Dictionary:
+	var out := {}
+	for id: String in ids:
+		if old.has(id) and int(old[id]) < MEMBER_SPOTS.size():
+			out[id] = int(old[id])
+	for id: String in ids:
+		if out.has(id):
+			continue
+		for i in MEMBER_SPOTS.size():
+			if not out.values().has(i):
+				out[id] = i
+				break
+	return out
+
+
+## The other members on the podium (group_members, without this player): added with a short
+## scale-in, dropped with a scale-out, their outfit changed in place; the name plate and the
+## LEADER mark follow. They share the hero's materials and cast no shadow (the phone's budget).
+func show_group_members(list: Array) -> void:
+	if group_view == null:
+		return
+	var others: Array = []
+	var info := {}
+	for m: Dictionary in list:
+		var id := String(m.get("id", ""))
+		if bool(m.get("me", false)) or id == "" or others.size() >= MEMBER_SPOTS.size():
+			continue
+		others.append(id)
+		info[id] = m
+	_member_slot = member_slots(_member_slot, others)
+	for id: String in _member_models.keys():
+		if not info.has(id):
+			_drop_member(id)
+	for id: String in others:
+		var m: Dictionary = info[id]
+		var bundle := String(m.get("bundle", "default"))
+		var cm := _member_models.get(id) as CharacterModel
+		if cm == null or not is_instance_valid(cm):
+			cm = _add_member(id, int(_member_slot[id]), bundle)
+		elif cm.bundle != bundle:
+			cm.apply_bundle(bundle)
+		var plate := cm.get_node_or_null(^"NamePlate") as Label3D
+		if plate:
+			plate.text = String(m.get("name", "PLAYER"))
+		var mark := cm.get_node_or_null(^"LeaderMark") as Label3D
+		if mark:
+			mark.visible = bool(m.get("leader", false))
+
+
+func _add_member(id: String, slot: int, bundle: String) -> CharacterModel:
+	var cm := CharacterModel.new()
+	cm.name = "GroupModel_%d" % (slot + 1)
+	group_view.add_child(cm)
+	cm.position = MEMBER_SPOTS[slot]
+	cm.rotation.y = MEMBER_YAWS[slot]
+	cm.setup(bundle, false)
+	cm.play_lobby()
+	_share_looks(cm)
+	var plate := _plate("PLAYER", UI.TEXT, 44, PLATE_Y)
+	plate.name = "NamePlate"
+	cm.add_child(plate)
+	var mark := _plate("LEADER", UI.ACCENT, 34, MARK_Y)
+	mark.name = "LeaderMark"
+	cm.add_child(mark)
+	cm.scale = Vector3.ONE * 0.01
+	cm.create_tween().tween_property(cm, "scale", Vector3.ONE * MEMBER_SCALE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_member_models[id] = cm
+	return cm
+
+
+func _drop_member(id: String) -> void:
+	var cm := _member_models.get(id) as CharacterModel
+	_member_models.erase(id)
+	if cm == null or not is_instance_valid(cm):
+		return
+	cm.name = "GroupModelGone"
+	var tw := cm.create_tween()
+	tw.tween_property(cm, "scale", Vector3.ONE * 0.01, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.tween_callback(cm.queue_free)
+
+
+## A member's meshes take the hero's materials (the same GLB meshes: one set of materials for every
+## model on the podium) and cast no shadow.
+func _share_looks(cm: CharacterModel) -> void:
+	for n: String in cm.meshes:
+		var mine := cm.meshes[n] as MeshInstance3D
+		mine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var hero := model.meshes.get(n) as MeshInstance3D if model else null
+		if hero == null or hero.mesh != mine.mesh:
+			continue
+		for s in mine.mesh.get_surface_count():
+			var mat := hero.get_surface_override_material(s)
+			if mat:
+				mine.set_surface_override_material(s, mat)
+
+
+## A floating text over a member (always facing the camera, drawn over the yard).
+static func _plate(text: String, color: Color, font_size: int, y: float) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font = UI.font("heavy")
+	l.font_size = font_size
+	l.outline_size = 12
+	l.modulate = color
+	l.outline_modulate = Color(0, 0, 0, 0.85)
+	l.pixel_size = 0.004
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.double_sided = true
+	l.render_priority = 10
+	l.outline_render_priority = 9
+	l.position = Vector3(0, y, 0)
+	return l
+
+
 ## What START does for a mode and a team size: "training" (the 1 vs 1 against the bot or the
 ## dummy), "training_team" (DUO / SQUAD against bots on this phone), "quick" (the 1 vs 1 QUICK
-## MATCH), "team_search" (the DUO / SQUAD search) or "team_later" (online teams switched off).
+## MATCH), "team_search" (the group's DUO / SQUAD: Cloud.group_start) or "team_later" (online teams
+## switched off).
 static func start_route(m: String, size: int, teams_online := Game.TEAMS_ONLINE) -> String:
 	if m == "lonewolf":
 		if size <= 1:
@@ -1042,6 +1263,12 @@ func _process(delta: float) -> void:
 	wardrobe_ui.process()
 	profile_ui.process(delta)
 	team.process(delta)
+	if group_view:
+		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
+	_gate_t -= delta
+	if _gate_t <= 0.0:
+		_gate_t = 0.25
+		update_start_gate()
 
 
 ## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the

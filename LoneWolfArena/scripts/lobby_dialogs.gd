@@ -149,6 +149,12 @@ func notice(title: String, text: String) -> void:
 ## pick its opponent too (a bot's level, kept as the setting "difficulty", or the target dummy for
 ## this session: Game.practice), which also picks TRAINING GROUND.
 func select_mode() -> void:
+	if LobbyTeam.is_member():
+		# In a group the leader picks (Cloud.group's mode / size, shown on the mode card).
+		var who := LobbyTeam.leader_name(LobbyTeam.members())
+		notice("SELECT MODE", "%s picks the mode while you are in their group: %s %s. EXIT GROUP to pick your own." % [
+			who if who != "" else "The leader", Game.mode_name(), String(SIZE_NAMES.get(Game.team_size, "SOLO"))])
+		return
 	var v := open_modal("SELECT MODE", 980.0)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 20)
@@ -161,7 +167,7 @@ func select_mode() -> void:
 
 ## What a mode's card in SELECT MODE says under its name for a team size (1 SOLO, 2 DUO, 4 SQUAD):
 ## the lines of MODE_INFO for SOLO; DUO and SQUAD say who plays whom (TRAINING GROUND: the bot's
-## level; LONE WOLF: online, or "NEXT UPDATE" while Game.TEAMS_ONLINE is off).
+## level; LONE WOLF: real players only, never bots, or "NEXT UPDATE" while Game.TEAMS_ONLINE is off).
 static func mode_lines(m: String, size: int, teams_online := Game.TEAMS_ONLINE) -> Array:
 	if size <= 1:
 		var info: Dictionary = MODE_INFO.get(m, MODE_INFO[Game.DEFAULT_MODE])
@@ -171,8 +177,7 @@ static func mode_lines(m: String, size: int, teams_online := Game.TEAMS_ONLINE) 
 	if m == "lonewolf":
 		if not teams_online:
 			return ["ONLINE DUO / SQUAD: NEXT UPDATE", "PLAY DUO AND SQUAD IN TRAINING GROUND"]
-		return ["%s · %d VS %d ONLINE · EACH PLAYER + %s" % [word, size, size, mates],
-			"NOBODY FOUND IN %d S: YOUR TEAM VS BOTS" % roundi(TeamMatch.FILL_S)]
+		return ["%s · %d VS %d · REAL PLAYERS" % [word, size, size], "YOUR GROUP OF FRIENDS, OR PLAYERS FOUND ONLINE"]
 	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
 	return ["%s · YOU + %s VS %d BOTS · BOT: %s" % [word, mates, size, level], "DUMMY IS SOLO ONLY"]
 
@@ -337,10 +342,16 @@ func _chip(text: String, node_name: String, lit: bool, group: ButtonGroup) -> Bu
 ## A mode picked in SELECT MODE: kept (the setting "mode", saved with the bot's level), the popup
 ## closes and the lobby's mode card follows.
 func _pick(m: String) -> void:
+	if LobbyTeam.is_member():
+		close_modal()                   # (the leader's choice stands: Lobby.on_group_changed)
+		lobby.on_group_changed()
+		return
 	Game.mode = m
 	Game.save_settings()
 	close_modal()
 	lobby._refresh_mode()
+	if LobbyTeam.in_group():
+		LobbyTeam.cloud_call("set_group_mode", [Game.mode, Game.team_size])   # the members' cards follow
 
 
 # ---------------------------------------------------------------- player name

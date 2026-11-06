@@ -12,6 +12,7 @@ const TeamLobbyUnit := preload("res://tests/team_lobby_unit.gd")   # DUO / SQUAD
 const TeamHudUnit := preload("res://tests/team_hud_unit.gd")       # DUO / SQUAD: WP-B2 fills it
 const TeamRulesUnit := preload("res://tests/team_rules_unit.gd")   # DUO / SQUAD: WP-C fills it
 const TeamNetUnit := preload("res://tests/team_net_unit.gd")       # DUO / SQUAD: WP-N fills it
+const GroupLobbyUnit := preload("res://tests/group_lobby_unit.gd") # GROUPS: the lobby (UI)
 
 var _fails := 0
 var _passes := 0
@@ -94,6 +95,7 @@ func _ready() -> void:
 	TeamHudUnit.run(self)         # DUO / SQUAD match HUD and results (tests/team_hud_unit.gd)
 	TeamRulesUnit.run(self)       # DUO / SQUAD rules: knocks, revives, rounds (tests/team_rules_unit.gd)
 	TeamNetUnit.run(self)         # DUO / SQUAD between two phones (tests/team_net_unit.gd)
+	GroupLobbyUnit.run(self)      # GROUPS in the lobby: bar, START gating, podium, texts (tests/group_lobby_unit.gd)
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
