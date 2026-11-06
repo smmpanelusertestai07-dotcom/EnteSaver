@@ -159,13 +159,13 @@ static func invite_rows(friends: Dictionary, online_ids: Dictionary, in_group_id
 ## (players a team). A member's own "team" / "slot" (set_group_team) wins; the rest fill in join
 ## order: DUO BLUE = leader + first member, ORANGE = the next two; SQUAD all BLUE.
 static func team_entries(list: Array, size: int) -> Array:
-	var per := maxi(size, 1)
+	var per := NetGroup.per_team(size)
 	var taken := {}
 	var out: Array = []
 	for m: Dictionary in list:
 		if m.has("team") and m.has("slot"):
 			var t := clampi(int(m.team), 0, 1)
-			var s := clampi(int(m.slot), 0, per - 1)
+			var s := clampi(int(m.slot) - t * per, 0, per - 1)     # (Cloud's slot is the roster's: team * per + place)
 			if not taken.has("%d_%d" % [t, s]):
 				taken["%d_%d" % [t, s]] = true
 				out.append(_entry(m, t, s))
@@ -531,9 +531,9 @@ func open_teams() -> void:
 	_slot_panel = SlotPanel.new()
 	_slot_panel.editable = leader
 	_slot_panel.moved.connect(func(id: String, team: int, slot: int) -> void:
-		cloud_call("set_group_team", [id, team, slot]))
+		cloud_call("set_group_team", [id, team, team * NetGroup.per_team(Game.team_size) + slot]))
 	v.add_child(_slot_panel)
-	_slot_panel.show_slots(maxi(Game.team_size, 1), team_entries(members(), Game.team_size))
+	_slot_panel.show_slots(NetGroup.per_team(Game.team_size), team_entries(members(), Game.team_size))
 
 
 ## The group changed: the bar, the invite's popup and the open TEAMS panel follow.
@@ -542,7 +542,7 @@ func on_group_changed() -> void:
 	_follow_invited()
 	if _slot_panel and is_instance_valid(_slot_panel):
 		_slot_panel.editable = is_leader()
-		_slot_panel.show_slots(maxi(Game.team_size, 1), team_entries(members(), Game.team_size))
+		_slot_panel.show_slots(NetGroup.per_team(Game.team_size), team_entries(members(), Game.team_size))
 
 
 func process(delta: float) -> void:
