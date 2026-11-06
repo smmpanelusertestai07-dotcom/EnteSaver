@@ -1,17 +1,32 @@
 class_name Effects
 extends RefCounted
 ## Lightweight visual effects (tracers, impacts, muzzle flashes, explosions).
-## Everything is created on demand and frees itself.
+## Everything is created on demand and frees itself, but the bullet holes: one MultiMesh per scene
+## holds them all (one draw call), the oldest overwritten, each cleared after HOLE_LIFE_S.
 
 const MAX_HOLES := 40
+const HOLE_LIFE_S := 12.0
+const HIDDEN_HOLE := Transform3D(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0, -1000, 0))   # an empty slot: no size, far below
 
 static var _mats := {}
 static var _meshes := {}
-static var _holes: Array = []
+static var _hole_mmi: MultiMeshInstance3D
+static var _hole_born := PackedInt64Array()   # tick (ms) each hole was made, -1 when its slot is empty
+static var _hole_next := 0
 static var _hole_mat: StandardMaterial3D
 static var muzzle_tex: Texture2D
 static var glow_tex: Texture2D
 static var lights_enabled := true
+## Share of each burst's particles that are made (they are CPU-simulated), see configure().
+static var particle_share := 1.0
+
+
+## The graphics level and the VISUAL EFFECTS setting (full): lights on muzzle flashes and explosions
+## from HIGH up and only with the effects on; particle bursts at half on LOW and at half again with
+## the effects off (a burst keeps 2 particles at least, so hits still spark).
+static func configure(level: int, full: bool) -> void:
+	lights_enabled = level >= 2 and full
+	particle_share = (0.5 if level <= 0 else 1.0) * (1.0 if full else 0.5)
 
 
 static func _mat(color: Color, additive := true, tex: Texture2D = null, billboard := false) -> StandardMaterial3D:
@@ -121,7 +136,7 @@ static func _burst(parent: Node, pos: Vector3, normal: Vector3, color: Color, am
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.explosiveness = 1.0
-	p.amount = amount
+	p.amount = maxi(roundi(amount * particle_share), 2)
 	p.lifetime = life
 	p.local_coords = false
 	p.mesh = _box(Vector3(size, size, size * 3.0))
@@ -147,19 +162,58 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 		return
 	_burst(parent, pos + normal * 0.02, normal, Color(1.0, 0.75, 0.35, 1), 7, 5.0, 0.025, 0.22)
 	_burst(parent, pos + normal * 0.05, normal, Color(0.55, 0.52, 0.48, 0.55), 4, 1.2, 0.09, 0.45, 0.5)
-	var hole := MeshInstance3D.new()
-	hole.mesh = _quad(Vector2(0.07, 0.07))
-	hole.material_override = _hole_material()
-	hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	parent.add_child(hole)
 	var up := Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT
-	hole.global_transform = Transform3D(Basis.looking_at(-normal, up), pos + normal * 0.012)
-	_holes.append(hole)
-	while _holes.size() > MAX_HOLES:
-		var old: Variant = _holes.pop_front()
-		if is_instance_valid(old):
-			(old as Node).queue_free()
-	_free_after(hole, 12.0)
+	var mm := _hole_layer(parent).multimesh
+	mm.set_instance_transform(_hole_next, Transform3D(Basis.looking_at(-normal, up), pos + normal * 0.012))
+	_hole_born[_hole_next] = Time.get_ticks_msec()
+	_hole_next = (_hole_next + 1) % MAX_HOLES
+
+
+## Every bullet hole of the scene is an instance of one MultiMesh (one draw call, not one each): a
+## ring of MAX_HOLES, the oldest overwritten; a hole goes after HOLE_LIFE_S (a timer clears it).
+static func _hole_layer(parent: Node) -> MultiMeshInstance3D:
+	if is_instance_valid(_hole_mmi) and _hole_mmi.get_parent() == parent:
+		return _hole_mmi
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = _quad(Vector2(0.07, 0.07))
+	mm.instance_count = MAX_HOLES
+	_hole_mmi = MultiMeshInstance3D.new()
+	_hole_mmi.name = "BulletHoles"
+	_hole_mmi.multimesh = mm
+	_hole_mmi.material_override = _hole_material()
+	_hole_mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(_hole_mmi)
+	_hole_born.resize(MAX_HOLES)
+	_hole_born.fill(-1)
+	_hole_next = 0
+	for i in MAX_HOLES:
+		mm.set_instance_transform(i, HIDDEN_HOLE)
+	var t := Timer.new()
+	t.wait_time = 1.0
+	t.autostart = true
+	t.timeout.connect(_clear_old_holes)
+	_hole_mmi.add_child(t)
+	return _hole_mmi
+
+
+static func _clear_old_holes() -> void:
+	if not is_instance_valid(_hole_mmi):
+		return
+	var now := Time.get_ticks_msec()
+	for i in _hole_born.size():
+		if _hole_born[i] >= 0 and now - _hole_born[i] > int(HOLE_LIFE_S * 1000.0):
+			_hole_born[i] = -1
+			_hole_mmi.multimesh.set_instance_transform(i, HIDDEN_HOLE)
+
+
+## The bullet holes showing now (tests, the draw-call budget sweep).
+static func hole_count() -> int:
+	var n := 0
+	if is_instance_valid(_hole_mmi):
+		for b in _hole_born:
+			n += 1 if b >= 0 else 0
+	return n
 
 
 ## Bullet hole: a dark round core with a soft edge and a faint chipped rim, lit like the surface

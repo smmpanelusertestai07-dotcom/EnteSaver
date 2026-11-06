@@ -1,13 +1,20 @@
 extends Node
 ## Friends and custom rooms end to end (Cloud through tests/mqtt_mock.gd, started by
-## tools/qa/run_checks.sh). The guest (LW_LAN_ROLE=guest) asks the host to be friends and the host
-## accepts; the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
+## tools/qa/run_checks.sh). The guest (LW_NET_ROLE=guest) asks the host to be friends and the host
+## accepts; each phone lists the other's signed player card (v2: picture, banner, level and
+## signature, kept by the broker) and sees a new banner arrive once the other phone changes it;
+## the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
 ## and ammo); the guest tries a wrong password (refused), then the right one; the host sees it in
 ## the room and starts; both play the match with the room's rules (the host's walls never run out)
 ## and the host wins. Prints "ROOM CHECK DONE bad=N".
 
 const CODE := "424242"
 const PIN := "4821"
+## Each phone's name card (its banner changes to "then" once it has seen the other's card).
+const CARDS := {
+	"host": {"avatar": "neon", "banner": "hive", "signature": "HOST SIDE", "xp": 5740, "then": "shards"},
+	"guest": {"avatar": "royal", "banner": "scope", "signature": "GUEST SIDE", "xp": 0, "then": "contour"},
+}
 
 var bad := 0
 var at: Node
@@ -15,7 +22,11 @@ var at: Node
 
 func run(autotest: Node) -> int:
 	at = autotest
-	var host := OS.get_environment("LW_LAN_ROLE") == "host"
+	var host := OS.get_environment("LW_NET_ROLE") == "host"
+	var me: Dictionary = CARDS["host" if host else "guest"]
+	var them: Dictionary = CARDS["guest" if host else "host"]
+	for k: String in ["avatar", "banner", "signature", "xp"]:
+		Game.profile[k] = me[k]
 	var cloud := Game.cloud_service()
 	cloud.start_lobby()
 	var started := [false]
@@ -33,7 +44,44 @@ func run(autotest: Node) -> int:
 			return _done("friend request not sent")
 	if not await _until(func() -> bool: return Game.is_friend(other), 20.0):
 		_fail("not friends after the request was accepted")
+	if not cloud.friend_requests.is_empty() or not (Game.profile.friend_out as Dictionary).is_empty():
+		_fail("friend requests left over after the answer")
+	# ALL PLAYERS: the other phone's signed card (v3, with its career) is kept by the broker and listed whole; a
+	# change of its banner publishes it again.
+	cloud.start_directory()
+	if not await _until(func() -> bool: return cloud.directory.has(other), 20.0):
+		_fail("the other player's card never arrived")
+	else:
+		var card: Dictionary = cloud.directory[other]
+		var level := clampi(1 + int(them.xp) / Game.XP_PER_LEVEL, 1, Cloud.CARD_LEVEL_MAX)
+		if String(card.name) != String(cloud.peers[other].name):
+			_fail("the card's name differs from the lobby's")
+		if int(card.v) != 3 or (card.career as Dictionary).size() != 5 or card.avatar != them.avatar or card.banner != them.banner or int(card.level) != level \
+				or card.signature != them.signature:
+			_fail("the other player's v3 card did not come through whole: %s" % str(card))
+		at.log_line("card v3: picture %s, banner %s, LV %d, \"%s\", career %s" % [card.avatar, card.banner, int(card.level), card.signature,
+			str(card.career)])
+		Game.profile.banner = me.then
+		if not await _until(func() -> bool: return String((cloud.directory.get(other, {}) as Dictionary).get("banner", "")) == them.then, 20.0):
+			_fail("the other player's new banner never arrived (a changed card is published again)")
+	cloud.stop_directory()
 	at.log_line("friends: %s (code %s)" % [Game.is_friend(other), Cloud.friend_code(other)])
+	# Friends chat (NetChat): each phone sends the other a message, encrypted to the friend's key and
+	# left on the relay; it arrives and is kept (unread), and its waiting copy is taken off the relay.
+	var why := "?"
+	for _i in 12:
+		why = cloud.send_friend_chat(other, "hello from %s!" % ("host" if host else "guest"))
+		if why == "":
+			break
+		await at.wait(0.5)
+	if why != "":
+		_fail("the friends chat message could not be sent (%s)" % why)
+	var want := "HELLO FROM %s!" % ("GUEST" if host else "HOST")
+	if not await _until(func() -> bool: return NetChat.messages(other).any(func(m: Array) -> bool:
+			return not bool(m[1]) and String(m[2]) == want), 20.0):
+		_fail("the friend's chat message never arrived")
+	else:
+		at.log_line("friends chat: \"%s\", unread %d" % [want, NetChat.unread(other)])
 	# Custom room.
 	if host:
 		cloud.open_room(PIN, {"rounds": 1, "walls": true, "ammo": true, "frags": false}, CODE)
@@ -67,13 +115,26 @@ func run(autotest: Node) -> int:
 	await at.wait(1.5)
 	var p: Fighter = arena.get("player")
 	var b: Fighter = arena.get("bot")
+	# The online HUD layer: the round trip to the other phone is measured, and the host's chat line
+	# (the room's encryption) shows in the guest's feed.
+	var hud_net: HudNet = (arena.get("hud") as Node).get_node_or_null("HudNet")
+	if hud_net == null:
+		_fail("the online HUD layer (ping, chat) is missing")
+	else:
+		if not await _until(func() -> bool: return cloud.peer_rtt >= 0 and cloud.relay_rtt >= 0, 10.0):
+			_fail("no round trip measured (opponent %d ms, relay %d ms)" % [cloud.peer_rtt, cloud.relay_rtt])
+		at.log_line("ping: opponent %d ms, relay %d ms" % [cloud.peer_rtt, cloud.relay_rtt])
+		if host:
+			hud_net.send("nice shot")
+		elif not await _until(func() -> bool: return hud_net.feed.any(func(e: Dictionary) -> bool: return String(e.text) == "NICE SHOT"), 10.0):
+			_fail("the opponent's chat line never showed")
 	if host:
 		p.deploy_shield()
 		await at.wait(0.3)
 		if p.shields < 9 or p.weapon().reserve < 300:
 			_fail("unlimited walls / ammo did not top up (walls %d, reserve %d)" % [p.shields, p.weapon().reserve])
 		await at.wait(1.0)
-		b.take_damage(9999.0, "head", p, p.global_position)
+		await _shoot_down(at, arena, p, b)
 	if not await _until(func() -> bool: return bool(arena.get("_result_shown")), 30.0):
 		return _done("the match did not end")
 	var winner: Variant = arena.get("_winner")
@@ -104,3 +165,14 @@ func _done(error: String) -> int:
 		_fail(error)
 	at.log_line("ROOM CHECK DONE bad=%d" % bad)
 	return bad
+
+## The other phone takes only real hits (one bullet of the round's gun at most, at most as fast
+## as it fires), so the host lands real headshots until the remote player goes down.
+func _shoot_down(runner: Node, match_arena: Node, shooter: Fighter, target: Fighter) -> void:
+	var d: Dictionary = Weapons.DEFS[String(match_arena.call("_round_gun"))]
+	var hit := float(d.damage) * float(d.head_mult) * Weapons.pen_mult(d, "head")
+	for _i in 20:
+		if not target.alive:
+			return
+		target.take_damage(hit, "head", shooter, shooter.global_position)
+		await runner.wait(maxf(float(d.interval), 0.12))

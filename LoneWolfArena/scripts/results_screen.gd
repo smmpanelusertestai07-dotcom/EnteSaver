@@ -1,16 +1,27 @@
 class_name ResultsScreen
 extends Control
-## End-of-round results over the (still rendering) arena. setup(result) gets the dictionary
+## End-of-match results over the (still rendering) arena. setup(result) gets the dictionary
 ## built by arena.gd: won, draw, invalid, kills, damage, headshots, accuracy, time, xp, enemy,
-## mode, map, weapon, score_player, score_bot, hp_left, difficulty, taken.
+## mode (the name shown: TRAINING GROUND / LONE WOLF), mode_id ("training" / "lonewolf"), map,
+## weapon, score_player, score_bot, hp_left, difficulty (the bot's level, or ONLINE against a
+## player), taken; shots, hits, deaths and enemy_id go to the profile (Game.record_match).
 ## Layout (reference result screens, original art): mode + map top-left; a medal emblem with
 ## the big title (gold VICTORY / grey DEFEAT / white DRAW / red INVALID) top centre; the round
 ## score; a stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY, TIME, HP LEFT) with your
 ## row in blue and, when the arena offers scoreboard_rows(), the opponent's row in orange; an
 ## honour tag (x ~0.18-0.37 W, y 0.83-0.88 H); XP gained with an animated level bar in the
 ## bottom-left band; PLAY AGAIN (yellow, node PlayAgain, 0.661-0.819 W) and LOBBY (grey, node
-## Lobby, 0.836-0.992 W) in the 0.894-0.959 H band. Works unpaused at time scale 1. Android back
+## Lobby, 0.836-0.992 W) in the 0.88-0.96 H band. Works unpaused at time scale 1. Android back
 ## = LOBBY (ignored while PLAY AGAIN's match loading runs).
+## DUO / SQUAD (result.team, built by TeamArena._match_result): the plates read YOUR TEAM and the
+## other side (ORANGE TEAM, or the other player's name in a match against them); both teams' tables
+## side by side (TeamTables: TeamTable_0 blue, the player's team with the player first, and
+## TeamTable_1 orange; rows TeamRow_<n>, n the row's index in result.rows: name, K, KNOCKS, REVIVES,
+## DAMAGE, HS, ACC); PLAY AGAIN for a match on this phone. A match between two phones offers the
+## same two humans another one (see _build_online): PLAY AGAIN TOGETHER (node PlayAgainTogether) after
+## a co-op TEAM INVITE match, REMATCH (node Rematch) after one against the other player, in PLAY
+## AGAIN's place; none after a forfeit or once a player left (LOBBY only). ADD FRIEND for the other
+## player of an online match against them.
 
 const COLUMNS := ["ELIMINATIONS", "DAMAGE", "HEADSHOTS", "ACCURACY", "TIME", "HP LEFT"]
 const NAME_W := 250.0
@@ -35,6 +46,30 @@ var _intro_t0 := 0                # ticks (ms) of the intro (fade, medal pop, ti
 var _title: Control
 var _title_x := 0.0
 var _enemy := {}                  # the opponent's scoreboard row ({} when the scene has none)
+var _shades: Array[Control] = []  # the full-screen shades behind the content (see _fit_cutout)
+var _team := false                # a DUO / SQUAD result (result.team)
+var _team_online := false         # ... played between two phones
+var _team_again := false          # ... that offers PLAY AGAIN TOGETHER / REMATCH (team_again_offered)
+var _again_team := {}             # ... the same team again: {"size", "coop"} (Game.team_match)
+const TEAM_COLUMNS := ["K", "KNOCKS", "REVIVES", "DAMAGE", "HS", "ACC"]
+# An internet match (not one without internet): REMATCH and ADD FRIEND (see _build_online).
+const INVITE_DELAY_MS := 700      # the fresh challenge goes out this long after the old session is left
+const AWAIT_MS := 12000           # how long a phone waits for the other's fresh challenge
+const GUEST_GRACE_MS := 2500      # with the session gone the old guest first waits this long for the host's
+var _online := false
+var _enemy_id := ""
+var _peer_id := ""                # the other phone's player (the 1 vs 1 opponent, the teammate or the other team's player)
+var _peer_name := ""
+var _rematch: Button
+var _friend: Button
+var _status: Label
+var _want := false                # this player tapped REMATCH
+var _they_want := false           # the other player asked for it (their "rm", or their challenge came)
+var _they_take := true            # the other phone takes this one's challenges (their "rm" said)
+var _starting := false            # both want it: a fresh challenge is on its way
+var _loading := false             # the rematch's match is loading
+var _invite_ms := 0               # when this phone sends the fresh challenge (0: not now)
+var _await_ms := 0                # until when this phone waits for the other's (0: not waiting)
 
 
 func setup(result: Dictionary) -> void:
@@ -49,8 +84,22 @@ func setup(result: Dictionary) -> void:
 	var is_draw: bool = result.get("draw", false)
 	var invalid: bool = result.get("invalid", false)
 	_kind = "invalid" if invalid else ("draw" if is_draw else ("victory" if won else "defeat"))
+	_enemy_id = String(result.get("enemy_id", ""))
+	_online = String(result.get("mode_id", "")) == "lonewolf" and result.get("local", false) != true and Game.is_player_id(_enemy_id)
+	_peer_id = _enemy_id
+	_peer_name = String(result.get("enemy", "THE OPPONENT"))
+	_team = result.get("team", false) == true
+	if _team:
+		_online = false                   # (the 1 vs 1's REMATCH; a team match's own: _team_again)
+		_team_online = result.get("online", Game.online or Game.team_match.get("online", false) == true) == true
+		var other := other_player(Game.team_match)
+		_team_again = _team_online and team_again_offered(result, Game.team_match)
+		if _team_again:
+			_peer_id = String(other.id)
+			_peer_name = String(other.name)
+			_again_team = {"size": int(Game.team_match.size), "coop": bool(Game.team_match.coop)}
 	_hide_match_hud()
-	_enemy = _enemy_row()
+	_enemy = {} if _team else _enemy_row()
 	_build()
 	_animate_in()
 
@@ -107,6 +156,18 @@ func _palette() -> Array:
 			return [Color(1, 0.62, 0.55), Color(0.86, 0.18, 0.14), Color(0.95, 0.4, 0.32), Color(0.55, 0.1, 0.08)]
 
 
+## The screen's content stays clear of a camera cutout (UI.safe_margins); its shades reach under it.
+func _fit_cutout() -> void:
+	if not is_inside_tree():
+		return
+	var m := UI.safe_margins(get_viewport())
+	offset_left = m.x
+	offset_right = -m.y
+	for s: Control in _shades:
+		s.offset_left = -m.x
+		s.offset_right = m.y
+
+
 func _build() -> void:
 	var r := _result
 	var pal := _palette()
@@ -121,12 +182,20 @@ func _build() -> void:
 	var low := UI.gradient_rect([[0.0, Color(0, 0, 0, 0)], [0.6, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.7)]])
 	UI.full_rect(low)
 	add_child(low)
+	# Off a camera cutout: the screen keeps its content clear of it, its shades still reach the edges.
+	_shades = [shade, side, low]
+	var fit := Timer.new()
+	fit.wait_time = 1.0
+	fit.autostart = true
+	fit.timeout.connect(_fit_cutout)
+	add_child(fit)
+	_fit_cutout.call_deferred()
 	# Mode + map, top-left.
 	var head := VBoxContainer.new()
 	head.position = Vector2(40, 24)
 	head.add_theme_constant_override("separation", -6)
 	add_child(head)
-	head.add_child(UI.shadowed(UI.label(String(r.get("mode", "LONE WOLF")).to_upper(), 36, UI.TEXT, "heavy")))
+	head.add_child(UI.shadowed(UI.label(String(r.get("mode", Game.mode_name(String(r.get("mode_id", ""))))).to_upper(), 36, UI.TEXT, "heavy")))
 	head.add_child(UI.shadowed(UI.label(String(r.get("map", "CARGO CAGE")).to_upper(), 28, Color(0.72, 0.72, 0.74), "heavy")))
 	var sub := UI.label("VS %s  ·  %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper(),
 		String(r.get("weapon", "")).to_upper()], 16, UI.TEXT_DIM, "bold")
@@ -170,20 +239,32 @@ func _build() -> void:
 	score.alignment = BoxContainer.ALIGNMENT_CENTER
 	score.add_theme_constant_override("separation", 8)
 	add_child(score)
-	score.add_child(_score_plate("YOU", int(r.get("score_player", 0)), UI.BLUE, true))
+	score.add_child(_score_plate("YOUR TEAM" if _team else "YOU", int(r.get("score_player", 0)), UI.BLUE, true))
 	var colon := UI.label(":", 30, UI.TEXT, "number")
 	colon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	score.add_child(colon)
-	score.add_child(_score_plate(String(r.get("enemy", "BOT")).to_upper(), int(r.get("score_bot", 0)), UI.ORANGE, false))
+	score.add_child(_score_plate(String(r.get("enemy", "ORANGE TEAM" if _team else "BOT")).to_upper(), int(r.get("score_bot", 0)), UI.ORANGE, false))
+	var note := ""
 	if _kind == "invalid":
-		var why := UI.outlined(UI.label("INTEGRITY CHECK FAILED  -  THIS MATCH DOES NOT COUNT", 18, Color(1, 0.6, 0.55), "bold"), 4)
+		note = "INTEGRITY CHECK FAILED  -  THIS MATCH DOES NOT COUNT"
+	elif bool(r.get("opponent_left", false)):
+		note = "%s LEFT THE MATCH  -  THE WIN IS YOURS" % String(r.get("enemy", "THE OPPONENT")).to_upper()
+	if note != "":
+		var why := UI.outlined(UI.label(note, 18, Color(1, 0.6, 0.55) if _kind == "invalid" else Color(1.0, 0.86, 0.45), "bold"), 4)
+		why.name = "InvalidNote" if _kind == "invalid" else "OpponentLeft"
 		why.anchor_left = 0.0
 		why.anchor_right = 1.0
 		why.offset_top = 438
 		why.offset_bottom = 464
+		if _team:
+			why.offset_top = 258
+			why.offset_bottom = 282
 		why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		add_child(why)
-	_build_table()
+	if _team:
+		_build_team_tables()
+	else:
+		_build_table()
 	_build_footer()
 
 
@@ -253,8 +334,12 @@ func _build_table() -> void:
 	], true))
 	if not _enemy.is_empty():
 		var e := _enemy
+		# Under the opponent's name: ONLINE (LOCAL without internet) for another player (LEFT once they
+		# left the match), else BOT and its level.
+		var online := String(r.get("mode_id", "")) == "lonewolf"
+		var tag := "LEFT" if r.get("opponent_left", false) == true else ("LOCAL" if r.get("local", false) == true else "ONLINE")
 		table.add_child(_stat_row("EnemyRow", String(e.get("name", r.get("enemy", "BOT"))).to_upper(),
-			"BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
+			tag if online else "BOT  ·  %s" % String(r.get("difficulty", "")).to_upper(), [
 			[float(e.get("kills", 0)), "%d"], [float(e.get("damage", 0)), "%d"], [float(e.get("headshots", 0)), "%d"],
 			[float(e.get("accuracy", 0)), "%d%%"], [t, "time"], [float(e.get("hp", 0)), "%d"],
 		], false))
@@ -319,6 +404,99 @@ func _stat_row(node_name: String, who_name: String, sub: String, values: Array, 
 		tw.tween_property(l, "scale", Vector2(1.3, 1.3), 0.08)
 		tw.tween_property(l, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		i += 1
+	return row
+
+
+## DUO / SQUAD: both teams' tables side by side (rows: result.rows, else the arena's scoreboard).
+func _build_team_tables() -> void:
+	var rows: Array = _result.get("rows", []) if _result.get("rows") is Array else []
+	if rows.is_empty():
+		var scene := get_tree().current_scene if is_inside_tree() else null
+		if scene != null and scene.has_method("scoreboard_rows"):
+			rows = scene.call("scoreboard_rows")
+	var box := HBoxContainer.new()
+	box.name = "TeamTables"
+	box.anchor_left = 0.5
+	box.anchor_right = 0.5
+	box.offset_left = -560
+	box.offset_right = 560
+	box.offset_top = 286 if bool(_result.get("opponent_left", false)) else 268
+	box.offset_bottom = 560
+	box.add_theme_constant_override("separation", 20)
+	add_child(box)
+	_table = box
+	resized.connect(_layout_table)
+	_layout_table.call_deferred()
+	var n := maxi(int(_result.get("team_size", 0)), 1)
+	for side in 2:
+		var mine := side == 0
+		var col := VBoxContainer.new()
+		col.name = "TeamTable_%d" % side
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_theme_constant_override("separation", 2)
+		box.add_child(col)
+		var head := PanelContainer.new()
+		head.add_theme_stylebox_override("panel", UI.box(Color(UI.BLUE if mine else UI.ORANGE, 0.9), 0, 0, Color.TRANSPARENT, 10.0))
+		var hh := HBoxContainer.new()
+		head.add_child(hh)
+		var tl := UI.label("YOUR TEAM" if mine else String(_result.get("enemy", "ORANGE TEAM")).to_upper(), 19, UI.TEXT, "heavy")
+		tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hh.add_child(UI.ellipsis(tl))
+		hh.add_child(UI.label("ROUNDS %d" % int(_result.get("score_player" if mine else "score_bot", 0)), 17, UI.TEXT, "bold"))
+		col.add_child(head)
+		col.add_child(_team_cells("TeamHeader_%d" % side, "PLAYER", "", TEAM_COLUMNS, Color(0.19, 0.185, 0.18, 0.92), UI.TEXT_DIM, 14, 26))
+		var shown := 0
+		for i in rows.size():
+			var row: Variant = rows[i]
+			if not row is Dictionary:
+				continue
+			var d: Dictionary = row
+			if bool(d.get("ally", bool(d.get("me", false)))) != mine:
+				continue
+			shown += 1
+			var me := bool(d.get("me", false))
+			var sub := "YOU" if me else ("BOT" if bool(d.get("bot", false)) else ("LEFT" if String(d.get("status", "")) == "left" else "PLAYER"))
+			var vals := [str(int(d.get("kills", 0))), str(int(d.get("knocks", 0))), str(int(d.get("revives", 0))), str(int(d.get("damage", 0))),
+				str(int(d.get("headshots", 0))), "%d%%" % int(d.get("accuracy", 0))]
+			var base := Color(0.0, 0.32, 0.55, 0.92) if mine else Color(0.36, 0.15, 0.06, 0.9)
+			if me:
+				base = Color(0.02, 0.42, 0.68, 0.96)
+			var line := _team_cells("TeamRow_%d" % i, String(d.get("name", "?")).to_upper(), sub, vals, base, UI.TEXT, 22 if n <= 2 else 19,
+				44 if n <= 2 else 36)
+			col.add_child(line)
+		if shown == 0:
+			col.add_child(UI.label("NO PLAYERS", 15, UI.TEXT_DIM, "bold"))
+
+
+## One row of a team table: name (+ a small line under it) then the values, each in its own cell.
+func _team_cells(node_name: String, who: String, sub: String, values: Array, bg: Color, ink: Color, fs: int, h: int) -> Control:
+	var row := PanelContainer.new()
+	row.name = node_name
+	row.add_theme_stylebox_override("panel", UI.box(bg, 0, 0, Color.TRANSPARENT, 4.0))
+	row.custom_minimum_size = Vector2(0, h)
+	var rh := HBoxContainer.new()
+	rh.add_theme_constant_override("separation", 0)
+	row.add_child(rh)
+	var nv := VBoxContainer.new()
+	nv.alignment = BoxContainer.ALIGNMENT_CENTER
+	nv.add_theme_constant_override("separation", -4)
+	nv.custom_minimum_size = Vector2(150, 0)
+	nv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nv.size_flags_stretch_ratio = 2.3
+	var nl := UI.ellipsis(UI.label(who, fs if sub != "" else 14, ink, "bold"))
+	nl.name = "Name"
+	nv.add_child(nl)
+	if sub != "":
+		nv.add_child(UI.label(sub, 11, UI.ACCENT if sub == "YOU" else Color(1, 1, 1, 0.65), "bold"))
+	rh.add_child(nv)
+	for i in values.size():
+		var l := UI.label(String(values[i]), fs if sub != "" else 13, ink, "number" if sub != "" else "bold")
+		l.name = "Value_%d" % i
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		l.clip_text = true
+		rh.add_child(l)
 	return row
 
 
@@ -389,8 +567,8 @@ func _build_footer() -> void:
 	xr.name = "XpRow"
 	xr.anchor_left = 0.026
 	xr.anchor_right = 0.37
-	xr.anchor_top = 0.894
-	xr.anchor_bottom = 0.959
+	xr.anchor_top = 0.88
+	xr.anchor_bottom = 0.96
 	xr.add_theme_constant_override("separation", 14)
 	xr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(xr)
@@ -420,13 +598,19 @@ func _build_footer() -> void:
 	_xp_to = to
 	_lv_before = lv_before
 	_xp_t0 = Time.get_ticks_msec() + 450
-	# Buttons in the reference band: PLAY AGAIN (yellow) 0.661-0.819 W, LOBBY (grey) 0.836-0.992 W.
-	var again := UI.hero_button("PLAY AGAIN", 30, Vector2(0, 46))
-	again.name = "PlayAgain"
-	_place(again, 0.661, 0.819)
-	_again = again
-	again.pressed.connect(_play_again)
-	add_child(again)
+	# Buttons in the reference band: PLAY AGAIN (yellow) 0.661-0.819 W, LOBBY (grey) 0.836-0.992 W;
+	# an internet match has REMATCH in PLAY AGAIN's place and ADD FRIEND left of it.
+	if _online:
+		_build_online()
+	elif _team and _team_online:
+		_build_team_online()
+	else:
+		var again := UI.hero_button("PLAY AGAIN", 30, Vector2(0, 46))
+		again.name = "PlayAgain"
+		_place(again, 0.661, 0.819)
+		_again = again
+		again.pressed.connect(_play_again)
+		add_child(again)
 	var lobby := UI.button("LOBBY", 26, "light", Vector2(0, 46))
 	lobby.name = "Lobby"
 	_place(lobby, 0.836, 0.992)
@@ -437,8 +621,8 @@ func _build_footer() -> void:
 func _place(c: Control, x0: float, x1: float) -> void:
 	c.anchor_left = x0
 	c.anchor_right = x1
-	c.anchor_top = 0.894
-	c.anchor_bottom = 0.959
+	c.anchor_top = 0.88                # 58 px on the 720 px canvas: a full touch target
+	c.anchor_bottom = 0.96
 	c.offset_left = 0
 	c.offset_right = 0
 	c.offset_top = 0
@@ -450,17 +634,460 @@ func _play_again() -> void:
 		return
 	_again.disabled = true
 	if Game.online:
-		Game.goto_lobby()          # a Wi-Fi rematch is a new challenge from the lobby
+		Game.goto_lobby()          # (a match without internet: the next one is paired in the lobby)
 		return
 	Loading.start_match(get_tree().current_scene)
 
 
-## Android back = LOBBY, except while PLAY AGAIN's match loading runs.
+## Android back = LOBBY, except while PLAY AGAIN's (or a rematch's) match loading runs.
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST and is_inside_tree() and _built:
-		if _again and _again.disabled:
+		if (_again and _again.disabled) or _loading:
 			return
 		Game.goto_lobby()
+
+
+# ---------------------------------------------------------------- online: REMATCH and ADD FRIEND
+
+## An internet match's buttons: REMATCH (yellow, PLAY AGAIN's place), ADD FRIEND left of it while
+## the two are not friends, and a status line above them.
+## REMATCH needs both players. While the match's session is still up a tap tells the other phone
+## ("rm", Arena.ask_rematch, with whether this phone takes their challenges), whose screen then says
+## "<NAME> WANTS A REMATCH". Once both want it, both leave the old session and a fresh duel
+## challenge goes from the phone whose challenge the other takes (the old host when both do: no two
+## challenges crossing), INVITE_DELAY_MS later; the other phone takes it at once. With the session
+## gone (the other went back to the lobby) a tap sends the fresh challenge itself (the old guest
+## first waits GUEST_GRACE_MS for the host's). A challenge from the old opponent that comes here is
+## their rematch: REMATCH takes it. After a forfeit (they left the match) REMATCH is off.
+## DUO / SQUAD between two phones (_team_again) works the same way with the other phone's player:
+## PLAY AGAIN TOGETHER after a co-op match ("<NAME> WANTS TO PLAY AGAIN"), REMATCH after one against
+## them. The fresh invite is a team invite with the same size and coop (Cloud.team_invite, not
+## quick), and once both want it only the old host sends it (it runs the bots: the same roles and
+## sides). While the screen offers the button, Cloud lets that player's team invite of the same size
+## and coop through to it (Cloud.play_again), friend or not: as ACCEPT, or taken at once after this
+## player's tap. The new match is the team match of the session it starts (_on_session).
+func _build_online() -> void:
+	_status = UI.outlined(UI.label("", 19, UI.TEXT, "bold"), 4)
+	_status.name = "RematchStatus"
+	_status.anchor_left = 0.40
+	_status.anchor_right = 0.992
+	_status.anchor_top = 0.815
+	_status.anchor_bottom = 0.87
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_status)
+	_rematch = UI.hero_button(_caption(), 22 if _coop_again() else 30, Vector2(0, 46))
+	_rematch.name = "PlayAgainTogether" if _coop_again() else "Rematch"
+	_place(_rematch, 0.56 if _coop_again() else 0.661, 0.819)      # (co-op: no ADD FRIEND, room for the longer word)
+	# Its Caption shows the state (_set_rematch); the button's own text stays for checks, never drawn.
+	_rematch.clip_text = true
+	for c: String in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color", "font_disabled_color"]:
+		_rematch.add_theme_color_override(c, Color.TRANSPARENT)
+	_rematch.pressed.connect(_on_rematch)
+	add_child(_rematch)
+	if bool(_result.get("opponent_left", false)):
+		_set_rematch(_caption(), false)
+		_say("%s LEFT: NO REMATCH" % _name(), UI.TEXT_DIM)
+	if not _coop_again() and not Game.is_friend(_peer_id) and not Game.is_blocked(_peer_id):
+		var asked := Game.cloud_service().friend_asked(_peer_id)
+		_friend = UI.button("REQUEST SENT" if asked else "ADD FRIEND", 22, "dark" if asked else "light", Vector2(0, 46))
+		_friend.name = "AddFriend"
+		_friend.disabled = asked
+		_place(_friend, 0.47, 0.645)
+		_friend.pressed.connect(_on_add_friend)
+		add_child(_friend)
+	if _rematch.disabled:
+		return
+	var cl := Game.cloud_service()
+	if _team_again:
+		# Their team invite reaches this screen (as ACCEPT, or taken at once after this player's tap)
+		# for as long as the screen offers the button, not only after the tap: once the old session
+		# is gone (a phone away, the relay dropped), each phone's fresh invite must still get through.
+		cl.play_again = {"id": _peer_id, "size": int(_again_team.size), "coop": bool(_again_team.coop)}
+	cl.invited.connect(_on_invited)
+	cl.invite_answered.connect(_on_answered)
+	cl.invite_cancelled.connect(_on_their_challenge_gone)
+	cl.invite_failed.connect(_on_failed)
+	cl.session_started.connect(_on_session)
+	cl.session_ended.connect(_on_session_ended)
+	var a := _arena()
+	if a != null and a.has_signal("rematch_asked"):
+		a.connect("rematch_asked", _on_they_want)
+		if a.get("rematch_wanted") == true:
+			_on_they_want.call_deferred()
+
+
+## DUO / SQUAD between two phones: PLAY AGAIN TOGETHER / REMATCH as the 1 vs 1's REMATCH
+## (_build_online) when the results offer it (_team_again). Otherwise (a forfeit, a player left) no
+## PLAY AGAIN: LOBBY, and ADD FRIEND for the other player of a match against them (in PLAY AGAIN's
+## place) while the two are not friends.
+func _build_team_online() -> void:
+	if _team_again:
+		_build_online()
+		return
+	if not Game.is_player_id(_enemy_id) or Game.is_friend(_enemy_id) or Game.is_blocked(_enemy_id):
+		return
+	_status = UI.outlined(UI.label("", 19, UI.TEXT, "bold"), 4)
+	_status.name = "RematchStatus"
+	_status.anchor_left = 0.40
+	_status.anchor_right = 0.992
+	_status.anchor_top = 0.815
+	_status.anchor_bottom = 0.87
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_status)
+	var asked := Game.cloud != null and Game.cloud.friend_asked(_enemy_id)
+	_friend = UI.button("REQUEST SENT" if asked else "ADD FRIEND", 22, "dark" if asked else "light", Vector2(0, 46))
+	_friend.name = "AddFriend"
+	_friend.disabled = asked
+	_place(_friend, 0.661, 0.819)
+	_friend.pressed.connect(_on_add_friend)
+	add_child(_friend)
+
+
+## The other phone's player in an online team match (`tm`: Game.team_match): {"id", "name"} of the
+## roster's human who is not this player, {} when there is none.
+static func other_player(tm: Dictionary) -> Dictionary:
+	var roster: Variant = tm.get("roster")
+	if not roster is Array or not bool(tm.get("online", false)):
+		return {}
+	for e: Variant in roster:
+		if e is Dictionary and not bool((e as Dictionary).get("bot", true)) and int((e as Dictionary).get("slot", -1)) != int(tm.get("my_slot", 0)) \
+				and Game.is_player_id((e as Dictionary).get("id")):
+			return {"id": String(e.id), "name": String((e as Dictionary).get("name", "PLAYER"))}
+	return {}
+
+
+## Whether an online team match's results offer PLAY AGAIN TOGETHER / REMATCH (`r`: the result, `tm`:
+## Game.team_match): only with the other phone's player known, never after a forfeit (they left:
+## result.opponent_left), once a player left (a row LEFT), or after a match that ended early or was
+## left (result.ended / left).
+## After an all-human match (a GROUP's, Game.team_match "multi") only LOBBY: the group stays together
+## in the lobby and its leader starts again from there.
+static func team_again_offered(r: Dictionary, tm: Dictionary) -> bool:
+	if bool(tm.get("multi", false)):
+		return false
+	if other_player(tm).is_empty() or bool(r.get("opponent_left", false)) or bool(r.get("ended", false)) or bool(r.get("left", false)) \
+			or bool(r.get("invalid", false)):
+		return false
+	var rows: Variant = r.get("rows")
+	if rows is Array:
+		for row: Variant in rows:
+			if row is Dictionary and String((row as Dictionary).get("status", "")) == "left":
+				return false
+	return true
+
+
+## PLAY AGAIN TOGETHER after a co-op team match between two phones, else REMATCH.
+func _caption() -> String:
+	return "PLAY AGAIN TOGETHER" if _coop_again() else "REMATCH"
+
+
+func _coop_again() -> bool:
+	return _team_again and bool(_again_team.get("coop", false))
+
+
+## The word in the status line: PLAY AGAIN (co-op) or REMATCH.
+func _word() -> String:
+	return "PLAY AGAIN" if _coop_again() else "REMATCH"
+
+
+## What starts or loads: THE NEXT MATCH (co-op) or THE REMATCH.
+func _what() -> String:
+	return "THE NEXT MATCH" if _coop_again() else "THE REMATCH"
+
+
+func _wants() -> String:
+	return "WANTS TO PLAY AGAIN" if _coop_again() else "WANTS A REMATCH"
+
+
+## The arena behind (the current scene) when it offers the rematch's calls, else null.
+func _arena() -> Node:
+	var s := get_tree().current_scene if is_inside_tree() else null
+	return s if s != null and s.has_method("leave_session") and s.has_method("ask_rematch") else null
+
+
+func _name() -> String:
+	return _peer_name.to_upper()
+
+
+## Whether this phone's DUEL CHALLENGES FROM lets the opponent's challenge through.
+func _takes_challenges() -> bool:
+	var who := int(Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE))
+	return who == Game.CHALLENGES_EVERYONE or (who == Game.CHALLENGES_FRIENDS and Game.is_friend(_peer_id))
+
+
+func _say(text: String, col := UI.TEXT) -> void:
+	if _status:
+		_status.text = text
+		_status.add_theme_color_override("font_color", col)
+
+
+func _set_rematch(text: String, enabled: bool) -> void:
+	if _rematch:
+		_rematch.text = text
+		UI.set_caption(_rematch, text)
+		_rematch.disabled = not enabled
+		_rematch.modulate.a = 1.0 if enabled else 0.6
+
+
+func _on_rematch() -> void:
+	if _starting or _rematch.disabled:
+		return
+	var cl := Game.cloud_service()
+	if cl.has_invite() and is_rematch_invite(cl.invite_from(), _peer_id, _again_team if _team_again else {}):
+		_take_challenge()                # their fresh challenge is here already: this tap takes it
+		return
+	_want = true
+	if _team_again:
+		cl.play_again = {"id": _peer_id, "size": int(_again_team.size), "coop": bool(_again_team.coop)}
+	var a := _arena()
+	if a != null and bool(a.call("ask_rematch", _takes_challenges())):
+		if _they_want:
+			_agree()
+		else:
+			_set_rematch("ASKED", false)
+			_say("%s ASKED: WAITING FOR %s" % [_word(), _name()])
+		return
+	_challenge_now()                     # the match's session is gone
+
+
+## The other player tapped REMATCH ("rm"): this screen asks, or both want it now.
+func _on_they_want() -> void:
+	if _they_want:
+		return
+	_they_want = true
+	var a := _arena()
+	_they_take = a == null or a.get("rematch_they_take") != false
+	if _want:
+		_agree()
+	elif not _starting:
+		_set_rematch(_caption(), true)
+		_say("%s %s" % [_name(), _wants()], UI.ACCENT)
+
+
+## Both want the rematch: out of the old session; the phone whose challenge the other takes sends
+## a fresh one a moment later, the other one waits for it (and takes it at once). A team match's
+## comes from the old host only (it runs the bots), so the old guest must take the host's.
+func _agree() -> void:
+	var a := _arena()
+	var i_take := _takes_challenges()
+	var host := a == null or bool(a.call("hosted"))
+	# Who invites: the host when the guest takes its challenge, else the guest when the host takes
+	# theirs (both phones work it out alike from the two answers).
+	var guest_takes := _they_take if host else i_take
+	var host_takes := i_take if host else _they_take
+	var i_invite := guest_takes if host else (not guest_takes and host_takes)
+	if _team_again and not guest_takes:
+		_stop_wanting()
+		_say("DUEL CHALLENGES FROM LEAVES THE HOST OUT: NO %s" % _word(), UI.BAD)
+		_set_rematch(_caption(), false)
+		return
+	if not guest_takes and not host_takes:
+		_stop_wanting()
+		_say("DUEL CHALLENGES ARE OFF ON BOTH PHONES: NO REMATCH", UI.BAD)
+		_set_rematch("REMATCH", false)
+		return
+	_starting = true
+	_set_rematch("STARTING", false)
+	_say("STARTING %s..." % _what(), UI.ACCENT)
+	if a != null:
+		a.call("leave_session")
+	if i_invite:
+		_invite_ms = Time.get_ticks_msec() + INVITE_DELAY_MS
+	else:
+		_await_ms = Time.get_ticks_msec() + AWAIT_MS
+		var cl := Game.cloud_service()
+		if cl.has_invite() and is_rematch_invite(cl.invite_from(), _peer_id, _again_team if _team_again else {}):
+			_take_challenge()
+
+
+## The match's session is gone: a fresh challenge from here (the old guest first gives the old
+## host's a moment, so two do not cross).
+func _challenge_now() -> void:
+	_starting = true
+	_set_rematch("STARTING", false)
+	_say(("INVITING %s AGAIN..." if _coop_again() else "SENDING %s A REMATCH CHALLENGE...") % _name())
+	var a := _arena()
+	if a != null:
+		a.call("leave_session")
+	var host := a == null or bool(a.call("hosted"))
+	_invite_ms = Time.get_ticks_msec() + (INVITE_DELAY_MS if host else GUEST_GRACE_MS)
+
+
+func _send_challenge() -> void:
+	var cl := Game.cloud_service()
+	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
+		_take_challenge()                # theirs came first: take it rather than cross it
+		return
+	if cl.waiting_for() != "" and String(cl.opponent.get("id", "")) == _peer_id:
+		return                           # (already sent)
+	if not cl.peers.has(_peer_id):
+		_give_up("%s IS NOT ONLINE NOW" % _name())
+	elif not (cl.team_invite(_peer_id, int(_again_team.size), bool(_again_team.coop)) if _team_again else cl.invite(_peer_id)):
+		_give_up("COULD NOT SEND THE CHALLENGE: TAP %s AGAIN" % _caption())
+	else:
+		_say("%s: WAITING FOR %s..." % [_word(), _name()], UI.ACCENT)
+
+
+## Takes the old opponent's fresh challenge (out of the old session first: the new room is not
+## this match's, which the arena leaving the tree later must not end).
+func _take_challenge() -> void:
+	_starting = true
+	_invite_ms = 0
+	_await_ms = 0
+	var a := _arena()
+	if a != null:
+		a.call("leave_session")
+	Game.cloud_service().answer(true)
+	_set_rematch("STARTING", false)
+	_say("STARTING %s..." % _what(), UI.ACCENT)
+
+
+func _give_up(why: String) -> void:
+	_starting = false
+	_want = false
+	_invite_ms = 0
+	_await_ms = 0
+	_say(why, UI.BAD)                    # (Cloud.play_again stays: their next invite still comes here)
+	_set_rematch(_caption(), true)
+
+
+## The rematch cannot be (a refusal shown): nothing goes out later either (_on_session_ended would
+## otherwise send it once the old session ends), and Cloud no longer takes their team invite.
+func _stop_wanting() -> void:
+	_want = false
+	_forget_play_again()
+
+
+## Cloud stops showing that player's team invite here (Cloud.play_again: set while the screen offers
+## PLAY AGAIN TOGETHER / REMATCH).
+func _forget_play_again() -> void:
+	if _team_again and Game.cloud != null and String(Game.cloud.play_again.get("id", "")) == _peer_id:
+		Game.cloud.play_again = {}
+
+
+## A challenge came in here: the old opponent's is their rematch (taken at once when this player
+## wants one too); anyone else's is declined (no lobby to show it). After a team match only that
+## player's team invite with the same size and coop is theirs; after a 1 vs 1 only their duel
+## challenge (a TEAM INVITE from them is not the rematch).
+func _on_invited(_who: String) -> void:
+	var cl := Game.cloud_service()
+	if not cl.has_invite():
+		return                           # (answered already)
+	var inv := cl.invite_from()
+	if _loading or not is_rematch_invite(inv, _peer_id, _again_team if _team_again else {}):
+		cl.answer(false)
+		return
+	if _want or _starting:
+		_take_challenge()
+	else:
+		_they_want = true
+		_set_rematch("ACCEPT", true)
+		_say("%s %s" % [_name(), _wants()], UI.ACCENT)
+
+
+## Whether an invite that came in on these results is the rematch: from the old opponent, with the
+## team wanted (a team match's size and coop; after a 1 vs 1 none, a duel challenge).
+static func is_rematch_invite(inv: Dictionary, peer_id: String, wanted_team: Dictionary) -> bool:
+	var team: Variant = inv.get("team", {})
+	return peer_id != "" and String(inv.get("id", "")) == peer_id and team is Dictionary and team == wanted_team
+
+
+func _on_answered(accepted: bool, _who: String) -> void:
+	if not accepted and _starting and not _loading:
+		_give_up("%s DID NOT TAKE %s" % [_name(), _what()])
+
+
+func _on_their_challenge_gone() -> void:
+	if _they_want and not _starting and not _loading:
+		_they_want = false
+		_set_rematch(_caption(), true)
+		_say("%s CALLED %s OFF" % [_name(), _what()], UI.TEXT_DIM)
+
+
+func _on_failed(_who: String) -> void:
+	if _starting and not _loading:
+		_give_up("COULD NOT REACH %s" % _name())
+
+
+## The rematch's session is up: its match loads (as an accepted challenge does in the lobby). After
+## a team match it is the team match of that session (LobbyFriends.session_team_match: the same two
+## humans, the old host hosting again), so team_arena_net loads.
+func _on_session(_host: bool) -> void:
+	if not _starting or _loading:
+		return
+	var cl := Game.cloud_service()
+	if _team_again:
+		var tm := LobbyFriends.session_team_match(cl) if cl.session_team == _again_team else {}
+		if tm.is_empty():
+			cl.end_session("left")         # (not the team asked for: nothing loads)
+			_give_up("COULD NOT START %s" % _what())
+			return
+		Game.team_match = tm
+	elif not cl.session_team.is_empty():
+		cl.end_session("left")             # (a team session on a 1 vs 1's results never loads as a duel)
+		_give_up("COULD NOT START %s" % _what())
+		return
+	_loading = true
+	_invite_ms = 0
+	_await_ms = 0
+	_forget_play_again()
+	Game.online = true
+	Game.session = cl
+	Game.room_rules = cl.session_rules.duplicate()
+	_set_rematch("LOADING", false)
+	if _friend:
+		_friend.disabled = true
+	_say("LOADING %s..." % _what(), UI.ACCENT)
+	Loading.start_match(get_tree().current_scene)
+
+
+## The match's session ended: the other player went back to the lobby. One that wanted the
+## rematch gets a fresh challenge there.
+func _on_session_ended(_reason: String) -> void:
+	if _want and not _starting and not _loading:
+		_challenge_now()
+
+
+func _on_add_friend() -> void:
+	if _friend == null or _friend.disabled:
+		return
+	if Game.cloud_service().request_friend(_enemy_id):
+		_friend.text = "REQUEST SENT"
+		_friend.disabled = true
+	else:
+		_say("COULD NOT SEND THE FRIEND REQUEST: TRY AGAIN", UI.BAD)
+
+
+func _step_rematch() -> void:
+	var now := Time.get_ticks_msec()
+	if _invite_ms > 0 and now >= _invite_ms:
+		_invite_ms = 0
+		_send_challenge()
+	if _await_ms > 0 and now >= _await_ms:
+		_await_ms = 0
+		if not _loading:
+			_give_up("NO CHALLENGE CAME FROM %s" % _name())    # (a team match's play-again stops here too)
+
+
+## Leaving (LOBBY, back): the old opponent's challenge waiting here is declined (the lobby would not
+## show it), the fresh challenge or team invite this screen sent and nobody took yet is called off
+## (the player left for the lobby and is not pulled into a match from there), and Cloud no longer
+## takes a team invite for this screen (Cloud.play_again).
+func _exit_tree() -> void:
+	if not (_online or _team_again) or Game.cloud == null:
+		return
+	_forget_play_again()
+	if _loading:
+		return
+	var cl := Game.cloud_service()
+	if cl.has_invite() and String(cl.invite_from().get("id", "")) == _peer_id:
+		cl.answer(false)
+	if _starting and not cl.in_session and cl.waiting_for_id() == _peer_id and _peer_id != "":
+		cl.cancel_invite()
 
 
 ## The XP bar fills over 0.9 s of real time (it never lags behind on slow frames).
@@ -577,6 +1204,7 @@ func _process(delta: float) -> void:
 	_t += delta
 	_step_intro()
 	_step_xp()
+	_step_rematch()
 	if _medal and (_kind == "victory" or _kind == "draw"):
 		_medal.queue_redraw()
 	if _again:

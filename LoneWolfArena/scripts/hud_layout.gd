@@ -13,6 +13,20 @@ extends RefCounted
 ## centre, jump and crouch to its right, prone at the top, the wall button over the fire button,
 ## medkit and sprint on the left, the weapon panel and its three slots 45 % larger; no left
 ## fire, reload, scoreboard or free-look buttons (reload: tap the panel; scores: tap the bar).
+## Later additions (missing from a saved layout, they take their default place): free look and a
+## LEFT FIRE button over the left side (hold to fire with the left thumb; it does not aim).
+## PRONE moved from the reference's place at the top (right of the score bar, centre-anchored)
+## to under the weapon panel, left of SCOPE: on screens narrower than about 18:9 the right-anchored
+## panel slid over the old place, hiding the button and taking its taps (MOVED repairs saved
+## layouts that still have it there). No two default touch areas overlap from 16:9 to 22:9 but the
+## gear's, which sits on the panel's corner on purpose.
+## A camera cutout at a short side of the screen (`inset`, set by the HUD from UI.safe_margins)
+## moves the edge-anchored widgets in by its width.
+## RELOAD (up and to the left of FIRE) and SWITCH (gun <-> fists, right beside RELOAD on its left,
+## where the reference puts its quick weapon switch next to its quick reload) are the reference's
+## quick reload and quick weapon switch buttons; the settings can turn them off, as the left fire
+## button (HUD.button_enabled), and the editor still places them. SWITCH sat left of the weapon
+## panel's small slots before (MOVED).
 
 const VERSION := 5
 const REF_ASPECT := 20.0 / 9.0
@@ -23,31 +37,42 @@ const OPACITY_MIN := 0.1         # editor opacity range 10 .. 100 %
 const PANEL_W := 3.3             # weapon panel width in slot heights
 const PANEL_H := 2.05            # main slot (1) + gap + the row of small slots
 const STRIP_H := 0.17            # zone status strip under the minimap, in minimap sides
-const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button
+const MIN_TOUCH := 0.036         # smallest touch radius (screen heights) of a round button (taps count to 1.15 x it: 60 px at 720)
+## Default places of earlier versions that have moved since: a saved layout that still has the
+## widget exactly there takes its new default place (size and opacity stay the player's).
+const MOVED := {"prone": [{"x": 0.673, "y": 0.073, "a": "c"}], "swap": [{"x": 0.712, "y": 0.235, "a": "r"}]}
+
+## The screen's sides that a camera cutout covers, in canvas pixels (x left, y right; the HUD and
+## the editor keep it up to date from UI.safe_margins): edge-anchored widgets keep their distance
+## to the safe area's edge, and nothing is kept on screen under the cutout.
+static var inset := Vector2.ZERO
 
 ## Hit-test order (first wins when two widgets overlap) and editor list.
-const ORDER := ["settings", "weapons", "fire_r", "scope", "freelook", "wall", "jump", "crouch", "prone", "sprint",
-	"medkit", "grenade", "minimap", "joystick"]
+const ORDER := ["settings", "weapons", "fire_r", "fire_l", "scope", "freelook", "wall", "jump", "crouch", "prone", "sprint",
+	"medkit", "grenade", "reload", "swap", "minimap", "joystick"]
 const DEFAULTS := {
 	"joystick": {"x": 0.18, "y": 0.71, "s": 0.23, "o": 0.8, "a": "l"},
 	"fire_r": {"x": 0.798, "y": 0.68, "s": 0.26, "o": 0.9, "a": "r"},
+	"fire_l": {"x": 0.09, "y": 0.39, "s": 0.15, "o": 0.85, "a": "l"},
 	"scope": {"x": 0.835, "y": 0.4, "s": 0.104, "o": 0.85, "a": "r"},
 	"freelook": {"x": 0.945, "y": 0.375, "s": 0.09, "o": 0.85, "a": "r"},
 	"wall": {"x": 0.0375, "y": 0.53, "s": 0.11, "o": 0.85, "a": "l"},
 	"jump": {"x": 0.906, "y": 0.519, "s": 0.166, "o": 0.85, "a": "r"},
 	"crouch": {"x": 0.922, "y": 0.834, "s": 0.166, "o": 0.85, "a": "r"},
-	"prone": {"x": 0.673, "y": 0.073, "s": 0.104, "o": 0.85, "a": "c"},
+	"prone": {"x": 0.762, "y": 0.385, "s": 0.104, "o": 0.85, "a": "r"},
 	"sprint": {"x": 0.181, "y": 0.438, "s": 0.131, "o": 0.85, "a": "l"},
 	"medkit": {"x": 0.0375, "y": 0.678, "s": 0.104, "o": 0.85, "a": "l"},
 	"grenade": {"x": 0.678, "y": 0.912, "s": 0.13, "o": 0.85, "a": "c"},
+	"reload": {"x": 0.73, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
+	"swap": {"x": 0.672, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
 	"settings": {"x": 0.9865, "y": 0.035, "s": 0.046, "o": 0.9, "a": "r"},
 	"weapons": {"x": 0.861, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
 }
 const LABELS := {
-	"joystick": "MOVE", "fire_r": "FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
+	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
 	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "freelook": "FREE LOOK",
-	"weapons": "WEAPONS", "minimap": "MAP",
+	"weapons": "WEAPONS", "minimap": "MAP", "reload": "RELOAD", "swap": "SWITCH",
 }
 
 
@@ -70,6 +95,10 @@ static func resolve(overrides: Dictionary) -> Dictionary:
 		var o: Variant = overrides.get(id)
 		if o is Dictionary:
 			var od := o as Dictionary
+			if _at_old_default(id, od):
+				od = od.duplicate()
+				for k in ["x", "y", "a"]:
+					od.erase(k)
 			for k in ["x", "y", "s", "o"]:
 				if od.has(k) and (od[k] is float or od[k] is int):
 					d[k] = float(od[k])
@@ -84,6 +113,17 @@ static func resolve(overrides: Dictionary) -> Dictionary:
 		d.id = id
 		out[id] = d
 	return out
+
+
+## True when a saved widget still sits exactly at a default place it had in an earlier version.
+static func _at_old_default(id: String, od: Dictionary) -> bool:
+	for old: Dictionary in MOVED.get(id, []):
+		var x: Variant = od.get("x")
+		var y: Variant = od.get("y")
+		if (x is float or x is int) and (y is float or y is int) and absf(float(x) - float(old.x)) < 0.0006 \
+				and absf(float(y) - float(old.y)) < 0.0006 and String(od.get("a", "")) == String(old.a):
+			return true
+	return false
 
 
 static func current() -> Dictionary:
@@ -103,9 +143,10 @@ static func to_save(layout: Dictionary) -> Dictionary:
 	return out
 
 
-## The HUD's size unit: the screen height, or less on screens narrower than 16:9 so it all fits.
+## The HUD's size unit: the screen height, or less where the safe width is narrower than 16:9 so
+## it all fits.
 static func unit(vs: Vector2) -> float:
-	return minf(vs.y, vs.x / MIN_ASPECT)
+	return minf(vs.y, maxf(vs.x - inset.x - inset.y, 1.0) / MIN_ASPECT)
 
 
 static func size_px(w: Dictionary, vs: Vector2) -> float:
@@ -136,9 +177,9 @@ static func raw_center(w: Dictionary, vs: Vector2) -> Vector2:
 	var x := vs.x * 0.5 + (float(w.x) - 0.5) * ref_w
 	match String(w.get("a", "c")):
 		"l":
-			x = float(w.x) * ref_w
+			x = inset.x + float(w.x) * ref_w
 		"r":
-			x = vs.x - (1.0 - float(w.x)) * ref_w
+			x = vs.x - inset.y - (1.0 - float(w.x)) * ref_w
 	return Vector2(x, float(w.y) * vs.y)
 
 
@@ -146,7 +187,8 @@ static func center(w: Dictionary, vs: Vector2) -> Vector2:
 	var he := half_extent(w, vs)
 	var c := raw_center(w, vs)
 	var m := 2.0
-	return Vector2(clampf(c.x, he.x + m, maxf(vs.x - he.x - m, he.x + m)), clampf(c.y, he.y + m, maxf(vs.y - he.y - m, he.y + m)))
+	var lo := inset.x + he.x + m
+	return Vector2(clampf(c.x, lo, maxf(vs.x - inset.y - he.x - m, lo)), clampf(c.y, he.y + m, maxf(vs.y - he.y - m, he.y + m)))
 
 
 ## Moves a widget so its centre is at `pos` (pixels), picking the anchor from the screen third.
@@ -159,9 +201,9 @@ static func place(w: Dictionary, pos: Vector2, vs: Vector2) -> void:
 		a = "r"
 	var x := 0.5 + (pos.x - vs.x * 0.5) / ref_w
 	if a == "l":
-		x = pos.x / ref_w
+		x = (pos.x - inset.x) / ref_w
 	elif a == "r":
-		x = 1.0 - (vs.x - pos.x) / ref_w
+		x = 1.0 - (vs.x - inset.y - pos.x) / ref_w
 	w.a = a
 	w.x = clampf(x, 0.02, 0.98)
 	w.y = clampf(pos.y / vs.y, 0.04, 0.98)

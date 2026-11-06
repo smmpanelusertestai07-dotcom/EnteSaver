@@ -4,7 +4,9 @@ extends Control
 ## (arena.minimap_texture over arena.map_rect) that follows the player, the player arrow with its
 ## view cone, the enemy as a red dot while revealed (shots / footsteps) or in sight, the red
 ## footprints of their running steps, and the white safe-zone circle. It clips its drawing to its own rect; until the render exists (first frames)
-## a dark floor plan from arena.obstacles stands in. The HUD places it from its layout.
+## a dark floor plan from arena.obstacles stands in. The HUD places it from its layout. DUO / SQUAD
+## (the HUD's HudTeam): teammates always, as blue dots with their number (a knocked one in a red
+## ring, one out of the round not at all); enemies as in the 1 vs 1 (ally_marks).
 
 const VIEW_M := 28.0                       # metres shown edge to edge
 const ARROW := Color(0.16, 0.8, 0.88)      # player arrow (cyan, like the reference)
@@ -81,12 +83,23 @@ func _draw() -> void:
 		draw_set_transform(fp, atan2(-d.x, d.y), Vector2(0.6, 1.0))
 		draw_circle(Vector2.ZERO, 4.4, Color(1.0, 0.3, 0.22, 0.85 * o * clampf(float(st.t) / 0.8, 0.0, 1.0)), true, -1.0, true)
 	draw_set_transform(Vector2.ZERO)
+	# Teammates (DUO / SQUAD): numbered blue dots, always.
+	var team: HudTeam = hud.get("team")
+	for m: Dictionary in ally_marks(team, origin, k):
+		var ap: Vector2 = m.pos
+		if bool(m.knocked):
+			draw_circle(ap, 10.0, Color(0.95, 0.24, 0.2, 0.95 * o), false, 2.5, true)
+		draw_circle(ap, 7.5, Color(0, 0, 0, 0.6 * o), true, -1.0, true)
+		draw_circle(ap, 6.2, Color(HudDraw.BLUE, o), true, -1.0, true)
+		HudDraw.text(self, str(int(m.n)), ap + Vector2(0, 0.5), 10, Color(1, 1, 1, o), 1, 0, "number")
 	# Enemy: red dot while revealed or in sight.
 	var reveal: Dictionary = hud._reveal
 	var seen: Dictionary = hud.seen
 	for f: Fighter in arena.get("fighters"):
 		if f == player or not f.alive:
 			continue
+		if team != null and f.team == team.my_team():
+			continue                       # (drawn above)
 		if not (reveal.has(f) or seen.get(f, false)):
 			continue
 		var ep := (Vector2(f.global_position.x, f.global_position.z) - origin) * k
@@ -107,6 +120,23 @@ func _draw() -> void:
 	arrow.append(arrow[0])
 	draw_polyline(arrow, Color(0, 0, 0, 0.6 * o), 1.2, true)
 	_frame(s, o)
+
+
+## The teammates' marks (the player's own arrow aside): [{"pos" (in the minimap), "n" (badge),
+## "knocked"}] for every teammate still in the round; [] without a team layer.
+static func ally_marks(team: HudTeam, origin: Vector2, k: float) -> Array:
+	var out := []
+	if team == null:
+		return out
+	var me := team.player()
+	var n := 0
+	for f: Fighter in team.members(team.my_team()):
+		n += 1
+		var st := team.status(f)
+		if f == me or st == "out" or st == "left":
+			continue
+		out.append({"pos": (Vector2(f.global_position.x, f.global_position.z) - origin) * k, "n": n, "knocked": st == "knocked"})
+	return out
 
 
 func _frame(s: Vector2, o: float) -> void:

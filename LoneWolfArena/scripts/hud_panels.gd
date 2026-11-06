@@ -9,6 +9,9 @@ extends Control
 ##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs. It stays
 ##    between the widgets listed in `avoid` (the HUD passes the minimap and the weapon panel),
 ##    so on 16:9 it gets narrower and its header and columns shrink to fit instead of covering them.
+##    DUO / SQUAD (a team arena): grouped by team, BLUE (the player's, the player first) then
+##    ORANGE, each under its band with the rounds won; columns STATUS (UP / KNOCKED / OUT / LEFT),
+##    KILLS, KNOCKS, REVIVES, DAMAGE, HP; shorter rows so a SQUAD board fits a 720 px screen.
 ## The HUD sends taps here first (tap() returns true when a panel used the tap).
 
 const CLASS_NAMES := {"AR": "ASSAULT RIFLE", "SMG": "SUBMACHINE GUN", "SG": "SHOTGUN", "PISTOL": "PISTOL",
@@ -165,9 +168,21 @@ func pick_close_rect() -> Rect2:
 	return Rect2(c - Vector2(0.032, 0.032) * u, Vector2(0.064, 0.064) * u)
 
 
+## A team arena's board (grouped by team).
+func team_board() -> bool:
+	return HudTeam.wanted(arena)
+
+
+## Row height of the board, in HUD units.
+func board_row_h() -> float:
+	if not team_board():
+		return 0.085
+	return 0.056 if _rows.size() > 4 else 0.07
+
+
 func board_rect() -> Rect2:
 	var u := _u()
-	var h := (0.155 + maxi(_rows.size(), 2) * 0.085 + 0.075) * u
+	var h := (0.155 + maxi(_rows.size(), 2) * board_row_h() + (0.09 if team_board() else 0.0) + 0.085) * u
 	var y0 := 0.17 * size.y
 	var lo := 0.05 * u
 	var hi := size.x - 0.05 * u
@@ -247,7 +262,10 @@ func _draw_pick() -> void:
 	var ly := r.position.y + 0.11 * u
 	draw_rect(Rect2(Vector2(r.position.x + 0.025 * u, ly - 0.014 * u), Vector2(0.007 * u, 0.028 * u)), Color(HudDraw.YELLOW, a))
 	var lw := HudDraw.text(self, "WEAPON", Vector2(r.position.x + 0.045 * u, ly), int(0.03 * u), Color(1, 1, 1, a), 0, 0, "bold")
-	HudDraw.text_parts(self, [["BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)], ["SELECTED WEAPON", HudDraw.YELLOW]],
+	# (DUO / SQUAD: every fighter picks its own gun, TeamArena; a 1 vs 1: both use the one picked)
+	var own := arena is TeamArena
+	HudDraw.text_parts(self, [["EVERY FIGHTER PICKS " if own else "BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)],
+		["THEIR OWN WEAPON" if own else "SELECTED WEAPON", HudDraw.YELLOW]],
 		Vector2(r.position.x + 0.07 * u + lw, ly), int(0.021 * u), 0, 0, "semi", a)
 	for i in pick_options.size():
 		_draw_card(i, a, u)
@@ -337,11 +355,13 @@ func _draw_board() -> void:
 	draw_rect(r, Color(HudDraw.PANEL_BG, HudDraw.PANEL_BG.a * a))
 	HudDraw.vband(self, Rect2(r.position, Vector2(r.size.x, 0.09 * u)), Color(1, 1, 1, 0.08 * a), Color(1, 1, 1, 0.02 * a))
 	HudDraw.corner_brackets(self, r.grow(-4), 0.035 * u, Color(1, 1, 1, 0.4 * a), 2.0)
-	var mode := "LONE WOLF"
+	var mode := Game.mode_name()
 	var map_name := "CARGO CAGE"
 	var round_i := 1
 	var goal := 1
 	if arena != null:
+		if arena.get("mode_name") != null:
+			mode = String(arena.get("mode_name"))
 		map_name = String(arena.get("map_name"))
 		round_i = int(arena.get("round_index"))
 		goal = int(arena.get("rounds_to_win"))
@@ -366,6 +386,9 @@ func _draw_board() -> void:
 	HudDraw.text_parts(self, right_parts, Vector2(right_x, hy), rfs, 2, 0, "semi", a)
 	var xr := board_close_rect()
 	HudDraw.close_button(self, xr.get_center(), xr.size.x * 0.5, a)
+	if team_board():
+		_draw_team_rows(r, u, a)
+		return
 	# Columns (header and value fonts fit the column width).
 	var cols := ["ROUNDS", "KILLS", "DAMAGE", "HEADSHOTS", "ACCURACY", "HP"]
 	var name_w := r.size.x * 0.33
@@ -421,5 +444,64 @@ func _draw_board() -> void:
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw, 0.006 * u), Color(0, 0, 0, 0.5 * a))
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw * hpf, 0.006 * u), Color(HudDraw.HP_WHITE, a))
 		y += row_h
-	HudDraw.text(self, "TAP THE SCORE BAR OR THE LIST BUTTON TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
+	HudDraw.text(self, "TAP THE SCORE BAR TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
+		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")
+
+
+## The team rows (scoreboard_rows with "team", "ally", "status", "knocks", "revives", "bot"): my team
+## first under a blue band, then the other under an orange one.
+func _draw_team_rows(r: Rect2, u: float, a: float) -> void:
+	var cols := ["STATUS", "KILLS", "KNOCKS", "REVIVES", "DAMAGE", "HP"]
+	var name_w := r.size.x * 0.3
+	var x0 := r.position.x + 0.03 * u
+	var col_w := (r.size.x - name_w - 0.06 * u) / cols.size()
+	var hfs := int(0.02 * u)
+	var widest := 0.0
+	for c in cols:
+		widest = maxf(widest, HudDraw.text_width(String(c), hfs, "semi"))
+	if widest > col_w * 0.92:
+		hfs = maxi(8, int(hfs * col_w * 0.92 / widest))
+	var hy2 := r.position.y + 0.115 * u
+	HudDraw.text(self, "PLAYER", Vector2(x0 + 0.03 * u, hy2), hfs, Color(0.7, 0.74, 0.8, a), 0, 0, "semi")
+	for c in cols.size():
+		HudDraw.text(self, String(cols[c]), Vector2(x0 + name_w + col_w * (c + 0.5), hy2), hfs, Color(0.7, 0.74, 0.8, a), 1, 0, "semi")
+	var rh := board_row_h() * u
+	var y := r.position.y + 0.145 * u
+	var score: Dictionary = arena.get("score") if arena != null and arena.get("score") is Dictionary else {}
+	var vfs := mini(int(0.028 * u), int(col_w * 0.9 / maxf(HudDraw.text_width("100", 100, "number") / 100.0, 0.01)))
+	for side in 2:
+		var mine := side == 0
+		var col := HudDraw.BLUE if mine else HudDraw.ORANGE
+		var band := Rect2(Vector2(x0, y), Vector2(r.size.x - 0.06 * u, 0.04 * u))
+		HudDraw.band(self, band, Color(col, 0.75 * a), Color(col, 0.1 * a))
+		HudDraw.text(self, "BLUE TEAM" if mine else "ORANGE TEAM", Vector2(x0 + 0.02 * u, band.get_center().y), int(0.024 * u), Color(1, 1, 1, a), 0, 0, "bold")
+		var won := int(score.get("player" if mine else "bot", 0))
+		HudDraw.text(self, "ROUNDS %d" % won, Vector2(band.end.x - 0.02 * u, band.get_center().y), int(0.022 * u), Color(1, 1, 1, 0.9 * a), 2, 0, "bold")
+		y += 0.045 * u
+		for row: Dictionary in _rows:
+			if bool(row.get("ally", bool(row.get("me", false)))) != mine:
+				continue
+			var rr := Rect2(Vector2(x0, y), Vector2(r.size.x - 0.06 * u, rh - 0.008 * u))
+			var st := String(row.get("status", "up" if bool(row.get("alive", true)) else "out"))
+			var gone := st == "out" or st == "left"
+			HudDraw.band(self, rr, Color(col, (0.12 if gone else 0.26) * a), Color(col, 0.04 * a))
+			draw_rect(Rect2(rr.position, Vector2(0.006 * u, rr.size.y)), Color(col, a))
+			var cy := rr.get_center().y
+			var nm := String(row.get("name", "?")).to_upper()
+			var nfs := int(0.028 * u)
+			var nw := HudDraw.text_width(nm, nfs, "bold")
+			if nw > name_w - 0.05 * u:
+				nfs = maxi(9, int(nfs * (name_w - 0.05 * u) / nw))
+			var name_col := HudDraw.YELLOW if bool(row.get("me", false)) else Color.WHITE
+			HudDraw.text(self, nm, Vector2(x0 + 0.025 * u, cy), nfs, Color(name_col, (0.55 if gone else 1.0) * a), 0, 0, "bold")
+			var st_col: Color = {"up": HudDraw.HEAL_GREEN, "knocked": HudTeam.KNOCK_RED, "left": HudTeam.OUT_GREY}.get(st, Color(1, 0.4, 0.35))
+			var vals := [st.to_upper(), str(row.get("kills", 0)), str(row.get("knocks", 0)), str(row.get("revives", 0)),
+				str(row.get("damage", 0)), str(row.get("hp", 0)) if st == "up" else "-"]
+			for c in vals.size():
+				var vc := Color(st_col, a) if c == 0 else Color(1, 1, 1, (0.6 if gone else 1.0) * a)
+				HudDraw.text(self, String(vals[c]), Vector2(x0 + name_w + col_w * (c + 0.5), cy), int(0.02 * u) if c == 0 else vfs, vc, 1, 0,
+					"bold" if c == 0 else "number")
+			y += rh
+		y += 0.005 * u
+	HudDraw.text(self, "TAP THE SCORE BAR TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.025 * u),
 		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")

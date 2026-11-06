@@ -3,8 +3,22 @@ extends Fighter
 ## Local player: over-the-shoulder camera, touch look / drag-fire, scopes, recoil and aim assist.
 
 const CAM_HEIGHT := 1.62
+## Over the right shoulder: the camera's pivot steps CAM_SHOULDER right of the head and CAM_RAISE
+## up (in the view's own axes), so the crosshair's ray passes clear of the own body and the head
+## sits below and left of the crosshair, never on it; the camera then hangs CAM_DIST behind.
 const CAM_SHOULDER := 0.55
+const CAM_RAISE := 0.2
 const CAM_DIST := 3.25
+## The camera's collision: a sphere this big is swept from the head to the pivot (a container at
+## the right side, a low roof) and the spring arm sweeps it behind (a wall at the back), against
+## the map and the deployed walls, so the view never cuts into a wall.
+const CAM_RADIUS := 0.18
+const CAM_MASK := LAYER_WORLD | LAYER_SHIELD
+## Nearer than this to the head the own model is hidden (no view from inside it); nearer than
+## FADE_DIST, or with the body within COVER_GAP of the crosshair's ray, it is see-through.
+const HEAD_CLEAR := 0.45
+const FADE_DIST := 0.95
+const COVER_GAP := 0.06
 const ADS_DIST := 1.5
 const FOV_HIP := 68.0
 const PITCH_MIN := -70.0
@@ -82,6 +96,8 @@ var _track_dir := Vector3.ZERO        # last camera->target chest direction (for
 var _track_target: Fighter
 var _victory_yaw := INF
 var _faded := false
+var _hidden_close := false            # the camera is at the head: the own model is hidden
+var _cam_query: PhysicsShapeQueryParameters3D
 var _cam_y := CAM_HEIGHT
 var _fov := FOV_HIP
 var _scope_hold := false              # "hold fire to scope" for snipers: fire on release
@@ -89,6 +105,8 @@ var ready_item := ""                  # "wall" or "grenade" in hand: FIRE puts i
 var _item_held := false               # FIRE is down with an item in hand (it goes on the release)
 var _wall_ghost: MeshInstance3D       # where the wall in hand would stand
 var arc_normal := Vector3.UP          # the surface the last grenade_arc() ends on
+var _tick_from := Vector3.INF         # the body's place before and after the last physics tick: at
+var _tick_to := Vector3.INF           # 90 or 120 frames a second the camera and the model are drawn between
 
 
 func _ready() -> void:
@@ -108,11 +126,11 @@ func _build_camera() -> void:
 	yaw_node.add_child(pitch_node)
 	spring = SpringArm3D.new()
 	spring.spring_length = CAM_DIST
-	spring.collision_mask = LAYER_WORLD
-	spring.margin = 0.15
-	spring.position = Vector3(CAM_SHOULDER, 0, 0)
+	spring.collision_mask = CAM_MASK
+	spring.margin = 0.08
+	spring.position = Vector3(CAM_SHOULDER, CAM_RAISE, 0)
 	var sph := SphereShape3D.new()
-	sph.radius = 0.15
+	sph.radius = CAM_RADIUS
 	spring.shape = sph
 	pitch_node.add_child(spring)
 	camera = Camera3D.new()
@@ -135,12 +153,31 @@ func is_scoped() -> bool:
 	return ads and scope_type() == "sniper"
 
 
+## The sight a gun aims through: "sniper" (the full scope), "2x" (a red-dot gun that lists a SCOPE
+## 2X: it aims at twice the hip view's zoom, see Weapons), "reddot", or "none" (iron sights, fists).
+static func sight_of(def: Dictionary) -> String:
+	var s := String(def.get("scope", "none"))
+	if s == "reddot" and "SCOPE 2X" in (def.get("attach", []) as Array):
+		return "2x"
+	return s
+
+
+## The sensitivity setting that turns the view: General from the hip, the sight's own while aiming
+## (Red Dot also for iron sights).
+static func sens_key(def: Dictionary, aiming: bool) -> String:
+	if not aiming:
+		return "sens_general"
+	match sight_of(def):
+		"sniper":
+			return "sens_sniper"
+		"2x":
+			return "sens_2x"
+	return "sens_reddot"
+
+
 ## Sensitivity for the current view (settings are 1..200, 100 = default speed).
 func _sensitivity() -> float:
-	var s: float = Game.settings.sens_general
-	if ads:
-		s = Game.settings.sens_sniper if scope_type() == "sniper" else Game.settings.sens_reddot
-	return maxf(s, 1.0) / 100.0
+	return maxf(float(Game.settings.get(sens_key(weapon().def, ads), 100)), 1.0) / 100.0
 
 
 func reset_for_round(pos: Vector3, yaw: float) -> void:
@@ -179,17 +216,33 @@ func die(killer: Fighter, headshot := false) -> void:
 	super(killer, headshot)
 
 
+## Team modes: knocked down (Fighter.knock): the item in hand goes away, FIRE lets go.
+func knock(by: Fighter, headshot := false) -> void:
+	put_away_item()
+	firing = false
+	_shot_wait = -1.0
+	_scope_hold = false
+	super(by, headshot)
+
+
 ## The aim was set directly (not dragged): firing decides afresh what to hold.
 func forget_aim_hold() -> void:
 	_anchor = ""
 
 
 func _assist_active() -> bool:
-	return assist_on and not is_free_looking()
+	return assist_on and not is_free_looking() and assist_allowed(int(Game.settings.get("aim_precision", 0)), ads)
+
+
+## The Aim precision setting: 0 assisted (the assist always works), 1 manual while aiming down a
+## sight (assisted from the hip), 2 fully manual. The red crosshair shows either way.
+static func assist_allowed(precision: int, aiming: bool) -> bool:
+	return precision <= 0 or (precision == 1 and not aiming)
 
 
 ## Free look (the eye button): while it is held a drag turns the camera all the way around the
-## character (its face too) without turning the character or the aim.
+## character (its face too) without turning the character or the aim, at the Free Look
+## sensitivity.
 func start_free_look() -> void:
 	free_look = alive and not firing
 
@@ -197,7 +250,7 @@ func start_free_look() -> void:
 func add_free_look(rel: Vector2) -> void:
 	if not free_look:
 		return
-	var deg_per_px := 130.0 / maxf(get_viewport().get_visible_rect().size.y, 1.0) * _sensitivity()
+	var deg_per_px := 130.0 / maxf(get_viewport().get_visible_rect().size.y, 1.0) * maxf(float(Game.settings.sens_freelook), 1.0) / 100.0
 	_free.x -= deg_to_rad(rel.x * deg_per_px)
 	_free.y = clampf(_free.y - deg_to_rad(rel.y * deg_per_px), deg_to_rad(-55.0), deg_to_rad(35.0))
 
@@ -211,12 +264,15 @@ func is_free_looking() -> bool:
 	return free_look or _free.length() > 0.02
 
 
+## A look drag of rel pixels: 130 degrees per screen height at sensitivity 100 (x the zoom while
+## aiming). A drag on the right fire button (from_fire_button) turns at Fire Button Drag percent of
+## that; the head "stop" keeps its share of the screen in thumb travel at any sensitivity.
 func add_look(rel: Vector2, from_fire_button := false) -> void:
 	if not alive:
 		return
 	var s := _sensitivity()
 	if from_fire_button:
-		s *= float(Game.settings.sens_fire) / 100.0
+		s *= maxf(float(Game.settings.sens_fire), 1.0) / 100.0
 	var vh := get_viewport().get_visible_rect().size.y
 	var deg_per_px := 130.0 / maxf(vh, 1.0) * s
 	if ads:
@@ -331,8 +387,10 @@ func set_firing(on: bool) -> void:
 			_item_held = false
 			_use_ready_item()
 		return
+	if on and reviving != null and arena and arena.has_method("cancel_revive"):
+		arena.cancel_revive(self)        # firing cancels a revive
 	var was := firing
-	firing = on and alive
+	firing = on and alive and not knocked
 	if firing and not was and scope_type() != "sniper" and not Weapons.is_melee(weapon().def):
 		_shot_wait = 0.0
 	elif not firing and was and _shot_wait >= 0.0:
@@ -362,7 +420,7 @@ func _fire_once() -> void:
 
 
 func toggle_ads() -> void:
-	if not alive or healing or ready_item != "" or Weapons.is_melee(weapon().def):
+	if not alive or healing or knocked or ready_item != "" or Weapons.is_melee(weapon().def):
 		return
 	ads = not ads
 	sprinting = false
@@ -371,7 +429,7 @@ func toggle_ads() -> void:
 
 
 func do_jump() -> void:
-	want_jump = true
+	want_jump = not knocked
 
 
 ## Crouch button: toggles stand <-> crouch (from prone it goes to crouch), like the reference mode.
@@ -383,8 +441,10 @@ func toggle_prone() -> void:
 	set_stance(Stance.STAND if stance == Stance.PRONE else Stance.PRONE)
 
 
+## Sprint on or off (the HUD asks every frame while the stick is pushed past the ring): never
+## while aiming, healing or firing, so firing keeps its slowdown; it comes back once FIRE is let go.
 func set_sprint(on: bool) -> void:
-	sprinting = on and stance == Stance.STAND and not ads and not healing
+	sprinting = on and stance == Stance.STAND and not ads and not healing and not firing
 
 
 func do_reload() -> void:
@@ -421,7 +481,7 @@ func _take_item(item: String) -> void:
 	if ready_item == item:
 		put_away_item()
 		return
-	if not alive or hold_fire or _item_count(item) <= 0 or (item == "grenade" and _throwing):
+	if not alive or hold_fire or knocked or reviving != null or _item_count(item) <= 0 or (item == "grenade" and _throwing):
 		return
 	if healing:
 		cancel_heal()
@@ -534,13 +594,14 @@ func _think(delta: float) -> void:
 	_v_drag = 0.0
 	_update_aim_assist(delta)
 	if firing and _shot_wait >= 0.0:
-		# The first shot leaves when the drag that began with the press stops (or never came).
+		# The first shot leaves when the drag that began with the press stops (or never came);
+		# manual aim (Aim precision) fires it at once.
 		_shot_wait += delta
 		var settling := _on_column and assist_target != null and aim_pitch > _head_in and aim_pitch <= _lip_hi \
 			and _shot_wait < DRAG_SHOT_WINDOW + DRAG_SHOT_SETTLE
 		# just beside a target: the pull puts the crosshair on it first (at most DRAG_SHOT_WINDOW)
 		settling = settling or (assist_target != null and aim_zone == "" and not _on_column and _shot_wait < DRAG_SHOT_WINDOW)
-		if (_shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_move >= 0.03)) and not settling:
+		if not _assist_active() or ((_shot_wait >= DRAG_SHOT_WINDOW or (_shot_wait >= DRAG_SHOT_START and _since_v_move >= 0.03)) and not settling):
 			_shot_wait = -1.0
 			_try_fire()
 	elif firing:
@@ -579,7 +640,9 @@ func _try_fire() -> void:
 	var fwd := _magnet_dir(start, ray[1])
 	if perform_shot(start, fwd):
 		Game.mark("player fired")
-		if arena and arena.has_method("net_shot"):
+		if net_local and arena and arena.has_method("net_shot_by"):
+			arena.net_shot_by(self, start, fwd)
+		elif arena and arena.has_method("net_shot"):
 			arena.net_shot(start, fwd)
 		_apply_recoil(w)
 		if scope_type() == "sniper" and ads and not _scope_hold:
@@ -600,7 +663,7 @@ func _apply_recoil(w: WeaponState) -> void:
 	recoil_yaw += rng.randf_range(-float(d.recoil_h), float(d.recoil_h)) * k
 	shake = minf(shake + (0.35 if int(d.pellets) > 1 else 0.1), 0.7)
 	if int(d.pellets) > 1 or String(d["class"]) == "SNIPER":
-		Game.vibrate(25)
+		Game.vibrate(25, "shooting")
 
 
 ## Yaw/pitch (radians) the aim needs so the camera's crosshair (including recoil) points at p.
@@ -693,8 +756,8 @@ func _update_aim_assist(delta: float) -> void:
 	var best_score := INF
 	var best_miss := PI
 	for f: Fighter in arena.fighters:
-		if f == self or not f.alive:
-			continue
+		if f == self or not f.alive or ally_of(f):
+			continue                     # (teammates: no assist, no red crosshair, no magnet)
 		var chest := f.chest_position()
 		var dist := xf.origin.distance_to(chest)
 		var miss := _body_miss_angle(f)
@@ -793,7 +856,26 @@ func _zone_on(f: Fighter) -> String:
 	return "body" if _body_miss_angle(f) <= deg_to_rad(float(ASSIST.bubble_deg)) else ""
 
 
+## The body moves in physics ticks (60 a second). The tick's start and end are kept, so frames in
+## between (90 or 120 FPS) draw the camera and the own model where the body is at that moment, not
+## where the last tick left it (which held still for a frame and then jumped: judder at 90 FPS).
+func _physics_process(delta: float) -> void:
+	_tick_from = global_position
+	super(delta)
+	_tick_to = global_position
+
+
+## Where the body is drawn this frame: at more frames than ticks a second, between the last tick's
+## start and end; else (and when it was moved outside a tick: a new round's spawn) where it is.
+func drawn_position() -> Vector3:
+	if Engine.max_fps <= Engine.physics_ticks_per_second or _tick_to != global_position or _tick_from == Vector3.INF:
+		return global_position
+	return _tick_from.lerp(_tick_to, clampf(Engine.get_physics_interpolation_fraction(), 0.0, 1.0))
+
+
 func _process(delta: float) -> void:
+	if model != null:
+		model.position = global_basis.inverse() * (drawn_position() - global_position)
 	super._process(delta)
 	if rig == null:
 		return
@@ -815,7 +897,7 @@ func _process(delta: float) -> void:
 		var to := watch.global_position + Vector3.UP * _cam_y
 		rig.global_position = rig.global_position.lerp(to, 1.0 - exp(-8.0 * delta))
 	else:
-		rig.global_position = global_position + Vector3.UP * _cam_y
+		rig.global_position = drawn_position() + Vector3.UP * _cam_y
 	var sx := (randf() - 0.5) * shake * 0.6
 	var sy := (randf() - 0.5) * shake * 0.6
 	if victory_cam or not alive:
@@ -850,21 +932,36 @@ func _process(delta: float) -> void:
 	var fov_target := float(w.def.ads_fov) if ads else FOV_HIP
 	_fov = lerpf(_fov, fov_target, 1.0 - exp(-14.0 * delta))
 	camera.fov = _fov
-	_update_fade(scoped)
-	var shoulder := 0.0 if (victory_cam or scoped) else (0.42 if ads else CAM_SHOULDER)
-	# Keep the shoulder offset out of walls (right side against a container): the spring arm
-	# only guards the line behind the shoulder, not the sideways step to it.
+	var pivot := Vector3.ZERO if (victory_cam or scoped) else (Vector3(0.42, CAM_RAISE * 0.5, 0) if ads else Vector3(CAM_SHOULDER, CAM_RAISE, 0))
+	# Keep the step to the pivot out of walls (the right side against a container, a low roof):
+	# the spring arm only guards the line behind the pivot, not the step to it.
 	var walled := false
-	if shoulder > 0.0:
-		var origin := pitch_node.global_position
-		var res := trace(origin, pitch_node.global_basis.x, shoulder + 0.2, LAYER_WORLD)
-		if not res.is_empty():
-			shoulder = maxf(origin.distance_to(res.position) - 0.2, 0.0)
+	if pivot != Vector3.ZERO:
+		var safe := _sweep(pitch_node.global_position, pitch_node.global_basis * pivot)
+		if safe < 1.0:
+			pivot *= safe
 			walled = true
-	if walled and shoulder < spring.position.x:
-		spring.position.x = shoulder        # pull in at once, ease back out
+	if walled and pivot.length() < spring.position.length():
+		spring.position = pivot             # pull in at once, ease back out
 	else:
-		spring.position.x = lerpf(spring.position.x, shoulder, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
+		spring.position = spring.position.lerp(pivot, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
+	_update_fade(scoped)
+
+
+## How far (0..1) a sphere the camera's size gets along `motion` from `from` before it would touch
+## the map or a deployed wall (1: all the way).
+func _sweep(from: Vector3, motion: Vector3) -> float:
+	if _cam_query == null:
+		_cam_query = PhysicsShapeQueryParameters3D.new()
+		var sph := SphereShape3D.new()
+		sph.radius = CAM_RADIUS
+		_cam_query.shape = sph
+		_cam_query.collision_mask = CAM_MASK
+		_cam_query.exclude = [get_rid()]
+	_cam_query.transform = Transform3D(Basis.IDENTITY, from)
+	_cam_query.motion = motion
+	var r := get_world_3d().direct_space_state.cast_motion(_cam_query)
+	return r[0] if r.size() == 2 else 1.0
 
 
 ## Finds an orbit angle with a clear 3 m view of the character (avoids walls).
@@ -885,16 +982,53 @@ func _pick_victory_yaw() -> float:
 	return best
 
 
+## The own model: hidden in the scope (a first-person view: head, hair and gun would fill it) and
+## with the camera pushed to the head (a wall behind and beside it); see-through while the camera
+## is close, or while the body would cover what the crosshair is on (the right side against a
+## container pulls the camera in behind the head).
 func _update_fade(scoped := false) -> void:
-	# The scope is a first-person view: the own model (head, hair, gun) would fill it.
-	if model.visible == scoped:
-		model.visible = not scoped
-	var close := spring.get_hit_length() < 0.95 and alive and not scoped
+	var own_view := alive and not victory_cam          # (dead: the camera is on the fall, then on the killer)
+	var cam := camera.global_position
+	var head := head_position()
+	_hidden_close = own_view and cam.distance_to(head) < (HEAD_CLEAR + (0.05 if _hidden_close else 0.0))
+	var gone := scoped or _hidden_close
+	if model.visible == gone:
+		model.visible = not gone
+	var close := own_view and not gone and (cam.distance_to(head) < FADE_DIST or covers_crosshair(COVER_GAP + (0.06 if _faded else 0.0)))
 	if close == _faded:
 		return
 	_faded = close
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).transparency = 0.75 if close else 0.0
+
+
+## True when the own body (any hit zone: head, torso, arms, legs) or the gun in hand comes within
+## `gap` m of the crosshair's ray between the camera and a little past the body: it would hide
+## what the crosshair is on.
+func covers_crosshair(gap := COVER_GAP) -> bool:
+	var xf := camera.global_transform
+	var from := xf.origin
+	var to := from - xf.basis.z * (from.distance_to(head_position()) + 1.2)
+	for hb: Area3D in hitboxes:
+		var cs := hb.get_child(0) as CollisionShape3D
+		var c := hb.global_position
+		var a := c
+		var b := c
+		var r := 0.0
+		if cs.shape is SphereShape3D:
+			r = (cs.shape as SphereShape3D).radius
+		elif cs.shape is CapsuleShape3D:
+			var cap := cs.shape as CapsuleShape3D
+			r = cap.radius
+			var half := hb.global_basis.y.normalized() * maxf(cap.height * 0.5 - r, 0.0)
+			a = c - half
+			b = c + half
+		var pts := Geometry3D.get_closest_points_between_segments(from, to, a, b)
+		if pts[0].distance_to(pts[1]) < r + gap:
+			return true
+	var hand := model.bone_position("hand_r")
+	var pts2 := Geometry3D.get_closest_points_between_segments(from, to, hand, model.muzzle_position())
+	return pts2[0].distance_to(pts2[1]) < 0.05 + gap
 
 
 func add_shake(amount: float) -> void:

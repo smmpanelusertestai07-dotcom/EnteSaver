@@ -18,12 +18,6 @@ const LIGHT := Color(0.851, 0.847, 0.839)         # secondary buttons (#D9D8D6)
 const TEXT := Color(0.97, 0.97, 0.96)
 const TEXT_DIM := Color(0.64, 0.64, 0.66)
 const BAD := Color(0.95, 0.30, 0.24)
-const RARITY_COLORS := {
-	"common": Color(0.62, 0.63, 0.65),
-	"rare": Color(0.20, 0.58, 1.0),
-	"epic": Color(0.66, 0.30, 1.0),
-	"legendary": Color(1.0, 0.74, 0.18),
-}
 const FONT_FILES := {
 	"bold": "res://assets/fonts/ui_bold",
 	"semi": "res://assets/fonts/ui_semibold",
@@ -31,6 +25,8 @@ const FONT_FILES := {
 	"number": "res://assets/fonts/number",
 }
 const ICON_DIR := "res://assets/ui/icons/"
+## The smallest touch target (canvas px on the 720 px tall canvas: about 9 mm on a phone).
+const TOUCH_MIN := 56.0
 const ART_DIR := "res://assets/ui/"
 
 static var _fonts := {}
@@ -213,10 +209,55 @@ static func hero_button(text: String, size := 44, min_size := Vector2(300, 80), 
 	return b
 
 
+## Screenshot tours and checks set this to stand in for a phone's camera cutout (x >= 0).
+static var margins_for_test := Vector2(-1.0, -1.0)
+
+
+## Keeps a full-screen Control's left and right edges clear of the camera cutout (safe_margins):
+## its offsets follow the cutout now, on a size change and every second (turning the phone over
+## moves the cutout to the other side without one).
+static func keep_clear_of_cutout(c: Control) -> void:
+	var apply := func() -> void:
+		if c.is_inside_tree():
+			var m := safe_margins(c.get_viewport())
+			c.offset_left = m.x
+			c.offset_right = -m.y
+	var t := Timer.new()
+	t.wait_time = 1.0
+	t.autostart = true
+	t.timeout.connect(apply)
+	c.add_child(t)
+	c.resized.connect(apply, CONNECT_DEFERRED)
+	apply.call_deferred()
+
+
+## The sides of the screen that a camera cutout covers, in `vp`'s canvas pixels (x left, y right;
+## the display's safe area, which immersive full screen does not keep clear by itself). In
+## landscape a punch-hole camera sits on a short side. Zero where the whole screen is safe and on
+## desktop builds; at most 12 % of the width a side.
+static func safe_margins(vp: Viewport) -> Vector2:
+	if margins_for_test.x >= 0.0 and not OS.has_feature("template"):
+		return margins_for_test
+	if vp == null or not OS.has_feature("mobile"):
+		return Vector2.ZERO
+	var safe := DisplayServer.get_display_safe_area()
+	var at := DisplayServer.window_get_position()
+	var win := DisplayServer.window_get_size()
+	var canvas_w := vp.get_visible_rect().size.x
+	if safe.size.x <= 0 or win.x <= 0:
+		return Vector2.ZERO
+	var k := canvas_w / float(win.x)
+	return Vector2(clampf(float(safe.position.x - at.x) * k, 0.0, canvas_w * 0.12),
+		clampf(float(at.x + win.x - safe.end.x) * k, 0.0, canvas_w * 0.12))
+
+
+## A button's caption: a hero button's "Caption" label, else the button's own text.
 static func set_caption(b: Button, text: String) -> void:
 	var cap := b.get_node_or_null("Caption") as Label
 	if cap:
 		cap.text = text
+	else:
+		b.text = text
 
 
 static func _draw_hero(b: Button) -> void:
@@ -313,7 +354,7 @@ static func segmented(options: Array, selected: int, on_change: Callable, size :
 		b.button_group = group
 		b.button_pressed = i == selected
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(min_w, 42)
+		b.custom_minimum_size = Vector2(min_w, TOUCH_MIN)
 		b.clip_text = true
 		b.add_theme_font_override("font", font("bold"))
 		b.add_theme_font_size_override("font_size", size)
@@ -412,7 +453,7 @@ static func _step_button(t: String) -> Button:
 	var b := Button.new()
 	b.text = t
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(40, 36)
+	b.custom_minimum_size = Vector2(TOUCH_MIN, TOUCH_MIN)
 	b.add_theme_font_override("font", font("bold"))
 	b.add_theme_font_size_override("font_size", 26)
 	var st := box(Color(0.88, 0.88, 0.87), 2, 0, Color.TRANSPARENT, 0.0)
@@ -549,6 +590,25 @@ static func style_scroll(sc: ScrollContainer) -> void:
 	bar.add_theme_stylebox_override("grabber_highlight", grip_hi)
 	bar.add_theme_stylebox_override("grabber_pressed", grip_on)
 	bar.custom_minimum_size = Vector2(8, 0)
+
+
+## How far (canvas px) a finger moves on a scrolling list before the touch becomes a scroll: a
+## smaller wobble is still a tap on the button under it (with no dead zone a 3 px wobble turned a
+## tap into a fling).
+const SCROLL_DEADZONE := 12
+
+
+## A finger drag scrolls `sc` wherever it starts on its rows. Buttons and plates keep a touch to
+## themselves (MOUSE_FILTER_STOP), so only the gaps between rows would scroll: every such control
+## under `content` passes the touch on to `sc` too. A tap still presses the button under it; once
+## the finger moves SCROLL_DEADZONE px the list scrolls and that press is dropped. Call it again
+## whenever the rows are built again.
+static func drag_scroll(sc: ScrollContainer, content: Control) -> void:
+	sc.scroll_deadzone = SCROLL_DEADZONE
+	for n in content.find_children("*", "Control", true, false):
+		var c := n as Control
+		if c.mouse_filter == Control.MOUSE_FILTER_STOP:
+			c.mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 ## A white glyph from assets/ui/icons/ (tinted), fitted into `size` px.

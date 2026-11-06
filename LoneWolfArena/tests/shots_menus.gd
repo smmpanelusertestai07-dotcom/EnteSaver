@@ -1,20 +1,26 @@
 extends Node
 ## Menus screenshot tour (everything outside the match), with real-input checks:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_menus.gd
-## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (menu
-## captions bright, drag to turn the character, START position report), name edit (pencil tap,
-## long name ends in "..."), the player card, how to play, the
-## wardrobe (card tap, rarity tab), every settings tab (tab taps, HIGH graphics, the HIGH / DEFAULT
-## sensitivity presets), credits, the quit dialog, START -> match loading overlay -> arena, the pause menu
-## (opened by Android back and by the HUD gear, settings inside it without the HUD editor
-## shortcut), results screens (win, defeat, draw, invalid) with the opponent's row in an empty
-## scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
+## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (the
+## reference's layout: the bottom bar's captions bright, FRIENDS and the gear top-right, no left
+## menu, stats chips, name plate or version; drag to turn the character, START position report),
+## the modes (mode card, SELECT MODE with the opponent chips, the DUMMY chip, LONE WOLF's START opens
+## the QUICK MATCH search, CANCEL; the size chips: DUO shows the TEAM bar, SOLO hides it), name edit (pencil tap, long name ends in "..."), the player card (opens
+## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
+## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
+## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
+## PLAY from the settings (MODES on top), the quit dialog, the match card of an online match, START ->
+## match loading overlay (TRAINING GROUND) -> arena, the in-match settings (opened by Android
+## back and by the HUD gear: QUIT MATCH in them, EDIT CUSTOM HUD opens the editor over the
+## match), results screens (win, defeat, draw, invalid, online) with the opponent's row in an
+## empty scene whose stub scoreboard stands in for the arena, PLAY AGAIN and LOBBY taps.
 ## Android back is sent the way the engine delivers it (_back(): the node, then its children
 ## by index, children added during the walk included), so a menu opened by a back request also
 ## receives that same request. Returns the number of failed checks.
 
 var _fails := 0
 var _at: Node
+var saved_guest := false
 ## The capture box draws 1-3 frames a second and caps the process step, so tweens (process
 ## time) lag the autotest timers (real time): waits before shots use _settle().
 
@@ -24,7 +30,10 @@ func run(at: Node) -> int:
 	var saved_settings: Dictionary = Game.settings.duplicate(true)
 	var saved_bundle := String(Game.profile.bundle)
 	var saved_name := String(Game.profile.name)
+	saved_guest = bool(Game.profile.guest_ok)
 	Game.settings.difficulty = 1
+	Game.mode = "training"
+	Game.practice = false
 	# The autotest boot goes straight to the lobby; wait for it, then look at the boot screen.
 	await _wait_scene("Lobby", 30.0)
 	Loading.hold_for_test = true
@@ -86,9 +95,30 @@ func run(at: Node) -> int:
 		return _fails
 	var marks: Dictionary = Game.get("_marks")
 	_check(marks.has("ui start"), "lobby reports the START position")
-	var howto := lobby.find_child("HowToPlayButton", true, false) as Control
-	var lum := await _caption_lum(howto)
-	_check(lum >= 230.0, "menu captions are drawn bright, not under their plate (HOW TO PLAY max lum %.0f)" % lum)
+	_check(lobby.find_child("Coins", true, false) == null and lobby.find_child("FeatureCard", true, false) == null
+		and _find_label(lobby, "OFFLINE") == null, "no coin strip, OFFLINE chip or featured card in the lobby")
+	var bar := lobby.find_child("BottomBar", true, false) as Control
+	var ward := lobby.find_child("BundlesButton", true, false) as Button
+	var online_btn := lobby.find_child("OnlineButton", true, false) as Button
+	_check(bar != null and ward != null and online_btn != null and ward.text == "WARDROBE" and online_btn.text == "ONLINE 1 VS 1"
+		and bar.is_ancestor_of(ward) and bar.is_ancestor_of(online_btn), "the bottom bar: WARDROBE and ONLINE 1 VS 1")
+	var vs0 := get_viewport().get_visible_rect().size
+	_check(bar != null and bar.get_global_rect().position.x < vs0.x * 0.05 and bar.get_global_rect().end.y > vs0.y * 0.9
+		and bar.get_global_rect().end.x < vs0.x * 0.5, "the bar sits bottom-left")
+	var pals := lobby.find_child("FriendsButton", true, false) as Control
+	var gear := lobby.find_child("SettingsButton", true, false) as Control
+	_check(pals != null and gear != null and pals.get_global_rect().position.x > vs0.x * 0.8 and pals.get_global_rect().end.x <= gear.get_global_rect().position.x
+		and gear.get_global_rect().end.y < vs0.y * 0.12, "FRIENDS left of the gear, top-right")
+	_check(lobby.find_child("Menu", true, false) == null and lobby.find_child("HowToPlayButton", true, false) == null
+		and lobby.find_child("CustomHudButton", true, false) == null and lobby.find_child("HelpButton", true, false) == null
+		and lobby.find_child("Stats", true, false) == null and lobby.find_child("OutfitName", true, false) == null
+		and _find_label(lobby, "v%s" % ProjectSettings.get_setting("application/config/version", "")) == null
+		and _find_label(lobby, String(Game.profile.name)) == lobby.find_child("PlayerName", true, false),
+		"no left menu, stats chips, outfit or version text, no name plate: the name only in the player card")
+	var lum := await _caption_lum(ward)
+	_check(lum >= 230.0, "the bar's captions are drawn bright (WARDROBE max lum %.0f)" % lum)
+	for c: Control in [ward, online_btn, pals, gear]:
+		_check(c.size.y >= UI.TOUCH_MIN and c.size.x >= UI.TOUCH_MIN, "%s is a full touch target" % c.name)
 	# Drag on the character turns it.
 	var model := lobby.get("model") as Node3D
 	var yaw0 := model.rotation.y
@@ -102,6 +132,7 @@ func run(at: Node) -> int:
 	at.touch(1, p0 + Vector2(180, 0) * fx.get_scale(), false)
 	await at.wait(0.1)
 	_check(absf(model.rotation.y - yaw0) > 0.3, "dragging on the character turns it (%.2f rad)" % (model.rotation.y - yaw0))
+	await _tour_modes(lobby)
 	# Name edit from the pencil; a long name ends in "..." inside the player card.
 	await _tap(lobby.find_child("EditName", true, false) as Control)
 	await _settle(0.5)
@@ -116,27 +147,36 @@ func run(at: Node) -> int:
 		_check(String(Game.profile.name) == "SHADOWHUNTER99" and nl and nl.size.x <= 170.0,
 			"a 14-character name is saved and fits the card (%.0f px)" % (nl.size.x if nl else -1.0))
 		await at.shot("m03b_long_name")
-	# The whole player card opens the editor too; back closes it.
+	# The whole player card opens PROFILE (tests/shots_profile.gd tours it); back closes it.
 	var card := lobby.find_child("PlayerCard", true, false) as Control
 	if card:
 		await _tap_at(card.get_global_rect().position + Vector2(34, 31))
 		await _settle(0.3)
-	_check(lobby.find_child("NameEdit", true, false) != null, "tapping the player card opens the name editor")
+	_check(lobby.find_child("Profile", true, false) != null, "tapping the player card opens PROFILE")
 	_back()
 	await _settle(0.3)
-	_check(lobby.get("_modal") == null, "back closes the name editor")
-	# How to play from its menu row; the header X closes it.
-	await _tap(howto)
+	_check(lobby.find_child("Profile", true, false) == null and lobby.get("_modal") == null, "back closes PROFILE")
+	# ONLINE 1 VS 1 (the bottom bar) opens the ONLINE window on its ONLINE tab, FRIENDS on FRIENDS.
+	await _tap(online_btn)
 	await _settle(0.6)
-	await at.shot("m04_how_to_play")
-	var modal := lobby.get("_modal") as Node
-	_check(modal != null, "HOW TO PLAY opens")
-	if modal:
-		await _tap(modal.find_child("Close", true, false) as Control)
-		await _settle(0.3)
-	_check(lobby.get("_modal") == null, "the popup X closes HOW TO PLAY")
-	# Wardrobe: open with a tap, pick a card by tapping it, filter by rarity, back closes it.
-	await _tap(lobby.find_child("BundlesButton", true, false) as Control)
+	var win := lobby.get("_modal") as Control
+	_check(win != null and win.find_child("Tab_online", true, false) != null and String(lobby.friends.get("_net_kind")) == "online",
+		"ONLINE 1 VS 1 opens the ONLINE window")
+	await at.shot("m04_online")
+	_back()
+	await _settle(0.4)
+	await _tap(pals)
+	await _settle(0.6)
+	win = lobby.get("_modal") as Control
+	_check(win != null and String(lobby.friends.get("_net_kind")) == "friends", "FRIENDS opens the ONLINE window on FRIENDS")
+	await at.shot("m04b_friends")
+	_back()
+	await _settle(0.4)
+	_check(lobby.get("_modal") == null, "back closes the ONLINE window")
+	# Wardrobe: open with a tap (the bar reads WARDROBE), every outfit listed (no rarity tabs), pick
+	# a card by tapping it, back closes it.
+	var ward_row := ward
+	await _tap(ward_row)
 	await at.wait(1.2)
 	var royal := lobby.find_child("Bundle_royal", true, false) as Control
 	_check(royal != null, "wardrobe lists Bundle_royal")
@@ -144,12 +184,14 @@ func run(at: Node) -> int:
 		await _tap(royal)
 		await at.wait(0.6)
 	_check(String(lobby.get("_preview_bundle")) == "royal", "tapping a bundle card previews it")
+	var listed := 0
+	for b: Dictionary in CharacterModel.BUNDLE_INFO:
+		if lobby.find_child("Bundle_" + String(b.id), true, false) != null:
+			listed += 1
+	_check(listed == CharacterModel.BUNDLE_INFO.size() and lobby.find_child("Tab_epic", true, false) == null,
+		"the wardrobe lists all %d outfits, with no rarity tabs" % CharacterModel.BUNDLE_INFO.size())
 	await _settle(0.5)
 	await at.shot("m05_wardrobe")
-	await _tap(lobby.find_child("Tab_epic", true, false) as Control)
-	await _settle(0.5)
-	await at.shot("m06_wardrobe_epic")
-	_check(lobby.find_child("Bundle_royal", true, false) == null and lobby.find_child("Bundle_neon", true, false) != null, "EPIC tab filters the cards")
 	_back()
 	await _settle(0.8)
 	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
@@ -159,12 +201,21 @@ func run(at: Node) -> int:
 	var sp := _settings(lobby)
 	_check(sp != null, "settings opens from the gear")
 	if sp:
-		await at.shot("m07_settings_basic")
+		await at.shot("m07_settings_display")
 		var g_before := int(Game.settings.graphics)
 		var high_q := _find_text(sp, "HIGH")
 		if high_q:
 			await _tap(high_q)
 		_check(int(Game.settings.graphics) == 2, "tapping HIGH sets graphics 2")
+		# EXTREME asks first (it can heat the phone); back answers the question, not the panel.
+		await _tap(_find_text(sp, "EXTREME"))
+		await _settle(0.4)
+		await at.shot("m07b_settings_extreme")
+		_check(sp.find_child("Confirm", true, false) != null and int(Game.settings.graphics) == 2, "EXTREME asks before it applies")
+		_back()
+		await _settle(0.4)
+		_check(_settings(lobby) != null and sp.find_child("Confirm", true, false) == null and int(Game.settings.graphics) == 2,
+			"back closes the question and keeps the settings open")
 		Game.settings.graphics = g_before
 		await _tap(_find_text(sp, "CONTROLS"))
 		await _settle(0.4)
@@ -175,19 +226,65 @@ func run(at: Node) -> int:
 		await at.shot("m09_settings_controls_more")
 		await _tap(_find_text(sp, "SENSITIVITY"))
 		await _settle(0.3)
-		var high := _find_text(sp, "HIGH")
-		if high:
-			await _tap(high)
+		var fast := _find_text(sp, "FAST")
+		if fast:
+			await _tap(fast)
 		await _settle(0.3)
 		await at.shot("m10_settings_sensitivity")
-		_check(int(Game.settings.sens_general) == 185 and int(Game.settings.sens_sniper) == 150, "HIGH preset sets 185 / 150")
-		var deflt := _find_text(sp, "DEFAULT")
-		if deflt:
-			await _tap(deflt)
-		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "DEFAULT preset sets 100 / 71")
+		var fp: Dictionary = SettingsPanel.SENS_PRESETS.FAST
+		_check(int(Game.settings.sens_general) == int(fp.sens_general) and int(Game.settings.sens_sniper) == int(fp.sens_sniper)
+			and int(Game.settings.sens_2x) == int(fp.sens_2x), "FAST preset sets its values")
+		var standard := _find_text(sp, "STANDARD")
+		if standard:
+			await _tap(standard)
+		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "STANDARD preset sets 100 / 71")
+		# RESET asks first; CANCEL keeps everything.
+		await _tap(sp.find_child("Reset", true, false) as Control)
+		await _settle(0.4)
+		await at.shot("m10b_settings_reset_confirm")
+		_check(sp.find_child("Confirm", true, false) != null, "RESET asks before it resets")
+		await _tap(sp.find_child("ConfirmCancel", true, false) as Control)
+		await _settle(0.3)
+		_check(sp.find_child("Confirm", true, false) == null, "CANCEL closes the question")
 		await _tap(_find_text(sp, "SOUND"))
 		await _settle(0.3)
 		await at.shot("m11_settings_sound")
+		_check(sp.find_children("*", "HSlider", true, false).size() == 3, "SOUND: effects, music, voice chat (no master)")
+		# ACCOUNT: the player ID, CLEAR CACHE, the links along the bottom (no RESET).
+		await _tap(_find_text(sp, "ACCOUNT"))
+		await _settle(0.4)
+		await at.shot("m11b_settings_account")
+		_check(sp.find_child("PlayerIdValue", true, false) != null and sp.find_child("ClearCache", true, false) != null
+			and not (sp.find_child("Reset", true, false) as Control).visible, "ACCOUNT: the player ID, CLEAR CACHE, no RESET")
+		await _tap(sp.find_child("PrivacyLink", true, false) as Control)
+		await _settle(0.5)
+		await at.shot("m11c_settings_privacy")
+		_check(sp.find_child("Sheet", false, false) != null and sp.find_child("DocScroll", true, false) != null,
+			"the Privacy Notice opens over the settings")
+		_back()
+		await _settle(0.4)
+		_check(sp.find_child("Sheet", false, false) == null and _settings(lobby) != null, "back closes the Privacy Notice, not the settings")
+		await _tap(sp.find_child("DeleteData", true, false) as Control)
+		await _settle(0.4)
+		await at.shot("m11d_settings_delete_ask")
+		_check(sp.find_child("Confirm", true, false) != null, "DELETE MY DATA asks first")
+		await _tap(sp.find_child("ConfirmCancel", true, false) as Control)
+		await _settle(0.3)
+		_check(sp.find_child("Confirm", true, false) == null and bool(Game.profile.guest_ok) == saved_guest,
+			"CANCEL deletes nothing")
+		# HOW TO PLAY under the tabs: a page with MODES on top; its X closes it.
+		await _tap(sp.find_child("HowToPlay", false, false) as Control)
+		await _settle(0.6)
+		await at.shot("m04_how_to_play")
+		var page := sp.find_child("Sheet", false, false)
+		var modes_row := page.find_child("HowToModes", true, false) if page else null
+		_check(modes_row != null and modes_row.get_child_count() == Game.MODE_NAMES.size() and _find_label(page, "TRAINING GROUND") != null
+			and _find_label(page, "LONE WOLF") != null and _find_label(page, "FIRST TO %d ROUNDS" % Game.ROUNDS_TO_WIN) != null,
+			"HOW TO PLAY (SETTINGS) explains both modes and first to %d" % Game.ROUNDS_TO_WIN)
+		if page:
+			await _tap(page.find_child("Close", true, false) as Control)
+			await _settle(0.3)
+		_check(sp.find_child("Sheet", false, false) == null and _settings(lobby) != null, "the page's X closes HOW TO PLAY")
 		var closed := [false]
 		sp.closed.connect(func() -> void: closed[0] = true)
 		_back()
@@ -206,10 +303,20 @@ func run(at: Node) -> int:
 	_back()
 	await _settle(0.3)
 	_check(lobby.get("_modal") == null, "a second back closes the quit dialog")
-	# START -> match loading overlay (back is ignored there) -> arena.
-	await _tap(lobby.get("start_btn") as Control, 0.05)
+	# The match card of an online match; the lobby comes back without a session.
+	var next_lobby := await _tour_online_card(lobby)
+	if next_lobby:
+		lobby = next_lobby
+	# START (TRAINING GROUND, the bot) -> match loading overlay (back is ignored there) -> arena.
+	var start := lobby.get("start_btn") as Button
+	await _tap(start, 0.05)
 	await _settle(0.25)
 	await at.shot("m13_match_loading")
+	_check(start.disabled and (start.get_node("Caption") as Label).text == "LOADING", "START says LOADING (not MATCHING) for a bot match")
+	var ov := _find_overlay()
+	_check(ov != null and _label_text(ov, "MatchMode") == "TRAINING GROUND"
+		and _texts(ov).contains("FIRST TO %d|1 VS BOT|BOT: NORMAL" % Game.rounds_to_win()),
+		"the match card: TRAINING GROUND, FIRST TO n, 1 VS BOT, BOT: NORMAL")
 	_back()
 	await _settle(0.1)
 	_check(lobby.find_child("QuitDialog", true, false) == null, "back during the match loading does nothing")
@@ -217,55 +324,73 @@ func run(at: Node) -> int:
 	_check(arena != null, "START enters the arena")
 	if arena:
 		await at.wait(1.0)
-		# Android back opens the pause menu (and the same request must not close it again).
+		# Android back opens the in-match menu: the settings straight away (and the same request
+		# must not close them again), QUIT MATCH in their tab column, the match paused.
 		_back()
 		await _settle(0.5)
 		var pm := arena.find_child("PauseMenu", true, false)
-		_check(pm != null and get_tree().paused, "back in a match opens the pause menu and keeps it open")
+		var psp: Node = pm.get("settings") if pm else null
+		_check(pm != null and get_tree().paused and psp is SettingsPanel, "back in a match opens the settings at once and keeps them open")
 		var hud := arena.get("hud") as CanvasItem
-		_check(hud != null and not hud.visible, "the match HUD is hidden under the pause menu")
+		_check(hud != null and not hud.visible, "the match HUD is hidden under the in-match settings")
+		var quit: Button = (psp.find_child("Quit", true, false) as Button) if psp else null
+		_check(quit != null and quit.text == "QUIT MATCH" and quit.get_global_rect().end.x <= SettingsPanel.MENU_W + 1.0
+			and quit.size.y >= UI.TOUCH_MIN, "QUIT MATCH sits in the settings' tab column")
 		await at.shot("m14_pause")
-		if pm:
-			await _tap(pm.find_child("Settings", true, false) as Control)
-			await _settle(0.5)
-			var psp: Node = null
-			for c in pm.get_children():
-				if c is SettingsPanel:
-					psp = c
-			_check(psp != null, "SETTINGS opens over the pause menu")
-			if psp:
-				await _tap(_find_text(psp, "CONTROLS"))
-				await _settle(0.4)
-				(psp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
-				await _settle(0.4)
-				await at.shot("m15_pause_settings")
-				_check(psp.find_child("EditHud", true, false) == null and psp.find_child("EditHudNote", true, false) != null,
-					"in a match the HUD editor shortcut is replaced by a note")
-				_back()
-				await _settle(0.4)
-			_check(arena.find_child("PauseMenu", true, false) != null and _no_settings(pm), "back closes the settings, the pause menu stays")
+		if quit:
+			await _tap(quit)                 # asks once more, still inside the column
+			await _settle(0.2)
+			_check(quit.text == "TAP AGAIN TO QUIT" and quit.get_global_rect().end.x <= SettingsPanel.MENU_W + 1.0
+				and arena.find_child("PauseMenu", true, false) != null, "QUIT MATCH asks once more (its caption fits)")
+		if psp:
+			await _tap(_find_text(psp, "CONTROLS"))
+			await _settle(0.4)
+			(psp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
+			await _settle(0.4)
+			await at.shot("m15_pause_settings")
+			var edit := psp.find_child("EditHud", true, false) as Control
+			_check(edit != null and psp.find_child("EditHudNote", true, false) == null, "in a match EDIT CUSTOM HUD is there")
+			# EDIT CUSTOM HUD opens the editor over the match; back closes it to the settings.
+			await _tap(edit)
+			await _settle(0.6)
+			var ed := pm.find_child("HudEditor", true, false)
+			_check(ed != null and get_tree().paused and arena == get_tree().current_scene, "EDIT CUSTOM HUD opens the editor over the paused match")
+			await at.shot("m15b_pause_hud_editor")
+			_back()
+			await _settle(0.4)
+			_check(pm.find_child("HudEditor", true, false) == null and is_instance_valid(psp) and not psp.is_queued_for_deletion(),
+				"back closes the editor, the settings stay")
 			_back()
 			await _settle(0.4)
 			_check(arena.find_child("PauseMenu", true, false) == null and not get_tree().paused and hud.visible,
-				"a second back resumes the match and shows the HUD again")
-		# The HUD gear opens it too; RESUME closes it.
+				"back again closes the settings: the match goes on, its HUD shows again")
+		# The HUD gear opens them too; their X closes them and the match goes on.
 		var gear_c := HudLayout.center(HudLayout.current().settings, get_viewport().get_visible_rect().size)
 		await _tap_at(gear_c)
 		await _settle(0.4)
 		var pm2 := arena.find_child("PauseMenu", true, false)
-		_check(pm2 != null and get_tree().paused, "the HUD gear opens the pause menu")
-		if pm2:
-			await _tap(pm2.find_child("Resume", true, false) as Control)
+		_check(pm2 != null and get_tree().paused and pm2.get("settings") is SettingsPanel, "the HUD gear opens the settings")
+		if pm2 and pm2.get("settings") is SettingsPanel:
+			await _tap((pm2.get("settings") as Node).find_child("Close", true, false) as Control)
 			await _settle(0.4)
-		_check(not get_tree().paused, "RESUME unpauses")
+		_check(not get_tree().paused and arena.find_child("PauseMenu", true, false) == null, "the settings' X closes them and unpauses")
 	# Results in an empty scene (the key art stands in for the arena behind; a stub scoreboard
 	# gives the opponent's row).
-	for r in [_sample("victory"), _sample("defeat"), _sample("draw"), _sample("invalid")]:
+	for r in [_sample("victory"), _sample("defeat"), _sample("draw"), _sample("invalid"), _sample("online")]:
 		var rs := await _results_scene(r)
 		await _settle(2.8)
 		await at.shot("m16_results_%s" % String(r.kind))
-		_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
+		if String(r.kind) == "online":
+			_check(rs.find_child("Rematch", true, false) != null and rs.find_child("AddFriend", true, false) != null
+				and rs.find_child("PlayAgain", true, false) == null and rs.find_child("Lobby", true, false) != null,
+				"online results: REMATCH and ADD FRIEND (not PLAY AGAIN) + LOBBY")
+		else:
+			_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
 		_check(rs.find_child("EnemyRow", true, false) != null, "the opponent's row comes from the scoreboard (%s)" % r.kind)
+		_check(_find_label(rs, String(r.mode)) != null, "the results name the mode %s (%s)" % [r.mode, r.kind])
+		if String(r.kind) == "online":
+			_check(_find_label(rs.find_child("EnemyRow", true, false), "ONLINE") != null and not _texts(rs).contains("BOT"),
+				"an online opponent is ONLINE, never a BOT level")
 	# LOBBY tap, back on results, PLAY AGAIN tap.
 	var rs2 := await _results_scene(_sample("defeat"))
 	await _settle(0.6)
@@ -293,6 +418,7 @@ func run(at: Node) -> int:
 	_check(ResultsScreen.honour({"headshots": 0, "hp_left": 0, "taken": 200}) == "FIGHTER", "honour FIGHTER")
 	Game.settings = saved_settings
 	Game.save_settings()
+	Game.practice = false
 	Game.profile.bundle = saved_bundle
 	Game.profile.name = saved_name
 	Game.save_profile()
@@ -300,14 +426,191 @@ func run(at: Node) -> int:
 	return _fails
 
 
+## The two modes in the lobby: the mode card shows TRAINING GROUND (the default) against the NORMAL
+## bot; SELECT MODE offers both, with TRAINING GROUND's opponent chips (the bot's level or the
+## DUMMY) on its card; LONE WOLF's START opens the QUICK MATCH search (CANCEL stops it); back to
+## TRAINING GROUND at the end.
+func _tour_modes(lobby: Node) -> void:
+	var card := lobby.find_child("ModeCard", true, false) as Control
+	_check(lobby.find_child("PracticeButton", true, false) == null and lobby.find_child("Difficulty", true, false) == null,
+		"the lobby has no opponent chips of its own: they are in SELECT MODE")
+	_check(card != null and _label_text(card, "ModeName") == "TRAINING GROUND" and _find_label(card, "CARGO CAGE") != null,
+		"the mode card shows TRAINING GROUND on CARGO CAGE")
+	_check(_label_text(card, "ModeFormat") == "BOT: NORMAL  ·  FIRST TO %d" % Game.rounds_to_win(),
+		"the mode card names the bot and the real round count (%s)" % _label_text(card, "ModeFormat"))
+	# SELECT MODE from the mode card: both modes, the opponent chips on TRAINING GROUND's card.
+	await _tap(card)
+	await _settle(0.6)
+	var popup := lobby.get("_modal") as Control
+	var tg := popup.find_child("Mode_training", true, false) if popup else null
+	var chips := tg.find_child("Difficulty", true, false) if tg else null
+	_check(popup != null and tg != null and popup.find_child("Mode_lonewolf", true, false) != null,
+		"the mode card opens SELECT MODE with both modes")
+	_check(chips != null and chips.get_child_count() == Game.DIFFICULTY_NAMES.size() + 1 and chips.find_child("Diff_DUMMY", false, false) != null
+		and (chips.find_child("Diff_NORMAL", false, false) as Button).button_pressed, "TRAINING GROUND's card offers EASY, NORMAL, HARD and the DUMMY")
+	await _at.shot("m02b_select_mode")
+	# The DUMMY chip: the target dummy instead of a bot (the card says so); it closes SELECT MODE.
+	await _tap(chips.find_child("Diff_DUMMY", false, false) as Control if chips else null)
+	await _settle(0.4)
+	_check(Game.practice and Game.mode == "training" and lobby.get("_modal") == null and _label_text(card, "ModeFormat") == "TARGET DUMMY",
+		"DUMMY picks the target dummy and closes SELECT MODE")
+	await _at.shot("m02e_lobby_dummy")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Diff_HARD", true, false) as Control if popup else null)
+	await _settle(0.4)
+	_check(not Game.practice and int(Game.settings.difficulty) == 2 and _label_text(card, "ModeFormat").begins_with("BOT: HARD"),
+		"HARD picks the bot again, at its level")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Diff_NORMAL", true, false) as Control if popup else null)
+	await _settle(0.4)
+	_check(int(Game.settings.difficulty) == 1 and not Game.practice, "NORMAL again")
+	# LONE WOLF.
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	if popup:
+		await _tap_art(popup.find_child("Mode_lonewolf", true, false) as Control)
+		await _settle(0.5)
+	_check(Game.mode == "lonewolf" and lobby.get("_modal") == null and Game.settings.mode == "lonewolf", "picking LONE WOLF keeps it and closes the popup")
+	_check(_label_text(card, "ModeName") == "LONE WOLF" and _label_text(card, "ModeFormat") == "1 VS 1 ONLINE",
+		"the LONE WOLF card says 1 VS 1 ONLINE")
+	await _at.shot("m02c_lobby_lone_wolf")
+	# LONE WOLF's START searches for a random opponent (QUICK MATCH: SEARCHING..., the time, CANCEL;
+	# no match loads by itself); CANCEL stops the search.
+	var start := lobby.get("start_btn") as Button
+	await _tap(start)
+	await _settle(1.2)
+	var online := lobby.get("_modal") as Control
+	var quick := lobby.get_node_or_null("NetMatch") as NetMatch
+	_check(online != null and online.find_child("QuickCancel", true, false) != null and quick != null and quick.searching
+		and not start.disabled and Game.cloud_service().seeking, "LONE WOLF's START opens the QUICK MATCH search")
+	_check(_find_overlay() == null, "LONE WOLF's START loads no match")
+	await _at.shot("m02d_lone_wolf_start")
+	if online:
+		await _tap(online.find_child("QuickCancel", true, false) as Control)
+		await _settle(0.4)
+	_check(lobby.get("_modal") == null and quick != null and not quick.searching and not Game.cloud_service().seeking,
+		"QUICK MATCH's CANCEL stops the search")
+	# And back to TRAINING GROUND (a tap on its card, away from the chips).
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	if popup:
+		await _tap_art(popup.find_child("Mode_training", true, false) as Control)
+		await _settle(0.5)
+	_check(Game.mode == "training" and _label_text(card, "ModeName") == "TRAINING GROUND"
+		and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"), "TRAINING GROUND is picked again")
+	# DUO / SQUAD: the size chips on the mode cards; DUO shows the TEAM bar (+ INVITE), SOLO hides it.
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	var duo := popup.find_child("Mode_training", true, false).find_child("Size_2", true, false) as Control if popup else null
+	await _tap(duo)
+	await _settle(0.5)
+	var team_bar := lobby.find_child("TeamBar", true, false) as Control
+	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and team_bar != null
+		and team_bar.is_visible_in_tree() and team_bar.find_child("TeamInvite", true, false) != null, "DUO: the mode card says so, the TEAM bar shows + INVITE")
+	await _at.shot("m02f_lobby_duo_team_bar")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Mode_training", true, false).find_child("Size_1", true, false) as Control if popup else null)
+	await _settle(0.5)
+	_check(Game.team_size == 1 and not team_bar.is_visible_in_tree() and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
+		"SOLO again: no TEAM bar")
+
+
+## A real tap on a SELECT MODE card's art (its upper part: the mode, never a chip).
+func _tap_art(c: Control) -> void:
+	if c == null:
+		_check(false, "tap target exists")
+		return
+	await _tap_at(c.get_global_rect().position + Vector2(c.size.x * 0.5, 90.0))
+
+
+## The match card of an online match (LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent's name;
+## never "1 VS BOT"): the overlay over the lobby as a challenge starts it. With no real session
+## the arena hands back to a new lobby at once, which is returned.
+func _tour_online_card(lobby: Node) -> Node:
+	var cloud := Game.cloud_service()
+	var saved_opponent: Dictionary = cloud.opponent
+	cloud.opponent = {"id": "", "name": "SHADOWHUNTER77", "bundle": "neon"}
+	Game.online = true
+	Game.session = cloud
+	(lobby.get("start_btn") as Button).disabled = true
+	Loading.start_match(lobby)
+	await _settle(0.25)
+	await _at.shot("m13b_match_loading_online")
+	var ov := _find_overlay()
+	var texts := _texts(ov) if ov else ""
+	_check(ov != null and _label_text(ov, "MatchMode") == "LONE WOLF" and texts.contains("1 VS 1 ONLINE")
+		and texts.contains("VS SHADOWHUNTER77") and texts.contains("FIRST TO %d" % Game.rounds_to_win(true))
+		and not texts.contains("BOT"), "the online match card: LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent")
+	var t := 0.0
+	var next: Node = null
+	while t < 30.0:
+		await _at.wait(0.2)
+		t += 0.2
+		var s := get_tree().current_scene
+		if s and s != lobby and s.name == "Lobby":
+			next = s
+			break
+	_check(next != null and not Game.online, "without a session the arena hands back to the lobby")
+	cloud.opponent = saved_opponent
+	await _settle(1.0)
+	# The lobby says why the online match did not start (never a bot match instead), once.
+	var modal: Node = next.get("_modal") if next else null
+	var notice := modal.find_child("NoticeText", true, false) as Label if modal else null
+	_check(notice != null and notice.text.contains("before the match began"), "the lobby says the online match did not start")
+	if notice:
+		await _at.shot("m13c_online_called_off")
+		await _tap(modal.find_child("NoticeOk", true, false) as Control)
+		await _settle(0.3)
+	return next
+
+
+## The Loading overlay in the tree (the match card), or null.
+func _find_overlay() -> Loading:
+	for n in get_tree().root.find_children("*", "Control", true, false):
+		if n is Loading and not n.is_queued_for_deletion():
+			return n
+	return null
+
+
+## The text of the Label named `label_name` under `root` ("" when there is none).
+func _label_text(root: Node, label_name: String) -> String:
+	var l := root.find_child(label_name, true, false) as Label if root else null
+	return l.text if l else ""
+
+
+## Every label text under `root`, joined with "|".
+func _texts(root: Node) -> String:
+	var out := PackedStringArray()
+	for l in root.find_children("*", "Label", true, false):
+		out.append((l as Label).text)
+	return "|".join(out)
+
+
+## A result as the arena builds it: TRAINING GROUND against BOT VIPER (victory, defeat, draw,
+## invalid), or an online LONE WOLF win against another player ("online").
 func _sample(kind: String) -> Dictionary:
-	var r := {"kind": kind, "won": kind == "victory", "draw": kind == "draw", "invalid": kind == "invalid",
-		"kills": 1 if kind == "victory" else 0, "damage": 200 if kind == "victory" else 137, "headshots": 3 if kind == "victory" else 1,
-		"accuracy": 46.7, "time": 74.0, "xp": 0 if kind == "invalid" else (330 if kind == "victory" else 74),
-		"enemy": "VIPER", "mode": "LONE WOLF", "map": "CARGO CAGE", "weapon": "AR-7 RIFLE",
-		"score_player": 1 if kind == "victory" else 0, "score_bot": 1 if kind == "defeat" else 0,
-		"hp_left": 112 if kind == "victory" else (0 if kind == "defeat" else 84), "difficulty": "NORMAL",
-		"taken": 88 if kind == "victory" else 200}
+	var online := kind == "online"
+	var won := kind == "victory" or online
+	# [your rounds, theirs, your kills (one per round won), damage, headshots, HP left, XP]
+	var n: Array = {"victory": [5, 2, 5, 1176, 3, 112, 330], "defeat": [2, 5, 2, 537, 1, 0, 74],
+		"draw": [4, 4, 4, 912, 1, 84, 150], "invalid": [1, 0, 1, 200, 1, 84, 0],
+		"online": [5, 3, 5, 1214, 3, 96, 330]}[kind]
+	var r := {"kind": kind, "won": won, "draw": kind == "draw", "invalid": kind == "invalid",
+		"kills": int(n[2]), "damage": int(n[3]), "headshots": int(n[4]),
+		"accuracy": 46.7, "time": 412.0, "xp": int(n[6]),
+		"enemy": "SHADOWHUNTER77" if online else "BOT VIPER", "mode": Game.mode_name("lonewolf" if online else "training"),
+		"mode_id": "lonewolf" if online else "training", "map": "CARGO CAGE", "weapon": String(Weapons.DEFS[Weapons.DEFAULT_PICK].name),
+		"score_player": int(n[0]), "score_bot": int(n[1]), "hp_left": int(n[5]), "difficulty": "ONLINE" if online else "NORMAL",
+		"taken": 88 if won else 200, "enemy_id": "shadowhunter77".sha256_text().left(32) if online else ""}
 	return r
 
 
@@ -322,15 +625,17 @@ func _results_scene(r: Dictionary) -> ResultsScreen:
 	root.name = "ResultsTest"
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# the opponent's numbers match the outcome: beaten, winner, or level on HP at the time-out
-	var e: Dictionary = {"victory": {"hp": 0, "kills": 0, "damage": 88, "headshots": 0},
-		"defeat": {"hp": 64, "kills": 1, "damage": 200, "headshots": 2},
-		"draw": {"hp": 84, "kills": 0, "damage": 116, "headshots": 1},
-		"invalid": {"hp": 140, "kills": 0, "damage": 60, "headshots": 0}}[String(r.kind)]
+	var e: Dictionary = {"victory": {"hp": 0, "kills": 2, "damage": 488, "headshots": 0},
+		"defeat": {"hp": 64, "kills": 5, "damage": 1000, "headshots": 2},
+		"draw": {"hp": 84, "kills": 4, "damage": 916, "headshots": 1},
+		"invalid": {"hp": 140, "kills": 0, "damage": 60, "headshots": 0},
+		"online": {"hp": 0, "kills": 3, "damage": 652, "headshots": 1}}[String(r.kind)]
+	var gun := String(r.weapon)
 	root.set("rows", [
 		{"name": "ROOKIE", "me": true, "alive": int(r.hp_left) > 0, "hp": int(r.hp_left), "kills": int(r.kills), "damage": int(r.damage),
-			"headshots": int(r.headshots), "accuracy": 47, "rounds": int(r.score_player), "weapon": "AR-7 RIFLE"},
-		{"name": "VIPER", "me": false, "alive": int(e.hp) > 0, "hp": int(e.hp), "kills": int(e.kills), "damage": int(e.damage),
-			"headshots": int(e.headshots), "accuracy": 31, "rounds": int(r.score_bot), "weapon": "AR-7 RIFLE"},
+			"headshots": int(r.headshots), "accuracy": 47, "rounds": int(r.score_player), "weapon": gun},
+		{"name": String(r.enemy), "me": false, "alive": int(e.hp) > 0, "hp": int(e.hp), "kills": int(e.kills), "damage": int(e.damage),
+			"headshots": int(e.headshots), "accuracy": 31, "rounds": int(r.score_bot), "weapon": gun},
 	])
 	var tex := UI.texture("keyart_clean.jpg")
 	if tex:
@@ -363,6 +668,14 @@ func _find_text(root: Node, text: String) -> Button:
 	for b in root.find_children("*", "Button", true, false):
 		if (b as Button).text == text and (b as Button).is_visible_in_tree():
 			return b
+	return null
+
+
+## A visible label showing exactly `text` under `root`, or null.
+func _find_label(root: Node, text: String) -> Label:
+	for l in root.find_children("*", "Label", true, false):
+		if (l as Label).text == text and (l as Label).is_visible_in_tree():
+			return l
 	return null
 
 

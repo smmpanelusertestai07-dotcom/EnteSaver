@@ -9,7 +9,7 @@ const EDGE_DAMAGE := 60.0     # at 5 m, then fading out to RADIUS
 const MODEL := "res://assets/props/grenade.glb"
 
 var thrower: Fighter
-var cosmetic := false      # a Wi-Fi copy of the other phone's grenade: it hurts no fighter here
+var cosmetic := false      # an online copy of the other phone's grenade: it hurts no fighter here
 var _fuse := FUSE
 var _bounced := false
 
@@ -77,11 +77,11 @@ func _explode() -> void:
 		if not hit.is_empty():
 			continue
 		var dmg := lerpf(MAX_DAMAGE, EDGE_DAMAGE, clampf(d / 5.0, 0.0, 1.0)) * clampf((RADIUS - d) / 1.0, 0.0, 1.0)
-		var dealt := f.take_damage(dmg, "body", thrower, pos)
+		var dealt := f.take_damage(dmg, "body", thrower, pos, "frag")
 		if thrower and is_instance_valid(thrower) and f != thrower and dealt > 0.0:
 			thrower.stats.damage += dealt
 			thrower.hit_landed.emit(f, dealt, false, target, not f.alive)
-			if not f.alive:
+			if not f.alive and thrower.team < 0:      # (team modes: TeamArena counts the referee's eliminations)
 				thrower.stats.kills += 1
 	for w in get_tree().get_nodes_in_group("shield_walls"):
 		if (w as Node3D).global_position.distance_to(pos) < RADIUS:

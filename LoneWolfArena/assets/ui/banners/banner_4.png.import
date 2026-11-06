@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bl62mkbarlirg"
-path="res://.godot/imported/v_coin.png-2248b05d30a7895c2f26a5ff83456b1d.ctex"
+uid="uid://3is4sc4tgfw4"
+path="res://.godot/imported/banner_4.png-e12edf1ee9a1ac6fd493be794e3f9bff.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/icons/v_coin.png"
-dest_files=["res://.godot/imported/v_coin.png-2248b05d30a7895c2f26a5ff83456b1d.ctex"]
+source_file="res://assets/ui/banners/banner_4.png"
+dest_files=["res://.godot/imported/banner_4.png-e12edf1ee9a1ac6fd493be794e3f9bff.ctex"]
 
 [params]
 
@@ -37,4 +37,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

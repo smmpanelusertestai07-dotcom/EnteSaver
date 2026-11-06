@@ -8,15 +8,17 @@ extends Control
 ## the fighters use, every sound) load on worker threads (ResourceLoader.load_threaded_request).
 ## They stay referenced by a small holder node under the root ("LoadingCache"), so later scene
 ## changes reuse them instead of reading the disk again; the sounds also go into Audio's cache.
-## Then Game.goto_lobby(). It never hangs: after TIMEOUT_S it goes to the lobby anyway; the
-## files that are still loading then are collected by the holder as they finish (every threaded
-## request gets its load_threaded_get, so no load token is left behind).
-## Automated runs (Game.autotest) skip straight to the lobby (their scripts expect it) unless a
-## screenshot tour sets `hold_for_test` to look at this screen.
+## Then Game.goto_login() (the guest login, or the lobby). It never hangs: after TIMEOUT_S it moves
+## on anyway; the files that are still loading then are collected by the holder as they finish
+## (every threaded request gets its load_threaded_get, so no load token is left behind).
+## On launch the intro sting (IntroSting) plays on top while the loads run; this screen leaves only
+## after it. Automated runs (Game.autotest) skip both and go to the lobby (their scripts expect
+## it) unless a screenshot tour sets `hold_for_test` to look at this screen.
 ##
-## MATCH: Loading.start_match(host) puts an overlay on top of `host` (mode + map card
-## "LONE WOLF / CARGO CAGE", the map name, the bar), loads the arena scene on a thread for at
-## least MATCH_MIN_S, then Game.goto_arena().
+## MATCH: Loading.start_match(host) puts an overlay on top of `host` (the mode + map card
+## "TRAINING GROUND / CARGO CAGE" or "LONE WOLF / CARGO CAGE" with the match's chips, see
+## match_info(), or for DUO / SQUAD team_info(); the map name; the bar), loads the arena scene
+## (Game.arena_scene()) on a thread for at least MATCH_MIN_S, then Game.goto_arena().
 
 const TIMEOUT_S := 12.0
 const BOOT_MIN_S := 2.4
@@ -34,7 +36,7 @@ const TIPS := [
 	"Tap the wall or frag button to take it in hand, then FIRE to put it down or throw it.",
 	"Put up a shield wall, then heal behind it.",
 	"Push the joystick past the ring to sprint.",
-	"Pick your gun in the 10-second prep. Both of you use it.",
+	"Pick your gun in the 10-second prep: a 1 VS 1 shares it, DUO and SQUAD pick their own.",
 	"The safe zone starts closing after 25 seconds. Stay inside.",
 	"Crouch or go prone to make yourself a smaller target.",
 	"A frag does up to 150 damage after a 3-second fuse. A vest stops a third of it.",
@@ -43,6 +45,8 @@ const GOLD := Color(0.94, 0.745, 0.24)
 
 ## Screenshot tours set this to keep the boot screen up (no automatic lobby).
 static var hold_for_test := false
+## Checks set this to keep the match overlay up at least this many seconds (a slow phone's load).
+static var delay_for_test := 0.0
 
 
 ## The root node "LoadingCache": keeps the boot preloads referenced (meta "resources") and
@@ -111,10 +115,11 @@ func _ready() -> void:
 	_tip_i = randi() % TIPS.size()
 	if mode == "boot":
 		if Game.autotest != "" and not hold_for_test:
-			Game.goto_lobby.call_deferred()
+			Game.goto_login.call_deferred()
 			return
 		Game.mark("boot screen")
 		_build_boot()
+		IntroSting.play_over(self)          # the launch sting on top: the loads below run under it
 		_start_boot_loads()
 	else:
 		_build_match()
@@ -165,7 +170,7 @@ func _build_boot() -> void:
 		t.position = Vector2(48, 36)
 		add_child(t)
 	_build_bar("LOADING GAME FILES")
-	var ver := UI.label("v%s  ·  OFFLINE" % ProjectSettings.get_setting("application/config/version", "1.0"), 15, Color(1, 1, 1, 0.55), "semi")
+	var ver := UI.label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 15, Color(1, 1, 1, 0.55), "semi")
 	ver.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	ver.offset_left = -260
 	ver.offset_right = -22
@@ -239,14 +244,90 @@ func _show_tip() -> void:
 	create_tween().tween_property(_tip, "modulate:a", 1.0, 0.35)
 
 
+## What the match card says about the match being loaded: {"mode", "badge", "chips", "desc"}.
+## Online it is LONE WOLF (FIRST TO n, 1 VS 1 ONLINE, the opponent's name), else TRAINING GROUND
+## against the bot (FIRST TO n, 1 VS BOT, its level) or the target dummy.
+static func match_info(online: bool, opponent: String, dummy: bool, difficulty: int, rounds: int, local := false) -> Dictionary:
+	if online:
+		return {"mode": Game.mode_name("lonewolf"), "badge": "1 VS 1",
+			"chips": ["FIRST TO %d" % rounds, "1 VS 1 LOCAL" if local else "1 VS 1 ONLINE", "VS " + opponent],
+			"desc": "Win the duel before the zone closes in."}
+	if dummy:
+		return {"mode": Game.mode_name("training"), "badge": "TRAINING",
+			"chips": ["TARGET DUMMY", "ENDLESS HP", "NO ZONE"],
+			"desc": "Practise your aim: the dummy never goes down."}
+	var level := String(Game.DIFFICULTY_NAMES[clampi(difficulty, 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	return {"mode": Game.mode_name("training"), "badge": "1 VS 1",
+		"chips": ["FIRST TO %d" % rounds, "1 VS BOT", "BOT: " + level],
+		"desc": "Win the duel before the zone closes in."}
+
+
+## The rounds a DUO / SQUAD match is played to: TeamArena.TEAM_ROUNDS_TO_WIN, or LW_ROUNDS_TO_WIN
+## in test runs of the editor binary (never an exported game).
+static func team_rounds_to_win() -> int:
+	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
+		return maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)
+	return TeamArena.TEAM_ROUNDS_TO_WIN
+
+
+## What the match card says about a DUO / SQUAD match (`tm`: Game.team_match): "2 VS 2" / "4 VS 4",
+## FIRST TO n, and who plays: "WITH <NAME> VS BOTS" (a TEAM INVITE), "VS <NAME>" (a player found by
+## the team search), "VS BOTS" (on this phone: TRAINING GROUND, or a search that found nobody, which
+## says so: "NO PLAYER FOUND: YOUR TEAM VS BOTS").
+static func team_info(tm: Dictionary, rounds: int) -> Dictionary:
+	var n := int(tm.get("size", 2))
+	var word := "DUO" if n <= 2 else "SQUAD"
+	var mine := int(tm.get("my_slot", 0))
+	var my_team := 0
+	var mate := ""
+	var foe := ""
+	var level := 1
+	for e: Variant in tm.get("roster", []):
+		if e is Dictionary and int((e as Dictionary).get("slot", -1)) == mine:
+			my_team = int((e as Dictionary).get("team", 0))
+	for e: Variant in tm.get("roster", []):
+		if not e is Dictionary:
+			continue
+		var d := e as Dictionary
+		if bool(d.get("bot", true)):
+			level = int(d.get("diff", 1))
+		elif int(d.get("slot", -1)) != mine:
+			if int(d.get("team", 0)) == my_team:
+				mate = String(d.get("name", "PLAYER"))
+			else:
+				foe = String(d.get("name", "PLAYER"))
+	var online := bool(tm.get("online", false))
+	var training := String(tm.get("mode_id", "")) == "training"
+	var chips := ["FIRST TO %d" % rounds, "%d VS %d" % [n, n]]
+	var desc := "Knock the other team down, revive your teammates, win the round together."
+	if online and mate != "":
+		chips.append("WITH %s VS BOTS" % mate)
+	elif online:
+		chips.append("VS %s" % (foe if foe != "" else "PLAYER"))
+	else:
+		chips.append("VS BOTS")
+		chips.append("BOT: " + String(Game.DIFFICULTY_NAMES[clampi(level, 0, Game.DIFFICULTY_NAMES.size() - 1)]))
+		if not training:
+			desc = "NO PLAYER FOUND: YOUR TEAM VS BOTS"
+	return {"mode": Game.mode_name("training" if training else "lonewolf"), "badge": word,
+		"chips": chips, "desc": desc}
+
+
 func _build_match() -> void:
 	_backdrop(1.12)
 	var shade := ColorRect.new()
 	shade.color = Color(0.02, 0.02, 0.05, 0.35)
 	UI.full_rect(shade)
 	add_child(shade)
+	var online := Game.online and Game.session != null
+	var opponent := String(Game.session.opponent.get("name", "")) if online else ""
+	var info := match_info(online, opponent if opponent != "" else "PLAYER", Game.practice and not online,
+		int(Game.settings.difficulty), Game.rounds_to_win(online), online and Game.session is Lan)
+	if not Game.team_match.is_empty():
+		info = team_info(Game.team_match, team_rounds_to_win())
 	# Mode + map card, top-left.
 	var card := PanelContainer.new()
+	card.name = "MatchCard"
 	card.add_theme_stylebox_override("panel", UI.chamfer(Color(0.07, 0.065, 0.06, 0.9), 14, 1, Color(1, 1, 1, 0.12), 0.0, ["br"]))
 	card.position = Vector2(40, 34)
 	card.custom_minimum_size = Vector2(360, 0)
@@ -264,7 +345,7 @@ func _build_match() -> void:
 		thumb.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		thumb.clip_contents = true
 		v.add_child(thumb)
-		var badge := UI.label(" 1 VS 1 ", 16, UI.INK, "heavy")
+		var badge := UI.label(" %s " % String(info.badge), 16, UI.INK, "heavy")
 		var bp := PanelContainer.new()
 		bp.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 6, 0, Color.TRANSPARENT, 6.0, ["br"]))
 		bp.add_child(badge)
@@ -279,21 +360,28 @@ func _build_match() -> void:
 	var bv := VBoxContainer.new()
 	bv.add_theme_constant_override("separation", 4)
 	body.add_child(bv)
-	var t_row := HBoxContainer.new()
-	t_row.add_theme_constant_override("separation", 12)
-	t_row.add_child(UI.label("LONE WOLF", 32, UI.AMBER, "heavy"))
-	var map_l := UI.label("CARGO CAGE", 32, UI.TEXT, "heavy")
-	t_row.add_child(map_l)
+	# Mode and map on one line; the map moves to a second one when they do not fit.
+	var t_row := HFlowContainer.new()
+	t_row.add_theme_constant_override("h_separation", 12)
+	t_row.add_theme_constant_override("v_separation", -6)
+	var mode_l := UI.label(String(info.mode), 32, UI.AMBER, "heavy")
+	mode_l.name = "MatchMode"
+	t_row.add_child(mode_l)
+	t_row.add_child(UI.label("CARGO CAGE", 32, UI.TEXT, "heavy"))
 	bv.add_child(t_row)
-	var chips := HBoxContainer.new()
-	chips.add_theme_constant_override("separation", 4)
-	for c in ["ROUNDS 1", "1 VS BOT", "BOT: " + String(Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)])]:
+	var chips := HFlowContainer.new()
+	chips.name = "MatchChips"
+	chips.add_theme_constant_override("h_separation", 4)
+	chips.add_theme_constant_override("v_separation", 4)
+	for c: String in info.chips:
 		var cp := PanelContainer.new()
 		cp.add_theme_stylebox_override("panel", UI.chamfer(Color(1, 1, 1, 0.1), 4, 0, Color.TRANSPARENT, 10.0, []))
 		cp.add_child(UI.label(c, 15, UI.TEXT, "bold"))
 		chips.add_child(cp)
 	bv.add_child(chips)
-	var desc := UI.label("Win the duel before the zone closes in.", 16, UI.TEXT_DIM, "semi")
+	var said := String(info.desc).begins_with("NO PLAYER FOUND")      # the team search found nobody: said plainly
+	var desc := UI.label(String(info.desc), 18 if said else 16, UI.ACCENT if said else UI.TEXT_DIM, "heavy" if said else "semi")
+	desc.name = "MatchDesc"
 	bv.add_child(desc)
 	# The map name, big, above the bar.
 	var big := UI.shadowed(UI.outlined(UI.label("CARGO CAGE", 132, UI.TEXT, "italic"), 10, Color(0.05, 0.04, 0.03, 0.95)), Vector2(0, 8), Color(0, 0, 0, 0.5))
@@ -407,6 +495,10 @@ func _finish_boot() -> void:
 		Game.mark("boot loaded %d files in %.1fs" % [keep.size(), _t])
 	else:
 		Game.mark("boot timeout: %d files still loading" % pending.size())
+	# The arena's shaders compile now, under the boot screen, not in a match's first frames (an
+	# online match waits for a loading phone only so long). Under the root: it outlives the boot.
+	if not hold_for_test and Game.autotest == "" and DisplayServer.get_name() != "headless":
+		root.add_child.call_deferred(ShaderWarmup.new())
 
 
 func _process(delta: float) -> void:
@@ -449,16 +541,24 @@ func _process_boot(delta: float) -> void:
 			_finish_boot()
 		else:
 			_status.text = "LOADING GAME FILES" if progress < 0.6 else "PREPARING THE ARENA"
-	elif not _leaving and not hold_for_test:
+	elif not _leaving and not hold_for_test and not IntroSting.playing(self):
 		_leaving = true
+		# Fade to the login screen's own near-black (it fades in from it), not to transparent:
+		# a transparent boot screen would show the project's light-blue clear colour for a moment.
+		var fade := ColorRect.new()
+		fade.name = "FadeOut"
+		fade.color = Color(0.02, 0.02, 0.03, 0.0)
+		fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		UI.full_rect(fade)
+		add_child(fade)
 		var tw := create_tween()
 		tw.tween_interval(0.15)
-		tw.tween_property(self, "modulate:a", 0.0, 0.25)
-		tw.tween_callback(Game.goto_lobby)
+		tw.tween_property(fade, "color:a", 1.0, 0.25)
+		tw.tween_callback(Game.goto_login)
 
 
 func _process_match(delta: float) -> void:
-	var path := "res://scenes/arena.tscn"
+	var path := Game.arena_scene()
 	var loaded := true
 	if _arena_scene == null and ResourceLoader.exists(path):
 		var st := ResourceLoader.load_threaded_get_status(path)
@@ -470,7 +570,7 @@ func _process_match(delta: float) -> void:
 	progress = maxf(progress, lerpf(progress, goal, minf(1.0, delta * 8.0)))
 	_status.text = "PREPARING WEAPONS" if progress < 0.5 else "ENTERING THE ARENA"
 	var real_s := (Time.get_ticks_msec() - _start_ms) / 1000.0
-	if not _leaving and ((loaded and _t >= MATCH_MIN_S) or real_s >= MATCH_MAX_S):
+	if not _leaving and real_s >= delay_for_test and ((loaded and _t >= MATCH_MIN_S) or real_s >= MATCH_MAX_S):
 		_leaving = true
 		progress = 1.0
 		_pct.text = "100%"
