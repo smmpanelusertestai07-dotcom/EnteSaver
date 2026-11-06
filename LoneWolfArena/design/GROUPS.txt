@@ -1,0 +1,130 @@
+GROUPS AND ALL-HUMAN TEAM MATCHES (1.5.0) - the contract for the two builders (CORE, UI)
+==========================================================================================
+
+Owner's request (2026-11-06): LONE WOLF online never brings bots; matchmaking finds real players.
+A player invites friends into a GROUP in the lobby; a member's character stands next to theirs
+in the lobby; a member's phone shows EXIT GROUP; a group of 4 plays DUO 2 VS 2 among themselves.
+TRAINING GROUND keeps its bots (offline, unchanged).
+
+1. WHAT THE PLAYER SEES
+-----------------------
+- GROUP (lobby, LONE WOLF): up to GROUP_MAX = 4 players. The first invite makes the inviter the
+  LEADER. The TEAM bar becomes the GROUP bar: the leader's "+ INVITE" lists online friends
+  (Cloud.peers ∩ friends, never blocked ones); an invited friend sees GROUP INVITE "<NAME> invites
+  you to their group" with ACCEPT / DECLINE / BLOCK; ACCEPT puts them in the group (no match starts).
+- Each member's character (CharacterModel with their outfit bundle) stands on the lobby podium
+  beside the player's own (up to 3 more, smaller, left/right of the hero), with a name plate and a
+  LEADER mark on the leader. Every phone in the group shows the same members.
+- A member's phone shows EXIT GROUP (leaves; the others see them go). The leader's phone shows
+  DISBAND GROUP (everyone leaves) and, per member, REMOVE. Only the leader's START works; a member
+  sees "WAITING FOR <LEADER> TO START" instead of START (SELECT MODE follows the leader's choice).
+- START (leader), LONE WOLF online, NO BOTS EVER:
+  - 1 VS 1 (SOLO): unchanged QUICK MATCH (already bot-free). A group cannot start 1 VS 1 (the
+    START notice says to EXIT GROUP or pick DUO / SQUAD).
+  - DUO (2 vs 2, 4 humans):
+      group of 4 -> the match starts at once among them: BLUE = leader + first member who joined,
+                    ORANGE = the other two;
+      group of 2 or solo -> matchmaking: "SEARCHING PLAYERS 3/4" until 4 humans in two teams of 2
+                    (a group of 2 is always one team); CANCEL any time. No timer, no bots.
+      group of 3 -> START says "DUO needs a group of 1, 2 or 4".
+  - SQUAD (4 vs 4, 8 humans): matchmaking the same way ("PLAYERS n/8"), a group (1-4) always on
+    one team. No bots.
+- After a match every phone goes back to the lobby; the GROUP stays together (the leader presses
+  START again: this replaces PLAY AGAIN TOGETHER for groups). The results screen of an all-human
+  match shows LOBBY (no REMATCH / PLAY AGAIN TOGETHER).
+
+2. WIRE PROTOCOL (all under Cloud.ROOT = "lonewolfarena/v1")
+------------------------------------------------------------
+Group room: ROOT/g/<gid> (gid 32 hex), packets exactly like match rooms (_room_packet: version 1,
+IV, AES-256-CBC JSON with "f" sender id and "n" counter per sender, HMAC-SHA256), with the group's
+own AES and HMAC keys. A receiver keeps a counter per sender (replays dropped) and accepts only
+current members (plus a "gjoin" from an id the leader invited).
+  "ginv" (inbox ROOT/u/<id>, like "tinv"): {"t":"ginv","from","name","bundle","sec","pk","sig"}
+        sec = RSA(invitee pk, gid(16) + aes(32) + mac(32) + size byte), sig over "ginv|from|to|sec".
+        Shown only from a friend this phone takes challenges from, while the lobby listens; not in a
+        match, not already in a group (busy -> "dec" with the invite's tag).
+  group room messages (k):
+        "gjoin"   {name, bundle}                      the invitee after ACCEPT (every 1 s until "groster")
+        "groster" {members:[[id,name,bundle],...], mode, size, status}   leader, on every change and
+                                                      every GROUP_BEAT_S (3 s): the truth for everyone
+        "gbeat"   {}                                  each member every GROUP_BEAT_S; a member silent
+                                                      GROUP_TIMEOUT_MS (12 s) is dropped by the leader;
+                                                      the leader silent 12 s = the group is gone
+        "gleave"  {}                                  EXIT GROUP; the leader drops them
+        "gkick"   {id}                                leader: REMOVE
+        "gend"    {}                                  leader: DISBAND (or the leader EXITs)
+        "gstart"  {room, aes, mac, size, roster}      leader: the group's own 2 VS 2 / the merged
+                                                      match (see below): every member joins it
+Matchmaking (never retained): ROOT/mm/g<size> ("g2" DUO, "g4" SQUAD), every SEEK_S from each
+searching LEADER (a solo searcher is a leader of 1): {"t":"gseek","id","n":members,"saw":[ids]}.
+The searching leader with the lowest id among those it sees becomes the MATCH HOST: it picks
+units (groups whole, never split) until 2 x size humans fit two teams, then sends each other unit's
+leader a signed "gmatch" (inbox, RSA-wrapped like "ginv"): room, aes, mac, size, roster (slot ->
+id, name, bundle, team). That leader answers "gacc"/"dec" (tagged) and forwards "gstart" in its
+group room; every member subscribes the match room and says "join". A unit that took another
+host's "gmatch" stops seeking. The host waits up to 15 s for every unit's "gacc"; a missing unit
+is dropped and the host goes back to seeking with what remains.
+Match room (all-human): ROOT/r/<room>, the 1 vs 1 packets, every member a sender. "join" every 1 s
+until the host has heard all; the host then sends "begin" (Arena._net_setup's) to everyone. Events
+and states are as today but delivered with the sender id; "bye" from a member = that slot LEFT; the
+host's "bye" or silence = the match ended ("left").
+
+3. CLOUD API (CORE implements; UI uses only this)
+-------------------------------------------------
+signal group_changed                     # members, leader, status, search progress changed
+signal group_invited(from_name: String)  # a group invite waits: group_invite_from()
+var group := {}                          # {} | {"gid","leader","members","status","mode","size"}
+func in_group() -> bool
+func is_group_leader() -> bool           # true when not in a group too (a solo leads itself)
+func group_members() -> Array            # [{"id","name","bundle","leader":bool,"me":bool}], leader first, join order
+func group_invite(friend_id: String) -> bool   # leader / solo; false: full, offline, blocked, busy
+func group_invite_from() -> Dictionary   # {"id","name","bundle"} or {}
+func answer_group_invite(accept: bool) -> void
+func leave_group() -> void               # EXIT GROUP; the leader's = DISBAND
+func kick_from_group(id: String) -> void # leader
+func set_group_mode(mode: String, size: int) -> void   # leader: what SELECT MODE picked (shown to members)
+func group_start(size: int) -> String    # leader: "" ok (starting or searching), else the notice text
+func group_search_stop() -> void         # CANCEL
+var search_found := 0                    # humans gathered so far for the match (this group included)
+var search_needed := 0                   # 4 DUO / 8 SQUAD; 0 when not searching
+const GROUP_MAX := 4
+Session for an all-human match (alongside the 1 vs 1 API, which stays for duels):
+var session_multi := false
+var session_roster: Array = []           # [{"slot","id","name","bundle","team"}] in slot order
+signal member_left(id: String)
+signal event_from(kind: String, data: Array, from_id: String)
+signal state_from(state: PackedFloat32Array, from_id: String)
+send_event / send_state / session_started(host) / session_ended(reason) keep their meaning
+(session_started fires once every member is in; is_host = this phone hosts the match).
+
+4. MATCH (CORE): TeamArenaNet with many humans
+----------------------------------------------
+- TeamArena.link_roster(size, roster, my_id, host_id, seed) -> team_match dict (like link_match;
+  "bot" false for every human slot; no bot slots in an all-human match).
+- Each phone runs its own slot; every other human is a RemoteFighter driven by state_from(sender).
+  The host is the referee (knocks, eliminations, revives, rounds) exactly as now; every guest
+  reports its own "dn" / "rvd"; "hit" goes to the phone that runs the target (the target slot's
+  owner applies it); decisions are broadcast. The limits of today's guest checks apply per sender
+  (a sender may only speak for its own slot).
+- A member who leaves (member_left) is LEFT for the rest of the match (TeamReferee.leave).
+- Results: an all-human match records like a team match (HISTORY "DUO · WITH <teammate>").
+- Direct UDP is off in all-human matches (relay only) for now; LAN is 1 vs 1 only.
+
+5. FILES (who edits what; nobody edits the other's files)
+---------------------------------------------------------
+CORE: scripts/cloud.gd, scripts/team_arena.gd, scripts/team_arena_net.gd, scripts/net_team_match.gd,
+      scripts/results_screen.gd (LOBBY only after an all-human match), scripts/lobby_friends.gd ONLY
+      in _on_net_session / session_team_match (build Game.team_match from session_roster),
+      new scripts/net_group.gd if wanted, tests/group_net_unit.gd, tests/group_online_check.gd
+      (4 copies over tests/mqtt_mock.gd: a group of 4 plays 2 VS 2; two groups of 2 matched;
+      EXIT GROUP; no bots), tools/qa/run_checks.sh (step group_online), design/INTERFACES.txt
+      (Cloud / match sections).
+UI:   scripts/lobby.gd (member models on the podium, layout), scripts/lobby_team.gd (GROUP bar:
+      INVITE, members, EXIT / DISBAND / REMOVE, START gating text), scripts/lobby_dialogs.gd and the
+      rest of scripts/lobby_friends.gd (GROUP INVITE popup via group_invited; search popup
+      "SEARCHING PLAYERS n/N" + CANCEL from search_found / search_needed; no BOTS IN), SELECT MODE
+      card texts ("DUO · 2 VS 2 · REAL PLAYERS"), tests/group_lobby_unit.gd,
+      tests/group_lobby_check.gd (a stand-in group: set Cloud.group + emit group_changed),
+      design/INTERFACES.txt (lobby sections).
+Both: run tools/qa/run_checks.sh quick while working and the full suite at the end
+(flock /tmp/lw_checks.lock); commit on your own branch; never push.
