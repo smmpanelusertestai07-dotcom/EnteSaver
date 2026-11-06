@@ -63,6 +63,12 @@ signal chat_received(text: String)     # the opponent's chat line in a match (cl
 signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk audio (a NetVoice frame)
 signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
 signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching player's "seek" (NetMatch)
+## GROUPS and all-human team matches (design/GROUPS.txt section 3; the lobby uses only these):
+signal group_changed                   # members, leader, sides, status or search progress changed
+signal group_invited(from_name: String) # a group invite waits: group_invite_from()
+signal member_left(id: String)         # an all-human match: that member left (its slot is LEFT)
+signal event_from(kind: String, data: Array, from_id: String)      # an all-human match's event, with its sender
+signal state_from(state: PackedFloat32Array, from_id: String)      # an all-human match's state, with its sender
 
 const ROOT := "lonewolfarena/v1"
 ## QUICK MATCH (NetMatch): searching players say so here every SEEK_S, never retained.
@@ -233,6 +239,31 @@ var seek_team := 0
 var play_again := {}
 const QUICK_SEEN_MAX := 64     # seekers remembered by a search (a flood of made-up ids cannot grow it)
 
+## GROUPS (design/GROUPS.txt): up to GROUP_MAX players in the lobby, one of them the LEADER, in the
+## group's own end-to-end encrypted room ROOT/g/<gid> (the match room's packets with the group's
+## keys, a counter per sender). `group` is {} or {"gid", "leader", "members": [{"id", "name",
+## "bundle", "team", "slot"}] (leader first, join order; NetGroup's slots), "status" ("joining",
+## "idle", "searching", "starting", "in_match"), "mode", "size"}; only the leader's "groster" is
+## the truth for the others. search_found / search_needed: the humans gathered for the match the
+## leader's START searches for (0 needed: no search). An all-human match (session_multi) is a
+## session in which every member sends: session_roster [{"slot", "id", "name", "bundle", "team"}]
+## in slot order, session_host_id the phone that referees (the leader that started it).
+const GROUP_MAX := NetGroup.MAX
+const GROUP_BEAT_S := 3.0             # the leader's roster and each member's beat
+const GROUP_TIMEOUT_MS := 12000       # a member (or the leader) silent this long has left the group
+const GROUP_RATE := 6.0               # group room messages taken per second and sender (burst 12)
+const MULTI_RATE := 120.0             # match room messages taken per second and member (states, events)
+var group := {}
+var search_found := 0
+var search_needed := 0
+var session_multi := false
+var session_roster: Array = []
+var session_host_id := ""
+var _grp := {}                 # the group's keys and bookkeeping: gid, aes, mac, seq, their, seen, invited, ...
+var _ginv := {}                # the group invite waiting here: {"id", "name", "bundle", "gid", "room", "aes", "mac", "size", "t"}
+var _multi := {}               # the all-human match: ids (id -> slot), seq, heard, ka, joined, left, state_t, t0
+var _buckets := {}             # token buckets per sender (group and match rooms): key -> [tokens, ms]
+
 
 func _ready() -> void:
 	name = "Cloud"
@@ -269,7 +300,7 @@ func stop_lobby() -> void:
 	peers.clear()
 	if _connected:
 		_unsubscribe(ROOT + "/lobby")
-	if not in_session and _outgoing.is_empty() and _room == "" and _ws != null:
+	if not in_session and _outgoing.is_empty() and _room == "" and _grp.is_empty() and _ws != null:
 		_send_packet(PackedByteArray([0xE0, 0x00]))
 		_ws.close()
 		_ws = null
@@ -383,7 +414,7 @@ func load_stall(since: int) -> bool:
 	if not in_session:
 		_listen_ms = -1
 		return false
-	if event_received.get_connections().is_empty():
+	if not _arena_listens():
 		_listen_ms = -1
 		return true
 	if _listen_ms < 0:
@@ -474,6 +505,8 @@ func _process(delta: float) -> void:
 		_send_packet(PackedByteArray([0xC0, 0x00]))
 	_pong_budget = minf(_pong_budget + delta, 3.0)
 	_tick_room(delta)
+	if not _grp.is_empty():
+		_tick_group(delta, Time.get_ticks_msec())
 	_card_t -= delta
 	if card_key(my_card()) != _card_sig:
 		_card_t = minf(_card_t, CARD_CHANGE_S)
@@ -501,8 +534,13 @@ func _process(delta: float) -> void:
 	# (the other phone said it was loading LOAD_STALL_MS + SILENCE_MS ago at most: its arena's
 	# first frames may stall a while longer)
 	var wait_ms := SILENCE_MS + (LOAD_STALL_MS if now - _peer_ka_ms < SILENCE_MS + LOAD_STALL_MS else 0)
+	if in_session and session_multi:
+		_check_members(now)
 	if in_session and now - _last_heard > wait_ms:
 		end_session("left")
+	if not _ginv.is_empty() and now - int(_ginv.t) > INVITE_TIMEOUT_MS:
+		_ginv = {}
+		group_changed.emit()
 	if not _outgoing.is_empty() and not in_session and now - int(_outgoing.t) > INVITE_TIMEOUT_MS:
 		var who := String(_outgoing.name)
 		cancel_invite()
@@ -519,21 +557,30 @@ func _tick_room(delta: float, now := Time.get_ticks_msec()) -> void:
 		_join_t -= delta
 		if _join_t <= 0.0:
 			_join_t = 1.0
-			_room_send({"k": "join"})
+			if not (session_multi and is_host):
+				_room_send({"k": "join"})
+		# An all-human match whose members do not all say "join" in time: the host starts with those
+		# that did (the others are LEFT at once), a member gives up on a host that never answers.
+		if session_multi:
+			if now - int(_multi.t0) > JOIN_TIMEOUT_MS:
+				if is_host and not (_multi.joined as Dictionary).is_empty():
+					_multi_start()
+				else:
+					_multi_abort()
 		# A challenge accepted here whose room handshake never completes (the challenger went
 		# away right after): give up, so the popup does not wait for ever.
-		if _accept_ms > 0 and now - _accept_ms > JOIN_TIMEOUT_MS:
+		elif _accept_ms > 0 and now - _accept_ms > JOIN_TIMEOUT_MS:
 			var who := String(opponent.get("name", "PLAYER"))
 			_leave_room()
 			invite_failed.emit(who)
-	elif in_session and event_received.get_connections().is_empty() and now - _session_ms < LOAD_KEEP_MS:
+	elif in_session and not _arena_listens() and now - _session_ms < LOAD_KEEP_MS:
 		# The match is loading here (the arena listens once it is up): a keep-alive every second,
 		# so the other phone does not take a slow load for leaving.
 		_keep_t -= delta
 		if _keep_t <= 0.0:
 			_keep_t = 1.0
 			_room_send({"k": "ka"})
-	if in_session and not event_received.get_connections().is_empty():
+	if in_session and _arena_listens() and not (session_multi and is_host):
 		# The round trip to the other phone: a numbered ping it answers at once (NetPing). Only
 		# once the arena is up on both: a phone that never gets its match loaded must still fall
 		# silent after LOAD_KEEP_MS, so the other one stops waiting for it.
@@ -700,6 +747,8 @@ func _parse() -> void:
 						_subscribe(_seek_topic())
 					if _room != "":
 						_subscribe(ROOT + "/r/" + _room)
+					if not _grp.is_empty():
+						_subscribe(ROOT + "/g/" + String(_grp.gid))
 					if room_code != "":
 						_subscribe(ROOT + "/c/" + room_code)
 				else:
@@ -757,6 +806,8 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 			_on_inbox(d)
 	elif _room != "" and topic == ROOT + "/r/" + _room:
 		_on_room(payload)
+	elif not _grp.is_empty() and topic == ROOT + "/g/" + String(_grp.gid):
+		_on_group(payload)
 	elif room_code != "" and topic == ROOT + "/c/" + room_code:
 		var a: Variant = JSON.parse_string(payload.get_string_from_utf8())
 		if a is Dictionary:
@@ -797,7 +848,7 @@ func _on_inbox(d: Dictionary) -> void:
 			if sec.size() != 80:
 				return
 			var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80)}
-			if in_session or not _outgoing.is_empty() or not _incoming.is_empty():
+			if in_session or session_multi or not _outgoing.is_empty() or not _incoming.is_empty():
 				_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 				return
 			var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
@@ -824,6 +875,8 @@ func _on_inbox(d: Dictionary) -> void:
 			invited.emit(String(_incoming.name))
 		"tinv":
 			_on_team_invite(from, d)
+		"ginv":
+			_on_group_invite(from, d)
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
 				_incoming = {}
@@ -837,6 +890,10 @@ func _on_inbox(d: Dictionary) -> void:
 				var who_out := String(_outgoing.name)
 				cancel_invite(false)
 				invite_answered.emit(false, who_out)
+			elif not _grp.is_empty() and (_grp.invited as Dictionary).has(from) \
+					and _tagged(d, {"mac": _grp.mac, "room": _grp.gid}, "dec", from):
+				(_grp.invited as Dictionary).erase(from)      # a group invite declined (or busy there)
+				group_changed.emit()
 		"acc":
 			if String(_outgoing.get("id", "")) == from and not Game.is_blocked(from) and _tagged(d, _outgoing, "acc", from):
 				_last_heard = Time.get_ticks_msec()     # the room handshake follows
@@ -877,7 +934,7 @@ func _on_inbox(d: Dictionary) -> void:
 ## The session it starts is a 1 vs 1 session (this phone hosts) whose session_team says the team.
 ## False when it did not go out.
 func team_invite(peer_id: String, size: int, coop: bool, quick := false) -> bool:
-	if team_byte(size, coop, quick) < 0 or in_session or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
+	if team_byte(size, coop, quick) < 0 or in_session or session_multi or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
 		return false
 	var pub := CryptoKey.new()
 	if pub.load_from_string(String(peers[peer_id].pk), true) != OK:
@@ -947,7 +1004,7 @@ func _on_team_invite(from: String, d: Dictionary) -> void:
 		return
 	var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80),
 		"team": {"size": int(team.size), "coop": bool(team.coop)}}
-	if in_session or not _outgoing.is_empty() or not _incoming.is_empty():
+	if in_session or session_multi or not _outgoing.is_empty() or not _incoming.is_empty():
 		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
@@ -1062,7 +1119,7 @@ func _tagged(d: Dictionary, inv: Dictionary, what: String, sender: String) -> bo
 
 ## Challenges a listed player: its public key wraps a fresh room name and the room's keys.
 func invite(peer_id: String, extra := {}) -> bool:
-	if in_session or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
+	if in_session or session_multi or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
 		return false
 	var pub := CryptoKey.new()
 	if pub.load_from_string(String(peers[peer_id].pk), true) != OK:
@@ -1170,6 +1227,14 @@ func drop_player(id: String) -> void:
 		room_changed.emit()
 	if friend_asked(id):
 		withdraw_request(id, false)
+	if String(_ginv.get("id", "")) == id:
+		_ginv = {}
+		group_changed.emit()
+	if not group.is_empty() and _group_has(id):
+		if String(group.leader) == id:
+			leave_group()              # (the group's leader blocked: this phone leaves it)
+		elif is_group_leader():
+			kick_from_group(id)
 
 
 ## DELETE MY DATA (SettingsAccount): asks the relay to delete what this phone's id left there or
@@ -1189,6 +1254,8 @@ func forget_me() -> bool:
 		end_session("left")
 	cancel_invite()
 	answer(false)
+	answer_group_invite(false)
+	leave_group()
 	if _room != "":
 		_leave_room()
 	close_room()
@@ -1805,41 +1872,63 @@ func _room_send(d: Dictionary) -> void:
 ## id and the next counter), then the HMAC-SHA256 over all of that.
 func _room_packet(d: Dictionary) -> PackedByteArray:
 	_seq += 1
-	d["f"] = my_id
-	d["n"] = _seq
+	return _seal(d, my_id, _seq, _aes, _mac)
+
+
+## A sealed room packet (a match room's or a group room's, by the keys): sender `from`, counter `n`.
+func _seal(d: Dictionary, from: String, n: int, aes: PackedByteArray, mac: PackedByteArray) -> PackedByteArray:
+	d["f"] = from
+	d["n"] = n
 	var plain := JSON.stringify(d).to_utf8_buffer()
 	var pad := 16 - plain.size() % 16
 	for i in pad:
 		plain.append(pad)
 	var iv := _crypto.generate_random_bytes(16)
 	var ctx := AESContext.new()
-	ctx.start(AESContext.MODE_CBC_ENCRYPT, _aes, iv)
+	ctx.start(AESContext.MODE_CBC_ENCRYPT, aes, iv)
 	var body := PackedByteArray([1])
 	body.append_array(iv)
 	body.append_array(ctx.update(plain))
 	ctx.finish()
-	body.append_array(_crypto.hmac_digest(HashingContext.HASH_SHA256, _mac, body))
+	body.append_array(_crypto.hmac_digest(HashingContext.HASH_SHA256, mac, body))
 	return body
 
 
-func _on_room(msg: PackedByteArray) -> void:
-	if msg.size() < 1 + 16 + 16 + 32 or msg[0] != 1 or (msg.size() - 49) % 16 != 0:
-		return
+## A room packet opened with these keys: what it says (with its sender "f" and counter "n"), or {}
+## when it is not from a holder of the keys or is malformed. The counter is the caller's to check.
+func _unseal(msg: PackedByteArray, aes: PackedByteArray, mac: PackedByteArray) -> Dictionary:
+	if aes.size() != 32 or mac.size() != 32 or msg.size() < 1 + 16 + 16 + 32 or msg[0] != 1 or (msg.size() - 49) % 16 != 0:
+		return {}
 	var body := msg.slice(0, msg.size() - 32)
-	if not _crypto.constant_time_compare(_crypto.hmac_digest(HashingContext.HASH_SHA256, _mac, body), msg.slice(msg.size() - 32)):
-		return                       # not from a phone that holds this room's keys
+	if not _crypto.constant_time_compare(_crypto.hmac_digest(HashingContext.HASH_SHA256, mac, body), msg.slice(msg.size() - 32)):
+		return {}                    # not from a phone that holds this room's keys
 	var ctx := AESContext.new()
-	ctx.start(AESContext.MODE_CBC_DECRYPT, _aes, body.slice(1, 17))
+	ctx.start(AESContext.MODE_CBC_DECRYPT, aes, body.slice(1, 17))
 	var plain := ctx.update(body.slice(17))
 	ctx.finish()
 	var pad := plain[plain.size() - 1] if plain.size() > 0 else 0
 	if pad < 1 or pad > 16:
-		return
+		return {}
 	var d: Variant = JSON.parse_string(plain.slice(0, plain.size() - pad).get_string_from_utf8())
-	if not d is Dictionary or String((d as Dictionary).get("f", "")) != String(opponent.get("id", "")):
-		return                       # our own message coming back, or someone else's
+	if not d is Dictionary or typeof((d as Dictionary).get("f")) != TYPE_STRING:
+		return {}
 	var n: Variant = (d as Dictionary).get("n", 0)
-	if (typeof(n) != TYPE_FLOAT and typeof(n) != TYPE_INT) or int(n) <= _their_seq:
+	if typeof(n) != TYPE_FLOAT and typeof(n) != TYPE_INT:
+		return {}
+	return d as Dictionary
+
+
+func _on_room(msg: PackedByteArray) -> void:
+	var d := _unseal(msg, _aes, _mac)
+	if d.is_empty():
+		return
+	if session_multi:
+		_on_multi(d)
+		return
+	if String(d.get("f", "")) != String(opponent.get("id", "")):
+		return                       # our own message coming back, or someone else's
+	var n: Variant = d.get("n", 0)
+	if int(n) <= _their_seq:
 		return                       # replayed (the broker keeps one sender's messages in order)
 	_their_seq = int(n)
 	_last_heard = Time.get_ticks_msec()
@@ -1887,7 +1976,7 @@ func _on_room(msg: PackedByteArray) -> void:
 		"pi":
 			# The other phone measures its round trip: answered at once (not a flood of answers).
 			var i: Variant = (d as Dictionary).get("i")
-			if in_session and (i is float or i is int) and _pong_budget >= 1.0 and not event_received.get_connections().is_empty():
+			if in_session and (i is float or i is int) and _pong_budget >= 1.0 and _arena_listens():
 				_pong_budget -= 1.0
 				_room_send({"k": "po", "i": int(i)})
 		"po":
@@ -1947,6 +2036,8 @@ func end_session(reason := "left") -> void:
 		last_end_reason = reason
 	in_session = false
 	session_team = {}
+	if session_multi:
+		_multi_reset()
 	peer_rtt = -1
 	_peer_pings.clear()
 	_outgoing = {}
@@ -2126,3 +2217,710 @@ func send_voice(frame: PackedByteArray) -> void:
 func send_event(kind: String, data: Array = []) -> void:
 	if in_session:
 		_room_send({"k": "ev", "e": kind, "d": data})
+
+
+## Whether the match's arena listens (the 1 vs 1's event_received, an all-human match's event_from).
+func _arena_listens() -> bool:
+	return not event_received.get_connections().is_empty() or not event_from.get_connections().is_empty()
+
+
+## A token bucket per sender and kind (`burst` at once, then `rate` a second): false = drop it.
+func _bucket(key: String, rate: float, burst: float) -> bool:
+	var now := Time.get_ticks_msec()
+	var b: Array = _buckets.get(key, [burst, now])
+	var tokens := minf(burst, float(b[0]) + float(now - int(b[1])) / 1000.0 * rate)
+	var ok := tokens >= 1.0
+	_buckets[key] = [tokens - 1.0 if ok else tokens, now]
+	return ok
+
+
+# ---------------------------------------------------------------- GROUPS (design/GROUPS.txt)
+# The group's room ROOT/g/<gid> carries room packets (_seal) under the group's own AES and HMAC keys,
+# which only ever travel inside an invite's RSA part ("ginv") or the group room itself. Every sender
+# counts its own packets from its wall clock in ms (so a member who leaves and comes back keeps
+# counting up) and a receiver keeps the newest counter per sender: a replay is dropped. Only current
+# members are heard, plus a "gjoin" from an id the leader invited; a blocked player never. Messages
+# ("k"): "gjoin" {name, bundle} (the invitee after ACCEPT, every GROUP_JOIN_S until the roster has
+# it), "groster" {members: [[id, name, bundle, team, slot]], mode, size, status} (the leader, on
+# every change and every GROUP_BEAT_S: the truth for everyone), "gbeat" (each member every
+# GROUP_BEAT_S), "gleave" (EXIT GROUP), "gkick" {id} (the leader's REMOVE), "gend" (DISBAND),
+# "gstart" {room, aes, mac, size, roster: [[slot, id, name, bundle, team]]} (the leader's START of the
+# group's own match: every member joins that match room). Silent GROUP_TIMEOUT_MS: a member is
+# dropped by the leader; the leader silent that long, the group is gone.
+const GROUP_JOIN_S := 1.0
+
+
+func in_group() -> bool:
+	return not group.is_empty() and (group.members as Array).size() > 1
+
+
+## True for the group's leader, and for a player in no group (a solo leads itself).
+func is_group_leader() -> bool:
+	return group.is_empty() or String(group.get("leader", "")) == my_id
+
+
+## [{"id", "name", "bundle", "leader", "me", "team", "slot"}], the leader first, then in join order.
+func group_members() -> Array:
+	var out := []
+	if group.is_empty():
+		return out
+	for m: Dictionary in group.members:
+		out.append({"id": String(m.id), "name": String(m.name), "bundle": String(m.bundle), "leader": String(m.id) == String(group.leader),
+			"me": String(m.id) == my_id, "team": int(m.team), "slot": int(m.slot)})
+	return out
+
+
+func _group_has(id: String) -> bool:
+	if group.is_empty():
+		return false
+	for m: Dictionary in group.members:
+		if String(m.id) == id:
+			return true
+	return false
+
+
+## What a group invite signs: who sends it, to whom, and the wrapped group keys with the size.
+static func group_invite_text(from: String, to: String, sec: String) -> String:
+	return "ginv|%s|%s|%s" % [from, to, sec]
+
+
+## A group invite signed by its sender's key, whose hash is the id it claims (always required).
+func group_invite_proven(d: Dictionary, from: String) -> bool:
+	for k in ["pk", "sig", "sec"]:
+		if typeof(d.get(k)) != TYPE_STRING:
+			return false
+	return String(d.pk).length() <= 1200 and from == String(d.pk).sha256_text().left(32) \
+		and verify_signed(String(d.pk), group_invite_text(from, my_id, String(d.sec)), String(d.sig))
+
+
+## The leader (or a solo: the first invite makes the group, this phone its leader) invites a friend:
+## their public key wraps the group's id and keys and the mode's size (16 + 32 + 32 + 1 bytes), the
+## whole signed. False when it cannot go out: offline, not listed, blocked, already in, the group
+## full (members and invites waiting), this phone a member but not the leader, or in a match.
+func group_invite(friend_id: String) -> bool:
+	if not _connected or my_id == "" or _key == null or in_session or session_multi or friend_id == my_id \
+			or not peers.has(friend_id) or Game.is_blocked(friend_id) or not is_group_leader():
+		return false
+	if not group.is_empty() and (_group_has(friend_id) or (group.members as Array).size() + (_grp.invited as Dictionary).size() >= GROUP_MAX):
+		return false
+	var pub := CryptoKey.new()
+	if pub.load_from_string(String(peers[friend_id].pk), true) != OK:
+		return false
+	var made := group.is_empty()
+	if made:
+		_group_create(clampi(int(Game.team_size), 1, 4))
+	var sec := String(_grp.gid).hex_decode()
+	sec.append_array(_grp.aes)
+	sec.append_array(_grp.mac)
+	sec.append(int(group.size) if int(group.size) in [1, 2, 4] else 2)
+	var wrapped := _crypto.encrypt(pub, sec)
+	if wrapped.is_empty():
+		if made:
+			_group_close(false)
+		return false
+	var sec_text := Marshalls.raw_to_base64(wrapped)
+	(_grp.invited as Dictionary)[friend_id] = Time.get_ticks_msec()
+	_publish_json(ROOT + "/u/" + friend_id, {"t": "ginv", "from": my_id, "name": String(Game.profile.name),
+		"bundle": String(Game.profile.bundle), "sec": sec_text, "pk": _pk_pem, "sig": _sign(group_invite_text(my_id, friend_id, sec_text))})
+	group_changed.emit()
+	return true
+
+
+func _me_entry() -> Dictionary:
+	return {"id": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle), "team": 0, "slot": 0}
+
+
+## This phone's counter in a group room starts from the wall clock (ms): never below one it used
+## before in the same group, so the others never take its packets for replays.
+static func _group_seq0() -> int:
+	return int(Time.get_unix_time_from_system() * 1000.0)
+
+
+func _group_create(size: int) -> void:
+	var gid := _crypto.generate_random_bytes(16).hex_encode()
+	_grp = {"gid": gid, "aes": _crypto.generate_random_bytes(32), "mac": _crypto.generate_random_bytes(32), "seq": _group_seq0(),
+		"their": {}, "seen": {}, "invited": {}, "beat_t": 0.0, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": false, "manual": false}
+	group = {"gid": gid, "leader": my_id, "members": [_me_entry()], "status": "idle", "mode": "lonewolf", "size": size}
+	NetGroup.arrange(group.members, size, false)
+	_subscribe(ROOT + "/g/" + gid)
+
+
+## A "ginv" in this phone's inbox. Unsigned, from a blocked player, or not the 81 bytes: ignored.
+## Shown (group_invited) only from a friend this phone takes challenges from (NetMatch.allowed),
+## while the lobby listens, and when not busy (in a match, in a group or joining one, another group
+## invite waiting); otherwise declined at once ("dec" with the invite's tag, as a duel's).
+func _on_group_invite(from: String, d: Dictionary) -> void:
+	if typeof(d.get("sec")) != TYPE_STRING or Game.is_blocked(from) or not group_invite_proven(d, from):
+		return
+	var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.sec)))
+	if sec.size() != 81 or not int(sec[80]) in [1, 2, 4]:
+		return
+	var gid := sec.slice(0, 16).hex_encode()
+	var inv := {"id": from, "gid": gid, "room": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "size": int(sec[80])}
+	var busy := in_session or session_multi or in_group() or (not group.is_empty() and not is_group_leader()) or not _ginv.is_empty()
+	if busy or not Game.is_friend(from) or not NetMatch.allowed(from, my_id) or group_invited.get_connections().is_empty():
+		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
+		return
+	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+	inv.name = who if who != "" else "PLAYER"
+	inv.bundle = String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
+	inv.t = Time.get_ticks_msec()
+	_ginv = inv
+	group_invited.emit(String(inv.name))
+
+
+## Who the group invite waiting here comes from: {"id", "name", "bundle"}, {} when none.
+func group_invite_from() -> Dictionary:
+	return {} if _ginv.is_empty() else {"id": String(_ginv.id), "name": String(_ginv.name), "bundle": String(_ginv.bundle)}
+
+
+## ACCEPT: this phone enters the group's room and says "gjoin" until the leader's roster has it (no
+## match starts). DECLINE: "dec". A group of one that this phone led (its invite still out) is
+## dropped for the new one.
+func answer_group_invite(accept: bool) -> void:
+	if _ginv.is_empty():
+		return
+	var inv := _ginv
+	_ginv = {}
+	if not accept or in_session or session_multi or in_group():
+		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
+		group_changed.emit()
+		return
+	if not group.is_empty():
+		_group_close(false)
+	_grp = {"gid": inv.gid, "aes": inv.aes, "mac": inv.mac, "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
+		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": true, "manual": false}
+	group = {"gid": inv.gid, "leader": inv.id, "members": [{"id": inv.id, "name": inv.name, "bundle": inv.bundle, "team": 0, "slot": 0}],
+		"status": "joining", "mode": "lonewolf", "size": int(inv.size)}
+	_subscribe(ROOT + "/g/" + String(inv.gid))
+	group_changed.emit()
+
+
+## EXIT GROUP ("gleave"); the leader's is DISBAND ("gend": everyone leaves).
+func leave_group() -> void:
+	if group.is_empty():
+		return
+	_group_close(true)
+	group_changed.emit()
+
+
+## The leader's REMOVE: that member is told ("gkick") and leaves the roster.
+func kick_from_group(id: String) -> void:
+	if group.is_empty() or String(group.leader) != my_id or id == my_id or not _group_has(id):
+		return
+	_group_send({"k": "gkick", "id": id})
+	_group_drop(id)
+
+
+## The leader's SELECT MODE pick, shown to the members (their SELECT MODE follows it).
+func set_group_mode(mode: String, size: int) -> void:
+	if group.is_empty() or String(group.leader) != my_id or size not in [1, 2, 4]:
+		return
+	group.mode = mode.left(16)
+	if int(group.size) != size:
+		group.size = size
+		NetGroup.arrange(group.members, size, bool(_grp.manual))
+	_group_roster()
+	group_changed.emit()
+
+
+## The leader puts a member on a side: team 0 BLUE / 1 ORANGE, slot the roster slot (-1: the first
+## free one of that team; a slot someone holds swaps the two). Teams may be uneven, a slot may stay
+## empty (never a bot). Echoed to everyone in "groster". False when it cannot be.
+func set_group_team(member_id: String, team: int, slot := -1) -> bool:
+	if group.is_empty() or String(group.leader) != my_id or not NetGroup.move(group.members, member_id, team, slot, int(group.size)):
+		return false
+	_grp.manual = true
+	_group_roster()
+	group_changed.emit()
+	return true
+
+
+## The leader's START (LONE WOLF online, never bots). "" when it goes: the group's own match starts
+## at once when both teams have a player (the default sides: DUO with 3 or 4; or the leader's own,
+## uneven allowed), else the search for the rest runs (search_found / search_needed). Otherwise the
+## notice to show. A solo's 1 VS 1 is QUICK MATCH (NetMatch): "" here, nothing started.
+func group_start(size: int) -> String:
+	if not is_group_leader():
+		return "ONLY THE LEADER CAN START"
+	if size == 1:
+		return "A GROUP CANNOT PLAY 1 VS 1: EXIT GROUP OR PICK DUO / SQUAD" if in_group() else ""
+	if size not in [2, 4]:
+		return "PICK DUO OR SQUAD"
+	if in_session or session_multi:
+		return "A MATCH IS ALREADY STARTING"
+	if not in_group():
+		_search_begin(size)
+		return ""
+	if int(group.size) != size:
+		set_group_mode(String(group.mode), size)
+	var plan := NetGroup.plan(group.members, size)
+	if plan == "search":
+		if (group.members as Array).size() > NetGroup.per_team(size):
+			return "TOO MANY PLAYERS FOR ONE %s TEAM" % ("DUO" if size == 2 else "SQUAD")
+		_search_begin(size)
+		return ""
+	if plan != "match":
+		return plan
+	if not _connected:
+		return "OFFLINE: THE MATCH NEEDS THE INTERNET"
+	_group_launch(size)
+	return ""
+
+
+## CANCEL of the search.
+func group_search_stop() -> void:
+	var was := search_needed > 0
+	search_needed = 0
+	search_found = 0
+	if not group.is_empty() and String(group.leader) == my_id and String(group.status) == "searching":
+		group.status = "idle"
+		_group_roster()
+	if was:
+		group_changed.emit()
+
+
+## The search for the rest of the match (no bots ever): this group (or solo) waits for real players.
+## Joining other searching units into one match ("gseek" / "gmatch") is not built yet.
+func _search_begin(size: int) -> void:
+	search_needed = 2 * size
+	search_found = maxi((group.members as Array).size(), 1) if not group.is_empty() else 1
+	if not group.is_empty():
+		group.status = "searching"
+		_group_roster()
+	group_changed.emit()
+
+
+func _group_send(d: Dictionary) -> void:
+	if _grp.is_empty():
+		return
+	_grp.seq = int(_grp.seq) + 1
+	_publish(ROOT + "/g/" + String(_grp.gid), _seal(d, my_id, int(_grp.seq), _grp.aes, _grp.mac))
+
+
+## The leader's roster: the truth for every member.
+func _group_roster() -> void:
+	if group.is_empty() or String(group.leader) != my_id:
+		return
+	_group_send({"k": "groster", "members": NetGroup.pack_members(group.members), "mode": String(group.mode),
+		"size": int(group.size), "status": String(group.status)})
+
+
+## Leaves the group here (tell: "gleave", the leader's "gend") and forgets its keys.
+func _group_close(tell: bool) -> void:
+	if not _grp.is_empty():
+		if tell:
+			_group_send({"k": "gend"} if String(group.get("leader", "")) == my_id else {"k": "gleave"})
+		if _connected:
+			_unsubscribe(ROOT + "/g/" + String(_grp.gid))
+	_grp = {}
+	group = {}
+	search_found = 0
+	search_needed = 0
+
+
+## The leader drops a member (EXIT GROUP, REMOVE, silent too long): the others hear the new roster.
+func _group_drop(id: String) -> void:
+	var members: Array = group.members
+	for i in members.size():
+		if String(members[i].id) == id:
+			members.remove_at(i)
+			break
+	NetGroup.arrange(members, int(group.size), bool(_grp.manual))
+	if search_needed > 0:
+		search_found = members.size()
+	_group_roster()
+	group_changed.emit()
+
+
+func _on_group(payload: PackedByteArray) -> void:
+	var d := _unseal(payload, _grp.aes, _grp.mac)
+	if d.is_empty():
+		return
+	var f := String(d.f)
+	var k := String(d.get("k", ""))
+	if f == my_id or Game.is_blocked(f):
+		return
+	var leader := String(group.leader)
+	if not _group_has(f) and not (leader == my_id and k == "gjoin" and (_grp.invited as Dictionary).has(f)):
+		return                       # only members, and a "gjoin" from an id the leader invited
+	var n := int(d.n)
+	if n <= int((_grp.their as Dictionary).get(f, -1)):
+		return                       # replayed
+	if not _bucket("g" + f, GROUP_RATE, 12.0):
+		return
+	_grp.their[f] = n
+	var now := Time.get_ticks_msec()
+	_grp.seen[f] = now
+	if f == leader:
+		_grp.leader_ms = now
+	match k:
+		"gjoin":
+			if leader == my_id:
+				_on_gjoin(f, d)
+		"groster":
+			if f == leader and leader != my_id:
+				_on_groster(d)
+		"gleave":
+			if leader == my_id:
+				_group_drop(f)
+		"gkick":
+			if f == leader and String(d.get("id", "")) == my_id:
+				_group_close(false)
+				group_changed.emit()
+		"gend":
+			if f == leader:
+				_group_close(false)
+				group_changed.emit()
+		"gstart":
+			if f == leader and leader != my_id:
+				_on_gstart(d)
+
+
+## The leader: an invited player joins (a new member gets its default side or the first free slot);
+## a member that says it again gets the roster again.
+func _on_gjoin(f: String, d: Dictionary) -> void:
+	var members: Array = group.members
+	if not _group_has(f):
+		if members.size() >= GROUP_MAX or in_session or session_multi:
+			return
+		(_grp.invited as Dictionary).erase(f)
+		var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+		var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
+		members.append({"id": f, "name": who if who != "" else "PLAYER", "bundle": b, "team": -1, "slot": -1})
+		NetGroup.arrange(members, int(group.size), bool(_grp.manual))
+		if search_needed > 0:
+			search_found = members.size()
+		group_changed.emit()
+	_group_roster()
+
+
+## A member: the leader's roster (checked by NetGroup.members_from) replaces what this phone had.
+## Without this phone in it the leader dropped it (unless it is still joining).
+func _on_groster(d: Dictionary) -> void:
+	var size := int(d.get("size", 2)) if (d.get("size") is float or d.get("size") is int) else 2
+	if size not in [1, 2, 4]:
+		return
+	var list := NetGroup.members_from(d.get("members"), String(group.leader), size)
+	if list.is_empty():
+		return
+	var mine := false
+	for m: Dictionary in list:
+		mine = mine or String(m.id) == my_id
+	if not mine:
+		if not bool(_grp.joining):
+			_group_close(false)
+			group_changed.emit()
+		return
+	var status := String(d.get("status", "idle")) if typeof(d.get("status")) == TYPE_STRING else "idle"
+	if status not in ["idle", "searching", "starting", "in_match"]:
+		status = "idle"
+	var mode := String(d.get("mode", "lonewolf")).left(16) if typeof(d.get("mode")) == TYPE_STRING else "lonewolf"
+	var before := JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed])
+	_grp.joining = false
+	group.members = list
+	group.status = status
+	group.mode = mode
+	group.size = size
+	search_needed = 2 * size if status == "searching" and size in [2, 4] else 0
+	search_found = list.size() if search_needed > 0 else 0
+	if JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed]) != before:
+		group_changed.emit()
+
+
+## Every frame while in a group: "gjoin" until in, the beats, the silent dropped, invites expired.
+func _tick_group(delta: float, now: int) -> void:
+	var leader := String(group.leader)
+	if bool(_grp.joining):
+		_grp.join_t = float(_grp.join_t) - delta
+		if float(_grp.join_t) <= 0.0:
+			_grp.join_t = GROUP_JOIN_S
+			_group_send({"k": "gjoin", "name": String(Game.profile.name), "bundle": String(Game.profile.bundle)})
+		if now - int(_grp.leader_ms) > JOIN_TIMEOUT_MS:
+			_group_close(false)          # the leader never let this phone in
+			group_changed.emit()
+		return
+	_grp.beat_t = float(_grp.beat_t) - delta
+	if float(_grp.beat_t) <= 0.0:
+		_grp.beat_t = GROUP_BEAT_S
+		if leader == my_id:
+			_group_roster()
+		else:
+			_group_send({"k": "gbeat"})
+	if leader != my_id:
+		if now - int(_grp.leader_ms) > GROUP_TIMEOUT_MS:
+			_group_close(false)          # the leader is gone: so is the group
+			group_changed.emit()
+		return
+	var gone := []
+	for m: Dictionary in group.members:
+		if String(m.id) != my_id and now - int((_grp.seen as Dictionary).get(String(m.id), now)) > GROUP_TIMEOUT_MS:
+			gone.append(String(m.id))
+	for id: String in gone:
+		_group_drop(id)
+	var invited: Dictionary = _grp.invited
+	for id: String in invited.keys():
+		if now - int(invited[id]) > INVITE_TIMEOUT_MS:
+			invited.erase(id)
+			group_changed.emit()
+	if (group.members as Array).size() <= 1 and invited.is_empty() and search_needed == 0:
+		_group_close(false)              # nobody joined and no invite waits: no group
+		group_changed.emit()
+
+
+## The leader starts the group's own match: a fresh match room and keys (inside the group room's
+## encryption only) and the roster from the sides; everyone joins it, the leader hosts.
+func _group_launch(size: int) -> void:
+	var room := _crypto.generate_random_bytes(16).hex_encode()
+	var aes := _crypto.generate_random_bytes(32)
+	var mac := _crypto.generate_random_bytes(32)
+	var roster := NetGroup.match_roster(group.members)
+	group.status = "starting"
+	search_needed = 0
+	search_found = 0
+	_group_send({"k": "gstart", "room": room, "aes": Marshalls.raw_to_base64(aes), "mac": Marshalls.raw_to_base64(mac), "size": size,
+		"roster": NetGroup.pack_roster(roster)})
+	_group_roster()
+	_multi_enter(room, aes, mac, size, roster, my_id)
+	group_changed.emit()
+
+
+## A member: the leader's START. Its roster must hold this phone, the leader, and members only.
+func _on_gstart(d: Dictionary) -> void:
+	if in_session or session_multi or typeof(d.get("room")) != TYPE_STRING or typeof(d.get("aes")) != TYPE_STRING \
+			or typeof(d.get("mac")) != TYPE_STRING or not (d.get("size") is float or d.get("size") is int):
+		return
+	var room := String(d.room)
+	var aes := Marshalls.base64_to_raw(String(d.aes))
+	var mac := Marshalls.base64_to_raw(String(d.mac))
+	var size := int(d.size)
+	var roster := NetGroup.roster_from(d.get("roster"), size)
+	if room.length() != 32 or not room.is_valid_hex_number() or aes.size() != 32 or mac.size() != 32 or roster.is_empty():
+		return
+	var ids := {}
+	for e: Dictionary in roster:
+		if not _group_has(String(e.id)):
+			return
+		ids[String(e.id)] = true
+	if not ids.has(my_id) or not ids.has(String(group.leader)):
+		return
+	seek_stop()
+	search_needed = 0
+	search_found = 0
+	group.status = "in_match"
+	_multi_enter(room, aes, mac, size, roster, String(group.leader))
+	group_changed.emit()
+
+
+# ---------------------------------------------------------------- the all-human match (session_multi)
+# The match room ROOT/r/<room> with the 1 vs 1's packets, every member a sender with its own counter
+# (replays dropped per sender), only roster members heard. Each member says "join" every second; the
+# host, once it heard all of them (or JOIN_TIMEOUT_MS passed: those missing are LEFT), starts the
+# session and answers "joined", which starts it on each member. Events and states come with their
+# sender (event_from, state_from), at most MULTI_RATE a second from one member; "bye" from a member
+# is member_left, from the host (or the host silent) the session's end ("left"). The host hears
+# every member, so it ends the session when all of them left. No direct UDP path in these matches.
+
+func _multi_enter(room: String, aes: PackedByteArray, mac: PackedByteArray, size: int, roster: Array, host_id: String) -> void:
+	if in_session:
+		end_session("left")
+	if seeking:
+		seek_stop()
+	if _room != "":
+		_leave_room()
+	session_multi = true
+	session_roster = roster.duplicate(true)
+	session_host_id = host_id
+	is_host = host_id == my_id
+	session_rules = {}
+	session_team = {"size": size, "coop": false}
+	var ids := {}
+	for e: Dictionary in roster:
+		ids[String(e.id)] = int(e.slot)
+	var now := Time.get_ticks_msec()
+	_multi = {"ids": ids, "seq": {}, "heard": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": now}
+	opponent = {}
+	_room = room
+	_aes = aes
+	_mac = mac
+	_seq = 0
+	_their_seq = -1
+	_join_t = 0.0
+	_last_heard = now
+	_subscribe(ROOT + "/r/" + _room)
+
+
+func _multi_start() -> void:
+	if in_session or not session_multi:
+		return
+	var now := Time.get_ticks_msec()
+	in_session = true
+	_accept_ms = 0
+	_session_ms = now
+	_keep_t = 0.0
+	peer_rtt = -1
+	_peer_ping_t = 0.0
+	_peer_pings.clear()
+	_last_state = []
+	_chat_in = [2.0, now]
+	_chat_out_ms = 0
+	queue.clear()
+	_direct_end()
+	_state_in_t = -1
+	relay_states_out = 0
+	relay_states_in = 0
+	_last_heard = now
+	for id: String in _multi.ids:
+		if id != my_id:
+			_multi.heard[id] = now
+	if is_host:
+		for id: String in _multi.ids:
+			if id != my_id and not (_multi.joined as Dictionary).has(id):
+				_multi.left[id] = true       # never came: LEFT from the start (the arena hears it)
+		_room_send({"k": "joined"})
+	session_started.emit(is_host)
+	if is_host:
+		for id: String in (_multi.left as Dictionary).keys():
+			member_left.emit(id)
+
+
+## The match never got going (the host never answered, or nobody joined the host).
+func _multi_abort() -> void:
+	_multi_reset()
+	_leave_room()
+	if not group.is_empty():
+		group.status = "idle"
+		_group_roster()
+	group_changed.emit()
+
+
+func _multi_reset() -> void:
+	session_multi = false
+	session_roster = []
+	session_host_id = ""
+	_multi = {}
+	if not group.is_empty() and String(group.status) in ["starting", "in_match"]:
+		group.status = "idle"
+		_group_roster()
+		group_changed.emit()
+
+
+func _on_multi(d: Dictionary) -> void:
+	var f := String(d.f)
+	if f == my_id or not (_multi.ids as Dictionary).has(f) or (_multi.left as Dictionary).has(f) or Game.is_blocked(f):
+		return
+	var n := int(d.n)
+	if n <= int((_multi.seq as Dictionary).get(f, -1)):
+		return                       # replayed
+	if not _bucket("m" + f, MULTI_RATE, MULTI_RATE):
+		return
+	_multi.seq[f] = n
+	var now := Time.get_ticks_msec()
+	_multi.heard[f] = now
+	if is_host or f == session_host_id:
+		_last_heard = now            # (a member waits on the host; the host on anyone)
+	var kind := String(d.get("k", ""))
+	match kind:
+		"join":
+			if is_host:
+				_multi.joined[f] = true
+				if in_session:
+					_room_send({"k": "joined"})
+				elif (_multi.joined as Dictionary).size() >= (_multi.ids as Dictionary).size() - 1:
+					_multi_start()
+		"joined":
+			if not is_host and f == session_host_id:
+				_multi_start()
+		"ka":
+			_multi.ka[f] = now
+			if is_host or f == session_host_id:
+				_peer_ka_ms = now
+		"pi":
+			var i: Variant = d.get("i")
+			if is_host and in_session and (i is float or i is int) and _pong_budget >= 1.0 and _arena_listens():
+				_pong_budget -= 1.0
+				_room_send({"k": "po", "i": int(i)})
+		"po":
+			var i: Variant = d.get("i")
+			if f == session_host_id and (i is float or i is int) and _peer_pings.has(int(i)):
+				peer_rtt = NetPing.smooth(peer_rtt, now - int(_peer_pings[int(i)]))
+				_peer_pings.erase(int(i))
+		"chat":
+			var x: Variant = d.get("x")
+			if in_session and typeof(x) == TYPE_STRING and bool(Game.settings.get("chat", true)) and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
+				var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
+				if line != "":
+					chat_received.emit(line)
+		"vo":
+			var a: Variant = d.get("a")
+			if in_session and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and bool(Game.settings.get("voice_chat", false)) \
+					and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
+				var frame := Marshalls.base64_to_raw(String(a))
+				if NetVoice.frame_ok(frame):
+					voice_received.emit(frame)
+		"st":
+			_on_multi_state(d, f)
+		"ev":
+			var ev: Variant = d.get("e", "")
+			var data: Variant = d.get("d", [])
+			if not in_session or typeof(ev) != TYPE_STRING or not data is Array or (data as Array).size() > 16:
+				return
+			for v: Variant in data:
+				if typeof(v) not in [TYPE_FLOAT, TYPE_INT, TYPE_STRING, TYPE_BOOL]:
+					return
+			if String(ev) == "bye":
+				_multi_member_left(f)
+			elif not _arena_listens():
+				if queue.size() < MAX_QUEUED:
+					queue.append([String(ev), data, f])
+			else:
+				event_from.emit(String(ev), data, f)
+
+
+## A member's state: STATE_SIZE numbers and its clock "t" (older than its newest: dropped).
+func _on_multi_state(d: Dictionary, f: String) -> void:
+	var s: Variant = d.get("s", [])
+	if not in_session or not s is Array or (s as Array).size() != RemoteFighter.STATE_SIZE:
+		return
+	var out := PackedFloat32Array()
+	for v: Variant in s:
+		if typeof(v) != TYPE_FLOAT and typeof(v) != TYPE_INT:
+			return
+		out.append(float(v))
+	var t: Variant = d.get("t")
+	var sent := int(t) if (t is float or t is int) and is_finite(float(t)) else -1
+	if sent >= 0:
+		if sent <= int((_multi.state_t as Dictionary).get(f, -1)):
+			return
+		_multi.state_t[f] = sent
+	last_state_sent_ms = sent
+	relay_states_in += 1
+	state_from.emit(out, f)
+
+
+## A member said "bye" or fell silent: LEFT (member_left); the host gone, or everyone gone for the
+## host, ends the session ("left").
+func _multi_member_left(f: String) -> void:
+	if not session_multi or (_multi.left as Dictionary).has(f):
+		return
+	_multi.left[f] = true
+	if f == session_host_id:
+		end_session("left")
+		return
+	if in_session:
+		member_left.emit(f)
+	if is_host and (_multi.left as Dictionary).size() >= (_multi.ids as Dictionary).size() - 1:
+		end_session("left")
+
+
+## Every frame in an all-human match: a member silent as long as a 1 vs 1 opponent may be has left.
+func _check_members(now: int) -> void:
+	for id: String in (_multi.ids as Dictionary).keys():
+		if id == my_id or id == session_host_id or (_multi.left as Dictionary).has(id):
+			continue
+		var ka := int((_multi.ka as Dictionary).get(id, -100000))
+		var wait_ms := SILENCE_MS + (LOAD_STALL_MS if now - ka < SILENCE_MS + LOAD_STALL_MS else 0)
+		if now - int((_multi.heard as Dictionary).get(id, now)) > wait_ms:
+			_multi_member_left(id)
+			if not session_multi:
+				return

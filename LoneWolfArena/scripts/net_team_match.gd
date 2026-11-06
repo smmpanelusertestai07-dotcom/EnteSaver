@@ -12,6 +12,13 @@ extends Node
 ## FOUND: YOUR TEAM VS BOTS"). The popup (node "Modal": "TeamStatus", "TeamTimer", "TeamFill" BOTS
 ## IN 0:nn, "TeamNote", "TeamCancel") is like QUICK MATCH's; CANCEL, X and back stop the search.
 ## The 1 vs 1 QUICK MATCH (NetMatch) is untouched.
+## GROUPS (1.5.0, design/GROUPS.txt): a player in a group (Cloud.in_group) goes through
+## Cloud.group_start(size) instead, with REAL PLAYERS ONLY: a group whose two teams both have a player
+## plays its own match at once (the lobby loads it: LobbyFriends._on_net_session, link_roster); else
+## its search shows "PLAYERS n/N" (Cloud.search_found / search_needed) with no timer and no bots,
+## until CANCEL (Cloud.group_search_stop). Joining searching groups and solos into one match is not
+## built yet, so a solo keeps the search above (with its bot fill) until it is: the guard is
+## _group_path, set only for a player in a group.
 
 const SEEK_S := 2.0
 const FILL_S := 25.0                      # LW_FILL_S overrides it in test runs
@@ -31,6 +38,7 @@ var _timer: Label
 var _fill: Label
 var _note: Label
 var _cancel: Button
+var _group_path := false                  # this search is a group's (Cloud.group_start): never bots
 
 
 ## START with DUO / SQUAD in LONE WOLF: opens the search (or brings back the one running).
@@ -64,6 +72,17 @@ func start() -> void:
 		return
 	if searching:
 		return
+	_group_path = cloud.in_group()
+	if _group_path:
+		var why := cloud.group_start(size)
+		if why != "":
+			_end(why)
+			return
+		searching = true
+		elapsed = 0.0
+		if _fill:
+			_fill.text = ""
+		return
 	searching = true
 	elapsed = 0.0
 	_seek_t = 0.0
@@ -85,6 +104,11 @@ func cancel() -> void:
 
 func stop() -> void:
 	var cloud := Game.cloud_service()
+	if _group_path:
+		if searching and not cloud.in_session and not cloud.session_multi:
+			cloud.group_search_stop()
+		searching = false
+		return
 	if searching and not cloud.in_session and _asked != "" and cloud.waiting_for() != "":
 		cloud.cancel_invite()
 	searching = false
@@ -106,6 +130,9 @@ func _process(delta: float) -> void:
 	if not searching:
 		return
 	var cloud := Game.cloud_service()
+	if _group_path:
+		_group_tick(cloud, delta)
+		return
 	if cloud.in_session:
 		stop()                       # paired: the lobby loads the match
 		return
@@ -234,3 +261,22 @@ func _end(why: String) -> void:
 		_note.text = why
 	if _cancel:
 		UI.set_caption(_cancel, "OK")
+
+
+## A group's START (no bots): the in-group match starting, or the search's PLAYERS n/N.
+func _group_tick(cloud: Cloud, delta: float) -> void:
+	if cloud.in_session or cloud.session_multi:
+		searching = false            # the group's match is starting: the lobby loads it
+		if _status:
+			_status.text = "STARTING MATCH..."
+		return
+	if cloud.search_needed == 0:
+		_end("THE SEARCH STOPPED.")
+		return
+	elapsed += delta
+	if _timer:
+		_timer.text = "%d:%02d" % [int(elapsed) / 60, int(elapsed) % 60]
+	if _fill:
+		_fill.text = "PLAYERS %d/%d" % [cloud.search_found, cloud.search_needed]
+	if _status:
+		_status.text = "CONNECTING..." if cloud.status != "online" else "SEARCHING PLAYERS %d/%d" % [cloud.search_found, cloud.search_needed]

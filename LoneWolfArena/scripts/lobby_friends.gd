@@ -48,6 +48,7 @@ const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYER
 
 
 var lan: LobbyLan                      # the tab PLAY WITHOUT INTERNET
+var _match_loading := false            # this lobby is loading an online match (_on_net_session)
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -907,12 +908,20 @@ func _on_room_changed() -> void:
 ## is LONE WOLF whatever mode the lobby shows; the arena ignores TRAINING GROUND's dummy choice
 ## (Game.practice) online, so that choice stays for later. A session a TEAM INVITE started
 ## (Cloud.session_team) is a team match (session_team_match), any other one the 1 vs 1.
+## An all-human match (a GROUP's, Cloud.session_multi) loads the same way, its Game.team_match from
+## Cloud.session_roster (TeamArena.link_roster); a member's START may be disabled meanwhile (only the
+## leader starts), so only a match this lobby is already loading turns it down.
 func _on_net_session(_host: bool) -> void:
 	var cloud := Game.cloud_service()
-	if lobby.start_btn.disabled or (not cloud.session_team.is_empty() and not Game.TEAMS_ONLINE):
+	var busy := _match_loading or (lobby.start_btn.disabled and not cloud.session_multi)
+	if busy or (not cloud.session_team.is_empty() and not Game.TEAMS_ONLINE):
 		cloud.end_session("left")       # a match is loading already (or online teams are off): tell the other phone
 		return
 	Game.team_match = session_team_match(cloud)
+	if cloud.session_multi and Game.team_match.is_empty():
+		cloud.end_session("left")       # (a roster this phone cannot play: not in it, a team empty)
+		return
+	_match_loading = true
 	Game.online = true
 	Game.session = cloud
 	Game.room_rules = cloud.session_rules.duplicate()
@@ -931,6 +940,9 @@ static func session_team_match(cloud: Cloud) -> Dictionary:
 	var st: Dictionary = cloud.session_team
 	if st.is_empty() or not Game.TEAMS_ONLINE:
 		return {}
+	if cloud.session_multi:
+		return TeamArena.link_roster(4 if int(st.get("size", 2)) == 4 else 2, cloud.session_roster, cloud.my_id, cloud.session_host_id,
+			cloud.session_host_id.hash())
 	var me := {"id": cloud.my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle)}
 	var other := {"id": String(cloud.opponent.get("id", "")), "name": String(cloud.opponent.get("name", "PLAYER")),
 		"bundle": String(cloud.opponent.get("bundle", "default"))}

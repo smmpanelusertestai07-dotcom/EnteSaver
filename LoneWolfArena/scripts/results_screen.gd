@@ -764,7 +764,11 @@ static func other_player(tm: Dictionary) -> Dictionary:
 ## Game.team_match): only with the other phone's player known, never after a forfeit (they left:
 ## result.opponent_left), once a player left (a row LEFT), or after a match that ended early or was
 ## left (result.ended / left).
+## After an all-human match (a GROUP's, Game.team_match "multi") only LOBBY: the group stays together
+## in the lobby and its leader starts again from there.
 static func team_again_offered(r: Dictionary, tm: Dictionary) -> bool:
+	if bool(tm.get("multi", false)):
+		return false
 	if other_player(tm).is_empty() or bool(r.get("opponent_left", false)) or bool(r.get("ended", false)) or bool(r.get("left", false)) \
 			or bool(r.get("invalid", false)):
 		return false

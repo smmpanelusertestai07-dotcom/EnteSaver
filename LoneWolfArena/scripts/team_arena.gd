@@ -107,6 +107,44 @@ static func link_match(size: int, coop: bool, host: Dictionary, guest: Dictionar
 		"my_slot": 0 if am_host else guest_slot, "host": am_host, "roster": out_roster}
 
 
+## An all-human match (a GROUP's own match, Cloud.session_multi) as Game.team_match: every slot a
+## real player, NO bot slots. `in_roster` is Cloud.session_roster ([{"slot", "id", "name", "bundle",
+## "team"}]); teams may be uneven (1..size players each) and a slot nobody holds is simply absent.
+## The slots are numbered again 0..n-1 in roster order (BLUE first), the same on every phone, so
+## the arena's slot list has no gaps. `host_id` referees. {} for anything that cannot be played
+## (a size other than 2 / 4, a team empty or over size, an id twice, this phone not in it).
+## `seed_value` is kept for the bots' names of rosters that have some (none here).
+static func link_roster(size: int, in_roster: Array, my_id: String, host_id: String, seed_value: int) -> Dictionary:
+	if size not in [2, 4]:
+		return {}
+	var entries := []
+	for e: Variant in in_roster:
+		if not e is Dictionary:
+			return {}
+		entries.append(e)
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return [int(a.get("team", 0)), int(a.get("slot", 0))] < [int(b.get("team", 0)), int(b.get("slot", 0))])
+	var out_roster := []
+	var counts := [0, 0]
+	var ids := {}
+	var mine := -1
+	for e: Dictionary in entries:
+		var t := int(e.get("team", -1))
+		var id := String(e.get("id", ""))
+		if t not in [0, 1] or id == "" or ids.has(id):
+			return {}
+		ids[id] = true
+		counts[t] += 1
+		if id == my_id:
+			mine = out_roster.size()
+		out_roster.append({"slot": out_roster.size(), "id": id, "team": t, "bot": false, "name": String(e.get("name", "PLAYER")),
+			"bundle": String(e.get("bundle", "default")), "diff": 1})
+	if mine < 0 or not ids.has(host_id) or counts[0] < 1 or counts[1] < 1 or counts[0] > size or counts[1] > size:
+		return {}
+	return {"size": size, "online": true, "coop": false, "multi": true, "mode_id": "duo" if size == 2 else "squad", "my_slot": mine,
+		"host": my_id == host_id, "host_id": host_id, "seed": seed_value, "roster": out_roster}
+
+
 # ---------------------------------------------------------------- read API (HUD, results: WP-B2)
 
 func team_of(f: Fighter) -> int:
@@ -323,7 +361,7 @@ func _spawn_fighters() -> void:
 		f.knocked_down.connect(_on_knocked)
 		f.knock_finished.connect(_on_knock_finished)
 		_outside[f] = 0.0
-		if not bool(Game.team_match.get("coop", false)) and not bool(_entry(f.slot).get("bot", true)) and f != player:
+		if not bool(Game.team_match.get("coop", false)) and not bool(_entry(f.slot).get("bot", true)) and f != player and f.team != my_team:
 			_enemy_id = String(_entry(f.slot).get("id", ""))
 	referee.setup(teams)
 

@@ -31,6 +31,17 @@ extends TeamArena
 ##   "rm" [takes]                            after the match: the other player tapped PLAY AGAIN
 ##                                           TOGETHER / REMATCH on its results (Arena.ask_rematch)
 ##
+## ALL-HUMAN MATCHES (a GROUP's own match, Game.team_match from TeamArena.link_roster, "multi" true;
+## Game.session a Cloud with session_multi): every slot is a real player on its own phone, there are
+## no bots, and the host (Game.team_match.host_id, the group's leader) referees as above. Each phone
+## runs only its own slot; every other one is a RemoteFighter driven by that member's states
+## (Cloud.state_from). Events come with their sender (Cloud.event_from): a member speaks only for the
+## slot it runs (_theirs checks the sender owns the slot), decisions and "tk" are taken only from the
+## host, and a "hit" goes to everyone but only the target's own phone applies it. The host starts
+## the first prep once every member's arena said "ready" (READY_WAIT_S at most). A member that leaves
+## (Cloud.member_left) is LEFT for the rest of the match (TeamReferee.leave on the host); the host
+## leaving ends the match for everyone (ENDED, as the coop guest's). The results offer only LOBBY.
+##
 ## Trust, as in the 1 vs 1: each phone can lie about its own fighter (a modified build can ignore
 ## hits), and the host about its bots and the rounds; nobody else can send anything (room keys, a
 ## counter per sender). What the other phone says is held to limits, so a modified build cannot
@@ -46,6 +57,7 @@ const BOT_VALUES := 9                # x, y, z, yaw, pitch, stance, flags, weapo
 const CAUSES := ["gun", "frag", "zone", "fall", "self", "bleed", "left"]
 const DECISION_SIZES := {"ko": 4, "el": 4, "rv": 2, "rend": 5, "round": 3}
 const FIN_SIZE := 10
+const READY_WAIT_S := 20.0           # all-human: the host starts the first prep after this even if a member never said "ready"
 
 var am_host := false                 # this phone hosts: runs the bots, referees
 var guest_slot := 1                  # the guest's player (1 in coop, `size` against the other player)
@@ -57,6 +69,14 @@ var _rv_seen := {}                   # host: reviver slot -> [target slot, ms] f
 var _spawns := {}                    # "grenade<slot>" / "wall<slot>" -> how many the other phone used this round
 var _spawn_round := -1
 var _fin_sent := false
+var multi := false                   # an all-human match (Cloud.session_multi): every human runs its own slot
+var host_id := ""                    # who referees it (Game.team_match.host_id)
+var _owner := {}                     # all-human: slot -> the id of the phone that runs it
+var _slot_of := {}                   # all-human: id -> slot
+var _from := ""                      # all-human: the sender of the event being handled
+var _ready_from := {}                # all-human, host: members whose arena said "ready"
+var _gone := {}                      # all-human: slot -> true once its member left
+var _setup_t := 0.0                  # all-human, host: s since this arena began listening
 
 
 func _ready() -> void:
@@ -64,6 +84,16 @@ func _ready() -> void:
 	coop = bool(tm.get("coop", false))
 	guest_slot = 1 if coop else int(tm.get("size", 2))
 	am_host = Game.session != null and Game.session.is_host
+	multi = bool(tm.get("multi", false))
+	host_id = String(tm.get("host_id", ""))
+	if multi:
+		for e: Variant in tm.get("roster", []):
+			if e is Dictionary:
+				var id := String((e as Dictionary).get("id", ""))
+				var s := int((e as Dictionary).get("slot", -1))
+				_owner[s] = host_id if bool((e as Dictionary).get("bot", false)) else id
+				if id != "":
+					_slot_of[id] = s
 	super()
 
 
@@ -77,8 +107,12 @@ func runs_here(f: Fighter) -> bool:
 	return f != null and runs_slot(f.slot)
 
 
-## Whether the fighter in `slot` runs on this phone: the host runs every slot but the guest's.
+## Whether the fighter in `slot` runs on this phone: the host runs every slot but the guest's; in an
+## all-human match each phone runs only its own (and the host any bot's).
 func runs_slot(slot: int) -> bool:
+	if multi:
+		return slot == int(Game.team_match.get("my_slot", -1)) or (am_host and String(_owner.get(slot, "")) == host_id \
+			and bool(_entry(slot).get("bot", false)))
 	return (slot != guest_slot) == am_host
 
 
@@ -105,6 +139,10 @@ func _net_tick(delta: float) -> void:
 				f.revive_t = minf(f.revive_t + delta, Fighter.REVIVE_S)
 	if not _sending():
 		return
+	if multi and am_host and not _net_begun:
+		_setup_t += delta
+		if _setup_t > READY_WAIT_S:
+			_net_begin()                 # (a member whose arena never got going: the match starts without waiting)
 	if phase == Phase.END:
 		if not _called_off:
 			_send_final()
@@ -185,6 +223,92 @@ func net_hit_by(target: Fighter, attacker: Fighter, amount: float, zone: String,
 ## Whether this arena still talks to the other phone.
 func _sending() -> bool:
 	return online and not _net_left and Game.session != null and Game.session.in_session
+
+
+# ---------------------------------------------------------------- an all-human match's members
+
+## All-human: the arena listens to every member (event_from, state_from, member_left) instead of the
+## one opponent; events that came while it loaded are in Cloud.queue with their sender.
+func _net_setup() -> void:
+	if not multi:
+		super()
+		return
+	_net_host = Game.session.is_host
+	Game.session.event_from.connect(_on_event_from)
+	Game.session.state_from.connect(_on_state_from)
+	Game.session.member_left.connect(_on_member_left)
+	Game.session.session_ended.connect(_on_net_ended)
+	var queued: Array = Game.session.queue.duplicate()
+	Game.session.queue.clear()
+	Game.session.send_event("ready")
+	for q: Array in queued:
+		if q.size() == 3:
+			_on_event_from(String(q[0]), q[1], String(q[2]))
+	Game.mark("online match: " + ("host" if Game.session.is_host else "guest"))
+
+
+func leave_session() -> void:
+	if online and not _net_left and Game.session != null:
+		for sig: String in ["event_from", "state_from", "member_left"]:
+			for c: Dictionary in Game.session.get_signal_connection_list(sig):
+				if (c.callable as Callable).get_object() == self:
+					Game.session.disconnect(sig, c.callable)
+	super()
+
+
+## A member's event: the host's word only from the host; anything about a slot only from the member
+## that runs it (_theirs, with _from set).
+func _on_event_from(kind: String, data: Array, from: String) -> void:
+	if not _slot_of.has(from) or _gone.has(int(_slot_of[from])):
+		return
+	_from = from
+	match kind:
+		"ready":
+			if am_host:
+				_ready_from[from] = true
+				if _all_ready():
+					_net_begin()
+		"begin", "tk", "ko", "el", "rv", "rend", "round":
+			if from == host_id:
+				_on_net_event(kind, data)
+		"rm":
+			pass                         # (no PLAY AGAIN TOGETHER after an all-human match: the group stays together)
+		_:
+			_on_net_event(kind, data)
+	_from = ""
+
+
+## Whether every member still in the match has its arena up ("ready").
+func _all_ready() -> bool:
+	for id: String in _slot_of:
+		if id != Game.session.my_id and not _gone.has(int(_slot_of[id])) and not _ready_from.has(id):
+			return false
+	return true
+
+
+func _on_state_from(s: PackedFloat32Array, from: String) -> void:
+	var slot := int(_slot_of.get(from, -1))
+	var f := _slot(slot) as RemoteFighter
+	if f != null and not runs_here(f) and s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index \
+			and phase != Phase.BREAK and _net_rate_ok("state%d" % slot, 30.0, 30.0):
+		f.apply_state(s, Game.session.last_state_sent_ms)
+
+
+## A member left (said bye, or went silent): its slot is LEFT for the rest of the match.
+func _on_member_left(id: String) -> void:
+	var slot := int(_slot_of.get(id, -1))
+	if slot < 0 or _gone.has(slot):
+		return
+	_gone[slot] = true
+	_ready_from.erase(id)
+	var f := _slot(slot)
+	if phase != Phase.END:
+		if am_host:
+			referee_leave(slot)
+		if hud != null and f != null:
+			hud.show_center("%s LEFT" % f.display_name, 2.0, Color.WHITE, 64)
+	if am_host and not _net_begun and _all_ready():
+		_net_begin()
 
 
 # ---------------------------------------------------------------- the other phone
@@ -403,9 +527,12 @@ func _spawn_ok(kind: String, f: Fighter, pos: Vector3) -> bool:
 	return true
 
 
-## The fighter in slot data[i] when the other phone runs it (null for anything else).
+## The fighter in slot data[i] when the other phone runs it (null for anything else); in an
+## all-human match only when the member who sent this event runs it.
 func _theirs(data: Array, i: int) -> Fighter:
 	var f := _slot_at(data, i)
+	if f != null and multi and String(_owner.get(f.slot, "")) != _from:
+		return null
 	return f if f != null and not runs_here(f) else null
 
 
@@ -521,7 +648,7 @@ func _awaits_final() -> bool:
 	if not _sending() or _forfeit or _invalid:
 		return false
 	for f in slots:
-		if not runs_here(f) and not final_stats.has(f.slot):
+		if not runs_here(f) and not final_stats.has(f.slot) and not _gone.has(f.slot):
 			return true
 	return false
 
@@ -536,12 +663,20 @@ func _on_net_ended(reason: String) -> void:
 		return
 	var other := _slot(guest_slot if am_host else 0)
 	var who := other.display_name if other != null else "PLAYER"
+	if multi:
+		var host_f := _slot(int(_slot_of.get(host_id, -1)))
+		who = host_f.display_name if host_f != null and not am_host else "EVERYONE ELSE"
 	if reason != "left" or not _counted:
 		super(reason)
 		if reason == "left":             # (the 1 vs 1's words name an opponent: here the other player)
-			var title := ("THE HOST LEFT" if not am_host else "TEAMMATE LEFT") if coop else "OPPONENT LEFT"
+			var title := ("THE HOST LEFT" if not am_host else "TEAMMATE LEFT") if coop or multi else "OPPONENT LEFT"
 			hud.show_center(title, 2.6, Color.WHITE, 80, "THE MATCH DID NOT START")
 			Game.match_notice = [title, "%s left before the match began. Nothing was counted." % who]
+		return
+	if multi:
+		# The host refereed (or, on the host, everyone else is gone): the match cannot go on. Counted,
+		# it goes into the profile as ENDED: no win, no loss.
+		_end_as_ended("THE HOST LEFT" if not am_host else "EVERYONE LEFT")
 		return
 	if coop and am_host:
 		# The guest left: its slot is OUT for the rest of the match ("<NAME> LEFT"); the bots play on.
@@ -551,19 +686,7 @@ func _on_net_ended(reason: String) -> void:
 	if coop:
 		# The host left: the bots ran there, so the match cannot go on. Counted, it goes into the
 		# profile as ENDED: no win, no loss.
-		close_pause()
-		if not _result_shown and not _invalid:
-			_result_shown = true
-			var r := _match_result(false, 0, roundi(player.hp))
-			r["ended"] = true
-			Game.record_match(r)
-		_called_off = true
-		phase = Phase.END
-		_end_t = 0.0
-		Engine.time_scale = 1.0
-		_freeze_all()
-		hud.show_center("THE HOST LEFT", 2.6, Color.WHITE, 80, "THE MATCH ENDED")
-		Game.match_notice = ["THE HOST LEFT", "THE HOST LEFT - THE MATCH ENDED. It counts as ENDED: no win, no loss."]
+		_end_as_ended("THE HOST LEFT")
 		return
 	# Against the other player: a forfeit, the match is ours (as the 1 vs 1).
 	_forfeit = true
@@ -574,3 +697,20 @@ func _on_net_ended(reason: String) -> void:
 	_freeze_all()
 	_conclude()
 	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+
+
+## The match cannot go on (the referee's phone is gone): back to the lobby, counted as ENDED.
+func _end_as_ended(title: String) -> void:
+	close_pause()
+	if not _result_shown and not _invalid:
+		_result_shown = true
+		var r := _match_result(false, 0, roundi(player.hp))
+		r["ended"] = true
+		Game.record_match(r)
+	_called_off = true
+	phase = Phase.END
+	_end_t = 0.0
+	Engine.time_scale = 1.0
+	_freeze_all()
+	hud.show_center(title, 2.6, Color.WHITE, 80, "THE MATCH ENDED")
+	Game.match_notice = [title, "%s - THE MATCH ENDED. It counts as ENDED: no win, no loss." % title]
