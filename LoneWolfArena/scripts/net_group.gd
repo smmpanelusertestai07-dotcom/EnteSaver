@@ -195,3 +195,56 @@ static func _name(v: Variant) -> String:
 
 static func _bundle(v: Variant) -> String:
 	return String(CharacterModel.bundle_info(String(v).left(32)).id)
+
+
+## MATCHMAKING ("gseek"): which searching units make one match. `units` [{"n": players}, ...] with
+## the deciding host's own unit first; each unit is a group (or a solo) kept whole on one team.
+## Returns [[unit index, team], ...] whose players fill both teams exactly (per = per_team(size)
+## each), the host's unit always in it on BLUE; [] when the units seen cannot fill a match yet.
+static func pick_units(units: Array, size: int) -> Array:
+	var per := per_team(size)
+	var picked: Array = []
+	if units.is_empty() or int(units[0].get("n", 0)) < 1 or int(units[0].get("n", 0)) > per:
+		return []
+	picked.append([0, 0])
+	var fill := [int(units[0].n), 0]
+	return picked if _fit(units.slice(0, 9), per, 1, fill, picked) else []
+
+
+static func _fit(units: Array, per: int, i: int, fill: Array, picked: Array) -> bool:
+	if int(fill[0]) == per and int(fill[1]) == per:
+		return true
+	if i >= units.size():
+		return false
+	var n := int(units[i].get("n", 0))
+	if n >= 1:
+		for t: int in [0, 1]:
+			if int(fill[t]) + n <= per:
+				fill[t] = int(fill[t]) + n
+				picked.append([i, t])
+				if _fit(units, per, i + 1, fill, picked):
+					return true
+				fill[t] = int(fill[t]) - n
+				picked.pop_back()
+	return _fit(units, per, i + 1, fill, picked)
+
+
+## A searching unit's members as "gseek" carries them ([[id, name, bundle], ...], its leader
+## first): 1..per players, ids real and unique, the first `leader`. [] when anything is off.
+static func unit_from(v: Variant, leader: String, size: int) -> Array:
+	if not v is Array or (v as Array).is_empty() or (v as Array).size() > per_team(size):
+		return []
+	var out := []
+	var ids := {}
+	for e: Variant in v:
+		if not e is Array or (e as Array).size() != 3:
+			return []
+		var a := e as Array
+		if typeof(a[0]) != TYPE_STRING or typeof(a[1]) != TYPE_STRING or typeof(a[2]) != TYPE_STRING:
+			return []
+		var id := String(a[0])
+		if not Game.is_player_id(id) or ids.has(id):
+			return []
+		ids[id] = true
+		out.append({"id": id, "name": _name(a[1]), "bundle": _bundle(a[2])})
+	return out if String(out[0].id) == leader else []

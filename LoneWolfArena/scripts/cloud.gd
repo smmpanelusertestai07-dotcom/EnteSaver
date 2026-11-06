@@ -507,6 +507,8 @@ func _process(delta: float) -> void:
 	_tick_room(delta)
 	if not _grp.is_empty():
 		_tick_group(delta, Time.get_ticks_msec())
+	if not _mm.is_empty():
+		_tick_mm(delta, Time.get_ticks_msec())
 	_card_t -= delta
 	if card_key(my_card()) != _card_sig:
 		_card_t = minf(_card_t, CARD_CHANGE_S)
@@ -749,6 +751,8 @@ func _parse() -> void:
 						_subscribe(ROOT + "/r/" + _room)
 					if not _grp.is_empty():
 						_subscribe(ROOT + "/g/" + String(_grp.gid))
+					if not _mm.is_empty():
+						_subscribe(_mm_topic())
 					if room_code != "":
 						_subscribe(ROOT + "/c/" + room_code)
 				else:
@@ -776,6 +780,10 @@ func _parse() -> void:
 func _on_publish(topic: String, payload: PackedByteArray) -> void:
 	if topic.begins_with(ROOT + "/p/"):
 		_on_card(topic, payload)
+		return
+	if topic.begins_with(ROOT + "/mm/g"):
+		if not _mm.is_empty() and topic == _mm_topic():
+			_on_gseek(payload)
 		return
 	if topic == SEEK_TOPIC or topic.begins_with(ROOT + "/mm/t"):
 		if topic == _seek_topic():          # only the search running here (1 vs 1, or that team size)
@@ -877,6 +885,11 @@ func _on_inbox(d: Dictionary) -> void:
 			_on_team_invite(from, d)
 		"ginv":
 			_on_group_invite(from, d)
+		"gmatch":
+			if not Game.is_blocked(from):
+				_on_gmatch(from, d)
+		"gacc":
+			_on_gmatch_answer(from, d, true)
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
 				_incoming = {}
@@ -894,6 +907,8 @@ func _on_inbox(d: Dictionary) -> void:
 					and _tagged(d, {"mac": _grp.mac, "room": _grp.gid}, "dec", from):
 				(_grp.invited as Dictionary).erase(from)      # a group invite declined (or busy there)
 				group_changed.emit()
+			else:
+				_on_gmatch_answer(from, d, false)             # a unit did not take the host's match
 		"acc":
 			if String(_outgoing.get("id", "")) == from and not Game.is_blocked(from) and _tagged(d, _outgoing, "acc", from):
 				_last_heard = Time.get_ticks_msec()     # the room handshake follows
@@ -2386,6 +2401,9 @@ func answer_group_invite(accept: bool) -> void:
 		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		group_changed.emit()
 		return
+	_mm_stop()
+	search_needed = 0
+	search_found = 0
 	if not group.is_empty():
 		_group_close(false)
 	_grp = {"gid": inv.gid, "aes": inv.aes, "mac": inv.mac, "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
@@ -2471,6 +2489,7 @@ func group_start(size: int) -> String:
 ## CANCEL of the search.
 func group_search_stop() -> void:
 	var was := search_needed > 0
+	_mm_stop()
 	search_needed = 0
 	search_found = 0
 	if not group.is_empty() and String(group.leader) == my_id and String(group.status) == "searching":
@@ -2480,15 +2499,263 @@ func group_search_stop() -> void:
 		group_changed.emit()
 
 
-## The search for the rest of the match (no bots ever): this group (or solo) waits for real players.
-## Joining other searching units into one match ("gseek" / "gmatch") is not built yet.
+## The search for the rest of the match (no bots ever): this unit (a group whole, or a solo) waits
+## for other searching units (matchmaking below) until both teams are full of real players.
 func _search_begin(size: int) -> void:
 	search_needed = 2 * size
 	search_found = maxi((group.members as Array).size(), 1) if not group.is_empty() else 1
+	_mm_begin(size)
 	if not group.is_empty():
 		group.status = "searching"
 		_group_roster()
 	group_changed.emit()
+
+
+# ---------------------------------------------------------------- matchmaking (gseek / gmatch)
+# Every searching LEADER (a solo searcher leads a unit of one) says "gseek" on ROOT/mm/g<size>
+# every MM_SEEK_S (never retained): {"t": "gseek", "id", "pk", "m": [[id, name, bundle], ...] (its
+# unit, leader first), "saw": [leader ids it heard]}. Units are never split. The leader with the
+# lowest id among itself and the units that see it is the MATCH HOST: once the units it hears fill
+# two teams exactly (NetGroup.pick_units) it sends each other unit's leader a signed "gmatch" to the
+# inbox: "sec" = RSA(that leader's key, room(16) + aes(32) + mac(32) + size byte), "roster" the
+# match's slots (public lobby data: ids, names, outfits), "sig" over gmatch|from|to|sec|roster. The
+# leader answers "gacc" (an HMAC with the match keys) or "dec", forwards "gstart" (with the host) in
+# its group room and joins the match room; the host, once every unit took it, does the same for its
+# own unit. A unit that does not answer within MM_ACCEPT_MS is skipped a while and the host seeks on.
+const MM_SEEK_S := 2.0
+const MM_SEEN_MS := 6000              # a searching unit not heard this long is left out
+const MM_ACCEPT_MS := 15000           # the host waits this long for every unit's "gacc"
+const MM_SNUB_MS := 20000             # a unit that did not take the host's "gmatch" is skipped this long
+const MM_UNITS_MAX := 24
+var _mm := {}                  # {"size", "seek_t", "units": id -> {"m", "pk", "saw", "ms"}, "snub": id -> ms, "pending": id -> bool, "pend_ms", "room", "aes", "mac", "roster"}
+
+
+func _mm_topic() -> String:
+	return ROOT + "/mm/g%d" % int(_mm.get("size", 2))
+
+
+func _mm_begin(size: int) -> void:
+	_mm_stop()
+	_mm = {"size": size, "seek_t": 0.0, "units": {}, "snub": {}, "pending": {}, "pend_ms": 0, "room": "", "aes": PackedByteArray(),
+		"mac": PackedByteArray(), "roster": []}
+	if _connected:
+		_subscribe(_mm_topic())
+
+
+func _mm_stop() -> void:
+	if _mm.is_empty():
+		return
+	if _connected:
+		_unsubscribe(_mm_topic())
+	_mm = {}
+
+
+## This phone's unit as "gseek" carries it: the group's members (leader first) or this player alone.
+func _mm_unit() -> Array:
+	if group.is_empty():
+		var me := _me_entry()
+		return [[String(me.id), String(me.name), String(me.bundle)]]
+	var out := []
+	for m: Dictionary in group.members:
+		out.append([String(m.id), String(m.name), String(m.bundle)])
+	return out
+
+
+func _on_gseek(payload: PackedByteArray) -> void:
+	if _mm.is_empty() or payload.size() > MAX_MESSAGE:
+		return
+	var d: Variant = JSON.parse_string(payload.get_string_from_utf8())
+	if not d is Dictionary or String((d as Dictionary).get("t", "")) != "gseek" or typeof(d.get("id")) != TYPE_STRING \
+			or typeof(d.get("pk")) != TYPE_STRING:
+		return
+	var id := String(d.id)
+	var pk := String(d.pk)
+	if id == my_id or not Game.is_player_id(id) or pk.length() > 1200 or id != pk.sha256_text().left(32):
+		return
+	var unit := NetGroup.unit_from(d.get("m"), id, int(_mm.size))
+	if unit.is_empty():
+		return
+	for m: Dictionary in unit:
+		if Game.is_blocked(String(m.id)) or String(m.id) == my_id or _group_has(String(m.id)):
+			return                       # never with a blocked player (nor a unit that claims one of ours)
+	var units: Dictionary = _mm.units
+	if not units.has(id) and units.size() >= MM_UNITS_MAX:
+		return
+	var saw := {}
+	if d.get("saw") is Array:
+		for s: Variant in (d.saw as Array).slice(0, MM_UNITS_MAX):
+			if typeof(s) == TYPE_STRING:
+				saw[String(s).left(32)] = true
+	units[id] = {"m": unit, "pk": pk, "saw": saw, "ms": Time.get_ticks_msec()}
+
+
+## Every frame while this leader searches: "gseek", the units heard, the host's pick and its wait.
+func _tick_mm(delta: float, now: int) -> void:
+	if in_session or session_multi:
+		return
+	var units: Dictionary = _mm.units
+	for id: String in units.keys():
+		if now - int(units[id].ms) > MM_SEEN_MS:
+			units.erase(id)
+	var snub: Dictionary = _mm.snub
+	for id: String in snub.keys():
+		if now - int(snub[id]) > MM_SNUB_MS:
+			snub.erase(id)
+	_mm.seek_t = float(_mm.seek_t) - delta
+	if float(_mm.seek_t) <= 0.0:
+		_mm.seek_t = MM_SEEK_S
+		_publish_json(_mm_topic(), {"t": "gseek", "id": my_id, "pk": _pk_pem, "m": _mm_unit(), "saw": units.keys().slice(0, 12)})
+	var mine := _mm_unit().size()
+	var found := mine
+	for id: String in units:
+		found += (units[id].m as Array).size()
+	found = mini(found, search_needed)
+	if found != search_found:
+		search_found = found
+		_group_roster()
+		group_changed.emit()
+	var pending: Dictionary = _mm.pending
+	if not pending.is_empty():
+		var all_in := true
+		for id: String in pending:
+			all_in = all_in and bool(pending[id])
+		if all_in:
+			_mm_launch()
+		elif now - int(_mm.pend_ms) > MM_ACCEPT_MS:
+			for id: String in pending:
+				if not bool(pending[id]):
+					snub[id] = now
+			_mm.pending = {}
+		return
+	# The host: the lowest id among this leader and the units that hear it.
+	var cands := []
+	for id: String in units:
+		if (units[id].saw as Dictionary).has(my_id) and not snub.has(id):
+			if id < my_id:
+				return                   # a lower id decides: its "gmatch" comes here
+			cands.append(id)
+	cands.sort_custom(func(a: String, b: String) -> bool: return (units[a].m as Array).size() > (units[b].m as Array).size())
+	var list := [{"n": mine}]
+	for id: String in cands:
+		list.append({"n": (units[id].m as Array).size()})
+	var pick := NetGroup.pick_units(list, int(_mm.size))
+	if pick.is_empty():
+		return
+	_mm_offer(pick, cands)
+
+
+## The host's pick: the match roster (BLUE first, each unit in its order) and a "gmatch" to each
+## other unit's leader.
+func _mm_offer(pick: Array, cands: Array) -> void:
+	var size := int(_mm.size)
+	var per := NetGroup.per_team(size)
+	var next := [0, per]
+	var roster := []
+	var leaders := []
+	for p: Array in pick:
+		var i := int(p[0])
+		var t := int(p[1])
+		var members: Array = []
+		if i == 0:
+			for e: Array in _mm_unit():
+				members.append({"id": String(e[0]), "name": String(e[1]), "bundle": String(e[2])})
+		else:
+			members = (_mm.units[String(cands[i - 1])].m as Array)
+			leaders.append(String(cands[i - 1]))
+		for m: Dictionary in members:
+			roster.append({"slot": int(next[t]), "id": String(m.id), "name": String(m.name), "bundle": String(m.bundle), "team": t})
+			next[t] = int(next[t]) + 1
+	roster.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.slot) < int(b.slot))
+	var room := _crypto.generate_random_bytes(16)
+	var aes := _crypto.generate_random_bytes(32)
+	var mac := _crypto.generate_random_bytes(32)
+	var packed := NetGroup.pack_roster(roster)
+	var pending := {}
+	for id: String in leaders:
+		var pub := CryptoKey.new()
+		if pub.load_from_string(String(_mm.units[id].pk), true) != OK:
+			return
+		var sec := room.duplicate()
+		sec.append_array(aes)
+		sec.append_array(mac)
+		sec.append(size)
+		var wrapped := _crypto.encrypt(pub, sec)
+		if wrapped.is_empty():
+			return
+		var sec_text := Marshalls.raw_to_base64(wrapped)
+		_publish_json(ROOT + "/u/" + id, {"t": "gmatch", "from": my_id, "sec": sec_text, "roster": packed,
+			"sig": _sign(gmatch_text(my_id, id, sec_text, packed))})
+		pending[id] = false
+	_mm.pending = pending
+	_mm.pend_ms = Time.get_ticks_msec()
+	_mm.room = room.hex_encode()
+	_mm.aes = aes
+	_mm.mac = mac
+	_mm.roster = roster
+
+
+## What a "gmatch" signs.
+static func gmatch_text(from: String, to: String, sec: String, roster: Array) -> String:
+	return "gmatch|%s|%s|%s|%s" % [from, to, sec, JSON.stringify(roster)]
+
+
+## Every unit took the host's match: the host's own unit goes in (its members by "gstart").
+func _mm_launch() -> void:
+	var room := String(_mm.room)
+	var aes: PackedByteArray = _mm.aes
+	var mac: PackedByteArray = _mm.mac
+	var roster: Array = _mm.roster
+	_group_launch_with(int(_mm.size), roster, room, aes, mac, my_id)
+
+
+## A searching leader's inbox: the host's "gmatch". Taken only from a unit this search heard (its
+## signed key), while searching that size and not deciding itself; its roster must hold this
+## unit whole on one team and the host. Then "gacc", the group's "gstart", the match room.
+func _on_gmatch(from: String, d: Dictionary) -> void:
+	if _mm.is_empty() or not (_mm.pending as Dictionary).is_empty() or in_session or session_multi or not is_group_leader() \
+			or not (_mm.units as Dictionary).has(from) or typeof(d.get("sec")) != TYPE_STRING or typeof(d.get("sig")) != TYPE_STRING:
+		return
+	var packed: Variant = d.get("roster")
+	if not packed is Array or not verify_signed(String(_mm.units[from].pk), gmatch_text(from, my_id, String(d.sec), packed), String(d.sig)):
+		return
+	var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.sec)))
+	var size := int(_mm.size)
+	if sec.size() != 81 or int(sec[80]) != size:
+		return
+	var room := sec.slice(0, 16).hex_encode()
+	var aes := sec.slice(16, 48)
+	var mac := sec.slice(48, 80)
+	var roster := NetGroup.roster_from(packed, size)
+	var team := -1
+	var ok := not roster.is_empty()
+	var ids := {}
+	for e: Dictionary in roster:
+		ids[String(e.id)] = int(e.team)
+	for e: Array in _mm_unit():
+		var id := String(e[0])
+		if not ids.has(id) or (team >= 0 and int(ids[id]) != team):
+			ok = false
+		elif team < 0:
+			team = int(ids[id])
+	ok = ok and ids.has(from)
+	if not ok:
+		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag({"mac": mac, "room": room}, "dec", my_id)})
+		return
+	_publish_json(ROOT + "/u/" + from, {"t": "gacc", "from": my_id, "mac": _tag({"mac": mac, "room": room}, "gacc", my_id)})
+	_group_launch_with(size, roster, room, aes, mac, from)
+
+
+## The host hears a unit's answer to its "gmatch" ("gacc" or "dec", tagged with the match keys).
+func _on_gmatch_answer(from: String, d: Dictionary, accepted: bool) -> bool:
+	if _mm.is_empty() or not (_mm.pending as Dictionary).has(from) \
+			or not _tagged(d, {"mac": _mm.mac, "room": _mm.room}, "gacc" if accepted else "dec", from):
+		return false
+	if accepted:
+		_mm.pending[from] = true
+	else:
+		_mm.snub[from] = Time.get_ticks_msec()
+		_mm.pending = {}               # (the units that took it give up on this host after a while)
+	return true
 
 
 func _group_send(d: Dictionary) -> void:
@@ -2503,7 +2770,7 @@ func _group_roster() -> void:
 	if group.is_empty() or String(group.leader) != my_id:
 		return
 	_group_send({"k": "groster", "members": NetGroup.pack_members(group.members), "mode": String(group.mode),
-		"size": int(group.size), "status": String(group.status)})
+		"size": int(group.size), "status": String(group.status), "found": search_found})
 
 
 ## Leaves the group here (tell: "gleave", the leader's "gend") and forgets its keys.
@@ -2513,6 +2780,7 @@ func _group_close(tell: bool) -> void:
 			_group_send({"k": "gend"} if String(group.get("leader", "")) == my_id else {"k": "gleave"})
 		if _connected:
 			_unsubscribe(ROOT + "/g/" + String(_grp.gid))
+	_mm_stop()
 	_grp = {}
 	group = {}
 	search_found = 0
@@ -2623,7 +2891,8 @@ func _on_groster(d: Dictionary) -> void:
 	group.mode = mode
 	group.size = size
 	search_needed = 2 * size if g_status == "searching" and size in [2, 4] else 0
-	search_found = list.size() if search_needed > 0 else 0
+	var found: Variant = d.get("found")
+	search_found = clampi(int(found) if (found is float or found is int) else list.size(), list.size(), search_needed) if search_needed > 0 else 0
 	if JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed]) != before:
 		group_changed.emit()
 
@@ -2671,17 +2940,22 @@ func _tick_group(delta: float, now: int) -> void:
 ## The leader starts the group's own match: a fresh match room and keys (inside the group room's
 ## encryption only) and the roster from the sides; everyone joins it, the leader hosts.
 func _group_launch(size: int) -> void:
-	var room := _crypto.generate_random_bytes(16).hex_encode()
-	var aes := _crypto.generate_random_bytes(32)
-	var mac := _crypto.generate_random_bytes(32)
-	var roster := NetGroup.match_roster(group.members)
-	group.status = "starting"
+	_group_launch_with(size, NetGroup.match_roster(group.members), _crypto.generate_random_bytes(16).hex_encode(),
+		_crypto.generate_random_bytes(32), _crypto.generate_random_bytes(32), my_id)
+
+
+## This unit goes into a match (its own, or one matchmaking made, hosted by `host_id`): the members
+## hear "gstart" in the group room, then this phone enters the match room.
+func _group_launch_with(size: int, roster: Array, room: String, aes: PackedByteArray, mac: PackedByteArray, host_id: String) -> void:
+	_mm_stop()
 	search_needed = 0
 	search_found = 0
-	_group_send({"k": "gstart", "room": room, "aes": Marshalls.raw_to_base64(aes), "mac": Marshalls.raw_to_base64(mac), "size": size,
-		"roster": NetGroup.pack_roster(roster)})
-	_group_roster()
-	_multi_enter(room, aes, mac, size, roster, my_id)
+	if not group.is_empty():
+		group.status = "in_match"
+		_group_send({"k": "gstart", "room": room, "aes": Marshalls.raw_to_base64(aes), "mac": Marshalls.raw_to_base64(mac), "size": size,
+			"roster": NetGroup.pack_roster(roster), "host": host_id})
+		_group_roster()
+	_multi_enter(room, aes, mac, size, roster, host_id)
 	group_changed.emit()
 
 
@@ -2697,18 +2971,23 @@ func _on_gstart(d: Dictionary) -> void:
 	var roster := NetGroup.roster_from(d.get("roster"), size)
 	if room.length() != 32 or not room.is_valid_hex_number() or aes.size() != 32 or mac.size() != 32 or roster.is_empty():
 		return
+	# Only the leader sends it (inside the group's encryption): the group's own match, or one that
+	# matchmaking made, hosted by "host" (the leader, or another unit's leader); it holds the whole group.
+	var host := String(d.get("host", group.leader)) if typeof(d.get("host", group.leader)) == TYPE_STRING else ""
 	var ids := {}
 	for e: Dictionary in roster:
-		if not _group_has(String(e.id)):
-			return
 		ids[String(e.id)] = true
-	if not ids.has(my_id) or not ids.has(String(group.leader)):
+	if not ids.has(my_id) or not ids.has(String(group.leader)) or not ids.has(host):
 		return
+	for m: Dictionary in group.members:
+		if not ids.has(String(m.id)):
+			return
 	seek_stop()
+	_mm_stop()
 	search_needed = 0
 	search_found = 0
 	group.status = "in_match"
-	_multi_enter(room, aes, mac, size, roster, String(group.leader))
+	_multi_enter(room, aes, mac, size, roster, host)
 	group_changed.emit()
 
 
