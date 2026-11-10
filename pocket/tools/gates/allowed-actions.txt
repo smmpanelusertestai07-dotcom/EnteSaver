@@ -1,0 +1,7 @@
+# The only actions PocketIDE's own workflow (.github/workflows/pocket.yml) may use, each pinned
+# there by full commit SHA with its tag in a comment (plan §16). All run on Node 24.
+actions/checkout
+actions/setup-java
+gradle/actions/setup-gradle
+actions/upload-artifact
+actions/download-artifact

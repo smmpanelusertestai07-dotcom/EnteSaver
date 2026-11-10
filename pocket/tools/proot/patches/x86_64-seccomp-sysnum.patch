@@ -1,0 +1,42 @@
+PRoot on x86-64 Android: a syscall Android's seccomp filter blocks came back as ENOSYS.
+
+On x86-64, glibc's rename(3) uses the legacy rename(2), which bionic does not use, so an
+app's seccomp filter traps it with SIGSYS, and PRoot is meant to run it as renameat(2).
+Kernels since 4.8 report a syscall-exit stop for the skipped syscall before the SIGSYS,
+and PRoot's sysexit handlers write their result into rax, where handle_seccomp_event()
+then read the syscall's number: rename(2) came back as read(2), and ENOSYS. Ubuntu's
+debconf stopped there ("DbDriver config: rename failed: Function not implemented").
+
+The kernel names the blocked syscall in the SIGSYS siginfo (si_syscall); use that.
+ARM keeps the number in its own register, so only x86-64 changes.
+
+--- a/src/tracee/seccomp.c
++++ b/src/tracee/seccomp.c
+@@ -1,5 +1,6 @@
+ #include <errno.h>     /* E*, */
+ #include <signal.h>    /* SIGSYS, */
++#include <sys/ptrace.h> /* ptrace(2), PTRACE_GETSIGINFO, */
+ #include <unistd.h>    /* getpgid, */
+ #include <utime.h>     /* utimbuf, */
+ #include <sys/vfs.h>   /* statfs64 */
+@@ -107,7 +108,19 @@
+ 	 * however at this point we are after syscall has been rejected
+ 	 * and orig_rax was reset to -1.  */
+ #if defined(ARCH_X86_64)
+-	tracee->_regs[CURRENT].orig_rax = tracee->_regs[CURRENT].rax;
++	{
++		/* The kernel names the syscall its filter blocked.  rax may not
++		 * hold that number any more: a kernel that reports a syscall-exit
++		 * stop for the skipped syscall before this SIGSYS makes PRoot run
++		 * its sysexit handlers first, and they write their result in rax
++		 * (a blocked rename(2) then came back as read(2): ENOSYS).  */
++		siginfo_t siginfo = {};
++		if (ptrace(PTRACE_GETSIGINFO, tracee->pid, NULL, &siginfo) == 0
++		    && siginfo.si_code == SYS_SECCOMP)
++			tracee->_regs[CURRENT].orig_rax = siginfo.si_syscall;
++		else
++			tracee->_regs[CURRENT].orig_rax = tracee->_regs[CURRENT].rax;
++	}
+ #elif defined(ARCH_X86)
+ 	tracee->_regs[CURRENT].orig_eax = tracee->_regs[CURRENT].eax;
+ #endif

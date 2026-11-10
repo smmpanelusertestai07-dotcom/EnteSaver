@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS everywhere, except this phone's own loopback: PocketIDE's private proxy to Cloud Shell
+     (<port>-<key>.localhost) and the one sign-in page an agent returns to (localhost, 127.0.0.1). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+</network-security-config>

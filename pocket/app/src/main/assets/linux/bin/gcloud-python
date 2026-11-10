@@ -1,0 +1,16 @@
+#!/bin/sh
+# PocketIDE: the Python that runs Google's gcloud (its CLOUDSDK_PYTHON). gcloud runs unchanged,
+# except that the tunnel `gcloud cloud-shell ssh` opens listens on a socket file only PocketIDE can
+# open, not on a port every app on the phone shares (see /opt/pocketide/lib/private_tunnel.py).
+# Python's own flags (gcloud passes -S) come first; anything that is not a script runs as is.
+flags=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -[BEIOSsuv] | -[BEIOSsuv][BEIOSsuv]*) flags="$flags $1"; shift ;;
+    *) break ;;
+  esac
+done
+case "${1:-}" in
+  *.py) exec python3 $flags /opt/pocketide/lib/private_tunnel.py "$@" ;;
+  *) exec python3 $flags "$@" ;;
+esac

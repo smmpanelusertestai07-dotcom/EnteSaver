@@ -1,0 +1,87 @@
+{
+  "_comment": "Where the PRoot inside each PocketIDE APK comes from. The release job reads the version string inside the APK's libproot.so, finds the matching entry, checks the APK's native libraries against the entry's recorded binaries, and attaches every archive and build recipe listed here to the release (GPL-2.0 for PRoot, LGPL-3.0-or-later for talloc). gpl_notice.py refuses to release an entry whose GPL or LGPL part lacks a pinned url and sha256. build-proot.sh builds the entry marked build: true from exactly these archives. Checksums: from Termux's packages (termux-packages packages/*/build.sh at the commits named); talloc's also recomputed from samba.org on 24 Sep 2026, and from its download.samba.org, Gentoo and OpenBSD distfile mirrors on 25 Sep 2026 (samba.org refuses GitHub's runners at times, so the mirrors outside it matter); the recipes' from raw.githubusercontent.com on 25 Sep 2026.",
+  "ndk": "29.0.14206865",
+  "releases": [
+    {
+      "version": "5.1.107.94",
+      "build": true,
+      "origin": "Built from source by PocketIDE's CI (pocket/tools/proot/build-proot.sh), with 16 KB page alignment and the patches listed here. Not shipped in any APK yet: the CI job is a build check whose output is kept as an artifact for a later release, once it has been tested on a phone.",
+      "patches": [
+        "patches/x86_64-seccomp-sysnum.patch",
+        "patches/link2symlink-count-on-success.patch",
+        "patches/arm-seccomp-sysarg1.patch"
+      ],
+      "proot": {
+        "license": "GPL-2.0",
+        "tag": "v5.1.107.94",
+        "commit": "58c3b42849fac502c6c60a45c4d2a82da9e9f8d4",
+        "url": "https://github.com/termux/proot/archive/v5.1.107.94.zip",
+        "sha256": "3fa4c57253463c3d595984d997b407b0b6bdb46d290b2a111959a2efd609e839"
+      },
+      "talloc": {
+        "license": "LGPL-3.0-or-later",
+        "version": "2.4.3",
+        "url": "https://www.samba.org/ftp/talloc/talloc-2.4.3.tar.gz",
+        "mirrors": [
+          "https://download.samba.org/pub/talloc/talloc-2.4.3.tar.gz",
+          "https://distfiles.gentoo.org/distfiles/f9/talloc-2.4.3.tar.gz",
+          "https://ftp.openbsd.org/pub/OpenBSD/distfiles/talloc-2.4.3.tar.gz"
+        ],
+        "sha256": "dc46c40b9f46bb34dd97fe41f548b0e8b247b77a918576733c528e83abd854dd"
+      },
+      "libandroid_shmem": {
+        "license": "BSD-3-Clause",
+        "version": "0.7",
+        "url": "https://github.com/termux/libandroid-shmem/archive/refs/tags/v0.7.tar.gz",
+        "sha256": "1e5ff8459bc0a8c229dd8a94b27d119987e09ef3414331c2b5ebfff20b98e867"
+      }
+    },
+    {
+      "version": "5.1.107.92",
+      "build": false,
+      "origin": "Termux's prebuilt aarch64 packages proot 5.1.107.92, libtalloc 2.4.3 and libandroid-shmem 0.7, built by Termux from the recipes below (termux-packages commit 08b49b3ce00b1e14a3a0365200f30e50f8dfafe1) and carried over from PocketIDE 2.6.0. libtallocxx.so and libandroid-shmem.so are Termux's libtalloc.so.2.4.3 and libandroid-shmem.so byte for byte, renamed. libproot.so has three same-length byte changes so Android can run it from the app's native library folder: the install prefix com.termux became com.ndockx, its library search path became $ORIGIN, and its libtalloc.so.2 dependency became libtallocxx.so. libproot-loader.so is Termux's loader unchanged.",
+      "binaries": {
+        "libproot.so": "f12d165dfd34062be3da5e838fbeec429f1b7b9ba5b95371fbd253fb4a9cafc2",
+        "libproot-loader.so": "44ef39c1e1a18c09f6e4c4b5d6f8bba82d30596598bd155ec162d05c5122ff04",
+        "libtallocxx.so": "3c9b207c0a6ea2896b7523e03f55d9ab0d9e88baa115d4c32b84058ff4246fbb",
+        "libandroid-shmem.so": "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731"
+      },
+      "proot": {
+        "license": "GPL-2.0",
+        "tag": "v5.1.107.92",
+        "commit": "7266fb3e8516535682f5a9c8f3a7e70f6506eddb",
+        "url": "https://github.com/termux/proot/archive/v5.1.107.92.zip",
+        "sha256": "29385d1ddb619a9c4449ab512bfd55032034b22f724ddf98fc95ff300ea32135",
+        "recipe": {
+          "url": "https://raw.githubusercontent.com/termux/termux-packages/08b49b3ce00b1e14a3a0365200f30e50f8dfafe1/packages/proot/build.sh",
+          "sha256": "d8ef12ff5eeaec16007a7547640ab27895d8e09ffad8e8f606f1ebfe88669d44"
+        }
+      },
+      "talloc": {
+        "license": "LGPL-3.0-or-later",
+        "version": "2.4.3",
+        "url": "https://www.samba.org/ftp/talloc/talloc-2.4.3.tar.gz",
+        "mirrors": [
+          "https://download.samba.org/pub/talloc/talloc-2.4.3.tar.gz",
+          "https://distfiles.gentoo.org/distfiles/f9/talloc-2.4.3.tar.gz",
+          "https://ftp.openbsd.org/pub/OpenBSD/distfiles/talloc-2.4.3.tar.gz"
+        ],
+        "sha256": "dc46c40b9f46bb34dd97fe41f548b0e8b247b77a918576733c528e83abd854dd",
+        "recipe": {
+          "url": "https://raw.githubusercontent.com/termux/termux-packages/08b49b3ce00b1e14a3a0365200f30e50f8dfafe1/packages/libtalloc/build.sh",
+          "sha256": "a7a5a81dc99a271ae919ba8b92861f305f1bb0c11c24d618f0accad2a6046224"
+        }
+      },
+      "libandroid_shmem": {
+        "license": "BSD-3-Clause",
+        "version": "0.7",
+        "url": "https://github.com/termux/libandroid-shmem/archive/refs/tags/v0.7.tar.gz",
+        "sha256": "1e5ff8459bc0a8c229dd8a94b27d119987e09ef3414331c2b5ebfff20b98e867",
+        "recipe": {
+          "url": "https://raw.githubusercontent.com/termux/termux-packages/08b49b3ce00b1e14a3a0365200f30e50f8dfafe1/packages/libandroid-shmem/build.sh",
+          "sha256": "db55b10b90c54dd4d39b76b5b074835c09c7c7534a84a12bc29c6a63717ff2fd"
+        }
+      }
+    }
+  ]
+}

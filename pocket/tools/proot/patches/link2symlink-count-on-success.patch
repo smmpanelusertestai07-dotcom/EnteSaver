@@ -1,0 +1,238 @@
+PRoot's faked hard links: count a link down only when the call removing it succeeded.
+
+With --link2symlink, PRoot fakes hard links with symlinks and keeps the link count in the
+name of a hidden file, deleting that file when the count reaches zero. It counted a link down
+on entry to the rename(2) or unlink(2) that removes or replaces it, before knowing whether
+the call would succeed, so a call that failed still counted it down:
+
+ - rename onto an existing faked hard link that fails (RENAME_NOREPLACE: "File exists")
+   counted it down; with two links, removing the other one then deleted the data;
+ - on x86-64 Android, whose seccomp filter blocks rename(2) and unlink(2) (bionic uses the
+   *at calls), PRoot runs the call again as renameat(2) or unlinkat(2), so its entry was seen
+   twice and the link counted down twice. dpkg stopped on it ("unable to securely remove
+   '/usr/bin/perl.dpkg-tmp': Operation not permitted").
+
+Remember the link on entry and count it down at exit when the kernel says the call succeeded
+(its raw result, before PRoot's own exit processing, which can turn the result of a call the
+filter skipped into 0).
+
+--- a/src/extension/link2symlink/link2symlink.c
++++ b/src/extension/link2symlink/link2symlink.c
+@@ -34,6 +34,8 @@
+ #define DELETED_SUFFIX " (deleted)"
+ 
+ static int decrement_link_count(Tracee *tracee, Reg sysarg);
++static int find_intermediate(Tracee *tracee, Reg sysarg, char intermediate[PATH_MAX]);
++static int count_down(Tracee *tracee, char intermediate[PATH_MAX]);
+ 
+ /**
+  * Configuration of this extension, attached to each tracee.  It only
+@@ -50,6 +52,11 @@
+ 	 * was redirected away from, when this syscall is about to return
+ 	 * a descriptor on it.  Empty otherwise.  */
+ 	char pending_link[PATH_MAX];
++
++	/* Host path of the intermediate file of the faked hard link that
++	 * the rename(2) or unlink(2) being processed removes or replaces,
++	 * counted down once the call succeeds.  Empty otherwise.  */
++	char pending_count_down[PATH_MAX];
+ } Link2SymlinkConfig;
+ 
+ /**
+@@ -749,15 +756,28 @@
+  */
+ static int decrement_link_count(Tracee *tracee, Reg sysarg)
+ {
+-	char original[PATH_MAX];
+ 	char intermediate[PATH_MAX];
+-	char final[PATH_MAX];
+-	char new_final[PATH_MAX];
++	int status;
++
++	status = find_intermediate(tracee, sysarg, intermediate);
++	if (status <= 0)
++		return status;
++
++	return count_down(tracee, intermediate);
++}
++
++/**
++ * Put in @intermediate the l2s intermediate file of the faked hard link
++ * at the path in @sysarg.  This function returns 1 if that path is a
++ * faked hard link, 0 if it is not, and -errno if an error occured.
++ */
++static int find_intermediate(Tracee *tracee, Reg sysarg, char intermediate[PATH_MAX])
++{
++	char original[PATH_MAX];
+ 	char * name;
+ 	struct stat statl;
+ 	ssize_t size;
+ 	int status;
+-	int link_count;
+ 
+ 	/* Note: this path was already canonicalized.  */
+ 	size = read_string(tracee, original, peek_reg(tracee, CURRENT, sysarg), PATH_MAX);
+@@ -788,12 +808,28 @@
+ 	if (strncmp(name, PREFIX, strlen(PREFIX)) != 0)
+ 		return 0;
+ 
++	return 1;
++}
++
++/**
++ * Count down the links of the faked hard link whose l2s intermediate
++ * file is @intermediate, deleting its files at zero.  This function
++ * returns -errno if an error occured, otherwise 0.
++ */
++static int count_down(Tracee *tracee, char intermediate[PATH_MAX])
++{
++	char final[PATH_MAX];
++	char new_final[PATH_MAX];
++	ssize_t size;
++	int status;
++	int link_count;
++
+ 	/* Read intermediate link - if this fails then
+ 	 * this link2symlink is broken and we silently
+ 	 * skip as we were removing it anyway.  */
+ 	size = my_readlink(intermediate, final);
+ 	if (size < 0) {
+-		VERBOSE(tracee, 1, "Skiping deref of broken link2symlink \"%s\" -> \"%s\"", original, intermediate);
++		VERBOSE(tracee, 1, "Skiping deref of broken link2symlink \"%s\"", intermediate);
+ 		return 0;
+ 	}
+ 
+@@ -839,6 +875,33 @@
+ }
+ 
+ /**
++ * Remember the faked hard link that the rename(2) or unlink(2) being
++ * processed removes or replaces, to count it down once the call
++ * succeeds (see handle_sysexit_end): not before, as a call can fail,
++ * and on Android be blocked: its seccomp filter blocks rename(2) and
++ * unlink(2) on x86-64, and PRoot runs them again as renameat(2) and
++ * unlinkat(2), so the entry is seen twice.  Counting at the entry
++ * counted such a link down twice, and with two links left deleted
++ * the file the other one still named.
++ */
++static int remember_count_down(Extension *extension, Reg sysarg)
++{
++	Tracee *tracee = TRACEE(extension);
++	Link2SymlinkConfig *config = get_config(extension, true);
++	int status;
++
++	if (config == NULL)
++		return -ENOMEM;
++
++	config->pending_count_down[0] = '\0';
++	status = find_intermediate(tracee, sysarg, config->pending_count_down);
++	if (status <= 0)
++		config->pending_count_down[0] = '\0';
++
++	return status < 0 ? status : 0;
++}
++
++/**
+  * sizeof(struct stat) cut to contain only fields that are at same addresses
+  * regardless of whenever tracee is 32-bit or 64-bit.
+  *
+@@ -876,6 +939,29 @@
+ 
+ 	switch (sysnum) {
+ 
++	case PR_rename:
++	case PR_renameat:
++	case PR_renameat2:
++	case PR_unlink:
++	case PR_unlinkat: {
++		Link2SymlinkConfig *config = get_config(extension, false);
++		int status;
++
++		if (config == NULL || config->pending_count_down[0] == '\0')
++			return 0;
++
++		/* The file the call removed or replaced was a faked hard
++		 * link: count it down now that the call succeeded.  */
++		if ((int) peek_reg(tracee, CURRENT, SYSARG_RESULT) == 0) {
++			status = count_down(tracee, config->pending_count_down);
++			if (status < 0)
++				VERBOSE(tracee, 1, "link2symlink: could not count \"%s\" down: %d",
++					config->pending_count_down, status);
++		}
++		config->pending_count_down[0] = '\0';
++		return 0;
++	}
++
+ 	case PR_fstatat64:                 //int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags);
+ 	case PR_newfstatat:                //int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags);
+ 	case PR_stat64:                    //int stat(const char *path, struct stat *buf);
+@@ -1259,8 +1345,10 @@
+ 		/* Forget any dereference that was not consumed by the exit
+ 		 * stage of the syscall it was made for.  */
+ 		Link2SymlinkConfig *config = get_config(extension, false);
+-		if (config != NULL)
++		if (config != NULL) {
+ 			config->pending_link[0] = '\0';
++			config->pending_count_down[0] = '\0';
++		}
+ 
+ 		return 0;
+ 	}
+@@ -1274,7 +1362,7 @@
+ 			 *If newpath is a psuedo hard link decrement the link count.
+ 			 */
+ 
+-			status = decrement_link_count(tracee, SYSARG_2);
++			status = remember_count_down(extension, SYSARG_2);
+ 			if (status < 0)
+ 				return status;
+ 
+@@ -1286,7 +1374,7 @@
+ 			 *If newpath is a psuedo hard link decrement the link count.
+ 			 */
+ 
+-			status = decrement_link_count(tracee, SYSARG_4);
++			status = remember_count_down(extension, SYSARG_4);
+ 			if (status < 0)
+ 				return status;
+ 
+@@ -1299,7 +1387,7 @@
+ 			 *   the original file and intermediate file too.
+ 			 */
+ 
+-			status = decrement_link_count(tracee, SYSARG_1);
++			status = remember_count_down(extension, SYSARG_1);
+ 			if (status < 0)
+ 				return status;
+ 
+@@ -1319,7 +1407,7 @@
+ 			 *   to end of original file.
+ 			 */
+ 
+-			status = decrement_link_count(tracee, SYSARG_2);
++			status = remember_count_down(extension, SYSARG_2);
+ 			if (status < 0)
+ 				return status;
+ 
+@@ -1384,6 +1472,21 @@
+ 		return 0;
+ 	}
+ 
++	case SYSCALL_EXIT_START: {
++		/* The result as the kernel gave it, before PRoot's own exit
++		 * processing: a call the outer seccomp filter skipped leaves
++		 * something else than 0 there (on x86-64 its number), which
++		 * that processing can turn into 0.  Only a call the kernel
++		 * says succeeded may count a faked hard link down.  */
++		Tracee *tracee = TRACEE(extension);
++		Link2SymlinkConfig *config = get_config(extension, false);
++		if (config != NULL && config->pending_count_down[0] != '\0'
++		    && (int) peek_reg(tracee, CURRENT, SYSARG_RESULT) != 0)
++			config->pending_count_down[0] = '\0';
++
++		return 0;
++	}
++
+ 	case SYSCALL_EXIT_END: {
+ 		return handle_sysexit_end(extension);
+ 	}

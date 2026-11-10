@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/test/java/com/pocketide/github/DeviceFlowAuthTest.kt">
+        <error line="63" column="161" source="standard:max-line-length" />
+        <error line="101" column="161" source="standard:max-line-length" />
+    </file>
+</baseline>

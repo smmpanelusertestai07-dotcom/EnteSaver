@@ -1,0 +1,91 @@
+PRoot on ARM Android: a statx(2) Android's seccomp filter blocks was emulated on fd 0.
+
+Android 10's filter blocks statx(2) (bionic 10 does not use it), so Node.js's fstat(2),
+which libuv makes as statx(fd, "", AT_EMPTY_PATH), comes to PRoot as a SIGSYS to emulate.
+Kernels since 4.8 report a syscall-exit stop for the skipped syscall before the SIGSYS,
+and PRoot's sysexit handlers put their result into SYSARG_RESULT. On ARM and ARM64 that
+is also SYSARG_1, so the SIGSYS handler read 0 for the dirfd and emulated the call on
+fd 0 (stdin): code-server then refused every VSIX ("File is not a regular file").
+
+PRoot already restores SYSARG_1 from the entry snapshot when it synthesizes the sysexit
+itself. Do the same after a real sysexit stop, once the snapshot is known to be this
+syscall's: the sysexit restored the other arguments and the stack pointer from it, so
+they must match. On kernels that raise SIGSYS before any sysenter stop, the snapshot is
+an earlier syscall's, and nothing is restored.
+
+--- a/src/tracee/tracee.h
++++ b/src/tracee/tracee.h
+@@ -243,6 +243,13 @@
+ 	 * emulated or restarted.  See handle_seccomp_event().  */
+ 	bool restore_sysarg1_after_sigsys;
+ 
++	/* Kernels since 4.8 report the sysexit stop of a syscall the outer
++	 * seccomp filter skipped before its SIGSYS, and that sysexit put its
++	 * result into SYSARG_RESULT, which on ARM/ARM64 aliases SYSARG_1.
++	 * The argument is then restored from the entry snapshot, once the
++	 * snapshot is known to be this syscall's.  See handle_seccomp_event().  */
++	bool restore_sysarg1_after_sysexit;
++
+ 	/* Context used to collect all the temporary dynamic memory
+ 	 * allocations.  */
+ 	TALLOC_CTX *ctx;
+--- a/src/tracee/event.c
++++ b/src/tracee/event.c
+@@ -798,6 +798,17 @@
+ 					 * restore it from the entry snapshot.  */
+ 					tracee->restore_sysarg1_after_sigsys = true;
+ 				}
++#if defined(ARCH_ARM_EABI) || defined(ARCH_ARM64)
++				else {
++					/* The kernel reported the sysexit stop of the
++					 * skipped syscall before this SIGSYS, and it was
++					 * translated like any other: its result went into
++					 * SYSARG_RESULT, which aliases SYSARG_1 here, so a
++					 * statx(2) was then emulated on fd 0 instead of its
++					 * dirfd.  Restore that argument too.  */
++					tracee->restore_sysarg1_after_sysexit = true;
++				}
++#endif
+ 
+ 				/* A SIGSYS on the avoider syscall can only be the
+ 				 * outer seccomp policy trapping a syscall PRoot
+@@ -818,6 +829,7 @@
+ 					VERBOSE(tracee, 4, "suppressed SIGSYS after void syscall");
+ 					tracee->skip_next_seccomp_signal = false;
+ 					tracee->restore_sysarg1_after_sigsys = false;
++					tracee->restore_sysarg1_after_sysexit = false;
+ 					signal = 0;
+ 				} else {
+ 					signal = handle_seccomp_event(tracee);
+--- a/src/tracee/seccomp.c
++++ b/src/tracee/seccomp.c
+@@ -84,6 +84,7 @@
+ 	if (ret != 0) {
+ 		VERBOSE(tracee, 1, "Couldn't fetch regs on seccomp SIGSYS");
+ 		tracee->restore_sysarg1_after_sigsys = false;
++		tracee->restore_sysarg1_after_sysexit = false;
+ 		return SIGSYS;
+ 	}
+ 
+@@ -98,8 +99,21 @@
+ 	if (tracee->restore_sysarg1_after_sigsys
+ 	    && get_sysnum(tracee, ORIGINAL) == get_sysnum(tracee, CURRENT))
+ 		poke_reg(tracee, SYSARG_1, peek_reg(tracee, ORIGINAL, SYSARG_1));
++	/* After a real sysexit stop, the snapshot is this syscall's when that
++	 * sysexit restored the other arguments from it; on kernels that raise
++	 * SIGSYS before any sysenter stop, it is an earlier syscall's.  */
++	else if (tracee->restore_sysarg1_after_sysexit
++		 && get_sysnum(tracee, ORIGINAL) == get_sysnum(tracee, CURRENT)
++		 && peek_reg(tracee, ORIGINAL, SYSARG_2) == peek_reg(tracee, CURRENT, SYSARG_2)
++		 && peek_reg(tracee, ORIGINAL, SYSARG_3) == peek_reg(tracee, CURRENT, SYSARG_3)
++		 && peek_reg(tracee, ORIGINAL, SYSARG_4) == peek_reg(tracee, CURRENT, SYSARG_4)
++		 && peek_reg(tracee, ORIGINAL, SYSARG_5) == peek_reg(tracee, CURRENT, SYSARG_5)
++		 && peek_reg(tracee, ORIGINAL, SYSARG_6) == peek_reg(tracee, CURRENT, SYSARG_6)
++		 && peek_reg(tracee, ORIGINAL, STACK_POINTER) == peek_reg(tracee, CURRENT, STACK_POINTER))
++		poke_reg(tracee, SYSARG_1, peek_reg(tracee, ORIGINAL, SYSARG_1));
+ #endif
+ 	tracee->restore_sysarg1_after_sigsys = false;
++	tracee->restore_sysarg1_after_sysexit = false;
+ 
+ 	/* Save regs so they can be restored at end of replaced call.  */
+ 	save_current_regs(tracee, ORIGINAL_SECCOMP_REWRITE);

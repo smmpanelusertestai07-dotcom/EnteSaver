@@ -1,0 +1,24 @@
+# Every permission the merged release manifest may request. The permissions gate fails when the
+# merged manifest asks for anything not listed here, when a line here is no longer requested, and
+# when an android.permission line is not explained in Help > Permissions.
+# ${applicationId} stands for the package name, which differs between release and debug.
+
+# gcloud's connection to Cloud Shell, its downloads and updates, and each agent's icon from Open VSX.
+android.permission.INTERNET
+
+# The phone's DNS servers for Linux, again when the network changes.
+android.permission.ACCESS_NETWORK_STATE
+
+# The connection stays open while the owner finishes a sign-in in Chrome or switches apps for a
+# moment; Android 14 asks for the kind of service to be named (special use).
+android.permission.FOREGROUND_SERVICE
+android.permission.FOREGROUND_SERVICE_SPECIAL_USE
+
+# The ongoing "Connected to Cloud Shell" notice with its Disconnect button (Android 13 asks).
+android.permission.POST_NOTIFICATIONS
+
+# App lock, with the phone's own screen lock.
+android.permission.USE_BIOMETRIC
+
+# AndroidX core's signature-level permission guarding the app's own non-exported receivers.
+${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Android Lint fails the build on any warning (warningsAsErrors). These are the findings that
+     were reviewed and are not problems, each scoped to where it was reviewed, with the reason. -->
+<lint>
+    <!-- Reported whenever a newer Android is installed on the build machine (GitHub's runner
+         image carries platform 37), so with warningsAsErrors it would fail a build that did not
+         change on the day the image updates. Moving targetSdk is a deliberate change that needs
+         a newer Android Gradle Plugin and a phone test; the report still lists it. -->
+    <issue id="OldTargetApi" severity="informational" />
+
+    <!-- Every brand token is mirrored in colors.xml and checked by the brand gate
+         (tools/gates/brand_tokens.py), whether or not a resource uses it yet. -->
+    <issue id="UnusedResources">
+        <ignore regexp="R\.color\.brand_" />
+    </issue>
+
+    <!-- NoticeCard's tone is its usual second positional argument at every call site. -->
+    <issue id="ModifierParameter">
+        <ignore path="src/main/java/com/pocketide/ui/shell/ShellComponents.kt" />
+    </issue>
+
+    <!-- PocketIDE's connection runs with an arm64 PRoot: an x86 Chromebook or phone could not run
+         it, so the APK carries arm64 only (an x86-64 build exists for the emulator in CI). -->
+    <issue id="ChromeOsAbiSupport">
+        <ignore path="build.gradle.kts" />
+    </issue>
+</lint>

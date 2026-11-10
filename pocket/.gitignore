@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+build/
+/local.properties
+/.idea/
+*.iml
+/captures
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+# Python caches (tests and tools import scripts): never source, and never in the APK.
+__pycache__/
+*.pyc

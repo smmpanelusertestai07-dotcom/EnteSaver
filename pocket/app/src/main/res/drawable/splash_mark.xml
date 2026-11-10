@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The mark as a vector, on the 108 dp adaptive canvas Android's own splash expects.
+
+    It exists because the launcher foreground ships only as PNGs, and the Android 12+ splash
+    needs a vector for windowSplashScreenAnimatedIcon. The geometry is the same one
+    plan/make_icon.py draws the PNGs from, at the same 0.40 fill, so the thing on the splash and
+    the thing on the home screen are the same size and shape.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:name="root"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:name="mark" android:pivotX="54" android:pivotY="54">
+        <path android:fillColor="@color/brand_mark" android:pathData="M32.40,36.72h5.70v34.56h-5.70zM38.10,36.72h3.54v5.70h-3.54zM38.10,65.58h3.54v5.70h-3.54zM69.90,36.72h5.70v34.56h-5.70zM66.36,36.72h3.54v5.70h-3.54zM66.36,65.58h3.54v5.70h-3.54zM46.42,46.21L57.83,56.15L61.58,51.85L50.17,41.91zM50.17,66.09L61.58,56.15L57.83,51.85L46.42,61.79z" />
+    </group>
+</vector>
