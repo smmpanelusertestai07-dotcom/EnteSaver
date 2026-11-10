@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors branding/tokens.json; the brand gate fails the build if they disagree. -->
+    <color name="brand_tile_top">#FF7A3CD6</color>
+    <color name="brand_tile_bottom">#FF33146F</color>
+    <color name="brand_tile_flat">#FF56289F</color>
+    <color name="brand_accent">#FF8B55E8</color>
+    <color name="brand_accent_on_dark">#FFB79BF5</color>
+    <color name="brand_mark">#FFF7F3EB</color>
+    <color name="window_light">#FFFAF9F6</color>
+    <color name="window_dark">#FF171717</color>
+</resources>

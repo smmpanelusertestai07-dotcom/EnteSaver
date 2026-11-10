@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PocketIDE</string>
+    <string name="connection_channel_name">Cloud Shell connection</string>
+    <string name="connection_channel_description">Shown while PocketIDE is connected to your Cloud Shell, or setting up that connection. Has a Disconnect button.</string>
+    <string name="connection_fgs_subtype">Keeps the user\'s own encrypted connection to their Google Cloud Shell open (Google\'s gcloud over SSH) while they use the agents in PocketIDE or finish a sign-in page in the browser, shows that it is open, and lets the user close it.</string>
+    <string name="connection_on_title">Connected to Cloud Shell</string>
+    <string name="connection_on_text">Your agents open in PocketIDE.</string>
+    <string name="connection_setting_up_title">Setting up PocketIDE\'s connection</string>
+    <string name="connection_setting_up_text">Ubuntu and Google\'s gcloud, on this phone. It continues if you switch apps.</string>
+    <string name="connection_sign_in_title">Signing in to gcloud</string>
+    <string name="connection_sign_in_text">Finish Google\'s page in Chrome, then come back.</string>
+    <string name="connection_stop">Disconnect</string>
+    <string name="downloads_channel_name">Files from Cloud Shell</string>
+    <string name="downloads_channel_description">A file an agent gave you, on its way to the phone\'s Downloads (Download/PocketIDE), and when it is there.</string>
+    <string name="download_done">In Download/PocketIDE. Tap to open it.</string>
+    <string name="download_done_apk">In Download/PocketIDE. Tap to open your downloads, then tap it to install.</string>
+</resources>

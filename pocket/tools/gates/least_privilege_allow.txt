@@ -1,0 +1,8 @@
+# Reviewed exceptions to the least-privilege gate, one per line:
+#   <path relative to app/src/main/java/com/pocketide>: <the exact trimmed source line>
+# Each needs a reason in the commit that adds it.
+
+# 4.0.0: DELETE removes a cloud computer (user/codespaces/<name>) when the owner taps Delete, and
+# PATCH moves a branch forward with force off (git/refs/heads/<branch>). The per-call rules still
+# fail any DELETE of a repository and any PATCH of its visibility or archived state.
+github/RestClient.kt: internal enum class Verb { GET, POST, PUT, PATCH, DELETE }

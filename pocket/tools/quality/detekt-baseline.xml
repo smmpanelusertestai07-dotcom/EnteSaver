@@ -1,0 +1,125 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:ComputerScreen.kt$@Composable fun ComputerScreen(onHelp: () -&gt; Unit, onHelpPage: (String) -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:ComputerScreen.kt$@Composable private fun StatusCard(state: ComputerState, ide: IdeState, onStop: () -&gt; Unit, onSetUp: () -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:ComputerSetup.kt$ComputerSetup$private suspend fun build(start: SetupRecord)</ID>
+    <ID>CyclomaticComplexMethod:EngineRange.kt$EngineRange.Companion$private fun comparator(token: String): List&lt;Bound&gt;?</ID>
+    <ID>CyclomaticComplexMethod:HelpScreen.kt$@Composable fun HelpScreen(onBack: () -&gt; Unit, onOpen: (String) -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:VerifiedDownload.kt$VerifiedDownload$private suspend fun receive(url: HttpUrl, part: File, expected: Expected, onProgress: (Long, Long) -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:WorkspaceScreen.kt$@Composable fun WorkspaceScreen(route: WorkspaceRoute, onBack: () -&gt; Unit, onHelpPage: (String) -&gt; Unit)</ID>
+    <ID>LongParameterList:Downloader.kt$Downloader$( response: Response, pin: PinnedDownload, part: File, append: Boolean, start: Long, onProgress: (Long) -&gt; Unit, )</ID>
+    <ID>LoopWithTooManyJumpStatements:AgentStore.kt$AgentStore$for</ID>
+    <ID>LoopWithTooManyJumpStatements:OpenVsxSignature.kt$OpenVsxSignature$while</ID>
+    <ID>LoopWithTooManyJumpStatements:TarGzExtractor.kt$TarGzExtractor.TarStream$for</ID>
+    <ID>LoopWithTooManyJumpStatements:TarGzExtractor.kt$TarGzExtractor.TarStream$while</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.Stage.CHECK$8</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.Stage.DOWNLOAD_GCLOUD$16</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.Stage.DOWNLOAD_UBUNTU$8</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.Stage.TOOLS$40</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.Stage.UNPACK_GCLOUD$20</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.Stage.UNPACK_UBUNTU$8</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$10</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$100f</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$20</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$25</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$30</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$35</ID>
+    <ID>MagicNumber:ComputerSetup.kt$ComputerSetup.ToolsProgress$55</ID>
+    <ID>MagicNumber:DeviceFacts.kt$CpuFacts$16</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader$15_000</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader$200</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader$206</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader$2_000</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader$416</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader$5_000</ID>
+    <ID>MagicNumber:Downloader.kt$Downloader.Companion$1024</ID>
+    <ID>MagicNumber:Ed25519Stream.kt$Ed25519Stream.Companion$255</ID>
+    <ID>MagicNumber:Ed25519Stream.kt$Ed25519Stream.Companion$3</ID>
+    <ID>MagicNumber:Ed25519Stream.kt$Ed25519Stream.Companion$4</ID>
+    <ID>MagicNumber:Ed25519Stream.kt$Ed25519Stream.Companion$5</ID>
+    <ID>MagicNumber:EngineRange.kt$EngineRange.Companion$3</ID>
+    <ID>MagicNumber:GuestLines.kt$1024</ID>
+    <ID>MagicNumber:GuestLines.kt$16</ID>
+    <ID>MagicNumber:GuestLines.kt$8</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$100</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$100f</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$1e12</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$1e3</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$1e6</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$1e9</ID>
+    <ID>MagicNumber:GuestLines.kt$GuestLines$3</ID>
+    <ID>MagicNumber:GuestRoot.kt$GuestRoot$1024</ID>
+    <ID>MagicNumber:GuestRoot.kt$GuestRoot$64</ID>
+    <ID>MagicNumber:Ide.kt$Ide$5</ID>
+    <ID>MagicNumber:LinuxProcesses.kt$ProcessKeeper$2_000</ID>
+    <ID>MagicNumber:OpenVsx.kt$OpenVsx$404</ID>
+    <ID>MagicNumber:OpenVsx.kt$OpenVsx$429</ID>
+    <ID>MagicNumber:OpenVsxSignature.kt$OpenVsxSignature$4096</ID>
+    <ID>MagicNumber:SecureStore.kt$KeystoreBox$128</ID>
+    <ID>MagicNumber:SecureStore.kt$KeystoreBox$256</ID>
+    <ID>MagicNumber:SemVer.kt$SemVer.Companion$3</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$0x7f</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$0x80</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$0xff</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$100</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$12</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$124</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$148</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$155</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$156</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$157</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$257</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$263</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$3</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$32</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$345</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.TarStream$8</ID>
+    <ID>MagicNumber:TarGzExtractor.kt$TarGzExtractor.Unpacker$64</ID>
+    <ID>MagicNumber:Trees.kt$FileModes$0b111_111_111_111</ID>
+    <ID>NestedBlockDepth:Downloader.kt$Downloader$private suspend fun receive( response: Response, pin: PinnedDownload, part: File, append: Boolean, start: Long, onProgress: (Long) -&gt; Unit, )</ID>
+    <ID>NestedBlockDepth:GuestLines.kt$internal fun InputStream.forEachLine(maxChars: Int = 16 * 1024, onLine: (String) -&gt; Unit)</ID>
+    <ID>NestedBlockDepth:VerifiedDownload.kt$VerifiedDownload$private suspend fun receive(url: HttpUrl, part: File, expected: Expected, onProgress: (Long, Long) -&gt; Unit)</ID>
+    <ID>ReturnCount:ComputerSetup.kt$ComputerSetup$private suspend fun codeServerItem(record: SetupRecord): RepairItem</ID>
+    <ID>ReturnCount:ComputerSetup.kt$ComputerSetup$private suspend fun switchCodeServer( record: SetupRecord, pin: CodeServerPin, staged: Boolean, hold: () -&gt; Boolean, release: () -&gt; Unit, ): UpdateOutcome</ID>
+    <ID>ReturnCount:DeviceFacts.kt$CpuFacts$fun cores(possible: String?): Int?</ID>
+    <ID>ReturnCount:Ed25519Stream.kt$Ed25519Stream$fun verify(): Boolean</ID>
+    <ID>ReturnCount:Ed25519Stream.kt$Ed25519Stream.Companion$private fun recoverX(y: BigInteger, sign: Int): BigInteger?</ID>
+    <ID>ReturnCount:EngineRange.kt$EngineRange.Companion$private fun parseAlternative(text: String): List&lt;Bound&gt;?</ID>
+    <ID>ReturnCount:EngineRange.kt$EngineRange.Companion$private fun partial(text: String): Partial?</ID>
+    <ID>ReturnCount:GuestLines.kt$GuestLines$fun parse(raw: String): GuestLine</ID>
+    <ID>ReturnCount:GuestRoot.kt$GuestRoot$private fun guestTarget(target: String): String</ID>
+    <ID>ReturnCount:GuestRoot.kt$GuestRoot$private fun walk(names: List&lt;String&gt;, create: Boolean): Path?</ID>
+    <ID>ReturnCount:Lookalikes.kt$Lookalikes$fun problem(namespace: String, name: String): String?</ID>
+    <ID>ReturnCount:OpenVsxFixture.kt$OpenVsxFixture$private fun extensionAnswer(rest: List&lt;String&gt;): MockResponse?</ID>
+    <ID>ReturnCount:SemVer.kt$SemVer$override fun compareTo(other: SemVer): Int</ID>
+    <ID>ReturnCount:SemVer.kt$SemVer.Companion$fun parse(text: String): SemVer?</ID>
+    <ID>ReturnCount:TarGzExtractor.kt$TarGzExtractor.TarStream$fun next(): TarHeader?</ID>
+    <ID>SwallowedException:CodeServerSlot.kt$CodeServerSlot$tooSlow: TimeoutCancellationException</ID>
+    <ID>SwallowedException:GuestRoot.kt$GuestRoot.Companion$missing: IOException</ID>
+    <ID>SwallowedException:Ide.kt$Ide$notYet: IOException</ID>
+    <ID>SwallowedException:OpenVsx.kt$OpenVsx$unreadable: IllegalArgumentException</ID>
+    <ID>SwallowedException:OpenVsxSignature.kt$OpenVsxSignature$notBase64: IllegalArgumentException</ID>
+    <ID>SwallowedException:PhoneDns.kt$PhoneDns$refused: RuntimeException</ID>
+    <ID>SwallowedException:PhoneDns.kt$PhoneDns$unavailable: RuntimeException</ID>
+    <ID>SwallowedException:ProcStandIns.kt$ProcStandIns.Companion$unreadable: IOException</ID>
+    <ID>SwallowedException:ProcStandIns.kt$ProcStandIns.Companion$unreadable: SecurityException</ID>
+    <ID>SwallowedException:ProotComputer.kt$ProotComputer$failure: IOException</ID>
+    <ID>SwallowedException:Trees.kt$FileModes$unsupported: IllegalArgumentException</ID>
+    <ID>SwallowedException:Trees.kt$FileModes$unsupported: UnsupportedOperationException</ID>
+    <ID>ThrowsCount:AgentStore.kt$AgentStore$private suspend fun newest(namespace: String, name: String): ExtensionRelease</ID>
+    <ID>ThrowsCount:Ide.kt$Ide$private suspend fun awaitHealthy(port: Int, process: Process)</ID>
+    <ID>ThrowsCount:Projects.kt$Projects$fun create(name: String): String</ID>
+    <ID>ThrowsCount:VerifiedDownload.kt$VerifiedDownload$private suspend fun receive(url: HttpUrl, part: File, expected: Expected, onProgress: (Long, Long) -&gt; Unit)</ID>
+    <ID>TooGenericExceptionCaught:ComputerSetup.kt$ComputerSetup$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:Ide.kt$Ide$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:PhoneDns.kt$PhoneDns$refused: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:PhoneDns.kt$PhoneDns$unavailable: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:Updater.kt$Updater$failure: Exception</ID>
+    <ID>TooManyFunctions:Computer.kt$Computer</ID>
+    <ID>TooManyFunctions:DocsDsl.kt$com.pocketide.docs.DocsDsl.kt</ID>
+    <ID>TooManyFunctions:OpenVsx.kt$OpenVsx</ID>
+    <ID>TooManyFunctions:ShellComponents.kt$com.pocketide.ui.shell.ShellComponents.kt</ID>
+  </CurrentIssues>
+</SmellBaseline>

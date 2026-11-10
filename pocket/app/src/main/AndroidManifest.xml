@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Every permission here is listed, with its reason, in Help > Permissions, and the
+         permissions gate fails the build if the merged manifest asks for anything else. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Merged in by androidx.biometric for Android 9 and older; this app starts at Android 10. -->
+    <uses-permission
+        android:name="android.permission.USE_FINGERPRINT"
+        tools:node="remove" />
+
+    <queries>
+        <!-- Chrome (or another browser) for Custom Tabs: Cloud Shell, the agents' VS Code, and
+             every link open there. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+        <!-- Translate and other text actions in the native selection toolbar (Help). -->
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".PocketApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:hasFragileUserData="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.PocketIDE"
+        tools:targetApi="36">
+
+        <!-- singleTask: one PocketIDE home; coming back to it (from an agent's screen, a sign-in
+             page in Chrome) finds the one already open. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|layoutDirection|locale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- An agent's VS Code, in the app: Cloud Shell through Google's gcloud, full screen, with
+             PocketIDE's own keys, tools and Back. -->
+        <activity
+            android:name=".ui.workspace.WorkspaceActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|layoutDirection|locale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.PocketIDE"
+            android:windowSoftInputMode="adjustResize">
+            <!-- After a sign-in in Chrome, an agent's "Return to the editor" link (code-server's
+                 own scheme, code-oss:) brings the agent back to the front. Nothing is read from it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="code-oss" />
+            </intent-filter>
+        </activity>
+
+        <!-- Keeps the app, and with it the connection to Cloud Shell, open while an agent or a
+             sign-in page in the browser needs it. -->
+        <service
+            android:name=".link.ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="@string/connection_fgs_subtype" />
+        </service>
+
+        <!-- Says that an error stopped the app, with details to copy (StopNote). Its own process,
+             so it opens whatever went wrong in the app's. -->
+        <activity
+            android:name=".StoppedActivity"
+            android:exported="false"
+            android:process=":stopped" />
+    </application>
+</manifest>

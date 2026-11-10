@@ -1,0 +1,16 @@
+#!/bin/sh
+# PocketIDE: opens a web address in the phone's browser. Programs inside Linux call xdg-open (or
+# $BROWSER) to show a sign-in page; this hands the address to the PocketIDE app, which opens it
+# in Chrome. Only web addresses (http and https) go through.
+url="${1:-}"
+case "$url" in
+  http://* | https://*) ;;
+  *)
+    echo "PocketIDE opens only web addresses (http, https) in the phone's browser." >&2
+    exit 1
+    ;;
+esac
+dir=/root/.pocketide/open
+mkdir -p "$dir" || exit 1
+name="$(date +%s%N)-$$"
+printf '%s\n' "$url" > "$dir/.$name.tmp" && mv -f "$dir/.$name.tmp" "$dir/$name.url"

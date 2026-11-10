@@ -1,0 +1,45 @@
+# PocketIDE's detekt settings, on top of detekt's defaults (buildUponDefaultConfig).
+# Composable functions are named like types and take their state and callbacks as parameters,
+# so the rules that assume ordinary functions skip them.
+
+complexity:
+  LongMethod:
+    ignoreAnnotated: ['Composable']
+  LongParameterList:
+    ignoreAnnotated: ['Composable']
+    ignoreDefaultParameters: true
+  # What other code can call is what makes a class or file hard to read; small private helpers help.
+  TooManyFunctions:
+    ignorePrivate: true
+    ignoreOverridden: true
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated: ['Composable']
+
+exceptions:
+  # The app's edges (screens, the connection service, the computers list GitHub reports) turn any
+  # failure into one plain sentence for the owner instead of a crash, and always rethrow
+  # cancellation first. Everywhere else, catch what can actually happen.
+  TooGenericExceptionCaught:
+    excludes: ['**/ui/**', '**/cloud/ComputerService.kt', '**/cloud/LiveComputers.kt']
+  SwallowedException:
+    excludes: ['**/ui/**', '**/cloud/ComputerService.kt', '**/cloud/LiveComputers.kt']
+
+performance:
+  # Spread only passes a few URL path segments to a vararg; the copy costs nothing here.
+  SpreadOperator:
+    active: false
+
+style:
+  # Guard clauses at the top of a function ("return null when…") are the house style.
+  ReturnCount:
+    excludeGuardClauses: true
+  MagicNumber:
+    ignoreAnnotated: ['Composable']
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+  MaxLineLength:
+    maxLineLength: 160
+  UnusedPrivateMember:
+    ignoreAnnotated: ['Preview']
