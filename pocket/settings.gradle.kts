@@ -1,5 +1,5 @@
 // PocketIDE is its own Gradle build. It is never included from the repository's root settings,
-// so CloudSaver's build and PocketIDE's build cannot affect each other.
+// so Ente Saver's build and PocketIDE's build cannot affect each other.
 pluginManagement {
     repositories {
         google {

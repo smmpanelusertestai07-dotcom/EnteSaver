@@ -61,7 +61,7 @@ android {
 
         // Where the app's releases are published. CI passes the repository its release job
         // publishes to (tools/gates/workflow.py checks it); the fallback serves local builds only.
-        buildConfigField("String", "RELEASES_REPO", quoted(config("POCKETIDE_RELEASES_REPO").ifEmpty { "smmpanelusertestai07-dotcom/CloudSaver" }))
+        buildConfigField("String", "RELEASES_REPO", quoted(config("POCKETIDE_RELEASES_REPO").ifEmpty { "smmpanelusertestai07-dotcom/EnteSaver" }))
     }
 
     buildTypes {

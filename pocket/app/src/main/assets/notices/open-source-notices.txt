@@ -8,7 +8,7 @@ Shell. Each part keeps its own licence. The parts inside the APK are listed firs
 update themselves are named without a version, because the version you have changes.
 
 The source of PocketIDE, and the GPL source for each release, is published with that release at
-https://github.com/smmpanelusertestai07-dotcom/CloudSaver/releases (tags pocketide-v*).
+https://github.com/smmpanelusertestai07-dotcom/EnteSaver/releases (tags pocketide-v*).
 
 
 INSIDE THE APK

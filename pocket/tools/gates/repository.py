@@ -3,7 +3,7 @@
 
 No Markdown (the docs live inside the app), no key stores or private keys of any format, no
 local.properties (it can carry the owner's configuration), no built APKs, and no Python caches. And pocket/ stays
-a standalone Gradle build: the root settings never include it, so CloudSaver's build cannot
+a standalone Gradle build: the root settings never include it, so Ente Saver's build cannot
 break PocketIDE's, or the other way round.
 """
 from __future__ import annotations
