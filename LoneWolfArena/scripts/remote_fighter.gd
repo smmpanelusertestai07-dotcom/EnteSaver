@@ -26,6 +26,27 @@ var _hp_reported := MAX_HP
 var _hit_sent_at := -99.0
 const RESYNC_S := 0.8
 var _smooth := NetSmoother.new()
+## Its player is AWAY (Cloud.peer_away_changed: no link, the app in the background): it stands
+## where its last state left it, moves and shoots no more. `decided_here`: this phone decides its HP
+## meanwhile (1 vs 1: the phone still there; DUO / SQUAD: the host): hits and the zone take it here
+## as a fighter's own (Fighter.take_damage), so it can go down. Back, its reports may not heal what
+## it lost meanwhile: hp_cap holds them down until its phone took the word ("sync").
+var away := false
+var decided_here := false
+var hp_cap := -1.0
+
+
+## Its player went away (frozen; `here`: decided by this phone) or came back.
+func set_away(on: bool, here: bool) -> void:
+	if on == away:
+		decided_here = on and here
+		return
+	away = on
+	decided_here = on and here
+	_smooth.clear()
+	_net_pos = global_position
+	if not on and alive:
+		hp_cap = hp
 
 
 ## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; flags: 1 sprint, 2 ads,
@@ -47,6 +68,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_net_heal = false
 	hp_left = hp
 	_hp_reported = hp
+	hp_cap = -1.0
 	_smooth.clear()
 
 
@@ -82,7 +104,13 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 		if knocked:
 			knock_hp = clampf(s[8], 0.0, KNOCK_HP)
 		return
-	hp = clampf(s[8], 0.0, MAX_HP)
+	var reported := clampf(s[8], 0.0, MAX_HP)
+	if hp_cap >= 0.0:
+		if reported <= hp_cap + 0.5:
+			hp_cap = -1.0                # its phone took the word on its HP
+		else:
+			reported = hp_cap            # (no healing back what it lost while away)
+	hp = reported
 	if hp > _hp_reported:
 		hp_left = minf(hp_left + hp - _hp_reported, MAX_HP)      # it healed
 	_hp_reported = hp
@@ -92,6 +120,10 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 
 func _physics_process(delta: float) -> void:
 	if not alive:
+		return
+	if away:
+		velocity = Vector3.ZERO          # frozen where it was (its phone sends nothing)
+		model.update_locomotion(Vector2.ZERO, stance, _net_floor, delta)
 		return
 	if _net_pos == Vector3.INF:
 		_net_pos = global_position
@@ -125,6 +157,11 @@ func _physics_process(delta: float) -> void:
 ## Hits from this phone's player (DUO / SQUAD: from any fighter running here, never a teammate) are
 ## sent to the other phone; its HP comes back in its state.
 func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
+	if away and decided_here:
+		var dmg0 := super(amount, zone, attacker, from_pos, cause)
+		hp_left = hp
+		_hp_reported = hp
+		return dmg0
 	if not alive or round_over or attacker == null or attacker == self or not (attacker.is_player or attacker.net_local) \
 			or attacker.ally_of(self):
 		return 0.0

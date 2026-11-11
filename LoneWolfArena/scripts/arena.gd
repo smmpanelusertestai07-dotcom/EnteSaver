@@ -113,6 +113,16 @@ var _net_left := false           # this arena is done with its session (leave_se
 var _rematch_sent := false       # "rm" went out (ask_rematch)
 var rematch_wanted := false      # the other player asked for a rematch ("rm", after the match)
 var rematch_they_take := true    # ... and their phone takes this one's challenges (their "rm" says)
+## A player AWAY (Cloud.peer_away_changed: no link, the app in the background, BACK pressed out of
+## the app) is not out of the match: its fighter stands frozen and this phone decides its HP and
+## death meanwhile (RemoteFighter.set_away); past Cloud.AWAY_GRACE_MS it has LEFT. Back, it asks
+## ("back", once a second while Cloud.rejoining) and takes the other phone's word ("sync",
+## _send_sync) before it sends its own states again.
+var _back_t := 0.0
+var _last_rend: Array = []       # the host's last "rend" (sent again after a "sync")
+## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
+## map's centre while it shrinks.
+var zone_final := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -191,7 +201,7 @@ func leave_session() -> void:
 		return
 	_net_left = true
 	Game.online = false
-	for sig: String in ["event_received", "state_received", "session_ended"]:
+	for sig: String in ["event_received", "state_received", "session_ended", "peer_away_changed"]:
 		for c: Dictionary in Game.session.get_signal_connection_list(sig):
 			if (c.callable as Callable).get_object() == self:
 				Game.session.disconnect(sig, c.callable)
@@ -207,6 +217,7 @@ func _net_setup() -> void:
 	Game.session.event_received.connect(_on_net_event)
 	Game.session.state_received.connect(_on_net_state)
 	Game.session.session_ended.connect(_on_net_ended)
+	Game.session.peer_away_changed.connect(_on_peer_away)
 	var queued: Array = Game.session.queue.duplicate()
 	Game.session.queue.clear()
 	Game.session.send_event("ready")
@@ -341,6 +352,98 @@ func _on_net_event(kind: String, data: Array) -> void:
 				score.bot = int(data[1])
 				_next_round()
 				_follow_host_clock()
+		"back":
+			# The other player is back after being away: this phone's word on its fighter.
+			if data.is_empty() and _net_rate_ok("back", 2.0, 3.0):
+				_send_sync()
+		"sync":
+			_on_sync(data)
+
+
+## The other phone's player went AWAY (frozen here, its HP and death decided here) or came back
+## (this phone's word on its fighter goes to it at once: "sync").
+func _on_peer_away(_id: String, away: bool) -> void:
+	if not online or _net_left:
+		return
+	(bot as RemoteFighter).set_away(away, true)
+	if not away:
+		_send_sync()
+
+
+## This phone's word on the other phone's fighter and on the match, for that phone back from being
+## away: [round, phase, prep left or fight time, this phone's score, the other's score, its HP,
+## alive, x, y, z, the round's gun, what took it out]. The host's last word on a round that is over
+## here ("rend", and "fin" once the match is) goes again after it: the other phone missed it.
+func _send_sync() -> void:
+	if not session_up():
+		return
+	var r := bot as RemoteFighter
+	var at := r.global_position
+	Game.session.send_event("sync", [round_index, int(phase), prep_left if phase == Phase.PREP else elapsed, int(score.player),
+		int(score.bot), snappedf(r.hp, 0.1), r.alive, snappedf(at.x, 0.01), snappedf(at.y, 0.01), snappedf(at.z, 0.01),
+		picked_weapon, String(_down_cause.get(r, ""))])
+	if _net_host and _last_rend.size() == 7 and int(_last_rend[0]) == round_index and (phase == Phase.BREAK or phase == Phase.END):
+		Game.session.send_event("rend", _last_rend)
+		if phase == Phase.END:
+			_final_sent = false
+			_send_final()
+
+
+## The other phone's word ("sync", see _send_sync). The guest follows the host's round as it stands
+## (_follow_round); then either takes its own player's HP (never more than it has: no healing back
+## what it lost while away), its place and, gone down meanwhile, its death. The host answers with its
+## own word, so the guest follows its round.
+func _on_sync(data: Array) -> void:
+	if data.size() != 12 or not _net_rate_ok("sync", 2.0, 4.0) or not data[6] is bool or typeof(data[10]) != TYPE_STRING \
+			or typeof(data[11]) != TYPE_STRING:
+		return
+	for i: int in [0, 1, 2, 3, 4, 5, 7, 8, 9]:
+		if not (data[i] is float or data[i] is int) or not is_finite(float(data[i])):
+			return
+	var r := int(data[0])
+	var ph := int(data[1])
+	if r < 1 or r > MAX_ROUNDS or ph < 0 or ph > 3:
+		return
+	Game.session.rejoined()
+	if not _net_host:
+		_follow_round(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
+	if r == round_index and ph == int(phase) and (phase == Phase.FIGHT or phase == Phase.PREP) and player.alive:
+		var pos := Vector3(float(data[7]), float(data[8]), float(data[9]))
+		if _in_hall(pos) and player.global_position.distance_to(pos) > 1.5:
+			player.global_position = pos           # where the others saw it stand meanwhile
+			player.velocity = Vector3.ZERO
+		var hp := clampf(float(data[5]), 0.0, Fighter.MAX_HP)
+		if bool(data[6]) and hp > 0.0:
+			player.hp = minf(player.hp, hp)
+		elif phase == Phase.FIGHT:
+			var cause := String(data[11])
+			player.last_hit_cause = cause if cause in ["frag", "zone", "fall", "self"] else ""
+			player.hp = 0.0
+			player.die(bot if cause in ["gun", "frag"] else null, false)
+	if _net_host:
+		_send_sync()
+
+
+## The guest back from being away: the host's round as it stands (it went on meanwhile, or this
+## phone went on alone): that round in the host's phase, with the host's score and gun.
+func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int, gun: String) -> void:
+	if phase == Phase.END:
+		return
+	score.bot = maxi(host_score, 0)
+	score.player = maxi(my_score, 0)
+	if r != round_index or (ph == int(Phase.FIGHT) and phase != Phase.FIGHT) or (ph == int(Phase.PREP) and phase != Phase.PREP):
+		_net_begun = true
+		round_index = r - 1
+		_next_round()                    # both back at their spawns, in that round's prep
+		if ph == int(Phase.FIGHT):
+			_start_fight()
+	if Weapons.PICKABLE.has(gun) and gun != picked_weapon:
+		_apply_pick(gun)
+	if phase == Phase.FIGHT and ph == int(Phase.FIGHT):
+		elapsed = clampf(clock, 0.0, ROUND_TIME)
+		time_left = ROUND_TIME - elapsed
+	elif phase == Phase.PREP and ph == int(Phase.PREP):
+		prep_left = clampf(clock, 0.0, PREP_TIME)
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
@@ -726,7 +829,7 @@ func _apply_pick(id: String) -> void:
 func _start_fight() -> void:
 	phase = Phase.FIGHT
 	_net_timeup_t = -1.0
-	if not practice and round_index == 1:
+	if not practice and round_index == 1 and not _counted:
 		Game.count_match(mode)
 		_counted = true
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
@@ -741,6 +844,8 @@ func _start_fight() -> void:
 	elapsed = 0.0
 	zone_radius = zone_start_radius
 	zone_state = "stationary"
+	zone_center = map.zone_center
+	zone_final = zone_final_for(round_index)
 	_zone_mesh.visible = not practice
 	_update_zone_mesh()
 	Game.mark("match started")
@@ -760,8 +865,13 @@ func _physics_process(delta: float) -> void:
 	if online and phase != Phase.END:
 		_net_t += delta
 		if _net_t >= float(Game.session.state_interval) - 0.002:      # (3 ticks of 1/60 s add up to a hair under 0.05)
+			_back_t -= _net_t
 			_net_t = 0.0
-			Game.session.send_state(RemoteFighter.pack(player, round_index))
+			if not Game.session.rejoining():
+				Game.session.send_state(RemoteFighter.pack(player, round_index))
+			elif _back_t <= 0.0:
+				_back_t = 1.0                # back from being away: the other phone's word first ("sync")
+				Game.session.send_event("back")
 	match phase:
 		Phase.PREP when online and not _net_begun:
 			pass        # online the first prep starts on both phones together (_net_begin), never alone
@@ -874,6 +984,7 @@ func _update_zone(delta: float) -> void:
 			Audio.play("countdown_beep", -6.0, 0.7)
 		var t := clampf((elapsed - ZONE_HOLD) / ZONE_SHRINK, 0.0, 1.0)
 		zone_radius = lerpf(zone_start_radius, ZONE_MIN, t)
+		zone_center = map.zone_center.lerp(zone_final, t)
 		if t >= 1.0:
 			zone_state = "closed"
 		_update_zone_mesh()
@@ -888,6 +999,29 @@ func _update_zone(delta: float) -> void:
 func _update_zone_mesh() -> void:
 	_zone_mesh.scale = Vector3(zone_radius, 1.0, zone_radius)
 	_zone_mesh.global_position = zone_center + Vector3.UP * 6.0
+
+
+## Where the safe zone closes in round `r`: a random spot of the hall's floor, the last circle inside
+## the walls (MapBuilder.HX / HZ less ZONE_MIN and a margin) and its centre off the cover (the
+## obstacles), a new one every round. Online every phone gets the same (Cloud.match_seed: the room's
+## key and the round); TRAINING draws it at random. (The start circle, from the map's centre, always
+## holds the final one: the hall's farthest spot is closer than zone_start_radius - ZONE_MIN.)
+func zone_final_for(r: int) -> Vector3:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = Game.session.match_seed("zone%d" % r) if online and Game.session != null else _rng.randi()
+	var mx := MapBuilder.HX - ZONE_MIN - 1.0
+	var mz := MapBuilder.HZ - ZONE_MIN - 1.0
+	var best := Vector3(map.zone_center.x, 0.0, map.zone_center.z)
+	for i in 16:
+		var p := Vector3(rng.randf_range(-mx, mx), 0.0, rng.randf_range(-mz, mz))
+		var free := true
+		for o: Rect2 in obstacles:
+			if o.grow(1.0).has_point(Vector2(p.x, p.z)):
+				free = false
+				break
+		if free:
+			return p
+	return best
 
 
 func in_zone(p: Vector3) -> bool:
@@ -997,8 +1131,9 @@ func _net_decide(timed_out := false) -> void:
 	if timed_out:
 		Game.mark("time up")
 	_end_round(winner, hs, timed_out, killer)
-	Game.session.send_event("rend", [round_index, 1 if winner == player else (-1 if winner == bot else 0),
-		int(score.player), int(score.bot), timed_out, hs, 1 if killer == player else (-1 if killer == bot else 0)])
+	_last_rend = [round_index, 1 if winner == player else (-1 if winner == bot else 0),
+		int(score.player), int(score.bot), timed_out, hs, 1 if killer == player else (-1 if killer == bot else 0)]
+	Game.session.send_event("rend", _last_rend)
 	if phase == Phase.END:
 		_send_final()                    # (after its "rend": the guest ends the match with it, then takes these)
 

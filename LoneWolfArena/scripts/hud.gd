@@ -815,6 +815,39 @@ func _glyph(id: String) -> Texture2D:
 	return HudDraw.tex(String(GLYPHS.get(id, "")), String(GLYPH_FALLBACK.get(id, "")))
 
 
+## Online: "<NAME> RECONNECTING..." over every fighter whose player is AWAY (RemoteFighter.away:
+## frozen until it is back), at the top of the screen while it is behind the camera; this phone's
+## own "RECONNECTING..." while it rejoins its match (Cloud.rejoining).
+func _draw_away(vs: Vector2, u: float) -> void:
+	if arena == null or not ("fighters" in arena) or player == null or player.camera == null:
+		return
+	var f := UI.font("bold")
+	var fs := int(0.034 * u)
+	var top := vs.y * 0.2
+	var lines: Array[String] = []
+	if bool(arena.get("online")) and Game.session != null and Game.session.rejoining():
+		lines.append("RECONNECTING...")
+	for x: Variant in arena.fighters:
+		var r := x as RemoteFighter
+		if r == null or not r.away or not r.alive:
+			continue
+		var txt := "%s RECONNECTING..." % r.display_name
+		var head := r.global_position + Vector3.UP * 2.3
+		if player.camera.is_position_behind(head):
+			lines.append(txt)
+			continue
+		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var at := player.camera.unproject_position(head) - Vector2(w * 0.5, 0.0)
+		draw_string_outline(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(3, fs / 6), Color(0, 0, 0, 0.8))
+		draw_string(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.85, 0.3))
+	for txt in lines:
+		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var at := Vector2((vs.x - w) * 0.5, top)
+		draw_string_outline(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(3, fs / 6), Color(0, 0, 0, 0.8))
+		draw_string(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.85, 0.3))
+		top += fs * 1.3
+
+
 func _draw() -> void:
 	var vs := size
 	var u := HudLayout.unit(vs)
@@ -830,6 +863,7 @@ func _draw() -> void:
 	if scoped:
 		_draw_scope(c, vs)
 	_draw_damage_dirs(c, u)
+	_draw_away(vs, u)
 	if alive:
 		if player.ready_item != "":
 			_draw_item_aim(c, u)

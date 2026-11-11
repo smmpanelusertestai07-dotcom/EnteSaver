@@ -15,10 +15,14 @@ extends Node
 ## AES-256-CBC with a random IV plus an HMAC-SHA256 over it, and carries the sender's id and a
 ## counter (replays are dropped). The inviter hosts. State goes out 20 times a second (a state
 ## that did not change only twice, then every STATE_IDLE_MS) with the sender's clock, so the other
-## phone can draw the fighter a little in the past, smoothly (RemoteFighter); a silent
-## opponent or a "bye" ends the match ("left"); a phone that hears nothing at all from the relay,
-## or was away (background, screen off) longer than the other phone waits, ends it as "connection
-## lost" (it is the one that dropped out; a link that went quiet outside a match is replaced too).
+## phone can draw the fighter a little in the past, smoothly (RemoteFighter); a "bye" ends the
+## match ("left"). A bad network or a backgrounded app does not: an opponent silent AWAY_AFTER_MS is
+## AWAY (peer_away_changed: its fighter stands frozen on the other phones, which decide its HP) and
+## only silent past AWAY_GRACE_MS has it LEFT; a dropped or dead relay link reconnects and
+## subscribes the room again with the session, its keys and its counters kept, and this phone away
+## (background, screen off, no link) a little less than that grace ends its match as "connection
+## lost" (it is the one that dropped out). Back in time, it waits for the other phone's word on its
+## fighter (rejoining: the arena's "back" / "sync") before it sends its own states again.
 ## While a phone loads the match it sends a keep-alive, so a slow load is not taken for leaving.
 ## The state can take a faster way: with DIRECT CONNECTION on for both players, the two phones open
 ## a direct UDP path (NetDirect: candidates swapped in the room, hole punching, packets sealed with
@@ -69,6 +73,7 @@ signal group_invited(from_name: String) # a group invite waits: group_invite_fro
 signal member_left(id: String)         # an all-human match: that member left (its slot is LEFT)
 signal event_from(kind: String, data: Array, from_id: String)      # an all-human match's event, with its sender
 signal state_from(state: PackedFloat32Array, from_id: String)      # an all-human match's state, with its sender
+signal peer_away_changed(id: String, away: bool)   # a match player fell silent (AWAY_AFTER_MS) / was heard again
 
 const ROOT := "lonewolfarena/v1"
 ## QUICK MATCH (NetMatch): searching players say so here every SEEK_S, never retained.
@@ -102,6 +107,12 @@ const SILENCE_MS := 8000
 ## out of it: it says so to itself a little before the other phone's SILENCE_MS runs out, so the
 ## two never both take the other for the one who left.
 const AWAY_MS := SILENCE_MS - 1500
+## In a match over the relay: a player silent AWAY_AFTER_MS is AWAY (its fighter frozen, the host
+## deciding its HP) and has LEFT only after AWAY_GRACE_MS; this phone away (paused, no link) for
+## SELF_GRACE_MS has dropped out, a little before the other phone's grace runs out.
+const AWAY_AFTER_MS := 3000
+const AWAY_GRACE_MS := 90000
+const SELF_GRACE_MS := AWAY_GRACE_MS - 1500
 const QUIET_MS := 15000        # nothing at all from the relay this long outside a match: the link is dead
 const KEEP_ALIVE_MS := 60000   # the keep-alive CONNECT asks for: the relay has dropped a phone away longer
 const LOAD_KEEP_MS := 30000    # a new session's keep-alives while its arena loads stop after this
@@ -195,6 +206,12 @@ var _last_rx_ms := 0           # when the relay last sent this phone anything (i
 var _frame_ms := -1            # when _process last ran (the tick clock; -1 before the first frame)
 var _paused_unix := 0.0        # wall-clock time the app was paused (the tick clock stops in sleep)
 var _away_wall_ms := 0         # how long the last pause lasted by the wall clock, once resumed
+var _absent := false           # in a match: this phone is away from it (paused, no link) since _absent_ms
+var _absent_ms := 0            # (tick clock; it may be below 0 for an absence that began before the app did)
+var _rejoin := false           # back from an absence: the arena waits for the other phone's "sync"
+var _away_ids := {}            # match players taken for AWAY now (id -> true)
+var _back_ms := 0              # when this phone, absent, heard the match again (the "sync" is waited for a while)
+const REJOIN_WAIT_MS := 6000   # back in a match, states wait this long at most for the other phone's "sync"
 var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
 var _session_ms := 0           # when the session started
 var _listen_ms := -1           # when this session's arena began listening (-1: loading, or none)
@@ -367,7 +384,7 @@ func _connect() -> void:
 ## phone that is alone on a backup broker goes back to the first one (see _process).
 func _next_broker() -> void:
 	_fail_n += 1
-	if _fail_n >= 3:
+	if _fail_n >= 3 and not in_session:      # (a match stays on its relay: the other phone is there)
 		if _broker_i == 0 and _brokers.size() > 1:
 			_home_bad_ms = Time.get_ticks_msec()        # (the first relay is out of reach from here for now)
 		_broker_i = (_broker_i + 1) % _brokers.size()
@@ -376,11 +393,12 @@ func _next_broker() -> void:
 	status = "offline"
 
 
-## Drops a connection that went dead without closing and connects again soon; a match going on is
-## over for this phone ("connection lost").
+## Drops a connection that went dead without closing and connects again soon; a match going on
+## goes on (its room is subscribed again on the CONNACK, keys and counters kept): this phone is away
+## from it meanwhile (_note_absent).
 func _reconnect() -> void:
 	if in_session:
-		end_session("connection lost")
+		_note_absent(_last_rx_ms)
 	if _ws != null:
 		_ws.close()
 	_ws = null
@@ -392,9 +410,11 @@ func _reconnect() -> void:
 
 ## Once a frame (now: the tick clock): how long this phone was gone since the last frame, the gap
 ## on the tick clock or an app pause measured on the wall clock (the tick clock stops while the
-## phone sleeps). Away about as long as the other phone waits, it is this phone that dropped out
-## of a match (the other may have ended it by now): whatever waits in its buffer (old states, the
-## other's "bye") must not say otherwise. Away longer than the keep-alive, its link is gone too.
+## phone sleeps). Away a while in a match, this phone was absent (_note_absent): it asks for the
+## match's state when back. Absent about as long as the other phone waits (self_grace_ms), it is
+## this phone that dropped out of the match (the other may have ended it by now): whatever waits in
+## its buffer (old states, the other's "bye") must not say otherwise. Away longer than the
+## keep-alive, its link is gone too.
 func _check_away(now: int) -> void:
 	var away := now - _frame_ms if _frame_ms >= 0 else 0
 	if load_stall(_frame_ms if _frame_ms >= 0 else now):
@@ -402,10 +422,80 @@ func _check_away(now: int) -> void:
 	_frame_ms = now
 	away = maxi(away, _away_wall_ms)
 	_away_wall_ms = 0
-	if away > AWAY_MS and in_session:
+	if in_session and away > AWAY_AFTER_MS / 2:
+		_note_absent(now - away)
+	if in_session and _absent and now - _absent_ms > self_grace_ms():
 		end_session("connection lost")
 	if away > KEEP_ALIVE_MS and _ws != null:
 		_reconnect()
+
+
+## How long the other phone waits for a silent one in a match (Lan: SILENCE_MS, its socket closes),
+## and how long this phone may be away from one before it has dropped out.
+func grace_ms() -> int:
+	return AWAY_GRACE_MS
+
+
+func self_grace_ms() -> int:
+	return SELF_GRACE_MS
+
+
+## This phone is away from its match since `since` (tick clock): paused, or its link dropped. Back,
+## it rejoins: the arena asks for the match's state ("back") and holds its states until it came.
+func _note_absent(since: int) -> void:
+	if not in_session:
+		return
+	_absent_ms = mini(_absent_ms, since) if _absent else since     # (away at least that long)
+	_absent = true
+	_rejoin = true
+
+
+## Whether this phone is back from an absence and waits for the other phone's word ("sync").
+func rejoining() -> bool:
+	return in_session and _rejoin and (_absent or Time.get_ticks_msec() - _back_ms < REJOIN_WAIT_MS)
+
+
+## This phone hears its match again (the other phone, or an all-human match's host).
+func _present(now: int) -> void:
+	if _absent:
+		_absent = false
+		_back_ms = now
+
+
+func rejoined() -> void:
+	_rejoin = false
+
+
+## Whether that match player is AWAY now (peer_away_changed).
+func peer_is_away(id: String) -> bool:
+	return _away_ids.has(id)
+
+
+## A player of this match was heard (away false) or has been silent AWAY_AFTER_MS (true). Only a
+## phone that is there itself takes another for away (an absent one hears nobody).
+func _set_away(id: String, away: bool) -> void:
+	if id == "" or away == _away_ids.has(id) or (away and (_absent or not _arena_listens())):
+		return
+	if away:
+		_away_ids[id] = true
+	else:
+		_away_ids.erase(id)
+	peer_away_changed.emit(id, away)
+
+
+## A number both phones of this match get, and nobody else (an HMAC of `what` with the room's key):
+## the seed of what must come out the same on both (the safe zone's centre each round).
+func match_seed(what: String) -> int:
+	var d := _crypto.hmac_digest(HashingContext.HASH_SHA256, _mac if not _mac.is_empty() else PackedByteArray([0]),
+		(_room + "/" + what).to_utf8_buffer())
+	return d.decode_s64(0) if d.size() >= 8 else 0
+
+
+## The session (re)starts: nobody away.
+func _reset_away() -> void:
+	_absent = false
+	_rejoin = false
+	_away_ids.clear()
 
 
 ## Whether a frame gap that began at `since` (the tick clock) is a match loading (LOAD_STALL_MS):
@@ -455,7 +545,7 @@ func _process(delta: float) -> void:
 		_ws = null
 		_connected = false
 		if in_session:
-			end_session("connection lost")
+			_note_absent(_last_rx_ms)        # (the match goes on: this phone connects again, AWAY meanwhile)
 		_next_broker()
 		return
 	if st == WebSocketPeer.STATE_OPEN:
@@ -477,7 +567,7 @@ func _process(delta: float) -> void:
 	# Every phone hears its own lobby announcement (5 s), the ping's answer (5 s) and in a match
 	# its own room messages back from the relay: nothing at all for this long means the link died
 	# without closing (the network went away, the relay stalls). In a match that is this phone
-	# dropping out, not the other one leaving.
+	# away (it connects again), not the other one leaving.
 	if Time.get_ticks_msec() - _last_rx_ms > (AWAY_MS if in_session else QUIET_MS):
 		_reconnect()
 		return
@@ -535,9 +625,11 @@ func _process(delta: float) -> void:
 		peers_changed.emit()
 	# (the other phone said it was loading LOAD_STALL_MS + SILENCE_MS ago at most: its arena's
 	# first frames may stall a while longer)
-	var wait_ms := SILENCE_MS + (LOAD_STALL_MS if now - _peer_ka_ms < SILENCE_MS + LOAD_STALL_MS else 0)
+	var wait_ms := grace_ms() + (LOAD_STALL_MS if now - _peer_ka_ms < SILENCE_MS + LOAD_STALL_MS else 0)
 	if in_session and session_multi:
 		_check_members(now)
+	elif in_session:
+		_set_away(String(opponent.get("id", "")), now - _last_heard > AWAY_AFTER_MS)
 	if in_session and now - _last_heard > wait_ms:
 		end_session("left")
 	if not _ginv.is_empty() and now - int(_ginv.t) > INVITE_TIMEOUT_MS:
@@ -1947,6 +2039,9 @@ func _on_room(msg: PackedByteArray) -> void:
 		return                       # replayed (the broker keeps one sender's messages in order)
 	_their_seq = int(n)
 	_last_heard = Time.get_ticks_msec()
+	_present(_last_heard)            # (this phone is back in the match: it hears the other one)
+	if in_session:
+		_set_away(String(opponent.get("id", "")), false)
 	var kind := String((d as Dictionary).get("k", ""))
 	match kind:
 		"join", "joined":
@@ -1960,6 +2055,7 @@ func _on_room(msg: PackedByteArray) -> void:
 			_outgoing = {}
 			if not in_session:
 				in_session = true
+				_reset_away()
 				_accept_ms = 0
 				_session_ms = Time.get_ticks_msec()
 				_keep_t = 0.0
@@ -2050,6 +2146,7 @@ func end_session(reason := "left") -> void:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
 	in_session = false
+	_reset_away()
 	session_team = {}
 	if session_multi:
 		_multi_reset()
@@ -3034,6 +3131,7 @@ func _multi_start() -> void:
 		return
 	var now := Time.get_ticks_msec()
 	in_session = true
+	_reset_away()
 	_accept_ms = 0
 	_session_ms = now
 	_keep_t = 0.0
@@ -3098,6 +3196,9 @@ func _on_multi(d: Dictionary) -> void:
 	_multi.heard[f] = now
 	if is_host or f == session_host_id:
 		_last_heard = now            # (a member waits on the host; the host on anyone)
+		_present(now)
+	if in_session:
+		_set_away(f, false)
 	var kind := String(d.get("k", ""))
 	match kind:
 		"join":
@@ -3183,6 +3284,7 @@ func _multi_member_left(f: String) -> void:
 	if not session_multi or (_multi.left as Dictionary).has(f):
 		return
 	_multi.left[f] = true
+	_away_ids.erase(f)
 	if f == session_host_id:
 		end_session("left")
 		return
@@ -3192,14 +3294,19 @@ func _multi_member_left(f: String) -> void:
 		end_session("left")
 
 
-## Every frame in an all-human match: a member silent as long as a 1 vs 1 opponent may be has left.
+## Every frame in an all-human match: a member silent AWAY_AFTER_MS is AWAY, silent as long as a
+## 1 vs 1 opponent may be it has left.
 func _check_members(now: int) -> void:
 	for id: String in (_multi.ids as Dictionary).keys():
-		if id == my_id or id == session_host_id or (_multi.left as Dictionary).has(id):
+		if id == my_id or (_multi.left as Dictionary).has(id):
+			continue
+		var heard := int((_multi.heard as Dictionary).get(id, now))
+		_set_away(id, now - heard > AWAY_AFTER_MS)
+		if id == session_host_id:
 			continue
 		var ka := int((_multi.ka as Dictionary).get(id, -100000))
-		var wait_ms := SILENCE_MS + (LOAD_STALL_MS if now - ka < SILENCE_MS + LOAD_STALL_MS else 0)
-		if now - int((_multi.heard as Dictionary).get(id, now)) > wait_ms:
+		var wait_ms := grace_ms() + (LOAD_STALL_MS if now - ka < SILENCE_MS + LOAD_STALL_MS else 0)
+		if now - heard > wait_ms:
 			_multi_member_left(id)
 			if not session_multi:
 				return

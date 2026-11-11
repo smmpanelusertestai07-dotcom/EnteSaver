@@ -77,6 +77,13 @@ var _from := ""                      # all-human: the sender of the event being 
 var _ready_from := {}                # all-human, host: members whose arena said "ready"
 var _gone := {}                      # all-human: slot -> true once its member left
 var _setup_t := 0.0                  # all-human, host: s since this arena began listening
+## AWAY players (Cloud.peer_away_changed): their fighters stand frozen everywhere; the host decides
+## the HP, knocks and eliminations of an away player's fighter (runs_here: hits and the zone take
+## it on the host, its referee hears its downs) and, the player back ("back" [slot]), sends it its
+## word ("sync" [slot, round, phase, prep left or fight time, team 0's and 1's rounds, HP, flags (1
+## knocked, 2 out), x, y, z, by slot, cause]); a member sends its own downs of the round again when the
+## host is back (they were lost meanwhile: _dn_log).
+var _dn_log: Array = []              # guest / member: this round's "dn" sent ([round, data])
 
 
 func _ready() -> void:
@@ -104,7 +111,7 @@ func is_referee() -> bool:
 
 
 func runs_here(f: Fighter) -> bool:
-	return f != null and runs_slot(f.slot)
+	return f != null and (runs_slot(f.slot) or (am_host and f is RemoteFighter and (f as RemoteFighter).decided_here))
 
 
 ## Whether the fighter in `slot` runs on this phone: the host runs every slot but the guest's; in an
@@ -150,7 +157,17 @@ func _net_tick(delta: float) -> void:
 	_net_t += delta
 	if _net_t < float(Game.session.state_interval) - 0.002:
 		return
+	var dt := _net_t
 	_net_t = 0.0
+	if Game.session.rejoining():
+		if not am_host:
+			# Back from being away: the host's word first ("sync"), then this phone's states again.
+			_back_t -= dt
+			if _back_t <= 0.0:
+				_back_t = 1.0
+				Game.session.send_event("back", [my_slot])
+			return
+		Game.session.rejoined()          # (the host is the referee: nobody's word to wait for)
 	Game.session.send_state(RemoteFighter.pack(player, round_index))
 	if am_host:
 		_send_tk()
@@ -159,7 +176,7 @@ func _net_tick(delta: float) -> void:
 func _send_tk() -> void:
 	var bots: Array = []
 	for f in slots:
-		if f != player and f.alive and runs_here(f):
+		if f != player and f.alive and runs_here(f) and not (f is RemoteFighter):
 			bots.append(f)
 	if bots.is_empty():
 		return
@@ -180,8 +197,11 @@ func _report_down(f: Fighter, killer: Fighter, headshot: bool, cause: String, fi
 	if am_host:
 		super(f, killer, headshot, cause, finished)
 	elif f == player and _sending():
-		Game.session.send_event("dn", [f.slot, round_index, killer.slot if killer != null and is_instance_valid(killer) else -1,
-			headshot, cause, finished])
+		var data := [f.slot, round_index, killer.slot if killer != null and is_instance_valid(killer) else -1, headshot, cause, finished]
+		if not _dn_log.is_empty() and int((_dn_log[0] as Array)[1]) != round_index:
+			_dn_log.clear()
+		_dn_log.append(data)
+		Game.session.send_event("dn", data)
 
 
 func _report_revive(reviver: Fighter, target: Fighter) -> void:
@@ -198,6 +218,8 @@ func _announce(kind: String, data: Array) -> void:
 		return
 	if am_host or (kind in ["pick", "rvs", "rvx"] and not data.is_empty() and int(data[0]) == my_slot):
 		Game.session.send_event(kind, data)
+	if am_host and kind == "rend":
+		_last_rend = data.duplicate()
 
 
 func net_shot_by(f: Fighter, origin: Vector3, dir: Vector3) -> void:
@@ -238,6 +260,7 @@ func _net_setup() -> void:
 	Game.session.state_from.connect(_on_state_from)
 	Game.session.member_left.connect(_on_member_left)
 	Game.session.session_ended.connect(_on_net_ended)
+	Game.session.peer_away_changed.connect(_on_peer_away)
 	var queued: Array = Game.session.queue.duplicate()
 	Game.session.queue.clear()
 	Game.session.send_event("ready")
@@ -399,6 +422,98 @@ func _on_net_event(kind: String, data: Array) -> void:
 			var st := fin_from(data)
 			if f != null and not st.is_empty() and int(data[0]) == round_index and not final_stats.has(f.slot):
 				final_stats[f.slot] = st
+		"back":
+			# A player back from being away asks for the host's word on its fighter.
+			var f := _theirs(data, 0)
+			if am_host and data.size() == 1 and f != null and _net_rate_ok("back%d" % f.slot, 2.0, 3.0):
+				_send_team_sync(f)
+		"sync":
+			if not am_host and (not multi or _from == host_id) and data.size() == 13 and _slot_at(data, 0) == player:
+				_on_team_sync(data)
+
+
+## A player went AWAY (`away`) or came back: every fighter its phone runs stands frozen meanwhile
+## (decided by the host, see the notes above); back, the host's word goes to it ("sync") and a member
+## sends the host its own downs of this round again when it is the host that is back.
+func _on_peer_away(id: String, away: bool) -> void:
+	if not online or _net_left:
+		return
+	var back: Array[Fighter] = []
+	for f in slots:
+		var r := f as RemoteFighter
+		if r != null and ((multi and String(_owner.get(f.slot, "")) == id) or (not multi and not runs_slot(f.slot))):
+			r.set_away(away, am_host)
+			back.append(f)
+	if away or not _sending():
+		return
+	if am_host:
+		for f in back:
+			_send_team_sync(f)
+	elif not multi or id == host_id:
+		for d: Array in _dn_log:
+			if int(d[1]) == round_index and phase == Phase.FIGHT:
+				Game.session.send_event("dn", d)
+
+
+## The host's word on `f` (a fighter the other phone runs) for that phone back from being away;
+## after it the last "rend" when this round is over here (the other phone missed it).
+func _send_team_sync(f: Fighter) -> void:
+	if not am_host or not _sending() or f == null:
+		return
+	var at := f.global_position
+	var by: Fighter = f.knocked_by if f.knocked else f.last_attacker
+	Game.session.send_event("sync", [f.slot, round_index, int(phase), prep_left if phase == Phase.PREP else elapsed,
+		int(team_score[0]), int(team_score[1]), snappedf(f.hp, 0.1), (1 if f.knocked else 0) | (0 if f.alive else 2),
+		snappedf(at.x, 0.01), snappedf(at.y, 0.01), snappedf(at.z, 0.01),
+		by.slot if by != null and is_instance_valid(by) and by.team != f.team else -1, String(_down_cause.get(f, ""))])
+	if _last_rend.size() == 5 and int(_last_rend[0]) == round_index and (phase == Phase.BREAK or phase == Phase.END):
+		Game.session.send_event("rend", _last_rend)
+
+
+## The host's word on this phone's player (see _send_team_sync): its round in its phase, the score,
+## then the player's place, HP (never more than it has) and, gone down meanwhile, its knock or end.
+func _on_team_sync(data: Array) -> void:
+	for i: int in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+		if not _num_ok(data[i]) or not is_finite(float(data[i])):
+			return
+	if typeof(data[12]) != TYPE_STRING or not _net_rate_ok("sync", 2.0, 4.0):
+		return
+	var r := int(data[1])
+	var ph := int(data[2])
+	if r < 1 or r > MAX_ROUNDS * 2 or ph < 0 or ph > 3:
+		return
+	Game.session.rejoined()
+	if phase == Phase.END:
+		return
+	if r != round_index:
+		round_index = r - 1
+		_apply_decision("round", [r, int(data[4]), int(data[5])])     # (TeamArena: the round reset, its prep)
+	team_score = [maxi(int(data[4]), 0), maxi(int(data[5]), 0)]
+	_sync_score()
+	if ph == int(Phase.FIGHT) and phase == Phase.PREP:
+		_net_begun = true
+		_start_fight()
+	if phase == Phase.FIGHT and ph == int(Phase.FIGHT):
+		elapsed = clampf(float(data[3]), 0.0, round_time())
+		time_left = round_time() - elapsed
+	elif phase == Phase.PREP and ph == int(Phase.PREP):
+		prep_left = clampf(float(data[3]), 0.0, PREP_TIME)
+	if ph != int(phase) or not player.alive or phase != Phase.FIGHT:
+		return
+	var pos := Vector3(float(data[8]), float(data[9]), float(data[10]))
+	if _in_hall(pos) and player.global_position.distance_to(pos) > 1.5:
+		player.global_position = pos           # where the others saw it stand meanwhile
+		player.velocity = Vector3.ZERO
+	var flags := int(data[7])
+	var cause := String(data[12]) if String(data[12]) in CAUSES else "zone"
+	var by := int(data[11])
+	if flags & 2:
+		_apply_decision("el", [my_slot, by, false, cause])
+	elif flags & 1:
+		if not player.knocked:
+			_apply_decision("ko", [my_slot, by, false, cause])
+	elif not player.knocked:
+		player.hp = minf(player.hp, clampf(float(data[6]), 1.0, Fighter.MAX_HP))
 
 
 ## "hit" [target, attacker, amount, zone, fx, fy, fz]: see the trust notes at the top.

@@ -463,6 +463,8 @@ func _start_fight() -> void:
 	elapsed = 0.0
 	zone_radius = zone_start_radius
 	zone_state = "stationary"
+	zone_center = map.zone_center
+	zone_final = zone_final_for(round_index)
 	_zone_mesh.visible = true
 	_update_zone_mesh()
 	Game.mark("match started")
@@ -569,6 +571,7 @@ func _update_zone(delta: float) -> void:
 			Audio.play("countdown_beep", -6.0, 0.7)
 		var t := clampf((elapsed - hold) / zone_shrink(), 0.0, 1.0)
 		zone_radius = lerpf(zone_start_radius, ZONE_MIN, t)
+		zone_center = map.zone_center.lerp(zone_final, t)
 		if t >= 1.0:
 			zone_state = "closed"
 		_update_zone_mesh()

@@ -602,6 +602,16 @@ func _process(delta: float) -> void:
 				end_session("connection lost")
 
 
+## The local match keeps the old waits: a silent other phone has left after SILENCE_MS (its socket
+## goes too), and this phone away AWAY_MS has dropped out (Cloud's relay grace is for the relay).
+func grace_ms() -> int:
+	return SILENCE_MS
+
+
+func self_grace_ms() -> int:
+	return AWAY_MS
+
+
 ## This phone's address on the other phone's network (the same first three numbers), else any local one.
 static func address_towards(peer: String) -> String:
 	var net := peer.substr(0, peer.rfind(".") + 1)

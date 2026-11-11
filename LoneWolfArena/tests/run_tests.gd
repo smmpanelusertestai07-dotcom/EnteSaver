@@ -1984,15 +1984,24 @@ func _test_session_ends() -> void:
 	cl._check_away(cl._frame_ms + Cloud.LOAD_STALL_MS)
 	_check(cl.in_session, "a frame gap shorter than the other phone waits keeps the session")
 	cl._check_away(cl._frame_ms + Cloud.AWAY_MS + 500)
+	_check(cl.in_session and heard.ended.is_empty() and cl.rejoining(),
+		"a phone away a while keeps its match (AWAY, back it waits for the other phone's word)")
+	cl._check_away(cl._frame_ms + Cloud.SELF_GRACE_MS + 500)
 	cl.event_received.disconnect(arena_up)
 	_check(not cl.in_session and heard.ended == ["connection lost"] and cl.last_end_reason == "connection lost",
-		"a phone away about as long as the other one waits ends its match as connection lost (%s)" % str(heard.ended))
+		"a phone away about as long as the other one waits (the grace) ends its match as connection lost (%s)" % str(heard.ended))
 	cl._incoming = invite.duplicate()
 	cl.answer(true)
 	cl._on_room(them._room_packet({"k": "join"}))
 	cl._process(0.016)
 	cl.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
 	cl._paused_unix -= 30.0                              # asleep for 30 s: the tick clock stood still
+	cl.notification(Node.NOTIFICATION_APPLICATION_RESUMED)
+	cl._process(0.016)
+	_check(cl.in_session and heard.ended.size() == 1 and cl.rejoining(),
+		"a phone that slept 30 s keeps its match and rejoins it (%s)" % str(heard.ended))
+	cl.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+	cl._paused_unix -= 100.0                             # then 100 s more: past the grace
 	cl.notification(Node.NOTIFICATION_APPLICATION_RESUMED)
 	cl._process(0.016)
 	_check(not cl.in_session and heard.ended.size() == 2 and heard.ended[1] == "connection lost",
