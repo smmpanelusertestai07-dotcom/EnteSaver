@@ -1,27 +1,24 @@
 extends Node
 ## GROUPS in the lobby (design/GROUPS.txt 1, UI), one copy of the game, run by tools/qa/run_checks.sh
 ## (step group_lobby) with a relay that is never there (LW_MQTT_URL=ws://127.0.0.1:9: nothing
-## leaves the machine). The Cloud group API is CORE's: a stand-in (tests/group_stub.gd, put in
-## LobbyTeam.stand_in before the lobby opens) plays it; the check sets its `group` and emits
-## group_changed as Cloud would. Real taps where a player taps:
+## leaves the machine). Cloud's own group API, with no relay: the check puts a group in Cloud (its
+## `group` and keys, as a roster or an invite brings them) and emits group_changed as Cloud does.
+## Real taps where a player taps:
 ## - a solo in LONE WOLF: the GROUP bar with + INVITE; the invite list (GroupAsk_<code> only on an
-##   online friend) sends Cloud.group_invite and says INVITED <NAME>, then JOINED;
+##   online friend); an invite that cannot go out (no relay) says so;
 ## - the leader of 4: three member models on the podium besides the hero, with name plates; REMOVE
-##   on each other member (asked first), DISBAND GROUP, INVITE greyed (full); TEAMS: the slot panel
-##   moves a member (Cloud.set_group_team);
-## - START (leader, DUO): Cloud.group_start; SEARCHING PLAYERS n/N with CANCEL; a notice when
-##   group_start says why it cannot start;
+##   on each other member (asked first) drops them, DISBAND GROUP, INVITE greyed (full);
+## - START (leader, DUO): a group of 3 is told why it cannot start offline; a group of 2 searches:
+##   SEARCHING PLAYERS n/N with CANCEL; TEAMS: the slot panel moves a member (Cloud.set_group_team);
 ## - a member: WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
 ##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
 ## - every touch target on the way is at least 56 px.
 ## Prints "GROUP LOBBY CHECK DONE bad=N".
 
-const GroupStub := preload("res://tests/group_stub.gd")
-
 var bad := 0
 var at: Node
-var stub: RefCounted
+var cloud: Cloud
 var ids := {}
 
 
@@ -33,12 +30,11 @@ func run(autotest: Node) -> int:
 	Game.team_size = 2
 	if not await _until(func() -> bool: return get_tree().current_scene is Lobby, 30.0):
 		return _done("the lobby never came up")
-	stub = GroupStub.new()
-	LobbyTeam.stand_in = stub
+	cloud = Game.cloud_service()
 	for n: String in ["ZORA", "ABEL", "KITE", "OFFLINE PAL", "VIPER"]:
 		ids[n] = (n + " id").sha256_text().left(32)
 	var first := get_tree().current_scene
-	Game.goto_lobby()                    # a lobby that listens to the stand-in
+	Game.goto_lobby()                    # a lobby built in LONE WOLF DUO
 	var lobby := await _new_lobby(first)
 	if lobby == null:
 		return _done("the lobby did not open again")
@@ -49,8 +45,8 @@ func run(autotest: Node) -> int:
 	await _teams(lobby)
 	await _member(lobby)
 	await _group_invite(lobby)
+	cloud.leave_group()
 	Game.profile.friends = saved_friends
-	LobbyTeam.stand_in = null
 	Game.team_size = 1
 	Game.mode = "training"
 	return _done("")
@@ -81,23 +77,17 @@ func _solo(lobby: Lobby) -> void:
 	_touch_ok(list)
 	await at.shot("g01_group_invite_list")
 	await _tap(ask)
-	await at.wait(0.5)
-	if stub.call("last", "group_invite") != ["group_invite", ids.ZORA]:
-		_fail("INVITE did not call Cloud.group_invite (%s)" % str(stub.get("calls")))
-	if _text(lobby.dialogs.modal, "GroupInvited") != "INVITED ZORA":
-		_fail("no INVITED ZORA popup (%s)" % _text(lobby.dialogs.modal, "GroupInvited"))
+	await at.wait(0.6)
+	if lobby.dialogs.modal == null or not _find_text(lobby.dialogs.modal, "ZORA COULD NOT BE REACHED") or not cloud.group.is_empty():
+		_fail("an invite that cannot go out (no relay here) does not say so")
+	lobby.dialogs.close_modal()
 	cloud.peers.erase(ids.ZORA)
 
 
 ## The leader of 4: three models besides the hero with name plates; REMOVE, DISBAND, INVITE greyed.
 func _leader(lobby: Lobby) -> void:
-	var me := String(stub.get("my_id"))
-	_set_group(me, "lonewolf", 2)
+	_set_group(cloud.my_id, "lonewolf", 2)
 	await at.wait(0.6)
-	if _text(lobby.dialogs.modal, "GroupInvited") != "ZORA JOINED YOUR GROUP":
-		_fail("the invite's popup does not say ZORA JOINED (%s)" % _text(lobby.dialogs.modal, "GroupInvited"))
-	await _tap(lobby.dialogs.modal.find_child("GroupInvitedOk", true, false) as Control if lobby.dialogs.modal else null)
-	await at.wait(0.3)
 	var models := _models(lobby)
 	if models.size() != 3:
 		_fail("the podium has %d member models, not 3" % models.size())
@@ -136,48 +126,43 @@ func _leader(lobby: Lobby) -> void:
 	await at.wait(0.4)
 	await _tap(lobby.dialogs.modal.find_child("ConfirmOk", true, false) as Control if lobby.dialogs.modal else null)
 	await at.wait(0.3)
-	var kicked: Array = stub.call("last", "kick_from_group")
-	if kicked.size() != 2 or not String(kicked[1]) in [ids.ZORA, ids.ABEL, ids.KITE]:
-		_fail("REMOVE did not call Cloud.kick_from_group (%s)" % str(kicked))
+	if cloud.group_members().size() != 3 or _models(lobby).size() != 2:
+		_fail("REMOVE did not drop the member (%d left)" % cloud.group_members().size())
 
 
-## START (the leader, DUO): group_start, SEARCHING PLAYERS n/N, CANCEL; a notice when it cannot.
+## START (the leader, DUO): a group of 3 (2 VS 1) is told it needs the internet; a group of 2 (one
+## team) searches: SEARCHING PLAYERS n/N, CANCEL.
 func _start_and_search(lobby: Lobby) -> void:
-	stub.set("start_answer", "")
-	stub.set("search_found", 3)
-	stub.set("search_needed", 4)
 	if not lobby.start_btn.is_visible_in_tree():
 		_fail("the leader has no START")
 	await _tap(lobby.start_btn)
+	await at.wait(0.4)
+	if _text(lobby.dialogs.modal, "NoticeText") != "OFFLINE: THE MATCH NEEDS THE INTERNET":
+		_fail("group_start's answer is not shown (%s)" % _text(lobby.dialogs.modal, "NoticeText"))
+	lobby.dialogs.close_modal()
+	await at.wait(0.2)
+	var other := String(cloud.group_members()[2].id)
+	cloud.kick_from_group(other)
+	await at.wait(0.3)
+	await _tap(lobby.start_btn)
 	await at.wait(0.5)
-	if stub.call("last", "group_start") != ["group_start", 2]:
-		_fail("START did not call Cloud.group_start(2) (%s)" % str(stub.get("calls")))
 	var popup := lobby.dialogs.modal
-	if popup == null or popup.find_child("GroupSearch", true, false) == null or _text(popup, "GroupSearchCount") != "SEARCHING PLAYERS 3/4":
-		_fail("no SEARCHING PLAYERS 3/4 popup (%s)" % _text(popup, "GroupSearchCount"))
+	if popup == null or popup.find_child("GroupSearch", true, false) == null or _text(popup, "GroupSearchCount") != "SEARCHING PLAYERS 2/4" \
+			or cloud.search_needed != 4:
+		_fail("no SEARCHING PLAYERS 2/4 popup (%s)" % _text(popup, "GroupSearchCount"))
 	if popup and (_find_text(popup, "BOT") or _text(popup, "GroupSearchTimer") == ""):
 		_fail("the search popup mentions bots or has no timer")
-	stub.set("search_found", 4)
-	await at.wait(0.2)
-	if _text(lobby.dialogs.modal, "GroupSearchCount") != "SEARCHING PLAYERS 4/4":
+	cloud.search_found = 3
+	await at.wait(0.3)
+	if _text(lobby.dialogs.modal, "GroupSearchCount") != "SEARCHING PLAYERS 3/4":
 		_fail("the search count does not follow Cloud.search_found")
 	if popup:
 		_touch_ok(popup)
 	await at.shot("g03_searching_players")
 	await _tap(popup.find_child("GroupSearchCancel", true, false) as Control if popup else null)
 	await at.wait(0.3)
-	if stub.call("last", "group_search_stop").is_empty() or lobby.dialogs.modal != null:
+	if cloud.search_needed != 0 or lobby.dialogs.modal != null:
 		_fail("CANCEL does not stop the search and close its popup")
-	stub.set("start_answer", "DUO needs a group of 1, 2 or 4")
-	await _tap(lobby.start_btn)
-	await at.wait(0.4)
-	if _text(lobby.dialogs.modal, "NoticeText") != "DUO needs a group of 1, 2 or 4":
-		_fail("group_start's answer is not shown (%s)" % _text(lobby.dialogs.modal, "NoticeText"))
-	lobby.dialogs.close_modal()
-	await at.wait(0.2)
-	stub.set("start_answer", "")
-	stub.set("search_needed", 0)
-	stub.set("search_found", 0)
 
 
 ## TEAMS: the leader's slot panel; tap a member, then a place: Cloud.set_group_team.
@@ -192,14 +177,15 @@ func _teams(lobby: Lobby) -> void:
 		return
 	_touch_ok(panel)
 	await at.shot("g04_group_teams")
-	await _tap(panel.find_child("Slot_1_1", true, false) as Control)
+	var who := String(cloud.group_members()[1].id)
+	await _tap(panel.find_child("Slot_0_1", true, false) as Control)
 	await at.wait(0.2)
 	panel = lobby.dialogs.modal.find_child("SlotPanel", true, false)
-	await _tap(panel.find_child("Slot_0_1", true, false) as Control if panel else null)
+	await _tap(panel.find_child("Slot_1_1", true, false) as Control if panel else null)
 	await at.wait(0.3)
-	var moved: Array = stub.call("last", "set_group_team")
-	if moved.size() != 4 or int(moved[2]) != 0 or int(moved[3]) != 1:
-		_fail("moving a member did not call Cloud.set_group_team (%s)" % str(moved))
+	var moved: Dictionary = cloud.group_members()[1]
+	if String(moved.id) != who or int(moved.team) != 1 or int(moved.slot) != 3:
+		_fail("moving a member did not reach Cloud.set_group_team (%s)" % str(moved))
 	lobby.dialogs.close_modal()
 	await at.wait(0.2)
 
@@ -228,35 +214,39 @@ func _member(lobby: Lobby) -> void:
 	if bar.find_child("GroupExit", true, false) == null or bar.find_child("GroupDisband", true, false) != null \
 			or bar.find_child("GroupRemove_2", true, false) != null:
 		_fail("a member does not see EXIT GROUP alone")
-	var calls_before: int = (stub.get("calls") as Array).size()
+	var before := JSON.stringify(cloud.group)
 	await _tap(wait)
 	await _tap(lobby.find_child("ModeCard", true, false) as Control)
 	await at.wait(0.4)
 	if lobby.dialogs.modal == null or lobby.dialogs.modal.find_child("Mode_lonewolf", true, false) != null:
 		_fail("a member could open SELECT MODE")
 	lobby.dialogs.close_modal()
-	if (stub.get("calls") as Array).size() != calls_before:
-		_fail("a member's taps reached the group API (%s)" % str(stub.get("calls")))
-	stub.set("search_found", 5)
-	stub.set("search_needed", 8)
+	if JSON.stringify(cloud.group) != before or cloud.search_needed != 0:
+		_fail("a member's taps changed the group")
+	cloud.search_found = 5
+	cloud.search_needed = 8
 	await at.wait(0.5)
 	if _find_label(wait, "SEARCHING PLAYERS 5/8") == null:
 		_fail("a member does not see the group's search")
-	stub.set("search_needed", 0)
+	cloud.search_found = 0
+	cloud.search_needed = 0
 	await at.wait(0.3)
 	await at.shot("g05_member_view")
 	await _tap(bar.find_child("GroupExit", true, false) as Control)
 	await at.wait(0.4)
 	await _tap(lobby.dialogs.modal.find_child("ConfirmOk", true, false) as Control if lobby.dialogs.modal else null)
 	await at.wait(0.6)
-	if stub.call("last", "leave_group").is_empty() or not _models(lobby).is_empty() or not lobby.start_btn.is_visible_in_tree():
+	if not cloud.group.is_empty() or not _models(lobby).is_empty() or not lobby.start_btn.is_visible_in_tree():
 		_fail("EXIT GROUP did not leave (models %d)" % _models(lobby).size())
 
 
 ## GROUP INVITE: the popup, waiting behind a question, ACCEPT.
 func _group_invite(lobby: Lobby) -> void:
 	lobby.dialogs.confirm("A QUESTION", "Waiting here.", "OK", func() -> void: pass)
-	stub.call("send_invite", ids.VIPER, "VIPER")
+	var key := Crypto.new().generate_random_bytes(32)
+	cloud._ginv = {"id": ids.VIPER, "name": "VIPER", "bundle": "default", "gid": "b2".repeat(16), "room": "b2".repeat(16),
+		"aes": key, "mac": key, "size": 2, "t": Time.get_ticks_msec()}
+	cloud.group_invited.emit("VIPER")
 	await at.wait(0.3)
 	if lobby.dialogs.modal == null or lobby.dialogs.modal.find_child("GroupInvitePopup", true, false) != null:
 		_fail("the GROUP INVITE did not wait behind the open question")
@@ -272,19 +262,25 @@ func _group_invite(lobby: Lobby) -> void:
 	await at.shot("g06_group_invite_popup")
 	await _tap(body.find_child("AcceptButton", true, false) as Control)
 	await at.wait(0.3)
-	if stub.call("last", "answer_group_invite") != ["answer_group_invite", true] or lobby.dialogs.modal != null:
-		_fail("ACCEPT did not call Cloud.answer_group_invite(true) and close")
+	if String(cloud.group.get("leader", "")) != ids.VIPER or String(cloud.group.get("status", "")) != "joining" or lobby.dialogs.modal != null:
+		_fail("ACCEPT did not join VIPER's group and close (%s)" % str(cloud.group.get("status")))
 
 
 # ---------------------------------------------------------------- helpers
 
-## A group of 4 (this player, ZORA, ABEL, KITE) led by `leader`, as Cloud's group_changed brings it.
+## A group of 4 (this player, ZORA, ABEL, KITE) led by `leader` in Cloud, as its roster brings it
+## (the leader first, the default sides), with the group's keys; then group_changed as Cloud emits it.
 func _set_group(leader: String, m: String, n: int) -> void:
-	var me := String(stub.get("my_id"))
-	stub.set("group", {"gid": "a1".repeat(16), "leader": leader, "status": "idle", "mode": m, "size": n, "members": [
-		{"id": me, "name": "ME", "bundle": "default"}, {"id": ids.ZORA, "name": "ZORA", "bundle": "neon"},
-		{"id": ids.ABEL, "name": "ABEL", "bundle": "default"}, {"id": ids.KITE, "name": "KITE", "bundle": "neon"}]})
-	stub.emit_signal("group_changed")
+	var me := {"id": cloud.my_id, "name": "ME", "bundle": "default"}
+	var list: Array = [{"id": ids.ZORA, "name": "ZORA", "bundle": "neon"}, {"id": ids.ABEL, "name": "ABEL", "bundle": "default"},
+		{"id": ids.KITE, "name": "KITE", "bundle": "neon"}]
+	list.insert(0 if leader == cloud.my_id else 1, me)
+	var key := Crypto.new().generate_random_bytes(32)
+	cloud._grp = {"gid": "a1".repeat(16), "aes": key, "mac": key, "seq": 0, "their": {}, "seen": {}, "invited": {}, "beat_t": 3.0,
+		"join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": false, "manual": false}
+	cloud.group = {"gid": "a1".repeat(16), "leader": leader, "status": "idle", "mode": m, "size": n, "members": list}
+	NetGroup.arrange(list, n, false)
+	cloud.group_changed.emit()
 
 
 ## The member models on the podium (not the hero; none on their way out).

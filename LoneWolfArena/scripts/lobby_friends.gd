@@ -20,13 +20,13 @@ extends RefCounted
 ## shows in the same popup as a duel, titled TEAM INVITE; while Game.TEAMS_ONLINE is off it is
 ## declined at once. A session a team invite started (Cloud.session_team) loads the team match
 ## (Game.team_match = TeamArena.link_match), any other one the 1 vs 1 (Game.team_match = {}).
-## GROUPS (design/GROUPS.txt, through LobbyTeam's guarded Cloud group API): a GROUP INVITE
+## GROUPS (design/GROUPS.txt, through Cloud's group API): a GROUP INVITE
 ## (Cloud.group_invited) shows "<NAME> invites you to their group" with ACCEPT / DECLINE / BLOCK and
 ## waits behind a busy popup as a duel does; LONE WOLF DUO / SQUAD's search shows SEARCHING PLAYERS
 ## n/N (Cloud.search_found / search_needed), the time searched and CANCEL (Cloud.group_search_stop):
 ## real players only, no bots. Cloud.group_changed redraws the lobby's group parts (Lobby.on_group_changed).
 ## Node names: Tab_<online|friends|room|local>, NetList, MyId, FriendSearch, FriendAccept,
-## FriendDecline, RoomHead, RoomStart, RoomPin, Rule_<key>, RoomCreate, JoinCode, JoinPin,
+## FriendDecline, RoomHead, RoomStart, RoomPin, RoomMode_<1|2|4>, Rule_<key>, RoomCreate, JoinCode, JoinPin,
 ## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card),
 ## GroupInvitePopup (GroupInviteText, GroupInviteBlock, DeclineButton, AcceptButton), GroupSearch
 ## (GroupSearchCount, GroupSearchTimer, GroupSearchNote, GroupSearchCancel).
@@ -43,6 +43,7 @@ var _friend_query := ""                # FRIENDS tab search (an ID or a name)
 var _room_rules := Cloud.ROOM_RULES.duplicate()     # the next custom room's rules
 var _room_pin_draft := ""              # the password typed before a rule button rebuilt the tab
 var _room_join_code := ""              # the room this phone asked to join (for its status line)
+var _room_size := 1                    # the next custom room's mode: SOLO 1, DUO 2, SQUAD 4
 var _dir_on := false                   # this window asked the cloud for the player cards
 var _place := {}                       # the tab and scroll a player's card was opened from: {"kind", "scroll"}
 var _scroll_back := -1                 # open(kind, true) scrolls the new list back there once it is laid out
@@ -51,7 +52,6 @@ var _badge_n := -1                     # the unread count the ONLINE 1 VS 1 row 
 var _badge_t := 0.0
 var _kb_field: LineEdit = null         # the text field the popup is lifted for (_lift_for_keyboard)
 var _kb_seen := false                  # the on-screen keyboard was up for it (_follow_keyboard)
-var _group_api: Object                 # where the group signals were connected (LobbyTeam.api())
 var _search_modal: Control             # the open SEARCHING PLAYERS popup
 var _search_count: Label
 var _search_timer: Label
@@ -159,7 +159,7 @@ func open(kind := "online", back := false) -> void:
 	var notes := {
 		"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
 		"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
-		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
+		"room": "A private room: share its ID and password. The host picks SOLO, DUO or SQUAD; players take the places they tap. Only the host starts, empty places stay empty.",
 		"local": LobbyLan.GUIDE,
 	}
 	var info := UI.label(String(notes[kind]), 17, UI.TEXT_DIM, "semi")
@@ -224,26 +224,23 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	v.add_child(row)
 
 
-## CUSTOM ROOM tab: create one (password, rules) or join one (ID + password); once in a room it
-## shows the room's ID, password and players, and the host's START.
+## CUSTOM ROOM tab: create one (password, the mode: SOLO 1 VS 1 with its rules, DUO 2 VS 2, SQUAD
+## 4 VS 4) or join one (ID + password). In a room (Cloud.in_room: the room is a group whose players
+## joined by its code): the ID and password, the BLUE / ORANGE places (SlotPanel, host_word HOST: a
+## tap on an empty place moves this player there, Cloud.room_take; the host's KICK on every other
+## player, Cloud.kick_from_group) and the host's START (Cloud.room_start, only the host's works:
+## uneven teams are fine, empty places stay empty, never a bot). A player out of the room (KICK, the
+## room closed, its host gone) is back on the tab with a notice (Cloud.room_notice).
 func _build_room_tab(v: VBoxContainer) -> void:
 	var cloud := Game.cloud_service()
 	if cloud.room_code != "":
 		var head := UI.label("ROOM ID  %s     PASSWORD  %s" % [cloud.room_code, cloud.room_pin], 30, UI.TEXT, "heavy")
 		head.name = "RoomHead"
 		v.add_child(head)
-		v.add_child(UI.label(_rules_text(cloud.room_rules), 18, UI.TEXT_DIM, "semi"))
-		var slots := HBoxContainer.new()
-		slots.add_theme_constant_override("separation", 14)
-		var guest := String(cloud.room_guest.get("name", ""))
-		for t: Array in [[String(Game.profile.name) + "  (HOST)", UI.ACCENT], [guest if guest != "" else "WAITING FOR A PLAYER...", UI.TEXT if guest != "" else UI.TEXT_DIM]]:
-			var slot := UI.label(String(t[0]), 22, t[1], "bold")
-			slot.custom_minimum_size = Vector2(420, 54)
-			slot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			slot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			slot.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.45), 8, 1, Color(1, 1, 1, 0.2), 12.0, ["br"]))
-			slots.add_child(slot)
-		v.add_child(slots)
+		var size := int(cloud.group.get("size", 1)) if cloud.in_room() else 1
+		v.add_child(UI.label(_room_mode_text(size, cloud.room_rules), 18, UI.TEXT_DIM, "semi"))
+		if cloud.in_room():
+			_room_slots(v, cloud, true)
 		var row := HBoxContainer.new()
 		row.alignment = BoxContainer.ALIGNMENT_END
 		row.add_theme_constant_override("separation", 12)
@@ -253,12 +250,15 @@ func _build_room_tab(v: VBoxContainer) -> void:
 			open("room"))
 		var start := UI.button("START", 22, "primary", Vector2(200, 56))
 		start.name = "RoomStart"
-		start.disabled = guest == ""
+		start.disabled = not room_ready(cloud)
 		start.pressed.connect(func() -> void:
 			start.disabled = true
 			UI.set_caption(start, "STARTING")
-			if not Game.cloud_service().start_room_match():
-				_net_note = "COULD NOT START, TRY AGAIN"
+			var why := Game.cloud_service().room_start()
+			if why != "":
+				_net_note = why
+				_net_sig = "-"
+				UI.set_caption(start, "START")
 				start.disabled = false)
 		row.add_child(close)
 		row.add_child(start)
@@ -266,17 +266,20 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		return
 	if cloud.join_state != "":
 		var msg := {"asking": "JOINING ROOM %s...", "in": "IN ROOM %s: WAITING FOR THE HOST TO START",
-			"wrong": "WRONG PASSWORD FOR ROOM %s", "none": "NO ROOM %s FOUND (OR ITS HOST LEFT)"}
+			"wrong": "WRONG PASSWORD FOR ROOM %s", "full": "ROOM %s IS FULL", "none": "NO ROOM %s FOUND (OR ITS HOST LEFT)"}
 		var st := UI.label(String(msg.get(cloud.join_state, "%s")) % String(_room_join_code), 24, UI.TEXT, "heavy")
 		st.name = "JoinState"
 		v.add_child(st)
+		if cloud.join_state == "in" and cloud.in_room():
+			v.add_child(UI.label(_room_mode_text(int(cloud.group.get("size", 1)), {}), 18, UI.TEXT_DIM, "semi"))
+			_room_slots(v, cloud, false)
 		var back := UI.button("LEAVE" if cloud.join_state in ["asking", "in"] else "BACK", 19, "light", Vector2(200, 56))
 		back.pressed.connect(func() -> void:
 			Game.cloud_service().leave_join()
 			open("room"))
 		v.add_child(back)
 		return
-	# Create: password (digits), rules.
+	# Create: password (digits), the mode, the rules (SOLO's 1 vs 1).
 	var create := HBoxContainer.new()
 	create.add_theme_constant_override("separation", 10)
 	create.add_child(UI.label("NEW ROOM  ·  PASSWORD", 20, UI.TEXT, "bold"))
@@ -286,29 +289,37 @@ func _build_room_tab(v: VBoxContainer) -> void:
 	pin.custom_minimum_size = Vector2(170, 56)
 	pin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	create.add_child(pin)
-	var mode := UI.label("1 VS 1", 20, UI.ACCENT, "heavy")
-	create.add_child(mode)
-	v.add_child(create)
-	var rules := HBoxContainer.new()
-	rules.add_theme_constant_override("separation", 8)
-	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-		var key := String(k[0])
-		var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 56))
-		tb.name = "Rule_" + key
-		tb.pressed.connect(func() -> void:
-			_room_rules[key] = not bool(_room_rules[key])
+	for m: Array in [[1, "SOLO 1 VS 1"], [2, "DUO 2 VS 2"], [4, "SQUAD 4 VS 4"]]:
+		var n := int(m[0])
+		var mb := UI.button(String(m[1]), 16, "primary" if n == _room_size else "dark", Vector2(150, 56))
+		mb.name = "RoomMode_%d" % n
+		mb.pressed.connect(func() -> void:
+			_room_size = n
 			_room_pin_draft = pin.text
 			open("room"))
-		rules.add_child(tb)
-	var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 56))
-	rounds.name = "Rule_rounds"
-	rounds.pressed.connect(func() -> void:
-		var steps := [1, 3, 5, 7]
-		_room_rules.rounds = steps[(steps.find(int(_room_rules.rounds)) + 1) % steps.size()]
-		_room_pin_draft = pin.text
-		open("room"))
-	rules.add_child(rounds)
-	v.add_child(rules)
+		create.add_child(mb)
+	v.add_child(create)
+	if _room_size == 1:
+		var rules := HBoxContainer.new()
+		rules.add_theme_constant_override("separation", 8)
+		for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
+			var key := String(k[0])
+			var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 56))
+			tb.name = "Rule_" + key
+			tb.pressed.connect(func() -> void:
+				_room_rules[key] = not bool(_room_rules[key])
+				_room_pin_draft = pin.text
+				open("room"))
+			rules.add_child(tb)
+		var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 56))
+		rounds.name = "Rule_rounds"
+		rounds.pressed.connect(func() -> void:
+			var steps := [1, 3, 5, 7]
+			_room_rules.rounds = steps[(steps.find(int(_room_rules.rounds)) + 1) % steps.size()]
+			_room_pin_draft = pin.text
+			open("room"))
+		rules.add_child(rounds)
+		v.add_child(rules)
 	if _room_pin_draft != "":
 		pin.text = _room_pin_draft
 	var make := UI.button("CREATE ROOM", 20, "primary", Vector2(230, 56))
@@ -320,7 +331,7 @@ func _build_room_tab(v: VBoxContainer) -> void:
 			_net_sig = "-"
 			return
 		_room_pin_draft = ""
-		Game.cloud_service().open_room(p, _room_rules)
+		Game.cloud_service().open_room(p, _room_rules, "", _room_size)
 		open("room"))
 	v.add_child(make)
 	# Join: room ID + password.
@@ -345,6 +356,50 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		open("room"))
 	join.add_child(go)
 	v.add_child(join)
+
+
+## The room's places (SlotPanel): its players by name in BLUE / ORANGE; a tap on an empty place
+## moves this player there; the host also has KICK on every other player.
+func _room_slots(v: VBoxContainer, cloud: Cloud, host: bool) -> void:
+	var size := int(cloud.group.get("size", 1))
+	var panel := SlotPanel.new()
+	panel.take_empty = true
+	panel.kick = host
+	panel.host_word = "HOST"
+	panel.slot_tapped.connect(func(t: int, i: int) -> void:
+		if not Game.cloud_service().room_take(t, i):
+			_net_note = "THAT PLACE IS TAKEN"
+			_net_sig = "-")
+	panel.kick_tapped.connect(func(id: String) -> void: Game.cloud_service().kick_from_group(id))
+	v.add_child(panel)
+	panel.show_slots(NetGroup.places(size, true), room_entries(cloud.group_members(), size))
+
+
+## The room's players as SlotPanel entries: each in their team's place (Cloud's slot is the roster
+## slot, team * per_team + place), the host tagged.
+static func room_entries(list: Array, size: int) -> Array:
+	var base := NetGroup.per_team(size)
+	var out := []
+	for m: Dictionary in list:
+		var t := clampi(int(m.get("team", 0)), 0, 1)
+		out.append({"id": String(m.get("id", "")), "name": String(m.get("name", "PLAYER")), "team": t,
+			"slot": int(m.get("slot", 0)) - t * base, "host": bool(m.get("leader", false)), "me": bool(m.get("me", false))})
+	return out
+
+
+## Whether the host's START can go: SOLO once the other player is in, DUO / SQUAD once both teams
+## have a player (uneven is fine).
+static func room_ready(cloud: Cloud) -> bool:
+	if not cloud.in_room() or int(cloud.group.get("size", 1)) == 1:
+		return not cloud.room_guest.is_empty()
+	return NetGroup.plan(cloud.group.members, int(cloud.group.size)) == "match"
+
+
+## What the room plays: SOLO with its rules, DUO / SQUAD between the players in the places.
+func _room_mode_text(size: int, rules: Dictionary) -> String:
+	if size == 1:
+		return _rules_text(rules) if not rules.is_empty() else "SOLO  ·  1 VS 1"
+	return "%s  ·  %d VS %d  ·  REAL PLAYERS, EMPTY PLACES STAY EMPTY" % ["DUO" if size == 2 else "SQUAD", size, size]
 
 
 func _rules_text(r: Dictionary) -> String:
@@ -733,9 +788,9 @@ func _on_modal_closed() -> void:
 	if cloud.has_invite() and free:
 		_show_challenge(String(cloud.invite_from().get("name", "PLAYER")))
 		return
-	var gi: Variant = LobbyTeam.cloud_call("group_invite_from", [], {})
-	if free and gi is Dictionary and not (gi as Dictionary).is_empty():
-		_show_group_invite(String((gi as Dictionary).get("name", "PLAYER")))
+	var gi := cloud.group_invite_from()
+	if free and not gi.is_empty():
+		_show_group_invite(String(gi.get("name", "PLAYER")))
 
 
 # ---------------------------------------------------------------- groups
@@ -763,7 +818,7 @@ func _show_group_invite(who: String) -> void:
 	var v := lobby.dialogs.open_modal("GROUP INVITE", 680.0)
 	v.name = "GroupInvitePopup"
 	var decline := func() -> void:
-		LobbyTeam.cloud_call("answer_group_invite", [false])
+		Game.cloud_service().answer_group_invite(false)
 		lobby.dialogs.close_modal()
 	lobby.dialogs.modal.set_meta("on_back", decline)
 	var t := UI.label(group_invite_text(who), 26, UI.TEXT, "heavy")
@@ -787,7 +842,7 @@ func _show_group_invite(who: String) -> void:
 	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 56))
 	yes.name = "AcceptButton"
 	yes.pressed.connect(func() -> void:
-		LobbyTeam.cloud_call("answer_group_invite", [true])
+		Game.cloud_service().answer_group_invite(true)
 		lobby.dialogs.close_modal())
 	row.add_child(block)
 	row.add_child(no)
@@ -797,16 +852,14 @@ func _show_group_invite(who: String) -> void:
 
 ## BLOCK on a GROUP INVITE, asked first: declined and the player blocked; CANCEL goes back to it.
 func _ask_block_group_inviter(who: String) -> void:
-	var gi: Variant = LobbyTeam.cloud_call("group_invite_from", [], {})
-	var id := String((gi as Dictionary).get("id", "")) if gi is Dictionary else ""
+	var id := String(Game.cloud_service().group_invite_from().get("id", ""))
 	var back := func() -> void:
-		var still: Variant = LobbyTeam.cloud_call("group_invite_from", [], {})
-		if still is Dictionary and not (still as Dictionary).is_empty():
+		if not Game.cloud_service().group_invite_from().is_empty():
 			_show_group_invite(who)
 		else:
 			lobby.dialogs.close_modal()
 	lobby.dialogs.confirm("BLOCK PLAYER", LobbyProfile.block_question(who), "BLOCK", func() -> void:
-		LobbyTeam.cloud_call("answer_group_invite", [false])
+		Game.cloud_service().answer_group_invite(false)
 		if id != "":
 			Game.block(id, who), back, true)
 
@@ -850,7 +903,7 @@ func open_search(size: int) -> void:
 func cancel_search() -> void:
 	var m := _search_modal
 	_search_modal = null
-	LobbyTeam.cloud_call("group_search_stop")
+	Game.cloud_service().group_search_stop()
 	if m and is_instance_valid(m) and lobby.dialogs.modal == m:
 		lobby.dialogs.close_modal()
 
@@ -865,14 +918,11 @@ func _follow_search(delta: float) -> void:
 	if not is_instance_valid(_search_modal) or _search_modal.is_queued_for_deletion() or lobby.dialogs.modal != _search_modal:
 		_search_modal = null
 		if not cloud.in_session:
-			LobbyTeam.cloud_call("group_search_stop")
+			Game.cloud_service().group_search_stop()
 		return
 	_search_t += delta
-	var a := LobbyTeam.api()
-	var found: Variant = a.get("search_found") if a else 0
-	var needed: Variant = a.get("search_needed") if a else 0
-	var f := int(found) if found is int else 0
-	var n := int(needed) if needed is int else 0
+	var f := cloud.search_found
+	var n := cloud.search_needed
 	if n > 0:
 		_search_seen = true
 	elif _search_seen and not cloud.in_session:
@@ -1068,10 +1118,24 @@ func _on_net_answered(accepted: bool, who: String) -> void:
 		_net_sig = "-"
 
 
-## The custom room changed (a player joined, a join attempt ended): redraw the room tab.
+## The custom room changed (a player joined, a join attempt ended): redraw the room tab. Out of a
+## room (KICK, closed, its host gone: Cloud.room_notice) the lobby says why.
 func _on_room_changed() -> void:
+	var cloud := Game.cloud_service()
+	if cloud.room_notice != "" and not _match_loading:
+		var why := cloud.room_notice
+		cloud.room_notice = ""
+		lobby.dialogs.notice("CUSTOM ROOM", why)
+		return
 	if _net_kind == "room" and lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal) and _net_list and is_instance_valid(_net_list):
 		open("room")
+
+
+## A room's players or places changed (its group): the room tab follows.
+func _on_room_group_changed() -> void:
+	var cloud := Game.cloud_service()
+	if cloud.room_code != "" or cloud.join_state != "":
+		_on_room_changed()
 
 
 ## Both phones agreed (a challenge accepted, the host started a custom room): load the match. It
@@ -1144,31 +1208,20 @@ func _connect_net(cloud: Cloud) -> void:
 	cloud.session_started.connect(_on_net_session)
 	cloud.session_ended.connect(_on_net_ended)
 	cloud.friend_chat_changed.connect(_on_friend_message)
-	# The group signals (GROUPS.txt 3, CORE's): guarded until Cloud has them.
-	_group_api = LobbyTeam.api()
-	if _group_api and _group_api.has_signal("group_changed"):
-		_group_api.connect("group_changed", lobby.on_group_changed)
-	if _group_api and _group_api.has_signal("group_invited"):
-		_group_api.connect("group_invited", _on_group_invited)
+	cloud.group_changed.connect(lobby.on_group_changed)
+	cloud.group_changed.connect(_on_room_group_changed)
+	cloud.group_invited.connect(_on_group_invited)
 	lobby.on_group_changed.call_deferred()      # a group from before this lobby (back from a match)
 
 
 ## Drops this object's connections (the handlers above) from the service, which outlives the lobby.
 func _disconnect_net(cloud: Cloud) -> void:
 	for sig in ["invited", "invite_cancelled", "invite_failed", "invite_answered", "session_started", "session_ended", "room_changed",
-			"friends_changed", "directory_changed", "friend_chat_changed"]:
+			"friends_changed", "directory_changed", "friend_chat_changed", "group_changed", "group_invited"]:
 		for c: Dictionary in cloud.get_signal_connection_list(sig):
-			if (c.callable as Callable).get_object() == self:
+			var o := (c.callable as Callable).get_object()
+			if o == self or o == lobby:
 				cloud.disconnect(sig, c.callable)
-	if _group_api and is_instance_valid(_group_api):
-		for sig in ["group_changed", "group_invited"]:
-			if not _group_api.has_signal(sig):
-				continue
-			for c: Dictionary in _group_api.get_signal_connection_list(sig):
-				var o := (c.callable as Callable).get_object()
-				if o == self or o == lobby:
-					_group_api.disconnect(sig, c.callable)
-	_group_api = null
 
 
 ## The tab PLAY WITHOUT INTERNET changed what it shows (LobbyLan): built again while it is open.

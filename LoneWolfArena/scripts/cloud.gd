@@ -153,7 +153,9 @@ var room_code := ""            # custom room this phone hosts: 6 digits ("" = no
 var room_pin := ""             # its password (digits)
 var room_rules := {}
 var room_guest := {}           # {"id", "name"}: who joined it with the right password
-var join_state := ""           # custom room this phone joins: "", "asking", "in", "wrong", "none"
+var join_state := ""           # custom room this phone joins: "", "asking", "in", "wrong", "full", "none"
+var room_notice := ""          # why this phone is out of the room it joined (KICK, closed, host gone): the lobby says it once
+var _room_kicked := {}         # ids this host KICKed from its room: never let in again while it is open
 var _brokers: Array = BROKERS
 var _broker_i := 0
 var _fail_n := 0               # failed connects in a row on the current broker
@@ -932,8 +934,10 @@ func _on_inbox(d: Dictionary) -> void:
 			# The custom room's host: the password was right (wait for START) or wrong; a "rin"
 			# while in the room says it is still open.
 			if join_state in ["asking", "in"] and String(d.get("code", "")) == String(_join.get("code", "")):
-				var state := "in" if String(d.t) == "rin" else "wrong"
+				var state := "in" if String(d.t) == "rin" else ("full" if d.get("full") == true else "wrong")
 				_join.t = Time.get_ticks_msec()
+				if state == "in" and typeof(d.get("sec")) == TYPE_STRING:
+					_room_enter(from, d)        # a room with slots: its group's keys
 				if state != join_state:
 					join_state = state
 					room_changed.emit()
@@ -1782,7 +1786,18 @@ func _on_friend_chat(from: String, d: Dictionary) -> void:
 
 ## Opens a custom room: a random 6-digit number plus the host's numeric password. A player who
 ## sends both is listed in the room; the host starts the match with the room's rules.
-func open_room(pin: String, rules: Dictionary, code := "") -> String:
+## CUSTOM ROOM WITH SLOTS: the room is a GROUP (its own group room and keys, this phone its leader:
+## the HOST) whose players joined by the code and password instead of an invite. size: the mode the
+## host picked, SOLO 1 (2 places: 1 VS 1), DUO 2 (4: 2 VS 2), SQUAD 4 (8: 4 VS 4), the places in
+## BLUE / ORANGE (NetGroup.places with room). A player with the right password ("ask", tagged with
+## the password's key) gets the group's keys RSA-wrapped for their own key in "rin" (tagged too, so
+## only a phone that knows the password could send it), then says "gjoin" in the group room and
+## takes the first free place (the team with fewer players). Only the host's roster ("groster")
+## counts; a player asks for an empty place with "gslot" (room_take); the host's KICK is the
+## group's "gkick" (that id is never let in again while the room is open). START (room_start, the
+## host's only): SOLO is the 1 vs 1 with the room's rules, DUO / SQUAD the all-human match of the
+## players in their places (uneven teams allowed, empty places stay empty: never a bot).
+func open_room(pin: String, rules: Dictionary, code := "", size := 1) -> String:
 	close_room()
 	var r := _crypto.generate_random_bytes(4)
 	room_code = code if code.length() == 6 and code.is_valid_int() and not OS.has_feature("template") \
@@ -1790,17 +1805,75 @@ func open_room(pin: String, rules: Dictionary, code := "") -> String:
 	room_pin = pin
 	room_rules = rules_from(rules)
 	room_guest = {}
+	_room_kicked = {}
+	if my_id != "" and not in_session and not session_multi:
+		if not group.is_empty():
+			_group_close(true)            # (a room is its own group: a group this phone was in is left)
+		_group_create(size if size in [1, 2, 4] else 1)
+		group.room = room_code
+		_grp.manual = true
+		NetGroup.arrange(group.members, int(group.size), true, true)
 	if _connected:
 		_subscribe(ROOT + "/c/" + room_code)
 	room_changed.emit()
+	group_changed.emit()
 	return room_code
 
 
 func close_room() -> void:
 	if room_code != "" and _connected:
 		_unsubscribe(ROOT + "/c/" + room_code)
+	var was_room := in_room() and String(group.leader) == my_id
 	room_code = ""
 	room_guest = {}
+	if was_room:
+		_group_close(true)                # "gend": every player in the room hears it is closed
+		group_changed.emit()
+
+
+## In a CUSTOM ROOM's group: hosting it, or joined to it by its code.
+func in_room() -> bool:
+	return not _grp.is_empty() and String(group.get("room", "")) != ""
+
+
+## The room host's START (only the host's works). SOLO: the 1 vs 1 with the room's rules
+## (start_room_match). DUO / SQUAD: the all-human match of the players in their places
+## (_group_launch: "gstart" to every player), uneven teams allowed, empty places staying empty.
+## "" when it goes, else the notice to show.
+func room_start() -> String:
+	if not in_room() or String(group.leader) != my_id:
+		return "ONLY THE HOST CAN START"
+	if in_session or session_multi or not _outgoing.is_empty():
+		return "A MATCH IS ALREADY STARTING"
+	if not _connected:
+		return "OFFLINE: THE MATCH NEEDS THE INTERNET"
+	var size := int(group.size)
+	if size == 1:
+		return "" if start_room_match() else "WAITING FOR A PLAYER"
+	if NetGroup.plan(group.members, size) != "match":
+		return "BOTH TEAMS NEED A PLAYER"
+	_group_launch(size)
+	return ""
+
+
+## A tap on an empty place of the room (team 0 BLUE / 1 ORANGE, place 0..): the host takes it at
+## once; a player asks the host ("gslot") and its roster then shows the move. False outside a room
+## (or still joining it) or when the place is not a free one.
+func room_take(team: int, place: int) -> bool:
+	if not in_room() or bool(_grp.joining) or place < 0:
+		return false
+	var size := int(group.size)
+	var slot := team * NetGroup.per_team(size) + place
+	if String(group.leader) == my_id:
+		if not NetGroup.take_empty(group.members, my_id, team, slot, size):
+			return false
+		_group_roster()
+		group_changed.emit()
+		return true
+	if not NetGroup.take_empty((group.members as Array).duplicate(true), my_id, team, slot, size):
+		return false
+	_group_send({"k": "gslot", "t": team, "s": slot})
+	return true
 
 
 ## Starts the hosted room's match with the player who joined it.
@@ -1818,12 +1891,79 @@ func start_room_match() -> bool:
 func join_room(code: String, pin: String) -> void:
 	_join = {"code": code, "key": _room_key(code, pin), "t": Time.get_ticks_msec(), "ask_t": 0.0}
 	join_state = "asking"
+	room_notice = ""
 	room_changed.emit()
 
 
+## Stops joining; a player in the room's group leaves it ("gleave").
 func leave_join() -> void:
 	_join = {}
 	join_state = ""
+	if in_room() and String(group.leader) != my_id:
+		_group_close(true)
+		group_changed.emit()
+
+
+## A joiner: the host's "rin" carries its room group's keys, RSA-wrapped for this phone's key and
+## tagged with the password's key over the wrapped part and the host's id. This phone then joins the
+## group as an invitee does (answer_group_invite): "gjoin" until the host's roster has it.
+func _room_enter(host: String, d: Dictionary) -> void:
+	var sec_text := String(d.sec)
+	if in_room() or in_session or session_multi or _key == null or typeof(d.get("rt")) != TYPE_STRING or sec_text.length() > 1024 \
+			or not _crypto.constant_time_compare(_room_tag(_join.key, "rin" + sec_text, host).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
+		return
+	var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(sec_text))
+	if sec.size() != 81 or not int(sec[80]) in [1, 2, 4]:
+		return
+	if not group.is_empty():
+		_group_close(true)                # (a group this phone was in is left for the room)
+	var gid := sec.slice(0, 16).hex_encode()
+	_grp = {"gid": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
+		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": true, "manual": true}
+	group = {"gid": gid, "leader": host, "members": [{"id": host, "name": "HOST", "bundle": "default", "team": 0, "slot": 0}],
+		"status": "joining", "mode": "lonewolf", "size": int(sec[80]), "room": String(_join.code)}
+	_subscribe(ROOT + "/g/" + gid)
+	group_changed.emit()
+
+
+## This phone is out of the room it joined (KICK, the host closed it, the host gone): the join ends
+## and the lobby says why once (room_notice with room_changed). A match that started from the room
+## says nothing (the room closes then).
+func _room_gone(why: String) -> void:
+	var code := String(group.get("room", ""))
+	_group_close(false)
+	_join = {}
+	join_state = ""
+	if not in_session and not session_multi:
+		room_notice = why % code
+	room_changed.emit()
+	group_changed.emit()
+
+
+## The host lets a player with the right password into its room's group: a place waits for them
+## (_grp.invited, as for a group invite, kept while they keep asking). False when the room is full.
+func _room_let_in(from: String) -> bool:
+	if _group_has(from):
+		return true
+	var inv: Dictionary = _grp.invited
+	if not inv.has(from) and (group.members as Array).size() + inv.size() >= NetGroup.cap(int(group.size), true):
+		return false
+	inv[from] = Time.get_ticks_msec()
+	return true
+
+
+## The room group's id, keys and size (16 + 32 + 32 + 1 bytes) RSA-wrapped for a player's key, as
+## base64 ("" when that key is no key).
+func _room_sec(pk: String) -> String:
+	var pub := CryptoKey.new()
+	if pub.load_from_string(pk, true) != OK:
+		return ""
+	var sec := String(_grp.gid).hex_decode()
+	sec.append_array(_grp.aes)
+	sec.append_array(_grp.mac)
+	sec.append(int(group.size))
+	var wrapped := _crypto.encrypt(pub, sec)
+	return Marshalls.raw_to_base64(wrapped) if not wrapped.is_empty() else ""
 
 
 func _on_room_ask(d: Dictionary) -> void:
@@ -1833,19 +1973,34 @@ func _on_room_ask(d: Dictionary) -> void:
 	_inbox_budget -= 1.0
 	if typeof(d.get("pk")) != TYPE_STRING or String(d.pk).length() > 1200 or from != String(d.pk).sha256_text().left(32):
 		return
+	var key := _room_key(room_code, room_pin)
 	var right := typeof(d.get("mac")) == TYPE_STRING and _crypto.constant_time_compare(
-		_room_tag(_room_key(room_code, room_pin), "ask", from).to_utf8_buffer(), String(d.mac).to_utf8_buffer())
+		_room_tag(key, "ask", from).to_utf8_buffer(), String(d.mac).to_utf8_buffer())
 	if not right:
 		_publish_json(ROOT + "/u/" + from, {"t": "rno", "from": my_id, "code": room_code})
 		return
-	if not room_guest.is_empty() and String(room_guest.id) != from:
+	if _room_kicked.has(from):
+		return                       # KICKed from this room: not let in again
+	var slots := in_room()
+	if slots and not _room_let_in(from):
+		_publish_json(ROOT + "/u/" + from, {"t": "rno", "from": my_id, "code": room_code, "full": true})
+		return
+	if not slots and not room_guest.is_empty() and String(room_guest.id) != from:
 		return                       # the room is full (1 vs 1)
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
 	peers[from] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec()}
-	var fresh := room_guest.is_empty()
-	room_guest = {"id": from, "name": String(peers[from].name)}
-	_publish_json(ROOT + "/u/" + from, {"t": "rin", "from": my_id, "code": room_code})
+	var fresh := false
+	if not slots or (int(group.size) == 1 and room_guest.is_empty()):
+		fresh = room_guest.is_empty()
+		room_guest = {"id": from, "name": String(peers[from].name)}      # (the 1 vs 1's other player)
+	var msg := {"t": "rin", "from": my_id, "code": room_code}
+	if slots and not _group_has(from):
+		var sec := _room_sec(String(d.pk))
+		if sec != "":
+			msg.sec = sec
+			msg.rt = _room_tag(key, "rin" + sec, my_id)
+	_publish_json(ROOT + "/u/" + from, msg)
 	if fresh:
 		room_changed.emit()
 
@@ -2314,7 +2469,7 @@ func group_invite_proven(d: Dictionary, from: String) -> bool:
 ## full (members and invites waiting), this phone a member but not the leader, or in a match.
 func group_invite(friend_id: String) -> bool:
 	if not _connected or my_id == "" or _key == null or in_session or session_multi or friend_id == my_id \
-			or not peers.has(friend_id) or Game.is_blocked(friend_id) or not is_group_leader():
+			or not peers.has(friend_id) or Game.is_blocked(friend_id) or not is_group_leader() or in_room():
 		return false
 	if not group.is_empty() and (_group_has(friend_id) or (group.members as Array).size() + (_grp.invited as Dictionary).size() >= GROUP_MAX):
 		return false
@@ -2372,7 +2527,7 @@ func _on_group_invite(from: String, d: Dictionary) -> void:
 		return
 	var gid := sec.slice(0, 16).hex_encode()
 	var inv := {"id": from, "gid": gid, "room": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "size": int(sec[80])}
-	var busy := in_session or session_multi or in_group() or (not group.is_empty() and not is_group_leader()) or not _ginv.is_empty()
+	var busy := in_session or session_multi or in_group() or (not group.is_empty() and not is_group_leader()) or not _ginv.is_empty() or in_room()
 	if busy or not Game.is_friend(from) or not NetMatch.allowed(from, my_id) or group_invited.get_connections().is_empty():
 		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
@@ -2426,14 +2581,16 @@ func leave_group() -> void:
 func kick_from_group(id: String) -> void:
 	if group.is_empty() or String(group.leader) != my_id or id == my_id or not _group_has(id):
 		return
+	if in_room():
+		_room_kicked[id] = true          # (the room's KICK: not let in again while it is open)
 	_group_send({"k": "gkick", "id": id})
 	_group_drop(id)
 
 
 ## The leader's SELECT MODE pick, shown to the members (their SELECT MODE follows it).
 func set_group_mode(mode: String, size: int) -> void:
-	if group.is_empty() or String(group.leader) != my_id or size not in [1, 2, 4]:
-		return
+	if group.is_empty() or String(group.leader) != my_id or size not in [1, 2, 4] or in_room():
+		return                           # (a room keeps the mode its host opened it with)
 	group.mode = mode.left(16)
 	if int(group.size) != size:
 		group.size = size
@@ -2459,6 +2616,8 @@ func set_group_team(member_id: String, team: int, slot := -1) -> bool:
 ## uneven allowed), else the search for the rest runs (search_found / search_needed). Otherwise the
 ## notice to show. A solo's 1 VS 1 is QUICK MATCH (NetMatch): "" here, nothing started.
 func group_start(size: int) -> String:
+	if in_room():
+		return room_start()
 	if not is_group_leader():
 		return "ONLY THE LEADER CAN START"
 	if size == 1:
@@ -2794,9 +2953,12 @@ func _group_drop(id: String) -> void:
 		if String(members[i].id) == id:
 			members.remove_at(i)
 			break
-	NetGroup.arrange(members, int(group.size), bool(_grp.manual))
+	NetGroup.arrange(members, int(group.size), bool(_grp.manual), in_room())
 	if search_needed > 0:
 		search_found = members.size()
+	if String(room_guest.get("id", "")) == id:
+		room_guest = {}
+		room_changed.emit()
 	_group_roster()
 	group_changed.emit()
 
@@ -2834,29 +2996,51 @@ func _on_group(payload: PackedByteArray) -> void:
 				_group_drop(f)
 		"gkick":
 			if f == leader and String(d.get("id", "")) == my_id:
-				_group_close(false)
-				group_changed.emit()
+				if in_room():
+					_room_gone("THE HOST REMOVED YOU FROM ROOM %s")
+				else:
+					_group_close(false)
+					group_changed.emit()
 		"gend":
 			if f == leader:
-				_group_close(false)
-				group_changed.emit()
+				if in_room():
+					_room_gone("THE HOST CLOSED ROOM %s")
+				else:
+					_group_close(false)
+					group_changed.emit()
 		"gstart":
 			if f == leader and leader != my_id:
 				_on_gstart(d)
+		"gslot":
+			if leader == my_id and in_room():
+				_on_gslot(f, d)
+
+
+## The room's host: a player taps an empty place ("gslot" {"t": team, "s": the roster slot}); a
+## place someone holds, or one that is not that team's, changes nothing.
+func _on_gslot(f: String, d: Dictionary) -> void:
+	var t: Variant = d.get("t")
+	var s: Variant = d.get("s")
+	if not NetGroup._whole(t) or not NetGroup._whole(s) or absf(float(t)) > 8.0 or absf(float(s)) > 64.0:
+		return
+	if NetGroup.take_empty(group.members, f, int(t), int(s), int(group.size)):
+		_group_roster()
+		group_changed.emit()
 
 
 ## The leader: an invited player joins (a new member gets its default side or the first free slot);
 ## a member that says it again gets the roster again.
 func _on_gjoin(f: String, d: Dictionary) -> void:
 	var members: Array = group.members
+	var room := in_room()
 	if not _group_has(f):
-		if members.size() >= GROUP_MAX or in_session or session_multi:
+		if members.size() >= NetGroup.cap(int(group.size), room) or in_session or session_multi:
 			return
 		(_grp.invited as Dictionary).erase(f)
 		var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 		var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
-		members.append({"id": f, "name": who if who != "" else "PLAYER", "bundle": b, "team": -1, "slot": -1})
-		NetGroup.arrange(members, int(group.size), bool(_grp.manual))
+		members.append({"id": f, "name": who if who != "" else "PLAYER", "bundle": b, "team": NetGroup.room_side(members) if room else -1, "slot": -1})
+		NetGroup.arrange(members, int(group.size), bool(_grp.manual), room)
 		if search_needed > 0:
 			search_found = members.size()
 		group_changed.emit()
@@ -2869,14 +3053,18 @@ func _on_groster(d: Dictionary) -> void:
 	var size := int(d.get("size", 2)) if (d.get("size") is float or d.get("size") is int) else 2
 	if size not in [1, 2, 4]:
 		return
-	var list := NetGroup.members_from(d.get("members"), String(group.leader), size)
+	var list := NetGroup.members_from(d.get("members"), String(group.leader), size, in_room())
 	if list.is_empty():
 		return
 	var mine := false
 	for m: Dictionary in list:
 		mine = mine or String(m.id) == my_id
 	if not mine:
-		if not bool(_grp.joining):
+		if bool(_grp.joining):
+			pass
+		elif in_room():
+			_room_gone("YOU ARE NO LONGER IN ROOM %s")
+		else:
 			_group_close(false)
 			group_changed.emit()
 		return
@@ -2906,8 +3094,11 @@ func _tick_group(delta: float, now: int) -> void:
 			_grp.join_t = GROUP_JOIN_S
 			_group_send({"k": "gjoin", "name": String(Game.profile.name), "bundle": String(Game.profile.bundle)})
 		if now - int(_grp.leader_ms) > JOIN_TIMEOUT_MS:
-			_group_close(false)          # the leader never let this phone in
-			group_changed.emit()
+			if in_room():
+				_room_gone("ROOM %s DID NOT LET YOU IN")
+			else:
+				_group_close(false)          # the leader never let this phone in
+				group_changed.emit()
 		return
 	_grp.beat_t = float(_grp.beat_t) - delta
 	if float(_grp.beat_t) <= 0.0:
@@ -2918,8 +3109,11 @@ func _tick_group(delta: float, now: int) -> void:
 			_group_send({"k": "gbeat"})
 	if leader != my_id:
 		if now - int(_grp.leader_ms) > GROUP_TIMEOUT_MS:
-			_group_close(false)          # the leader is gone: so is the group
-			group_changed.emit()
+			if in_room():
+				_room_gone("THE HOST OF ROOM %s LEFT")
+			else:
+				_group_close(false)          # the leader is gone: so is the group
+				group_changed.emit()
 		return
 	var gone := []
 	for m: Dictionary in group.members:
@@ -2932,8 +3126,8 @@ func _tick_group(delta: float, now: int) -> void:
 		if now - int(pending[id]) > INVITE_TIMEOUT_MS:
 			pending.erase(id)
 			group_changed.emit()
-	if (group.members as Array).size() <= 1 and pending.is_empty() and search_needed == 0:
-		_group_close(false)              # nobody joined and no invite waits: no group
+	if (group.members as Array).size() <= 1 and pending.is_empty() and search_needed == 0 and not in_room():
+		_group_close(false)              # nobody joined and no invite waits: no group (a room stays open)
 		group_changed.emit()
 
 

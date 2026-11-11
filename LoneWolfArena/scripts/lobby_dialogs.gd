@@ -351,7 +351,7 @@ func _pick(m: String) -> void:
 	close_modal()
 	lobby._refresh_mode()
 	if LobbyTeam.in_group():
-		LobbyTeam.cloud_call("set_group_mode", [Game.mode, Game.team_size])   # the members' cards follow
+		Game.cloud_service().set_group_mode(Game.mode, Game.team_size)   # the members' cards follow
 
 
 # ---------------------------------------------------------------- player name

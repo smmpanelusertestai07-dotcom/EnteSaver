@@ -4,14 +4,13 @@ extends Node
 ## machine). Real taps where a player taps:
 ## - a team match left over is cleared when the lobby opens;
 ## - SELECT MODE has the size chips Size_1 / 2 / 4 on both mode cards; DUO updates the mode card;
-##   the DUMMY is SOLO only;
-## - the TEAM bar shows in DUO (+ INVITE) and SQUAD (+ INVITE, two BOT tiles), hides in SOLO;
-## - INVITE lists stand-in friends (online first, INVITE only on them; offline ones greyed); the
-##   TEAM INVITE waiting popup says WAITING FOR, then DECLINED;
+##   the DUMMY is SOLO only; LONE WOLF's card says DUO plays real players;
+## - the mode card's line in LONE WOLF SQUAD and TRAINING SOLO (the GROUP bar that replaced the
+##   TEAM bar in 1.5 has its own check: tests/group_lobby_check.gd);
 ## - a stand-in TEAM INVITE (Cloud._incoming with a team) shows TEAM INVITE; DECLINE closes it;
 ## - START in LONE WOLF SOLO clears a team match left over (the 1 vs 1 QUICK MATCH);
-## - LONE WOLF x DUO opens the team search (CANCEL stops it); left alone, the match against bots
-##   loads with its card "NO PLAYER FOUND: YOUR TEAM VS BOTS", counted as DUO;
+## - LONE WOLF x DUO searches real players only (Cloud's search: SEARCHING PLAYERS 1/4, no bots, no
+##   match against bots ever); CANCEL stops it;
 ## - TRAINING GROUND x SQUAD loads scenes/team_arena.tscn with eight fighters' roster;
 ## - every touch target on the way is at least 56 px.
 ## Screenshots when run through tools/qa/capture.sh (script:res://tests/team_lobby_check.gd).
@@ -41,13 +40,11 @@ func run(autotest: Node) -> int:
 		_fail("a lobby that opens keeps an old team match")
 	await at.wait(0.5)
 	await _select_mode(lobby)
-	await _team_bar(lobby)
-	await _invite_list(lobby)
+	await _mode_lines(lobby)
 	await _team_invite(lobby)
 	await _quick_clears(lobby)
-	lobby = await _team_search(lobby)
-	if lobby:
-		await _training_squad(lobby)
+	await _team_search(lobby)
+	await _training_squad(lobby)
 	Game.team_size = 1
 	Game.mode = "training"
 	return _done("")
@@ -88,99 +85,26 @@ func _select_mode(lobby: Lobby) -> void:
 	var lines := popup.find_child("Mode_training", true, false) if popup else null
 	if dummy == null or not dummy.disabled or _find_label(lines, "DUMMY IS SOLO ONLY") == null:
 		_fail("the DUMMY is not SOLO only in DUO")
-	if popup and _find_label(popup.find_child("Mode_lonewolf", true, false), "DUO · 2 VS 2 ONLINE · EACH PLAYER + A BOT") == null:
+	if popup and _find_label(popup.find_child("Mode_lonewolf", true, false), "DUO · 2 VS 2 · REAL PLAYERS") == null:
 		_fail("LONE WOLF's card does not say what DUO plays online")
 	await at.shot("t02_select_mode_duo")
 	lobby.dialogs.back()
 	await at.wait(0.3)
 
 
-## The TEAM bar: DUO + INVITE, SQUAD + INVITE and two BOT tiles, none in SOLO.
-func _team_bar(lobby: Lobby) -> void:
-	var team_bar := lobby.find_child("TeamBar", true, false) as Control
-	if team_bar == null or not team_bar.is_visible_in_tree():
-		_fail("no TEAM bar in DUO")
-		return
-	var invite := team_bar.find_child("TeamInvite", true, false) as Control
-	if invite == null or team_bar.find_child("TeamBot_3", true, false) != null:
-		_fail("DUO's TEAM bar is not one + INVITE tile")
-	_touch_ok(team_bar)
-	await at.shot("t03_lobby_team_bar_duo")
+## The mode card's line: LONE WOLF SQUAD online, TRAINING SOLO unchanged.
+func _mode_lines(lobby: Lobby) -> void:
 	await _pick_size(lobby, "lonewolf", 4)
-	team_bar = lobby.find_child("TeamBar", true, false) as Control
-	if Game.team_size != 4 or Game.mode != "lonewolf" or team_bar == null or not team_bar.is_visible_in_tree() \
-			or team_bar.find_child("TeamInvite", true, false) == null or team_bar.find_child("TeamBot_3", true, false) == null \
-			or team_bar.find_child("TeamBot_4", true, false) == null:
-		_fail("SQUAD's TEAM bar is not + INVITE and two BOT tiles")
 	if _text(lobby, "ModeFormat") != "SQUAD  ·  4 VS 4 ONLINE":
 		_fail("the mode card in LONE WOLF SQUAD says %s" % _text(lobby, "ModeFormat"))
-	_touch_ok(team_bar)
-	await at.shot("t04_lobby_team_bar_squad")
+	var group_bar := lobby.find_child("GroupBar", true, false) as Control
+	if group_bar == null or not group_bar.is_visible_in_tree() or lobby.find_child("TeamBar", true, false) != null:
+		_fail("LONE WOLF does not show the GROUP bar (the TEAM bar is gone)")
+	await at.shot("t04_lobby_squad")
 	await _pick_size(lobby, "training", 1)
-	team_bar = lobby.find_child("TeamBar", true, false) as Control
-	if team_bar != null and team_bar.is_visible_in_tree():
-		_fail("the TEAM bar shows in SOLO")
 	if _text(lobby, "ModeFormat") != "BOT: NORMAL  ·  FIRST TO %d" % Game.rounds_to_win():
 		_fail("TRAINING SOLO's mode card changed: %s" % _text(lobby, "ModeFormat"))
 	await _pick_size(lobby, "training", 2)
-
-
-## INVITE: the friends, online ones first with INVITE, offline ones greyed; TEAM INVITE waits.
-func _invite_list(lobby: Lobby) -> void:
-	var cloud := Game.cloud_service()
-	var on_id := "online pal".sha256_text().left(32)
-	var off_id := "offline pal".sha256_text().left(32)
-	var saved_friends: Dictionary = Game.profile.friends
-	Game.profile.friends = {off_id: {"name": "ABEL"}, on_id: {"name": "ZORA"}}
-	cloud.peers[on_id] = {"name": "ZORA", "bundle": "neon", "pk": "", "seen": Time.get_ticks_msec() + 600000}
-	await _tap(lobby.find_child("TeamInvite", true, false) as Control)
-	await at.wait(0.8)
-	var popup := lobby.dialogs.modal
-	var list := popup.find_child("TeamInviteList", true, false) if popup else null
-	var on_row := list.find_child("TeamFriend_" + Cloud.friend_code(on_id), true, false) if list else null
-	var off_row := list.find_child("TeamFriend_" + Cloud.friend_code(off_id), true, false) if list else null
-	var ask := on_row.find_child("TeamAsk_" + Cloud.friend_code(on_id), true, false) as Button if on_row else null
-	var ask_off := off_row.find_child("TeamAsk_" + Cloud.friend_code(off_id), true, false) as Button if off_row else null
-	if list == null or on_row == null or off_row == null or ask == null or ask_off == null:
-		_fail("+ INVITE does not list the friends (%s)" % str(list.get_children().map(func(c: Node) -> String: return c.name) if list else []))
-	else:
-		if on_row.get_index() > off_row.get_index():
-			_fail("an online friend is not listed first")
-		if ask.disabled or not ask_off.disabled or off_row.modulate.a > 0.9:
-			_fail("INVITE is not on online friends only, or an offline friend is not greyed")
-		_touch_ok(list)
-		await at.shot("t05_team_invite_list")
-		# No relay here: the invite cannot go out, and the list says so.
-		await _tap(ask)
-		await at.wait(0.6)
-		if lobby.dialogs.modal == null or _find_label(lobby.dialogs.modal, "ZORA COULD NOT BE REACHED") == null:
-			_fail("an invite that cannot go out does not say so")
-	# The waiting popup (as after an invite that went out: Cloud keeps it), then the answer no.
-	cloud.set("_outgoing", {"id": on_id, "name": "ZORA", "bundle": "neon", "room": "00".repeat(16),
-		"aes": Crypto.new().generate_random_bytes(32), "mac": Crypto.new().generate_random_bytes(32), "t": Time.get_ticks_msec()})
-	lobby.team._wait_name = "ZORA"
-	lobby.team.call("_show_wait")
-	await at.wait(0.4)
-	var wait := lobby.dialogs.modal.find_child("TeamWait", true, false) as Label if lobby.dialogs.modal else null
-	if wait == null or wait.text != "WAITING FOR ZORA" or lobby.dialogs.modal.find_child("TeamWaitCancel", true, false) == null:
-		_fail("TEAM INVITE does not wait for the friend")
-	lobby.team.refresh()
-	await at.wait(0.2)
-	var tile := lobby.find_child("TeamInvite", true, false)
-	if tile == null or _find_label(tile, "ZORA") == null:
-		_fail("the TEAM bar does not say who the invite waits for")
-	await at.shot("t06_team_invite_waiting")
-	cloud.set("_outgoing", {})
-	lobby.team.on_answered(false, "ZORA")
-	await at.wait(0.3)
-	if wait == null or not is_instance_valid(wait) or wait.text != "ZORA DECLINED":
-		_fail("a declined TEAM INVITE does not say DECLINED")
-	await _tap(lobby.dialogs.modal.find_child("TeamWaitCancel", true, false) as Control if lobby.dialogs.modal else null)
-	await at.wait(0.3)
-	if lobby.dialogs.modal != null or _find_label(lobby.find_child("TeamInvite", true, false), "+ INVITE") == null:
-		_fail("OK does not close the TEAM INVITE, or the tile still waits")
-	cloud.peers.erase(on_id)
-	Game.profile.friends = saved_friends
 
 
 ## A stand-in TEAM INVITE (what Cloud keeps for a "tinv"): the popup TEAM INVITE; DECLINE closes it.
@@ -219,48 +143,30 @@ func _quick_clears(lobby: Lobby) -> void:
 	await at.wait(0.3)
 
 
-## LONE WOLF x DUO: the team search (CANCEL stops it); left alone, the match against bots.
-func _team_search(lobby: Lobby) -> Lobby:
+## LONE WOLF x DUO: the search for real players (Cloud.group_start: a solo is a unit of one),
+## SEARCHING PLAYERS 1/4 with no word of bots; CANCEL stops it. Never a match against bots.
+func _team_search(lobby: Lobby) -> void:
 	await _pick_size(lobby, "lonewolf", 2)
+	var cloud := Game.cloud_service()
 	await _tap(lobby.start_btn)
 	await at.wait(1.2)
 	var popup := lobby.dialogs.modal
-	var tm := lobby.get_node_or_null("TeamMatch") as TeamMatch
-	if popup == null or tm == null or not tm.searching or popup.find_child("TeamCancel", true, false) == null \
-			or popup.find_child("TeamStatus", true, false) == null or popup.find_child("TeamTimer", true, false) == null:
-		_fail("START in LONE WOLF DUO does not open the team search")
-		return lobby
-	var fill := popup.find_child("TeamFill", true, false) as Label
-	if fill == null or not fill.text.begins_with("BOTS IN 0:0"):
-		_fail("the search does not count down to the bots (%s)" % (fill.text if fill else "none"))
+	if popup == null or popup.find_child("GroupSearch", true, false) == null or popup.find_child("GroupSearchCancel", true, false) == null \
+			or _text(popup, "GroupSearchCount") != "SEARCHING PLAYERS 1/4" or cloud.search_needed != 4:
+		_fail("START in LONE WOLF DUO does not search real players (%s)" % _text(popup, "GroupSearchCount"))
+		return
+	for l in popup.find_children("*", "Label", true, false):
+		if (l as Label).text.contains("BOT"):
+			_fail("the search mentions bots: %s" % (l as Label).text)
 	_touch_ok(popup)
 	await at.shot("t08_team_search")
-	await _tap(popup.find_child("TeamCancel", true, false) as Control)
+	await at.wait(3.5)                   # (longer than the old LW_FILL_S: no match against bots comes)
+	if get_tree().current_scene != lobby or not Game.team_match.is_empty():
+		_fail("the search loaded a match on its own")
+	await _tap(popup.find_child("GroupSearchCancel", true, false) as Control)
 	await at.wait(0.4)
-	if tm.searching or lobby.dialogs.modal != null:
-		_fail("CANCEL does not stop the team search")
-	# Again, left alone this time: after LW_FILL_S the team plays bots here, said on its card.
-	Loading.delay_for_test = 1.5
-	await _tap(lobby.start_btn)
-	var shown := [false, ""]
-	var t := 0.0
-	while t < 20.0 and not get_tree().current_scene is TeamArena:
-		await at.wait(0.1)
-		t += 0.1
-		var desc := get_tree().root.find_child("MatchDesc", true, false) as Label
-		if desc and not shown[0]:
-			shown[0] = true
-			shown[1] = desc.text
-			await at.shot("t09_team_fill_card")
-	Loading.delay_for_test = 0.0
-	if not shown[0] or String(shown[1]) != "NO PLAYER FOUND: YOUR TEAM VS BOTS":
-		_fail("the match against bots does not say NO PLAYER FOUND (%s)" % str(shown))
-	if not get_tree().current_scene is TeamArena or String(get_tree().current_scene.scene_file_path) != "res://scenes/team_arena.tscn" \
-			or String(Game.team_match.get("mode_id", "")) != "duo" or Game.online:
-		_fail("nobody found does not load the DUO match against bots (%s)" % str(get_tree().current_scene))
-	await at.wait(1.0)
-	Game.goto_lobby()
-	return await _new_lobby(null)
+	if cloud.search_needed != 0 or lobby.dialogs.modal != null:
+		_fail("CANCEL does not stop the search")
 
 
 ## TRAINING GROUND x SQUAD loads the team arena on this phone.

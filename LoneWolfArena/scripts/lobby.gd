@@ -973,12 +973,9 @@ func _start() -> void:
 func start_group(size: int) -> void:
 	Game.team_match = {}
 	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
-	var why: Variant = LobbyTeam.cloud_call("group_start", [size])
-	if why == null:
-		dialogs.notice("ONLINE %s" % word, "Online groups are not available in this build.")
-		return
-	if String(why) != "":
-		dialogs.notice("LONE WOLF %s" % word, String(why))
+	var why := Game.cloud_service().group_start(size)
+	if why != "":
+		dialogs.notice("LONE WOLF %s" % word, why)
 		return
 	friends.open_search(size)
 
@@ -999,7 +996,7 @@ func on_group_changed() -> void:
 		# (set first: set_group_mode emits group_changed at once, which comes back here; with the
 		# gid not yet remembered that recursed without end, the crash on the first INVITE)
 		_group_gid = gid
-		LobbyTeam.cloud_call("set_group_mode", [Game.mode, Game.team_size])
+		Game.cloud_service().set_group_mode(Game.mode, Game.team_size)
 	_group_gid = gid
 	var list := LobbyTeam.members()
 	_gate_member = LobbyTeam.is_member()
@@ -1016,11 +1013,8 @@ func update_start_gate() -> void:
 		return
 	var text := ""
 	if _gate_member:
-		var a := LobbyTeam.api()
-		var found: Variant = a.get("search_found") if a else 0
-		var needed: Variant = a.get("search_needed") if a else 0
-		text = LobbyTeam.start_gate_text(true, false, _gate_leader_name,
-			Vector2i(int(found) if found is int else 0, int(needed) if needed is int else 0))
+		var c := Game.cloud_service()
+		text = LobbyTeam.start_gate_text(true, false, _gate_leader_name, Vector2i(c.search_found, c.search_needed))
 	if _wait_label.text != text:
 		_wait_label.text = text
 	_wait_leader.visible = text != ""
