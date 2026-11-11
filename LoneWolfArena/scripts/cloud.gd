@@ -934,7 +934,7 @@ func _on_inbox(d: Dictionary) -> void:
 			# The custom room's host: the password was right (wait for START) or wrong; a "rin"
 			# while in the room says it is still open.
 			if join_state in ["asking", "in"] and String(d.get("code", "")) == String(_join.get("code", "")):
-				var state := "in" if String(d.t) == "rin" else ("full" if d.get("full") == true else "wrong")
+				var state := "in" if String(d.t) == "rin" else ("full" if typeof(d.get("full")) == TYPE_BOOL and bool(d.full) else "wrong")
 				_join.t = Time.get_ticks_msec()
 				if state == "in" and typeof(d.get("sec")) == TYPE_STRING:
 					_room_enter(from, d)        # a room with slots: its group's keys

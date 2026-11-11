@@ -13,6 +13,10 @@ extends Node
 ## - a member: WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
 ##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
+## - CUSTOM ROOM with slots: CREATE with SQUAD shows 8 places with the HOST tag; in a DUO room a
+##   player who joined sits on ORANGE with the host's KICK, START goes once both teams have a
+##   player, a tap on an empty place moves the host there, KICK removes the player (START waits
+##   again); a player kicked out of a room is told so;
 ## - every touch target on the way is at least 56 px.
 ## Prints "GROUP LOBBY CHECK DONE bad=N".
 
@@ -45,6 +49,7 @@ func run(autotest: Node) -> int:
 	await _teams(lobby)
 	await _member(lobby)
 	await _group_invite(lobby)
+	await _room(lobby)
 	cloud.leave_group()
 	Game.profile.friends = saved_friends
 	Game.team_size = 1
@@ -62,7 +67,6 @@ func _solo(lobby: Lobby) -> void:
 	if invite == null or invite.disabled or bar.find_child("GroupExit", true, false) or bar.find_child("GroupDisband", true, false):
 		_fail("a solo's GROUP bar is not + INVITE alone")
 	_touch_ok(bar)
-	var cloud := Game.cloud_service()
 	Game.profile.friends = {ids.ZORA: {"name": "ZORA"}, ids["OFFLINE PAL"]: {"name": "ABBY"}}
 	cloud.peers[ids.ZORA] = {"name": "ZORA", "bundle": "neon", "pk": "", "seen": Time.get_ticks_msec() + 600000}
 	await _tap(invite)
@@ -264,6 +268,66 @@ func _group_invite(lobby: Lobby) -> void:
 	await at.wait(0.3)
 	if String(cloud.group.get("leader", "")) != ids.VIPER or String(cloud.group.get("status", "")) != "joining" or lobby.dialogs.modal != null:
 		_fail("ACCEPT did not join VIPER's group and close (%s)" % str(cloud.group.get("status")))
+
+
+## CUSTOM ROOM with slots (the ONLINE window's CUSTOM ROOM tab), with no relay: a room this phone
+## hosts, a player put in it as its "gjoin" would, KICK, and a kicked player's notice.
+func _room(lobby: Lobby) -> void:
+	lobby.friends.open("room")
+	await at.wait(0.4)
+	var popup := lobby.dialogs.modal
+	for n in [1, 2, 4]:
+		if popup == null or popup.find_child("RoomMode_%d" % n, true, false) == null:
+			_fail("CREATE has no RoomMode_%d" % n)
+	await _tap(popup.find_child("RoomMode_4", true, false) as Control if popup else null)
+	await at.wait(0.3)
+	await _tap(lobby.dialogs.modal.find_child("RoomCreate", true, false) as Control if lobby.dialogs.modal else null)
+	await at.wait(0.4)
+	var panel := lobby.dialogs.modal.find_child("SlotPanel", true, false) if lobby.dialogs.modal else null
+	if not cloud.in_room() or int(cloud.group.get("size", 0)) != 4 or panel == null or panel.find_child("Slot_1_3", true, false) == null \
+			or panel.find_child("HostTag", true, false) == null or panel.find_child("SlotKick_0", true, false) != null:
+		_fail("CREATE with SQUAD does not open a room with 8 places and the HOST tag")
+	await at.shot("g07_room_squad")
+	cloud.close_room()
+	cloud.open_room("4821", {}, "424242", 2)
+	(cloud._grp.invited as Dictionary)[ids.ZORA] = Time.get_ticks_msec()     # (the right password let ZORA in)
+	cloud._on_gjoin(ids.ZORA, {"name": "ZORA", "bundle": "neon"})
+	lobby.friends.open("room")
+	await at.wait(0.4)
+	popup = lobby.dialogs.modal
+	panel = popup.find_child("SlotPanel", true, false) if popup else null
+	var start := popup.find_child("RoomStart", true, false) as Button if popup else null
+	var kick := panel.find_child("SlotKick_2", true, false) as Button if panel else null
+	if panel == null or kick == null or start == null or start.disabled or _find_label(panel.find_child("Slot_1_0", true, false), "ZORA") == null:
+		_fail("a DUO room does not show ZORA on ORANGE with KICK and START")
+		return
+	_touch_ok(popup)
+	await at.shot("g08_room_duo")
+	await _tap(panel.find_child("Slot_0_1", true, false) as Control)
+	await at.wait(0.4)
+	if int(cloud.group_members()[0].slot) != 1:
+		_fail("a tap on an empty place does not move the host there (%s)" % str(cloud.group_members()[0]))
+	panel = lobby.dialogs.modal.find_child("SlotPanel", true, false) if lobby.dialogs.modal else null
+	await _tap(panel.find_child("SlotKick_2", true, false) as Control if panel else null)
+	await at.wait(0.4)
+	start = lobby.dialogs.modal.find_child("RoomStart", true, false) as Button if lobby.dialogs.modal else null
+	if cloud.group_members().size() != 1 or start == null or not start.disabled:
+		_fail("KICK does not remove the player (or START does not wait again)")
+	cloud.close_room()
+	# A player in someone's room, KICKed: back in the lobby with a notice.
+	var key := Crypto.new().generate_random_bytes(32)
+	cloud._grp = {"gid": "c3".repeat(16), "aes": key, "mac": key, "seq": 0, "their": {}, "seen": {}, "invited": {}, "beat_t": 3.0,
+		"join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": false, "manual": true}
+	cloud.group = {"gid": "c3".repeat(16), "leader": ids.KITE, "status": "idle", "mode": "lonewolf", "size": 2, "room": "135790", "members": [
+		{"id": ids.KITE, "name": "KITE", "bundle": "neon", "team": 0, "slot": 0}, {"id": cloud.my_id, "name": "ME", "bundle": "default", "team": 1, "slot": 2}]}
+	cloud.group_changed.emit()
+	await at.wait(0.3)
+	cloud._room_gone("THE HOST REMOVED YOU FROM ROOM %s")
+	await at.wait(0.4)
+	if _text(lobby.dialogs.modal, "NoticeText") != "THE HOST REMOVED YOU FROM ROOM 135790" or cloud.in_room():
+		_fail("a kicked player is not told (%s)" % _text(lobby.dialogs.modal, "NoticeText"))
+	lobby.dialogs.close_modal()
+	await at.wait(0.2)
 
 
 # ---------------------------------------------------------------- helpers

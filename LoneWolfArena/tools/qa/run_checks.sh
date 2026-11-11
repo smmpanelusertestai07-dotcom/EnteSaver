@@ -114,7 +114,7 @@ if [ "${1:-}" != "quick" ]; then
     [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest"' "$LOGS/sync_host.txt"
   # --- DUO / SQUAD: WP-B1's steps (team_lobby) go right below this line ---
   step team_lobby env LW_FILL_S=3 LW_MQTT_URL=ws://127.0.0.1:9 godot --headless --path . -- --autotest=script:res://tests/team_lobby_check.gd
-  # GROUPS in the lobby (UI): one copy, a stand-in group (tests/group_stub.gd), nothing leaves the machine
+  # GROUPS and the CUSTOM ROOM with slots in the lobby: one copy, a group put in Cloud by the check, nothing leaves the machine
   step group_lobby env LW_MQTT_URL=ws://127.0.0.1:9 godot --headless --path . -- --autotest=script:res://tests/group_lobby_check.gd
 
   # --- DUO / SQUAD: WP-B2's steps (none planned) go right below this line ---

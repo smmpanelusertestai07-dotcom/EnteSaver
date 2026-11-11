@@ -128,3 +128,18 @@ UI:   scripts/lobby.gd (member models on the podium, layout), scripts/lobby_team
       design/INTERFACES.txt (lobby sections).
 Both: run tools/qa/run_checks.sh quick while working and the full suite at the end
 (flock /tmp/lw_checks.lock); commit on your own branch; never push.
+
+6. CUSTOM ROOM WITH SLOTS (1.5.2, Cloud.open_room(pin, rules, code, size))
+-------------------------------------------------------------------------
+A room is a group (its own ROOT/g/<gid> room and keys, the host its leader) whose players joined by
+code + password instead of an invite. size: SOLO 1 (2 places), DUO 2 (4), SQUAD 4 (8); team t's
+places are roster slots t * NetGroup.per_team(size) .. + NetGroup.places(size, true) - 1.
+  "ask" (ROOT/c/<code>, HMAC with the password's key) -> the host's "rin" carries "sec" =
+        RSA(asker pk, gid + aes + mac + size byte) and "rt" = HMAC(password key, "rin" + sec + host);
+        a full room answers "rno" {"full": true}; a KICKed id is never answered again.
+  then the group room as above ("gjoin", the host's "groster" the only truth) plus
+  "gslot"   {t, s}                                 a player asks for an empty place (Cloud.room_take)
+START is the host's only (Cloud.room_start): SOLO = the 1 vs 1 with the room's rules
+(start_room_match), DUO / SQUAD = _group_launch: the all-human match of the players in their places
+(uneven allowed, empty places stay empty, no bots). The room closes when its match starts. A player
+out of the room (gkick, gend, the host silent) gets Cloud.room_notice, shown once by the lobby.
