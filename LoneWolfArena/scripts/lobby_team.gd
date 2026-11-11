@@ -13,9 +13,9 @@ extends RefCounted
 ## The lobby makes it (Lobby.team), builds it (build), redraws it on Cloud.group_changed and on
 ## SELECT MODE (refresh) and calls process() every frame; LobbyFriends hands it a declined invite
 ## (on_answered).
-## The Cloud group API (GROUPS.txt 3) is CORE's: every call to it goes through the guarded helpers
-## below (api / cloud_call / group / members / in_group / is_leader / group_max), the one place to
-## drop the guards once Cloud has it. `stand_in` lets a test put a stand-in in Cloud's place.
+## It reads and calls Cloud's group API (GROUPS.txt 3) through the helpers below (group / members /
+## in_group / is_leader / group_max / search_progress). A CUSTOM ROOM with slots is a group too
+## (Cloud.in_room): its players show in the room's own slot panel (LobbyFriends), not in this bar.
 ## Node names: GroupBar, GroupHead, GroupMember_<n>, GroupRemove_<n>, GroupInvite, GroupTeams,
 ## GroupExit, GroupDisband, GroupInviteList, GroupFriend_<code>, GroupAsk_<code>, GroupListNote,
 ## GroupFriends, GroupInvited, GroupInvitedOk, GroupTeamPanel (with a SlotPanel).
@@ -23,9 +23,6 @@ extends RefCounted
 const TILE_W := 280.0
 const ONLINE_GREEN := Color(0.38, 0.86, 0.44)
 const GROUP_MAX_DEFAULT := 4
-
-## TEST-ONLY: an object with the group API to use instead of Cloud (tests/group_stub.gd).
-static var stand_in: Object = null
 
 var lobby: Lobby
 var bar: VBoxContainer
@@ -44,41 +41,25 @@ func _init(owner_lobby: Lobby) -> void:
 	lobby = owner_lobby
 
 
-# ---------------------------------------------------------------- the Cloud group API, guarded
+# ---------------------------------------------------------------- the Cloud group API
 
-## Where the group API lives: Cloud, or a test's stand-in.
-static func api() -> Object:
-	return stand_in if stand_in != null else Game.cloud_service()
-
-
-## Calls a group method of the API when it has it (CORE's Cloud, GROUPS.txt 3), else `fallback`.
-static func cloud_call(method: String, args: Array = [], fallback: Variant = null) -> Variant:
-	var a := api()
-	if a == null or not a.has_method(method):
-		return fallback
-	return a.callv(method, args)
-
-
-## Cloud.group: {} | {"gid", "leader", "members", "status", "mode", "size"}.
+## Cloud.group: {} | {"gid", "leader", "members", "status", "mode", "size"} (+ "room" in a room).
 static func group() -> Dictionary:
-	var a := api()
-	var g: Variant = a.get("group") if a else null
-	return g as Dictionary if g is Dictionary else {}
+	return Game.cloud_service().group
 
 
-## Cloud.group_members(): [{"id", "name", "bundle", "leader", "me"}], leader first, join order.
+## Cloud.group_members(): [{"id", "name", "bundle", "leader", "me", "team", "slot"}], leader first.
 static func members() -> Array:
-	var m: Variant = cloud_call("group_members", [], [])
-	return m as Array if m is Array else []
+	return Game.cloud_service().group_members()
 
 
 static func in_group() -> bool:
-	return bool(cloud_call("in_group", [], false))
+	return Game.cloud_service().in_group()
 
 
 ## True when not in a group too (a solo leads itself).
 static func is_leader() -> bool:
-	return bool(cloud_call("is_group_leader", [], true))
+	return Game.cloud_service().is_group_leader()
 
 
 ## In a group and not its leader: START and SELECT MODE are the leader's.
@@ -87,17 +68,13 @@ static func is_member() -> bool:
 
 
 static func group_max() -> int:
-	var a := api()
-	var v: Variant = a.get("GROUP_MAX") if a else null
-	return int(v) if v is int else GROUP_MAX_DEFAULT
+	return Cloud.GROUP_MAX
 
 
 ## The search's progress: [found, needed] (needed 0: not searching).
 static func search_progress() -> Array:
-	var a := api()
-	var f: Variant = a.get("search_found") if a else null
-	var n: Variant = a.get("search_needed") if a else null
-	return [int(f) if f is int else 0, int(n) if n is int else 0]
+	var c := Game.cloud_service()
+	return [c.search_found, c.search_needed]
 
 
 ## The leader's name (the member marked leader), "" outside a group.
@@ -214,7 +191,7 @@ func refresh() -> void:
 	for c in bar.get_children():
 		bar.remove_child(c)
 		c.queue_free()
-	bar.visible = bar_shown(Game.mode, grouped)
+	bar.visible = bar_shown(Game.mode, grouped) and not Game.cloud_service().in_room()
 	if not bar.visible:
 		return
 	var acts := bar_actions(grouped, leader, list.size(), Game.team_size, group_max())
@@ -300,7 +277,7 @@ func _member_tile(n: int, m: Dictionary, can_remove: bool) -> PanelContainer:
 		var who := String(m.get("name", "PLAYER"))
 		rm.pressed.connect(func() -> void:
 			lobby.dialogs.confirm("REMOVE FROM GROUP", "Remove %s from your group?" % who, "REMOVE",
-				func() -> void: cloud_call("kick_from_group", [id]), Callable(), true))
+				func() -> void: Game.cloud_service().kick_from_group(id), Callable(), true))
 		h.add_child(rm)
 	return p
 
@@ -350,13 +327,13 @@ func _action_button(text: String, node_name: String, style: String, action: Call
 ## EXIT GROUP (a member), asked first.
 func _ask_exit() -> void:
 	lobby.dialogs.confirm("EXIT GROUP", "Leave %s's group? The others stay together." % leader_name(members()), "EXIT GROUP",
-		func() -> void: cloud_call("leave_group"), Callable(), true)
+		func() -> void: Game.cloud_service().leave_group(), Callable(), true)
 
 
 ## DISBAND GROUP (the leader), asked first: everyone leaves.
 func _ask_disband() -> void:
 	lobby.dialogs.confirm("DISBAND GROUP", "Disband your group? Every member leaves it.", "DISBAND",
-		func() -> void: cloud_call("leave_group"), Callable(), true)
+		func() -> void: Game.cloud_service().leave_group(), Callable(), true)
 
 
 # ---------------------------------------------------------------- the invite list
@@ -461,7 +438,7 @@ func _friend_row(r: Dictionary) -> PanelContainer:
 ## GroupAsk_<code>: the GROUP INVITE goes to this friend (Cloud.group_invite); then a popup says
 ## INVITED <NAME> and, when it comes, their answer.
 func ask_friend(id: String, who: String) -> void:
-	if not bool(cloud_call("group_invite", [id], false)):
+	if not Game.cloud_service().group_invite(id):
 		_list_note = "%s COULD NOT BE REACHED" % who
 		_list_sig = ""
 		_fill_list()
@@ -531,7 +508,7 @@ func open_teams() -> void:
 	_slot_panel = SlotPanel.new()
 	_slot_panel.editable = leader
 	_slot_panel.moved.connect(func(id: String, team: int, slot: int) -> void:
-		cloud_call("set_group_team", [id, team, team * NetGroup.per_team(Game.team_size) + slot]))
+		Game.cloud_service().set_group_team(id, team, team * NetGroup.per_team(Game.team_size) + slot))
 	v.add_child(_slot_panel)
 	_slot_panel.show_slots(NetGroup.per_team(Game.team_size), team_entries(members(), Game.team_size))
 

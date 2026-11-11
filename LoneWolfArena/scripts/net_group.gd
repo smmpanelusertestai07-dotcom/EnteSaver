@@ -6,8 +6,10 @@ extends RefCounted
 ## (team 0 holds slots 0..per-1, team 1 per..2 x per-1, per = per_team(size)). A slot nobody holds
 ## stays empty: an all-human match never fills it with a bot, so teams may be uneven (1 VS 2,
 ## 1 VS 3). The leader may arrange the sides (Cloud.set_group_team); until then arrange() gives the
-## default sides. The same structure (a host, a size, members in slots) is meant to serve the
-## CUSTOM ROOM with slots too: a group is a private room that players join by invite.
+## default sides. The same structure (a host, a size, members in slots) serves the CUSTOM ROOM with
+## slots (room true below): a room is a group whose players joined by its code and password, with
+## SOLO 1, DUO 2, SQUAD 4 places a team (places), numbered like the match's roster slots (team 0
+## from 0, team 1 from per_team(size)), and a player takes an empty place (take_empty).
 
 const MAX := 4                  # players in a group (Cloud.GROUP_MAX)
 
@@ -18,12 +20,24 @@ static func per_team(size: int) -> int:
 	return 4 if size == 4 else 2
 
 
+## The places a team has: a group's per_team(size); a CUSTOM ROOM's (room) SOLO 1, DUO 2, SQUAD 4.
+## Team t's places are the slots t * per_team(size) .. + places - 1 either way.
+static func places(size: int, room := false) -> int:
+	return (4 if size == 4 else (2 if size == 2 else 1)) if room else per_team(size)
+
+
+## The most players a group (MAX) or a room (both teams full) holds.
+static func cap(size: int, room := false) -> int:
+	return 2 * places(size, true) if room else MAX
+
+
 ## Gives every member a team and a slot. Default (manual false), as GROUPS.txt: DUO up to two
 ## players all BLUE (a search finds the other team), three 2 VS 1, four 2 VS 2 (the leader and the
 ## first to join BLUE); SQUAD everyone BLUE. manual: the leader's own sides stay; a member without a
 ## valid place (new, or the size changed under it) takes the first free slot, BLUE first.
-static func arrange(members: Array, size: int, manual: bool) -> void:
+static func arrange(members: Array, size: int, manual: bool, room := false) -> void:
 	var per := per_team(size)
+	var n := places(size, room)
 	var taken := {}
 	for i in members.size():
 		var m: Dictionary = members[i]
@@ -32,17 +46,17 @@ static func arrange(members: Array, size: int, manual: bool) -> void:
 		if not manual:
 			m["team"] = 1 if per == 2 and members.size() >= 3 and i >= 2 else 0
 			m["slot"] = -1
-		elif t in [0, 1] and s >= t * per and s < (t + 1) * per and not taken.has(s):
+		elif t in [0, 1] and s >= t * per and s < t * per + n and not taken.has(s):
 			taken[s] = true
 		else:
-			m["team"] = -1
+			m["team"] = t if room and t in [0, 1] else -1     # (a room's newcomer keeps the side it was given)
 			m["slot"] = -1
 	for m: Dictionary in members:
 		if int(m.slot) >= 0:
 			continue
 		var want := int(m.team) if int(m.team) in [0, 1] else 0
 		for t: int in [want, 1 - want]:
-			var s := first_free(taken, t, per)
+			var s := first_free(taken, t, per, n)
 			if s >= 0:
 				m["team"] = t
 				m["slot"] = s
@@ -50,8 +64,8 @@ static func arrange(members: Array, size: int, manual: bool) -> void:
 				break
 
 
-static func first_free(taken: Dictionary, team: int, per: int) -> int:
-	for s in range(team * per, (team + 1) * per):
+static func first_free(taken: Dictionary, team: int, per: int, n := -1) -> int:
+	for s in range(team * per, team * per + (per if n < 0 else n)):
 		if not taken.has(s):
 			return s
 	return -1
@@ -84,6 +98,35 @@ static func move(members: Array, id: String, team: int, slot: int, size: int) ->
 	who["team"] = team
 	who["slot"] = slot
 	return true
+
+
+## A CUSTOM ROOM's player `id` takes the empty place `slot` (a roster slot of `team`, 0 / 1). False
+## when there is no such player, the place is not one of that team's (places(size, true)) or someone
+## holds it: a room's player never pushes another out.
+static func take_empty(members: Array, id: String, team: int, slot: int, size: int) -> bool:
+	var per := per_team(size)
+	if team not in [0, 1] or slot < team * per or slot >= team * per + places(size, true):
+		return false
+	var who := {}
+	for m: Dictionary in members:
+		if int(m.get("slot", -1)) == slot:
+			return false
+		if String(m.id) == id:
+			who = m
+	if who.is_empty():
+		return false
+	who["team"] = team
+	who["slot"] = slot
+	return true
+
+
+## Which team a player who comes into a room joins: the one with fewer players (BLUE on a tie).
+static func room_side(members: Array) -> int:
+	var n := [0, 0]
+	for m: Dictionary in members:
+		if int(m.get("team", -1)) in [0, 1]:
+			n[int(m.team)] += 1
+	return 0 if n[0] <= n[1] else 1
 
 
 ## What the leader's START does with these sides: "match" (both teams have a player: the group plays
@@ -119,12 +162,13 @@ static func pack_members(members: Array) -> Array:
 
 
 ## A leader's "groster" members off the wire (untrusted, though only a key holder could send it):
-## at most MAX, the leader first, ids real and unique, teams 0 / 1 with slots in their range and
-## unique, names cleaned, outfits known. [] when anything is off.
-static func members_from(v: Variant, leader: String, size: int) -> Array:
-	if not v is Array or (v as Array).is_empty() or (v as Array).size() > MAX:
+## at most cap(size, room), the leader first, ids real and unique, teams 0 / 1 with slots in their
+## range (a room's: its places) and unique, names cleaned, outfits known. [] when anything is off.
+static func members_from(v: Variant, leader: String, size: int, room := false) -> Array:
+	if not v is Array or (v as Array).is_empty() or (v as Array).size() > cap(size, room):
 		return []
 	var per := per_team(size)
+	var n := places(size, room)
 	var out := []
 	var ids := {}
 	var used := {}
@@ -137,7 +181,7 @@ static func members_from(v: Variant, leader: String, size: int) -> Array:
 		var id := String(a[0])
 		var t := int(a[3])
 		var s := int(a[4])
-		if not Game.is_player_id(id) or ids.has(id) or t not in [0, 1] or s < t * per or s >= (t + 1) * per or used.has(s):
+		if not Game.is_player_id(id) or ids.has(id) or t not in [0, 1] or s < t * per or s >= t * per + n or used.has(s):
 			return []
 		ids[id] = true
 		used[s] = true
