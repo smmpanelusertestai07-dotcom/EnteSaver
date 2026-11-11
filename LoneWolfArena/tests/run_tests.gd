@@ -2030,7 +2030,7 @@ func _test_release_fixes() -> void:
 	var clear: Color = ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color")
 	_check(clear.get_luminance() < 0.05, "scene changes never flash a light clear colour (%s)" % str(clear))
 	var ver := String(ProjectSettings.get_setting("application/config/version", ""))
-	_check(ver == "1.5.2", "the version shown (loading, login) is the project's 1.5.2 (%s)" % ver)
+	_check(ver == "1.5.3", "the version shown (loading, login) is the project's 1.5.3 (%s)" % ver)
 	for path: String in ["res://scripts/loading.gd", "res://scripts/login.gd"]:
 		_check(FileAccess.get_file_as_string(path).contains("application/config/version"), "%s shows the project's version" % path)
 	_check(not FileAccess.get_file_as_string("res://scripts/lobby.gd").contains("application/config/version"),
