@@ -755,7 +755,8 @@ func start_reload() -> bool:
 	var w := weapon()
 	if w.start_reload():
 		Audio.play_at("reload_mag" if int(w.def.pellets) == 1 else "reload_shell", global_position, -4.0 if is_player else -8.0)
-		model.play_reload(float(w.def.reload))
+		if model:
+			model.play_reload(float(w.def.reload))
 		return true
 	return false
 
@@ -772,7 +773,8 @@ func switch_weapon(index: int) -> void:
 	current = index
 	var w := weapon()
 	w.cooldown = maxf(w.cooldown, float(w.def.equip))
-	model.play_swap(String(w.def.model), w.def.get("tint", Color.WHITE), float(w.def.equip))
+	if model:
+		model.play_swap(String(w.def.model), w.def.get("tint", Color.WHITE), float(w.def.equip))
 	Audio.play_at("ui_select", global_position, -10.0)
 	weapon_switched.emit()
 

@@ -56,6 +56,8 @@ func _ready() -> void:
 	_test_damage_shown()
 	_test_spread()
 	_test_weapon_state()
+	_test_kit()
+	_test_bot_sidearm()
 	_test_hud_layout()
 	_test_hud_touch_areas()
 	_test_guard()
@@ -272,6 +274,99 @@ func _test_weapon_state() -> void:
 	pw.on_fire()
 	pw.tick(1.0)
 	_check(pw.bloom == 0.0 and pw.burst == 0, "bloom/burst recover")
+
+
+## The kit, the same in every mode: the round's gun at 0, the fists at 1 (an older build still
+## reads both), the sidearm at 2, the same whatever the gun; SWITCH cycles gun -> sidearm -> fists;
+## before a pick only the fists can be in hand (the sidearm comes with the gun); the sidearm is out
+## of the pick grid, weaker per shot than every pickable pistol, 12 rounds and two spare magazines,
+## the quickest draw; it fires, runs dry and reloads like any gun; a new round refills it.
+func _test_kit() -> void:
+	var sd: Dictionary = Weapons.DEFS[Weapons.SIDEARM]
+	var weakest := INF
+	for id: String in Weapons.PICKABLE:
+		if String(Weapons.DEFS[id]["class"]) == "PISTOL":
+			weakest = minf(weakest, float(Weapons.DEFS[id].damage))
+	_check(not Weapons.PICKABLE.has(Weapons.SIDEARM) and float(sd.damage) < weakest * 0.6 and int(sd.mag) == 12
+		and int(sd.reserve) in [12, 24] and String(sd["class"]) == "PISTOL" and Weapons.CYCLE == [Weapons.GUN, Weapons.SIDE, Weapons.FISTS],
+		"the sidearm: not in the pick grid, well under the pickable pistols per shot (%.0f vs %.0f), 12 + %d rounds" % [sd.damage, weakest, sd.reserve])
+	for id: String in Weapons.PICKABLE:
+		_check(float(sd.equip) < float(Weapons.DEFS[id].equip), "the sidearm draws quicker than the %s" % id)
+	for id: String in ["ar", "lever", "sniper"]:
+		var f := Bot.new()
+		f.set_loadout(id)
+		_check(f.weapons.size() == 3 and f.gun().id == id and f.weapons[1].id == "fists" and f.sidearm().id == Weapons.SIDEARM
+			and f.current == Weapons.GUN, "the kit with the %s: [gun, fists, sidearm], the gun in hand" % id)
+		f.free()
+	var p := Player.new()
+	add_child(p)
+	p.process_mode = Node.PROCESS_MODE_DISABLED
+	p.set_loadout("smg")
+	var order: Array[int] = []
+	for i in 4:
+		p.switch_weapon(p.next_weapon())
+		order.append(p.current)
+	_check(order == [Weapons.SIDE, Weapons.FISTS, Weapons.GUN, Weapons.SIDE], "SWITCH cycles gun -> sidearm -> fists -> gun (%s)" % [order])
+	_check(p.weapon().id == Weapons.SIDEARM and p.weapon().cooldown <= float(sd.equip) + 0.001, "the sidearm in hand after its quick draw")
+	var w := p.weapon()
+	w.cooldown = 0.0
+	var shots := 0
+	while w.can_fire() and shots < 50:
+		w.on_fire()
+		w.cooldown = 0.0
+		shots += 1
+	_check(shots == 12 and w.ammo == 0 and not w.can_fire(), "twelve rounds to a magazine (%d)" % shots)
+	_check(p.start_reload() and w.reloading, "an empty sidearm reloads")
+	for i in 20:
+		w.tick(0.1)
+	_check(w.ammo == 12 and w.reserve == int(sd.reserve) - 12 and not w.reloading, "a reload takes a spare magazine (%d / %d)" % [w.ammo, w.reserve])
+	p.switch_weapon(Weapons.GUN)
+	_check(p.gun().ammo == int(Weapons.DEFS.smg.mag), "the gun keeps its own magazine")
+	p.await_pick()
+	_check(p.awaiting_pick and p.current == Weapons.FISTS and p.next_weapon() == Weapons.FISTS, "before the pick SWITCH stays on the fists")
+	p.switch_weapon(Weapons.SIDE)
+	p.switch_weapon(Weapons.GUN)
+	_check(p.current == Weapons.FISTS and not p.can_draw(Weapons.SIDE), "the sidearm comes with the gun: not before the pick")
+	p.set_loadout("sg")
+	_check(not p.awaiting_pick and p.current == Weapons.GUN and p.sidearm().ammo == 12 and p.sidearm().reserve == int(sd.reserve),
+		"the pick gives the kit back, the sidearm full")
+	p.knocked = true
+	p.switch_weapon(Weapons.SIDE)
+	_check(p.current == Weapons.GUN, "a knocked fighter draws nothing")
+	p.knocked = false
+	p.switch_weapon(Weapons.SIDE)
+	_check(p.current == Weapons.SIDE, "up again, the kit is there")
+	p.free()
+
+
+## The bot draws the sidearm when its gun runs empty with the enemy close (not far off), goes back
+## to the gun when the sidearm is empty or the enemy is past SIDEARM_KEEP_M, and holds the fists
+## only when both are dry.
+func _test_bot_sidearm() -> void:
+	var b := Bot.new()
+	add_child(b)
+	b.process_mode = Node.PROCESS_MODE_DISABLED
+	b.set_loadout("ar")
+	b.gun().ammo = 0
+	b._choose_arm(Bot.SIDEARM_DRAW_M + 4.0)
+	var far_keeps := b.current == Weapons.GUN
+	b._choose_arm(Bot.SIDEARM_DRAW_M - 2.0)
+	_check(far_keeps and b.current == Weapons.SIDE, "the bot draws the sidearm on an empty magazine up close, not far off")
+	b._choose_arm(Bot.SIDEARM_DRAW_M)
+	_check(b.current == Weapons.SIDE, "and keeps it while the enemy stays close")
+	b._choose_arm(Bot.SIDEARM_KEEP_M + 1.0)
+	_check(b.current == Weapons.GUN, "back to the gun once the enemy is far")
+	b.switch_weapon(Weapons.SIDE)
+	b.sidearm().ammo = 0
+	b._choose_arm(3.0)
+	_check(b.current == Weapons.GUN, "back to the gun when the sidearm is empty")
+	b._choose_arm(3.0)
+	_check(b.current == Weapons.GUN, "an empty sidearm is not drawn again")
+	b.gun().reserve = 0
+	b.sidearm().reserve = 0
+	b._choose_arm(3.0)
+	_check(b.current == Weapons.FISTS, "the fists only when both are dry")
+	b.free()
 
 
 func _test_hud_layout() -> void:
