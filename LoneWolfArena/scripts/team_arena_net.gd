@@ -837,7 +837,9 @@ func _set_down_quietly(f: Fighter, flags: int) -> void:
 	_applying += 1
 	if flags & 6:
 		f.last_hit_cause = "left" if flags & 4 else "gun"
+		f.quiet_death = true
 		f.die(null, false)
+		f.quiet_death = false
 	elif flags & 1 and not f.knocked:
 		f.knock(null, false)
 	_applying -= 1

@@ -1542,10 +1542,10 @@ func _notification(what: int) -> void:
 	var sp := _find_settings()
 	if sp and not sp.covered():
 		return                      # the panel closes itself
-	if dialogs.size_box:
-		dialogs.close_size_box()
-	elif _modal:                    # (also a popup that came in over the settings panel)
+	if _modal:                      # (also a popup that came in over the settings panel or the size box)
 		dialogs.back()
+	elif dialogs.size_box:
+		dialogs.close_size_box()
 	elif profile_ui.layer:
 		profile_ui.close()
 	elif wardrobe:

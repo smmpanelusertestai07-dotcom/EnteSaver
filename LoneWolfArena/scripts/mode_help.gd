@@ -14,15 +14,15 @@ extends VBoxContainer
 ## Each mode's pages: [picture, title, text] (pictures: _draw_picture).
 const PAGES := {
 	"lonewolf": [
-		["duel", "ONE ON ONE", "You against another player on CARGO CAGE. Take your opponent down to win the round; the first to 5 rounds wins the match."],
+		["duel", "ONE ON ONE", "You against another player on CARGO CAGE. Knock them out and the round is yours; whoever takes 5 rounds first wins the match."],
 		["pick", "ONE GUN FOR BOTH", "Every 2 rounds one of you picks the gun you both fight with, taking turns: the ROUNDS strip shows whose pick it is. A gun picked rests for the next 4 rounds."],
-		["clock", "TWO STAGES, ONE ZONE", "A round runs 20 s, then 90 s more while the safe zone closes in. Outside it you lose HP, faster the longer you stay; at time-out the higher HP wins."],
+		["clock", "TWO STAGES, ONE ZONE", "A round runs 20 s, then 90 s more (2 minutes in SQUAD) while the safe zone closes in. Outside it you lose HP, faster the longer you stay; at time-out the higher HP wins."],
 		["group", "PLAY WITH FRIENDS", "Pick DUO or SQUAD to play with your group against real players. INVITE friends who are online, or share your GROUP CODE so they join at once."],
 	],
 	"training": [
 		["bot", "PRACTISE YOUR WAY", "Fight a bot at EASY, NORMAL or HARD, round by round as online, or pick DUMMY to train your aim: no zone, no clock, nothing counted. DUO and SQUAD put bot teammates beside you."],
 		["pick", "ONE GUN FOR BOTH", "Every 2 rounds one side picks the gun both fight with, taking turns: the ROUNDS strip shows whose pick it is. A gun picked rests for the next 4 rounds."],
-		["clock", "TWO STAGES, ONE ZONE", "A round runs 20 s, then 90 s more while the safe zone closes in. Outside it you lose HP, faster the longer you stay; at time-out the higher HP wins."],
+		["clock", "TWO STAGES, ONE ZONE", "A round runs 20 s, then 90 s more (2 minutes in SQUAD) while the safe zone closes in. Outside it you lose HP, faster the longer you stay; at time-out the higher HP wins."],
 		["kit", "YOUR KIT", "Every round: the gun picked, the WREN 9 sidearm and your fists. SWITCH beside RELOAD goes gun, sidearm, fists; a tap on a slot of the weapon panel draws that one."],
 	],
 }

@@ -513,6 +513,11 @@ func armor_mult(zone: String) -> float:
 	return Weapons.after_armor(1.0, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
 
 
+## Set by the online paths that put a fighter down without a scene (a rejoin's or a restart's
+## restore of who is already out): no ELIMINATED tag or burst then, and none for a player who LEFT.
+var quiet_death := false
+
+
 func die(killer: Fighter, headshot := false) -> void:
 	if not alive:
 		return
@@ -534,7 +539,7 @@ func die(killer: Fighter, headshot := false) -> void:
 	revived_by = null
 	if model:
 		model.play_death()
-	if is_inside_tree():
+	if is_inside_tree() and not quiet_death and last_hit_cause != "left":
 		Effects.eliminated(self, global_position)
 	died.emit(self, killer, headshot)
 
