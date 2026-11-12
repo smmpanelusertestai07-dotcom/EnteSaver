@@ -90,6 +90,9 @@ var free_look := false                # eye button held: the camera turns around
 var _free := Vector2.ZERO             # the free look's camera yaw / pitch offset (radians)
 var spectating: Fighter               # eliminated: whose view the camera follows (the killer)
 var _spectate_wait := 0.0             # s left on the own fall before the camera goes to them
+## What this player still carried when eliminated ({"walls", "frags", "medkits"}; {} while alive):
+## the SPECTATING card shows it.
+var kit_at_death := {}
 var crosshair_on_target := false      # HUD: crosshair turns red
 var _red_target: Fighter              # whom it is red on (a shot then goes to them)
 var _track_dir := Vector3.ZERO        # last camera->target chest direction (for tracking)
@@ -211,6 +214,8 @@ func spectating_now() -> Fighter:
 ## their shoulder, like the reference's spectating view (until the next round).
 func die(killer: Fighter, headshot := false) -> void:
 	put_away_item()
+	if alive:
+		kit_at_death = {"walls": shields, "frags": grenades, "medkits": medkits}
 	spectating = killer if killer != null and killer != self else null
 	_spectate_wait = 1.0
 	super(killer, headshot)

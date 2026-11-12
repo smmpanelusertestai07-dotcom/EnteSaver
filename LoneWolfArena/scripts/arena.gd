@@ -1601,6 +1601,14 @@ func _awaits_final() -> bool:
 	return online and not _forfeit and not _invalid and _their_final.is_empty() and not _net_left and Game.session.in_session
 
 
+## The player id behind fighter `f` that a friend request can go to: the opponent of an internet
+## match (not one without internet), else "" (a bot, this phone's own player).
+func watched_player_id(f: Fighter) -> String:
+	if not online or f == null or f != bot or Game.local_match() or not Game.is_player_id(_enemy_id):
+		return ""
+	return _enemy_id
+
+
 ## Rows for the in-match scoreboard and the results: you first, then the opponent. Online, once the
 ## match is over, the opponent's row has the numbers its own phone sent ("fin"), and the guest shows
 ## the host's HP (_shown_hp). "deaths": the times this phone saw that fighter eliminated (K/D/A).

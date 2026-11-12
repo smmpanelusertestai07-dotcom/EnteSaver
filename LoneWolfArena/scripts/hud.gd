@@ -61,6 +61,7 @@ var team: HudTeam                  # DUO / SQUAD: the team layer (HudTeam.attach
 var seen := {}                     # fighter -> in sight (refreshed 10x per second)
 
 var _touches := {}                 # touch index -> {"kind": joy|look|fire|ui, "id": String}
+var _spec_friend_rect := Rect2()     # ADD FRIEND on the SPECTATING card (empty while not drawn)
 var _joy_touch := -1
 var _joy_center := Vector2.ZERO
 var _joy_vec := Vector2.ZERO       # finger offset in ring radii (can exceed 1)
@@ -476,6 +477,10 @@ func _input(event: InputEvent) -> void:
 
 func _on_down(index: int, pos: Vector2) -> void:
 	var vs := size
+	if _spec_friend_rect.has_area() and _spec_friend_rect.grow(6).has_point(pos):
+		spectate_add_friend()
+		_touches[index] = {"kind": "ui", "id": "friend"}
+		return
 	if panels.visible and panels.tap(pos):
 		_touches[index] = {"kind": "ui", "id": "panel"}
 		return
@@ -1854,9 +1859,13 @@ func team_matchup_lines() -> Array:
 
 ## "ROUND n / AREA: name" on a band fading from blue (left) to orange (right).
 ## Eliminated and following the killer's view: SPECTATING and their name at the bottom right
-## (the controls are hidden then; the kill feed keeps the bottom centre). DUO / SQUAD: HudTeam
-## draws it, with NEXT.
+## (the controls are hidden then; the kill feed keeps the bottom centre), with a small row of what
+## this player still carried when eliminated (walls, frags, medkits: Player.kit_at_death) and,
+## in an internet match against the player watched (Arena.watched_player_id), ADD FRIEND: the same
+## friend request as the results', greyed as REQUEST SENT once sent and FRIENDS when they already
+## are (spectate_friend_state). DUO / SQUAD: HudTeam draws it, with NEXT.
 func _draw_spectating(vs: Vector2, u: float) -> void:
+	_spec_friend_rect = Rect2()
 	if team != null:
 		return
 	var who := player.spectating_now() if player != null else null
@@ -1865,11 +1874,62 @@ func _draw_spectating(vs: Vector2, u: float) -> void:
 	var nm := who.display_name.to_upper()
 	var fs := int(0.03 * u)
 	var lfs := int(0.022 * u)
-	var w := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("SPECTATING", lfs, "bold")) + 0.12 * u
+	var kit: Dictionary = player.kit_at_death
+	var friend := spectate_friend_state(who)
+	var w := maxf(maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("SPECTATING", lfs, "bold")) + 0.12 * u,
+		0.36 * u if not kit.is_empty() or friend != "" else 0.0)
+	var h := 0.085 * u + (0.05 * u if not kit.is_empty() else 0.0) + (0.075 * u if friend != "" else 0.0)
 	var c := Vector2(vs.x - w * 0.5 - 0.06 * u, vs.y * 0.8)
-	HudDraw.plate(self, Rect2(c.x - w * 0.5, c.y - 0.04 * u, w, 0.085 * u), 0.7)
-	HudDraw.text(self, "SPECTATING", Vector2(c.x, c.y - 0.015 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
-	HudDraw.text(self, nm, Vector2(c.x, c.y + 0.022 * u), fs, Color.WHITE, 1, 2, "bold")
+	var top := minf(c.y - 0.04 * u, vs.y - 0.02 * u - h)
+	HudDraw.plate(self, Rect2(c.x - w * 0.5, top, w, h), 0.7)
+	HudDraw.text(self, "SPECTATING", Vector2(c.x, top + 0.025 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
+	HudDraw.text(self, nm, Vector2(c.x, top + 0.062 * u), fs, Color.WHITE, 1, 2, "bold")
+	var y := top + 0.085 * u
+	if not kit.is_empty():
+		# [wall] n   [frag] n   [medkit] n, centred under the name
+		var items := [["v_wall", int(kit.get("walls", 0))], ["item_grenade", int(kit.get("frags", 0))], ["v_medkit", int(kit.get("medkits", 0))]]
+		var step := 0.1 * u
+		var x0 := c.x - step * (items.size() - 1) * 0.5
+		var iy := y + 0.024 * u
+		for i in items.size():
+			var ix := x0 + step * i
+			var n := int(items[i][1])
+			var col := Color(1, 1, 1, 0.92) if n > 0 else Color(1, 1, 1, 0.35)
+			HudDraw.icon(self, HudDraw.tex(String(items[i][0])), Vector2(ix - 0.018 * u, iy), Vector2(0.034, 0.034) * u, col)
+			HudDraw.text(self, "x%d" % n, Vector2(ix + 0.004 * u, iy), int(0.02 * u), col, 0, 2, "bold")
+		y += 0.05 * u
+	if friend != "":
+		var br := Rect2(c.x - w * 0.5 + 0.03 * u, y + 0.008 * u, w - 0.06 * u, 0.06 * u)
+		var on := friend == "add"
+		draw_rect(br, Color(UI.ACCENT, 0.95) if on else Color(0.3, 0.3, 0.32, 0.75))
+		var caption := String({"add": "ADD FRIEND", "sent": "REQUEST SENT", "friends": "FRIENDS"}.get(friend, ""))
+		HudDraw.text(self, caption, br.get_center(), int(0.024 * u), UI.INK if on else Color(1, 1, 1, 0.6), 1, 0, "bold")
+		if on:
+			_spec_friend_rect = br
+
+
+## ADD FRIEND on the SPECTATING card for the player watched (`who`): "add" (can be sent), "sent"
+## (a request is waiting), "friends" (they already are), or "" (no button: a bot, a match without
+## internet, a blocked player).
+func spectate_friend_state(who: Fighter) -> String:
+	if arena == null or not arena.has_method("watched_player_id") or who == null:
+		return ""
+	var id := String(arena.call("watched_player_id", who))
+	if id == "" or Game.is_blocked(id):
+		return ""
+	if Game.is_friend(id):
+		return "friends"
+	return "sent" if Game.cloud_service().friend_asked(id) else "add"
+
+
+## A tap on the SPECTATING card's ADD FRIEND: the friend request goes to the player watched.
+func spectate_add_friend() -> bool:
+	var who := player.spectating_now() if player != null else null
+	if spectate_friend_state(who) != "add":
+		return false
+	var ok := Game.cloud_service().request_friend(String(arena.call("watched_player_id", who)))
+	queue_redraw()
+	return ok
 
 
 ## The 1 vs 1 player is out of the round: a small card at the bottom left while it spectates (the
