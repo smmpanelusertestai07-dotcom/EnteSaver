@@ -249,12 +249,14 @@ func _group_code() -> void:
 	host.my_code = "4213579086"
 	_check(host.group_code() == "4213579086" and host.group.is_empty(), "a solo has a GROUP CODE of its own")
 	_check(Cloud.code_topic("4213579086") == Cloud.ROOT + "/gc/42", "the topic names only the 2 bucket digits, never the 8 secret ones")
+	var said_9 := guest.join_group_code("421357908")
+	_check(said_9 == "A GROUP CODE HAS 10 DIGITS" and guest.join_group_code("+421357908") == said_9 and guest.join_group_code("135790") == said_9,
+		"JOIN BY CODE takes exactly 10 digits (%s)" % said_9)
+	var said_ok := guest.join_group_code("42 1357 9086")
+	_check(said_ok == "" and guest.code_state == "asking" and String(guest._cjoin.get("code", "")) == "4213579086",
+		"JOIN BY CODE takes the code as shown (spaces) and asks (%s)" % said_ok)
 	_check(not host.code_join and host._on_code_ask(guest._code_ask_msg()).is_empty(), "JOIN BY CODE is OFF until the player turns it on")
 	host.set_code_join(true)
-	_check(guest.join_group_code("421357908") != "" and guest.join_group_code("+421357908") != "" and guest.join_group_code("4213579086") != "",
-		"JOIN BY CODE takes exactly 10 digits")
-	_check(guest.join_group_code("42 1357 9086") == "" and guest.code_state == "asking" and String(guest._cjoin.code) == "4213579086",
-		"JOIN BY CODE takes the code as shown (spaces) and asks")
 	var reply := host._on_code_ask(guest._code_ask_msg())
 	_check(String(reply.get("t", "")) == "gin" and not host.group.is_empty() and (host._grp.invited as Dictionary).has(guest.my_id),
 		"the right code: the solo's group is made and a place waits for the joiner")
@@ -264,7 +266,7 @@ func _group_code() -> void:
 	_check(guest.group.is_empty() and guest.code_state == "asking", "a \"gin\" without the code's tag lets nobody in")
 	guest._on_code_answer(host.my_id, reply)
 	_check(guest.code_state == "in" and String(guest.group.leader) == host.my_id and guest._grp.aes == host._grp.aes
-		and String(guest.group.code) == "135790", "the right \"gin\": the joiner holds the group's keys, no invite needed")
+		and String(guest.group.code) == "4213579086", "the right \"gin\": the joiner holds the group's keys, no invite needed")
 	host._on_gjoin(guest.my_id, {"name": "GUEST", "bundle": "default"})
 	_check(host.group_members().size() == 2, "the joiner's \"gjoin\" seats it")
 	_check(guest.join_group_code("1124680211") == "EXIT YOUR GROUP FIRST", "a member cannot join another group by code")
