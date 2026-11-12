@@ -27,14 +27,17 @@ func run(autotest: Node) -> int:
 		return _done("the other phone was never seen in the lobby")
 	var other := String(cloud.peers.keys()[0])
 	if host:
-		# Alone: the search runs and shows its time; nobody to pair with (not even this phone).
+		# Alone: the search runs and shows its time; nobody to pair with (not even this phone). It
+		# opens no popup of its own (the first start's name prompt may stay open behind it).
+		var before := lobby.dialogs.modal
 		lobby.call("_start")
 		await at.wait(ALONE_S)
 		var nm := lobby.get_node_or_null("NetMatch") as NetMatch
 		var tab := lobby.search_tab
-		if nm == null or not nm.searching or not cloud.seeking or lobby.dialogs.modal != null or not tab.is_visible_in_tree() \
+		if nm == null or not nm.searching or not cloud.seeking or lobby.dialogs.modal != before or not tab.is_visible_in_tree() \
 				or not (tab.find_child("SearchCancel", true, false) as Control).is_visible_in_tree():
-			_fail("START in LONE WOLF did not show the QUICK MATCH search tab (no popup)")
+			_fail("START in LONE WOLF did not show the QUICK MATCH search tab (no popup) (search %s, seeking %s, popup %s, tab %s)" % [
+				nm != null and nm.searching, cloud.seeking, _modal_text(lobby), tab.is_visible_in_tree()])
 		elif not cloud.quick_seen.is_empty() or cloud.waiting_for() != "" or started[0]:
 			_fail("a lone search paired with something (seen %s)" % str(cloud.quick_seen.keys()))
 		else:
@@ -110,3 +113,14 @@ func _shoot_down(match_arena: Node, shooter: Fighter, target: Fighter) -> void:
 			return
 		target.take_damage(hit, "head", shooter, shooter.global_position)
 		await at.wait(maxf(float(d.interval), 0.12))
+
+
+## What an open popup says (for a failure's message).
+func _modal_text(lobby: Lobby) -> String:
+	var m := lobby.dialogs.modal
+	if m == null:
+		return "none"
+	var out := PackedStringArray()
+	for l in m.find_children("*", "Label", true, false):
+		out.append((l as Label).text)
+	return " / ".join(out)
