@@ -8,7 +8,7 @@ extends RefCounted
 ## Texts may hold {rounds} (Game.ROUNDS_TO_WIN). MODES spans the width on top, the other groups
 ## fill two columns under it: [icon, title, text].
 const MODES := ["MODES", [
-	["v_crosshair", "TRAINING GROUND", "1 vs a bot (EASY, NORMAL or HARD, picked in SELECT MODE), first to {rounds} rounds on CARGO CAGE. Or the TARGET DUMMY: it never goes down, no zone, no clock, nothing counted; CHANGE GUN on the weapon panel switches guns."],
+	["v_crosshair", "TRAINING GROUND", "1 vs a bot (EASY, NORMAL or HARD, picked in SELECT MODE), first to {rounds} rounds on CARGO CAGE. Or the TARGET DUMMY: it never goes down, no zone, no clock, nothing counted; CHANGE GUN beside the weapon panel's small slots switches guns."],
 	["v_player", "LONE WOLF", "1 vs 1 online against another player, first to {rounds}. START opens the ONLINE list: duel a player online, a friend or a CUSTOM ROOM."],
 ]]
 const GROUPS := [
@@ -19,7 +19,7 @@ const GROUPS := [
 		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
 		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
 		["v_reload", "RELOAD", "Tap RELOAD beside FIRE or the weapon panel (or it reloads by itself when the magazine is empty)."],
-		["v_fist", "SWITCH  ·  FISTS", "SWITCH swaps the gun and the fists (it shows the other one). Fists out you run 15 % faster."],
+		["v_fist", "SWITCH  ·  SIDEARM  ·  FISTS", "SWITCH goes gun, WREN 9 sidearm, fists and round again (it shows what comes next); or tap a small slot under the weapon panel. Fists out you run 15 % faster."],
 	]],
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
@@ -28,6 +28,7 @@ const GROUPS := [
 	]],
 	["THE MATCH", [
 		["v_player", "FIRST TO {rounds} ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win {rounds} rounds to win the match."],
+		["weapon_sidearm", "THE KIT", "Every round, in every mode: the picked gun, the WREN 9 sidearm (12 rounds, two spare magazines, the quickest draw, light hits) and your fists. The sidearm comes with the gun once it is picked."],
 		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use in the 15 s prep (12 guns, fixed attachments); the pick takes turns. A gun picked rests for the 4 rounds after."],
 		["v_zone", "SAFE ZONE", "A round has two stages on the clock: 20 s with the zone over the whole hall, then 90 s (SQUAD 120 s) while it closes to a spot. Outside it you lose HP; at time-out more HP wins."],
 	]],
