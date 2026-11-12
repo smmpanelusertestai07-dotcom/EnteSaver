@@ -115,6 +115,9 @@ const AWAY_MS := SILENCE_MS - 1500
 const AWAY_AFTER_MS := 3000
 const AWAY_GRACE_MS := 90000
 const SELF_GRACE_MS := AWAY_GRACE_MS - 1500
+## What a phone says while its match loads (keep-alive, the direct link's offer): heard from an
+## AWAY phone, these do not bring its fighter back (its arena is not up to report it yet).
+const LOAD_KINDS := ["ka", "dh", "dc"]
 const QUIET_MS := 15000        # nothing at all from the relay this long outside a match: the link is dead
 const KEEP_ALIVE_MS := 60000   # the keep-alive CONNECT asks for: the relay has dropped a phone away longer
 const LOAD_KEEP_MS := 30000    # a new session's keep-alives while its arena loads stop after this
@@ -197,6 +200,7 @@ var _join_t := 0.0
 var _outgoing := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _last_heard := 0
+var _last_live := 0             # the last message from the other phone that its arena is up (LOAD_KINDS aside)
 var _inbox_budget := 8.0
 var _crypto := Crypto.new()
 var _dir_wants := {}           # who wants the player cards (the ONLINE window, PROFILE): listened to while any does
@@ -228,6 +232,10 @@ var _resume_save_ms := -100000 # when the file was last written (the tick clock)
 var _in_match_unix := 0.0      # the wall-clock time this phone was last in its match (present)
 var _resume_emit := false      # a session entered from the file: session_started once the relay is up
 var _resume_wait := false      # ... and its arena waits for the other phone's "sync" however long it takes (the grace ends it)
+## A session entered from the file that ended before its arena was up: what the lobby (or the
+## arena that found it gone) says about it, [title, text], or [] (LEAVE MATCH: nothing to say).
+var rejoin_notice: Array = []
+var _resume_off := false       # this session's result is in the profile: no file for it any more (match_recorded)
 var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
 var _session_ms := 0           # when the session started
 var _listen_ms := -1           # when this session's arena began listening (-1: loading, or none)
@@ -655,7 +663,9 @@ func _process(delta: float) -> void:
 	if in_session and session_multi:
 		_check_members(now)
 	elif in_session:
-		_set_away(String(opponent.get("id", "")), now - _last_heard > AWAY_AFTER_MS)
+		# (an AWAY phone stays so while it only says it is loading: LOAD_KINDS)
+		var opp := String(opponent.get("id", ""))
+		_set_away(opp, now - (_last_live if _away_ids.has(opp) else _last_heard) > AWAY_AFTER_MS)
 	if in_session and now - _last_heard > wait_ms:
 		end_session("left")
 	if not _ginv.is_empty() and now - int(_ginv.t) > INVITE_TIMEOUT_MS:
@@ -1548,7 +1558,7 @@ func _resume_keys() -> Array:
 
 ## Writes the live session to the file (a 1 vs 1 over the relay only), atomically.
 func _save_resume() -> void:
-	if not in_session or session_multi or not session_team.is_empty() or not resume_allowed() or _key == null or _room == "":
+	if _resume_off or not in_session or session_multi or not session_team.is_empty() or not resume_allowed() or _key == null or _room == "":
 		return
 	_resume_save_ms = Time.get_ticks_msec()
 	_seq_kept = _seq + SEQ_RESERVE
@@ -1573,10 +1583,20 @@ func clear_resume() -> void:
 		DirAccess.remove_absolute(resume_path())
 
 
+## The match's result is in the profile (its results, or QUIT MATCH's LEFT): the file goes and is
+## not written again for this session, so closing the app on the results screen records nothing
+## more later (no LEFT on top of the result), and opening it again never rejoins a match that is over.
+func match_recorded() -> void:
+	_resume_off = true
+	clear_resume()
+
+
 ## The arena's note on its match, kept in the file: whether it was counted, the score (this
-## phone's rounds, the other's) and the mode's name (a LEFT recorded without the arena needs them).
-func note_match(counted: bool, mine: int, theirs: int, mode: String) -> void:
-	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode}
+## phone's rounds, the other's) and the mode's name (a LEFT recorded without the arena needs them),
+## the round to play on (0: unknown) and the picks (RoundRules.picks_text): both apps closed, the
+## resumed host's note is all that is left of the match.
+func note_match(counted: bool, mine: int, theirs: int, mode: String, round_on := 0, picks := "") -> void:
+	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode, "round": round_on, "picks": picks}
 	_save_resume()
 
 
@@ -1615,6 +1635,8 @@ func try_resume() -> bool:
 	if d.is_empty():
 		return false
 	resume_note = (d.note as Dictionary).duplicate()
+	_resume_off = false
+	rejoin_notice = []
 	opponent = d.opp
 	var left := resume_left_ms(d)
 	if left <= 0:
@@ -2439,9 +2461,10 @@ func _on_room(msg: PackedByteArray) -> void:
 	_last_heard = Time.get_ticks_msec()
 	_present(_last_heard)            # (this phone is back in the match: it hears the other one)
 	var kind := String((d as Dictionary).get("k", ""))
-	if in_session and kind != "ka":
-		# (a phone that comes back after a restart says "ka" while its arena loads: its fighter
-		# stays frozen here, and can be hit, until the arena is up)
+	if in_session and not kind in LOAD_KINDS:
+		# (a phone that comes back after a restart says "ka" while its arena loads, and offers
+		# its direct link: its fighter stays frozen here, and can be hit, until the arena is up)
+		_last_live = _last_heard
 		_set_away(String(opponent.get("id", "")), false)
 	match kind:
 		"join", "joined":
@@ -2469,6 +2492,7 @@ func _on_room(msg: PackedByteArray) -> void:
 				_direct_begin()
 				resumed = false
 				resume_note = {}
+				_resume_off = false
 				_in_match_unix = Time.get_unix_time_from_system()
 				_save_resume()
 				session_started.emit(is_host)
@@ -2534,7 +2558,7 @@ func _on_room(msg: PackedByteArray) -> void:
 				if typeof(v) not in [TYPE_FLOAT, TYPE_INT, TYPE_STRING, TYPE_BOOL]:
 					return
 			if String(ev) == "bye":
-				end_session("left")
+				end_session("left", true)
 			elif event_received.get_connections().is_empty():
 				if queue.size() < MAX_QUEUED:          # (only "ready" comes before the arena listens)
 					queue.append([String(ev), data])
@@ -2542,15 +2566,26 @@ func _on_room(msg: PackedByteArray) -> void:
 				event_received.emit(String(ev), data)
 
 
-## Ends the match's session: "left" (the other phone said bye or went silent, or this one leaves
-## the arena) or "connection lost" (this phone lost the relay or was away too long).
-func end_session(reason := "left") -> void:
+## Ends the match's session: "left" (the other phone said bye, `theirs`, or went silent, or this
+## one leaves the arena) or "connection lost" (this phone lost the relay or was away too long).
+## A session entered from the file whose arena is not up yet: this phone's own end (LEAVE MATCH,
+## lost again) puts a counted match into the profile as LEFT; the other phone's "bye" meanwhile
+## (it quit, or lost its own link: a LEFT for it) never does.
+func end_session(reason := "left", theirs := false) -> void:
 	var was := in_session
 	if in_session:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
 		if resumed and not _arena_listens():
-			_record_resume_left()        # (entered from the file, ended before its arena was up)
+			# (entered from the file, ended before its arena was up)
+			var counted := bool(resume_note.get("counted", false))
+			if theirs:
+				rejoin_notice = ["OPPONENT LEFT", "%s left the match while you were rejoining: it does not count as a defeat."
+					% String(opponent.get("name", "PLAYER"))]
+			else:
+				_record_resume_left()
+				rejoin_notice = [] if reason == "left" else ["CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat)."
+					if counted else "The match could not be rejoined in time. Nothing was counted."]
 	in_session = false
 	_resume_emit = false
 	_resume_wait = false

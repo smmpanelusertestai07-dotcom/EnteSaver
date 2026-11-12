@@ -1155,8 +1155,9 @@ func _on_net_ended(reason: String) -> void:
 	var m: Variant = lobby.dialogs.modal
 	if m is Node and is_instance_valid(m) and (m as Node).name == "RejoinModal" and not _match_loading:
 		lobby.dialogs.close_modal()
-		if reason != "left":
-			lobby.dialogs.notice.call_deferred("CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat).")
+		var n := Game.cloud_service().rejoin_notice
+		if n.size() == 2:                # (what ended the rejoin and what it counted; none after LEAVE MATCH)
+			lobby.dialogs.notice.call_deferred(String(n[0]), String(n[1]))
 	if not (Game.online and lobby.start_btn.disabled):
 		Game.online = false
 

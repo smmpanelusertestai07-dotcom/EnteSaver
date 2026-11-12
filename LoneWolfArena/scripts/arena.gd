@@ -127,6 +127,7 @@ var _back_t := 0.0
 ## The app was closed in this match and opened again (Cloud.resumed): this fresh arena holds still
 ## until the other phone's "sync" says where the match stands, then enters it there (_resume_into).
 var _resuming := false
+var _resume_round := 1           # the round the file's note says to play on (_resume_from_note)
 var _last_rend: Array = []       # the host's last "rend" (sent again after a "sync")
 ## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
 ## map's centre while it shrinks.
@@ -165,8 +166,8 @@ func _ready() -> void:
 		var lost := Game.session != null and Game.session.last_end_reason != "left"
 		Game.match_notice = ["CONNECTION LOST" if lost else "OPPONENT LEFT", ("The connection was lost" if lost
 			else "The other player left") + " before the match began. Nothing was counted."]
-		if Game.session != null and Game.session.resumed:
-			Game.match_notice = ["CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat)."]
+		if Game.session != null and Game.session.resumed and Game.session.rejoin_notice.size() == 2:
+			Game.match_notice = Game.session.rejoin_notice.duplicate()     # (what ended the rejoin, and what it counted)
 		Game.goto_lobby.call_deferred()
 		return
 	_build_zone()
@@ -247,6 +248,9 @@ func _net_setup() -> void:
 		_counted = bool(Game.session.resume_note.get("counted", false))
 		score.player = maxi(int(Game.session.resume_note.get("mine", 0)), 0)
 		score.bot = maxi(int(Game.session.resume_note.get("theirs", 0)), 0)
+		var n_round: Variant = Game.session.resume_note.get("round", 1)
+		_resume_round = clampi(int(n_round), 1, MAX_ROUNDS) if (n_round is int or n_round is float) else 1
+		picks = RoundRules.picks_from_text(String(Game.session.resume_note.get("picks", "")), Weapons.PICKABLE)
 		Game.mark("online match rejoined after a restart")
 	Game.session.send_event("ready")
 	for q: Array in queued:
@@ -279,7 +283,8 @@ func _on_net_event(kind: String, data: Array) -> void:
 			if Game.session.is_host:
 				_net_begin()
 		"begin":
-			if not Game.session.is_host:
+			# (a resumed host sends it again: a guest that never heard the first one starts its prep)
+			if not Game.session.is_host and not _net_begun:
 				_net_begin()
 				_follow_host_clock()
 		"pick":
@@ -382,8 +387,12 @@ func _on_net_event(kind: String, data: Array) -> void:
 				_next_round()
 				_follow_host_clock()
 		"back":
-			# The other player is back after being away: this phone's word on its fighter.
+			# The other player is back after being away: this phone's word on its fighter. A host
+			# that is itself back from a restart has no word yet: both apps were closed, so its
+			# own note decides (_resume_from_note); a guest in that state answers nothing.
 			if data.is_empty() and _net_rate_ok("back", 2.0, 3.0):
+				if _resuming and _net_host:
+					_resume_from_note()
 				_send_sync()
 		"sync":
 			_on_sync(data)
@@ -406,8 +415,8 @@ func _on_peer_away(_id: String, away: bool) -> void:
 ## two-stage clock. The host's last word on a round that is over
 ## here ("rend", and "fin" once the match is) goes again after it: the other phone missed it.
 func _send_sync() -> void:
-	if not session_up():
-		return
+	if not session_up() or _resuming:
+		return                           # (a fresh arena back from a restart has only blanks to tell)
 	var r := bot as RemoteFighter
 	var at := r.global_position
 	Game.session.send_event("sync", [round_index, int(phase), prep_left if phase == Phase.PREP else elapsed, int(score.player),
@@ -485,7 +494,8 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 
 
 ## A fresh arena after a restart (_resuming) enters the match where the other phone's word says it
-## stands: that round in that phase with the score, the gun and the clock. In a break the host
+## stands: that round in that phase with the score, the gun and the clock (the host says "begin"
+## again: a guest still waiting for the first one, lost with the restart, starts too). In a break the host
 ## starts the next round on both (its "round"), the guest waits for it; a match over on the other
 ## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync").
 func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String) -> void:
@@ -518,6 +528,20 @@ func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int
 		_start_fight()
 		elapsed = clampf(clock, 0.0, round_time())
 		time_left = round_time() - elapsed
+	if _net_host:
+		Game.session.send_event("begin")     # (a guest whose first "begin" was lost with this app's start)
+
+
+## Both apps were closed and opened again (the other phone, resuming too, asks for the match with
+## its own "back"): the host takes the round its file's note was on, from its prep, with the
+## note's score and picks; its "sync" then places the guest there. A round cut short is played
+## again; the match keeps its best-of.
+func _resume_from_note() -> void:
+	_resuming = false
+	Game.session.rejoined()
+	var r := mini(_resume_round, last_round())
+	var gun := String(picks.get(RoundRules.pick_round_of(r), ""))
+	_resume_into(r, int(Phase.PREP), PREP_TIME, int(score.bot), int(score.player), gun)
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
@@ -943,7 +967,7 @@ func _start_fight() -> void:
 		Game.count_match(mode)
 		_counted = true
 	if online and session_up():
-		Game.session.note_match(_counted, int(score.player), int(score.bot), mode_name)     # (the session file)
+		Game.session.note_match(_counted, int(score.player), int(score.bot), mode_name, round_index, RoundRules.picks_text(picks))     # (the session file)
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(preselected_pick())
@@ -1340,7 +1364,7 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 	var mine := int(score.player)
 	var theirs := int(score.bot)
 	if online and session_up():
-		Game.session.note_match(_counted, mine, theirs, mode_name)
+		Game.session.note_match(_counted, mine, theirs, mode_name, round_index + 1, RoundRules.picks_text(picks))
 	var decided := practice or _forfeit or match_over_after(round_index, mine, theirs, rounds_to_win)
 	var line := "%d  -  %d" % [mine, theirs]
 	_freeze_all()
@@ -1555,6 +1579,8 @@ func _show_results() -> void:
 	result = _final_result()
 	if not _invalid and _counted:          # (a match is counted when its first fight begins)
 		Game.record_match(result)
+	if online and Game.session != null:
+		Game.session.match_recorded()      # (the session file goes: nothing to rejoin or record later)
 	var screen := ResultsScreen.new()
 	pause_layer.add_child(screen)
 	screen.setup(result)
@@ -1605,6 +1631,8 @@ func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
 func record_left() -> void:
 	if not _counted or _result_shown or _invalid:
 		return
+	if online and Game.session != null:
+		Game.session.match_recorded()      # (the session file goes with the result recorded here)
 	if phase == Phase.END:
 		result = _final_result()
 		if not _invalid:
