@@ -264,9 +264,10 @@ func _on_net_event(kind: String, data: Array) -> void:
 				_follow_host_clock()
 		"pick":
 			# Its pick for this round (late ones still count: both must hold the same gun).
+			# A gun on cooldown is replaced by the first free one, as the picker's phone does.
 			if data.size() == 2 and Weapons.PICKABLE.has(String(data[0])) and int(data[1]) == round_index \
 					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT):
-				_apply_pick(String(data[0]))
+				_apply_pick(legal_pick(String(data[0])))
 		"shot":
 			# Its shots: muzzle flash, tracer, impact and sound here, while the round is fought and
 			# never faster than its gun (or fists) fire.
@@ -380,7 +381,9 @@ func _on_peer_away(_id: String, away: bool) -> void:
 
 ## This phone's word on the other phone's fighter and on the match, for that phone back from being
 ## away: [round, phase, prep left or fight time, this phone's score, the other's score, its HP,
-## alive, x, y, z, the round's gun, what took it out]. The host's last word on a round that is over
+## alive, x, y, z, the round's gun, what took it out, the match's picks (RoundRules.picks_text: the
+## weapon cooldown)]. The fight time is the whole fight's, so both phones show the same stage of the
+## two-stage clock. The host's last word on a round that is over
 ## here ("rend", and "fin" once the match is) goes again after it: the other phone missed it.
 func _send_sync() -> void:
 	if not session_up():
@@ -389,7 +392,7 @@ func _send_sync() -> void:
 	var at := r.global_position
 	Game.session.send_event("sync", [round_index, int(phase), prep_left if phase == Phase.PREP else elapsed, int(score.player),
 		int(score.bot), snappedf(r.hp, 0.1), r.alive, snappedf(at.x, 0.01), snappedf(at.y, 0.01), snappedf(at.z, 0.01),
-		picked_weapon, String(_down_cause.get(r, ""))])
+		picked_weapon, String(_down_cause.get(r, "")), RoundRules.picks_text(picks)])
 	if _net_host and _last_rend.size() == 7 and int(_last_rend[0]) == round_index and (phase == Phase.BREAK or phase == Phase.END):
 		Game.session.send_event("rend", _last_rend)
 		if phase == Phase.END:
@@ -397,13 +400,13 @@ func _send_sync() -> void:
 			_send_final()
 
 
-## The other phone's word ("sync", see _send_sync). The guest follows the host's round as it stands
-## (_follow_round); then either takes its own player's HP (never more than it has: no healing back
+## The other phone's word ("sync", see _send_sync). The guest takes the host's picks (the weapon
+## cooldown) and follows the host's round as it stands (_follow_round); then either takes its own player's HP (never more than it has: no healing back
 ## what it lost while away), its place and, gone down meanwhile, its death. The host answers with its
 ## own word, so the guest follows its round.
 func _on_sync(data: Array) -> void:
-	if data.size() != 12 or not _net_rate_ok("sync", 2.0, 4.0) or not data[6] is bool or typeof(data[10]) != TYPE_STRING \
-			or typeof(data[11]) != TYPE_STRING:
+	if data.size() < 12 or data.size() > 13 or not _net_rate_ok("sync", 2.0, 4.0) or not data[6] is bool \
+			or typeof(data[10]) != TYPE_STRING or typeof(data[11]) != TYPE_STRING or (data.size() == 13 and typeof(data[12]) != TYPE_STRING):
 		return
 	for i: int in [0, 1, 2, 3, 4, 5, 7, 8, 9]:
 		if not (data[i] is float or data[i] is int) or not is_finite(float(data[i])):
@@ -414,6 +417,8 @@ func _on_sync(data: Array) -> void:
 		return
 	Game.session.rejoined()
 	if not _net_host:
+		if data.size() == 13:
+			picks = RoundRules.picks_from_text(String(data[12]), Weapons.PICKABLE)     # the host's cooldowns
 		_follow_round(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
 	if r == round_index and ph == int(phase) and (phase == Phase.FIGHT or phase == Phase.PREP) and player.alive:
 		var pos := Vector3(float(data[7]), float(data[8]), float(data[9]))
@@ -791,7 +796,8 @@ func _start_prep() -> void:
 	if pick_round:
 		picked_weapon = ""
 		if _i_pick():
-			hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
+			var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
+			hud.open_weapon_pick(Weapons.PICKABLE, preselected_pick(), prep_left - 1.0, _on_weapon_picked, pick_cooldowns(), strip)
 		else:
 			pick_note = "%s IS PICKING THE WEAPON" % bot.display_name
 			if not online:
@@ -803,6 +809,24 @@ func _start_prep() -> void:
 	Game.mark("prep started")
 
 
+## The guns on cooldown at this round's pick (gun -> rounds left; none against the target dummy).
+func pick_cooldowns() -> Dictionary:
+	return {} if practice else RoundRules.cooldowns(Weapons.PICKABLE, round_index, picks)
+
+
+## The gun the pick panel starts on and the one taken when nothing is chosen in time: the last one
+## this player picked, or the first free gun when that one rests.
+func preselected_pick() -> String:
+	return legal_pick(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+
+
+## `id` when it may be picked for this round, else the first free gun (both phones alike).
+func legal_pick(id: String) -> String:
+	if practice:
+		return id if Weapons.DEFS.has(id) else Weapons.DEFAULT_PICK
+	return RoundRules.legal_pick(id, Weapons.PICKABLE, round_index, picks)
+
+
 func _i_pick() -> bool:
 	var first := ((round_index - 1) / 2) % 2 == 0
 	return not first if online and not Game.session.is_host else first
@@ -812,6 +836,7 @@ func _i_pick() -> bool:
 func _on_weapon_picked(id: String) -> void:
 	if not Weapons.DEFS.has(id):
 		id = Weapons.DEFAULT_PICK
+	id = legal_pick(id)
 	Game.settings.last_pick = id
 	Game.save_settings()
 	_apply_pick(id)
@@ -828,6 +853,8 @@ func repick() -> void:
 
 func _apply_pick(id: String) -> void:
 	picked_weapon = id
+	if not practice:
+		picks[RoundRules.pick_round_of(round_index)] = id      # (rests for the next rounds' picks)
 	for f in fighters:
 		f.set_loadout(id)
 	pick_note = "" if _i_pick() else "%s PICKED: %s" % [bot.display_name, String(Weapons.DEFS[id].name)]
@@ -842,7 +869,7 @@ func _start_fight() -> void:
 		_counted = true
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
-		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+		_on_weapon_picked(preselected_pick())
 	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:
@@ -887,7 +914,7 @@ func _physics_process(delta: float) -> void:
 			if _bot_pick_t > 0.0:
 				_bot_pick_t -= delta
 				if _bot_pick_t <= 0.0:
-					_apply_pick(String(Weapons.PICKABLE[_rng.randi() % Weapons.PICKABLE.size()]))
+					_apply_pick(_bot_choice())
 			prep_left -= delta
 			var n := ceili(prep_left)
 			if prep_left <= 3.0 and n != _last_count and n > 0:
@@ -935,6 +962,17 @@ func _physics_process(delta: float) -> void:
 			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
 			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 8.0:
 				_next_round()
+
+
+## The bot's pick: any gun not on cooldown.
+func _bot_choice() -> String:
+	var free: Array = []
+	for g: String in Weapons.PICKABLE:
+		if RoundRules.cooldown_left(g, round_index, picks) == 0:
+			free.append(g)
+	if free.is_empty():
+		return legal_pick(Weapons.DEFAULT_PICK)
+	return String(free[_rng.randi() % free.size()])
 
 
 ## Both back at their spawns with full HP, items and ammo for the next round (stats carry over).

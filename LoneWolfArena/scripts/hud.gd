@@ -173,11 +173,13 @@ func show_round_result(title: String, mine: int, theirs: int) -> void:
 	_round_banner = {"t": 2.6, "dur": 2.6, "title": title, "mine": mine, "theirs": theirs}
 
 
-func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable) -> void:
+## The weapon pick panel (HudPanels.open_pick); a 1 vs 1 passes the guns on cooldown and the ROUNDS
+## strip (who picks for each round).
+func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, cooldown := {}, strip := []) -> void:
 	var r := 1
 	if arena != null:
 		r = int(arena.get("round_index"))
-	panels.open_pick(options, preselect, seconds, on_pick, r)
+	panels.open_pick(options, preselect, seconds, on_pick, r, cooldown, strip)
 
 
 func close_weapon_pick() -> void:

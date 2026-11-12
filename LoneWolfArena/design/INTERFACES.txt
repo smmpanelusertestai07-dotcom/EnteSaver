@@ -14,8 +14,18 @@ listed here. If a part needs something new from the core, add it in its own file
   (what the HUD, scoreboard, pause menu and results show: TRAINING GROUND against the bot or the
   target dummy, LONE WOLF online), `practice` (the target dummy: endless HP, no zone, the clock
   counts up, nothing recorded), `online` (the opponent is another phone)
-- zone: `zone_state` ("stationary" | "shrinking" | "closed"), `zone_next()` (s until it
-  changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text or "")
+- the round's clock (scripts/round_rules.gd, `RoundRules`, pure functions the unit tests check):
+  the fight is stage 1 (`RoundRules.STAGE1_S` 20 s) then stage 2 (`stage2_time()`: 90 s, a
+  SQUAD's 120 s); `round_time()` both, `stage()` 1 / 2, `stage_left()` what the top clock shows
+  (each stage counted down on its own); `time_left` / `elapsed` stay the whole fight's.
+- zone: `zone_state` ("stationary" stage 1 | "shrinking" stage 2 | "closed"), `zone_next()` (s
+  until it changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text
+  or ""), `zone_at(t)` ([centre, radius] t s into the fight: the whole hall through stage 1, then
+  closing evenly to `RoundRules.ZONE_FINAL_R` 0.5 m at the end of stage 2, the centre sliding to
+  `zone_final`, a new spot every round from `zone_final_for(round)`, alike on both phones)
+- 1 vs 1 weapon cooldown: `picks` (pick round -> gun), `pick_cooldowns()` (gun -> rounds left,
+  `RoundRules.cooldowns`), `preselected_pick()`, `legal_pick(id)` (a gun that rests is replaced by
+  the first free one: the picker's phone, the other phone on its "pick", and the bot alike)
 - `fighters` (Array[Fighter]), `player`, `bot`, `map_name` ("CARGO CAGE"), `map_rect` (Rect2,
   world X/Z area of the minimap), `minimap_texture` (Texture2D rendered once from above, may be
   null for the first frames), `obstacles` (Array[Rect2] footprints, X/Z)
@@ -53,7 +63,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
 - `show_center(text, seconds, color := Color.WHITE, size := 96, sub := "")`
 - `show_round_banner(round_index: int, area: String)`  (blue->orange band "ROUND 1 / AREA: ...")
-- `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id))`
+- `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id),
+  cooldown := {} (gun -> rounds left: greyed, not pickable), strip := [] (per round of the match:
+  true when this player picks; the ROUNDS strip))`
   must call `on_pick` exactly once (tap SELECT, or the timer runs out -> current choice);
   `close_weapon_pick()` closes it without a callback.
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
@@ -569,9 +581,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - Rules: TeamReferee (scripts/team_referee.gd) is pure logic: down() / revive() / leave() return
   the decisions, winner() / timeout_winner() the round. TeamArena (scripts/team_arena.gd) applies
   them; its header lists the rules (knock, bleed, revive, friendly fire off, rounds, picks).
-- Round flow: PREP (PREP_TIME, every fighter picks its own gun: the player's panel, bots after
-  1.5-3.5 s where they run here) -> FIGHT (round_time(): DUO 90 s, SQUAD 120 s; zone_hold() /
-  zone_shrink()) -> the referee: a team with nobody UP, DEATH_SETTLE_S later "rend" (or the
+- Round flow: PREP (TEAM_PREP_S 10 s, every fighter picks its own gun: the player's panel, bots
+  after 1.5-3.5 s where they run here) -> FIGHT (the 1 vs 1's two stages: stage2_time() DUO 90 s,
+  SQUAD 120 s; the zone as the 1 vs 1's, zone_hurts(f) only for fighters run here) -> the referee: a team with nobody UP, DEATH_SETTLE_S later "rend" (or the
   time-out's HP sums) -> BREAK -> the referee's "round" -> PREP, or END (first to
   team_rounds_to_win(): 4, LW_ROUNDS_TO_WIN in tests). open_pause() is the base's (offline it
   pauses the tree; TeamArenaNet has online = true, so it never does).
