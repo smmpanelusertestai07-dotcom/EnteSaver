@@ -91,6 +91,7 @@ var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 var _counted := false            # Game.count_match counted this match (its first fight began)
+var _quiet_round := 0            # a rejoin landed in this round (its prep or fight): its band never shows
 var _called_off := false         # online: the session ended with no result to show (_on_net_ended)
 var _left_scene := false
 var _graphics_on := []           # [graphics, visual effects] apply_graphics last set up
@@ -540,6 +541,7 @@ func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int
 ## AREA band is not shown, and a zone that already shrinks there does so without the ZONE
 ## SHRINKING line (both were news to the others long ago); the next round's band shows as usual.
 func _rejoined_quietly() -> void:
+	_quiet_round = round_index           # (round 1's band, due at its fight's start, stays off too)
 	hud.skip_round_banner()
 	if phase == Phase.FIGHT and elapsed >= RoundRules.STAGE1_S and zone_state == "stationary":
 		zone_state = "shrinking"
@@ -1009,9 +1011,9 @@ func _start_fight() -> void:
 		_place_dummy()
 		zone_radius = 999.0
 		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
-	elif round_index == 1:
+	elif round_index == 1 and _quiet_round != round_index:
 		# (Later rounds show their band at the end of the break, before the prep: nothing covers
-		# the fight's start then.)
+		# the fight's start then. A rejoin into round 1's prep shows none.)
 		hud.show_round_banner(round_index, map_name, round_sub(round_index))
 	Audio.play("countdown_go", 0.0)
 
