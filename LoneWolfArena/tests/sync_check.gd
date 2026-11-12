@@ -136,14 +136,14 @@ func run(autotest: Node) -> int:
 	return _done("")
 
 
-## A results table row's numbers as shown (ELIMINATIONS .. HP LEFT), "" without the row.
+## A results table row's numbers as shown (K/D/A .. HP LEFT), "" without the row.
 func _row_text(table: Node, row_name: String) -> String:
 	var row := table.find_child(row_name, true, false) if table else null
 	if row == null:
 		return ""
 	var parts := PackedStringArray()
 	for c in ResultsScreen.COLUMNS:
-		var l := row.find_child("Value_" + String(c).replace(" ", "_"), true, false) as Label
+		var l := row.find_child(ResultsScreen.value_name(String(c)), true, false) as Label
 		parts.append(l.text if l else "?")
 	return " ".join(parts)
 

@@ -32,6 +32,9 @@ const ZONE_EDGE := 4.0
 const MAX_ROUNDS := 9
 ## Online the results wait this long (real seconds) at most for the other phone's own numbers.
 const FINAL_WAIT_S := 3.0
+## The results open this long (real seconds) after the match's last round ends: the cheer, the
+## round's plates and a look at the arena first.
+const RESULTS_DELAY_S := 5.5
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
 const DUMMY_NAME := "TARGET DUMMY"
 
@@ -89,6 +92,7 @@ var _break_t := 0.0
 var _bot_pick_t := -1.0
 var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
+var _downs := {"player": 0, "bot": 0}   # times each fighter was eliminated (the results' K/D/A)
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 var _counted := false            # Game.count_match counted this match (its first fight began)
 var _quiet_round := 0            # a rejoin landed in this round (its prep or fight): its band never shows
@@ -1090,7 +1094,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > 2.6 and not _result_shown and (not _awaits_final() or _end_t > 2.6 + FINAL_WAIT_S):
+			elif _end_t > RESULTS_DELAY_S and not _result_shown and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -1270,6 +1274,7 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	Game.mark("%s eliminated" % ("player" if victim == player else "bot"))
 	if victim == player:
 		_deaths += 1
+	_downs["player" if victim == player else "bot"] = int(_downs["player" if victim == player else "bot"]) + 1
 	var cause := death_cause(victim, killer)
 	_down_cause[victim] = cause
 	if victim == player:
@@ -1598,7 +1603,7 @@ func _awaits_final() -> bool:
 
 ## Rows for the in-match scoreboard and the results: you first, then the opponent. Online, once the
 ## match is over, the opponent's row has the numbers its own phone sent ("fin"), and the guest shows
-## the host's HP (_shown_hp).
+## the host's HP (_shown_hp). "deaths": the times this phone saw that fighter eliminated (K/D/A).
 func scoreboard_rows() -> Array:
 	var rows := []
 	for f in [player, bot]:
@@ -1609,7 +1614,7 @@ func scoreboard_rows() -> Array:
 		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": _shown_hp(f),
 			"kills": int(st.kills), "damage": roundi(st.damage), "headshots": int(st.headshots),
 			"accuracy": roundi(acc), "rounds": int(score["player" if f == player else "bot"]),
-			"weapon": String(f.gun().def.name)})
+			"weapon": String(f.gun().def.name), "deaths": int(_downs["player" if f == player else "bot"])})
 	return rows
 
 

@@ -246,7 +246,7 @@ func _test_results() -> void:
 		var mine := _bg(t0.find_child("TeamRow_0", true, false))
 		var theirs := _bg(t1.find_child("TeamRow_2", true, false))
 		_check(mine.b > mine.r and theirs.r > theirs.b, "rows in their team's colour (blue / orange)")
-		var v: Variant = t1.find_child("TeamRow_3", true, false).find_child("Value_3", true, false)
+		var v: Variant = t1.find_child("TeamRow_3", true, false).find_child("Value_1", true, false)
 		_check(v is Label and (v as Label).text == "300", "a row shows its damage")
 	_check(rs.find_child("Stats", true, false) == null, "no 1 vs 1 table in a team result")
 	_check(rs.find_child("Rematch", true, false) == null, "no REMATCH after a team match")

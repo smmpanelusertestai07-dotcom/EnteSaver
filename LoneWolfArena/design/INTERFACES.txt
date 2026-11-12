@@ -286,11 +286,21 @@ listed here. If a part needs something new from the core, add it in its own file
   VICTORY screen says so, `OpponentLeft`, their row reads LEFT); shots, hits, deaths and enemy_id (the
   online opponent's player id, else "") go to the profile only (`Game.record_match`). Hides the arena's `hud` while
   shown; the opponent's orange row
-  (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match
-  overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`); Android back = LOBBY (ignored while
-  PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag. An internet LONE
-  WOLF match (enemy_id, not local) has `Rematch` in PLAY AGAIN's place, `AddFriend` (not friends
-  yet: `Cloud.request_friend`) and the line `RematchStatus`: REMATCH while the session is up sends
+  (`EnemyRow`) comes from the current scene's `scoreboard_rows()` (its "deaths" make the K/D/A).
+  Two pages (`page`, `show_page(n)`): `Page1` = `HeroView` (a CharacterModel `HeroModel` with the
+  profile's bundle in its own SubViewport world: victory pose for a win, the lobby stand otherwise),
+  `Title` + `Tagline` (`ResultsScreen.tagline(kind, seed)`), `HeroPlate` (name, `HeroKills`,
+  `HeroDamage`), honour + XP, and `Continue`; `Page2` = `SideScore` ("<side> a VS b <side>",
+  `SideName_0/1` from `ResultsScreen.side_names(seed)`: two different names of SIDE_NAMES; online
+  the seed is `Game.session.match_seed("sides")` and the host's side takes the first) and the
+  tables (`Stats`: `SideHead_0`, YourRow, `SideHead_1`, EnemyRow; columns COLUMNS = K/D/A, DAMAGE,
+  HEADSHOTS, ACCURACY, TIME, HP LEFT, labels `ResultsScreen.value_name(column)`), and `Lobby`.
+  `Head` (mode, map) and PLAY AGAIN / `Rematch` / `PlayAgainTogether` with `RematchStatus` show on
+  both pages. Buttons: PLAY AGAIN (match overlay, then `Game.goto_arena`), CONTINUE (page 2), LOBBY
+  (`Game.goto_lobby`); Android back on page 2 = page 1, on page 1 = LOBBY (ignored while PLAY AGAIN
+  loads). The arena opens the results `Arena.RESULTS_DELAY_S` (5.5 s) after the last round ends. `ResultsScreen.honour(result)` (static) picks the honour tag. An internet LONE
+  WOLF match (enemy_id, not local) has `Rematch` in PLAY AGAIN's place, `AddFriend` on the head of
+  the opponent's table on page 2 (not friends yet: `Cloud.request_friend`) and the line `RematchStatus`: REMATCH while the session is up sends
   "rm" [takes their challenges] (`Arena.ask_rematch`; the other screen says "<NAME> WANTS A
   REMATCH", `Arena.rematch_asked` / `rematch_wanted` / `rematch_they_take`); once both want it both
   call `Arena.leave_session()` (the arena then leaves the new session alone and Game.online to it)
@@ -655,17 +665,18 @@ listed here. If a part needs something new from the core, add it in its own file
   each team's HP still standing (HudTeam.team_hp). The prep line lists members(my_team) as BLUE and
   the others as ORANGE.
 - Scoreboard (team arena): scoreboard_rows() rows need "ally" (or "me"), "status", "knocks",
-  "revives" besides today's keys; my team first. Shorter rows: a SQUAD board fits 720 px.
+  "revives", "deaths" besides today's keys; my team first. Shorter rows: a SQUAD board fits 720 px.
 - Results: `result.team == true` switches the screen: plates YOUR TEAM : result.enemy; TeamTables
-  with TeamTable_0 (rows with "ally" true) and TeamTable_1; TeamRow_<n>, n = the row's index in
-  result.rows (else the scene's scoreboard_rows()), values K, KNOCKS, REVIVES, DAMAGE, HS, ACC
-  (row keys kills, knocks, revives, damage, headshots, accuracy; sub-line YOU / BOT / LEFT / PLAYER
+  with TeamTable_0 (rows with "ally" true) and TeamTable_1 (page 2, each under its side name);
+  TeamRow_<n>, n = the row's index in result.rows (else the scene's scoreboard_rows()), values
+  K/D/A, DAMAGE, KNOCKS, REVIVES, HS, ACC (Value_0..5; row keys kills, deaths, assists (0 when
+  absent), damage, knocks, revives, headshots, accuracy; sub-line YOU / BOT / LEFT / PLAYER
   from "me", "bot", "status"). PLAY AGAIN only when the match was on this phone (result.online,
   else Game.online or Game.team_match.online). Online: PLAY AGAIN TOGETHER (`PlayAgainTogether`,
   co-op) or REMATCH (`Rematch`, against the other player) in its place (see ResultsScreen above),
-  ADD FRIEND left of REMATCH while not friends; after a forfeit or once a player left only LOBBY,
-  plus ADD FRIEND (in PLAY AGAIN's place) when result.enemy_id is another player's id and not yet a
-  friend.
+  ADD FRIEND on the orange table's head while not friends; after a forfeit or once a player left
+  only LOBBY, plus ADD FRIEND (on the orange table's head) when result.enemy_id is another player's
+  id and not yet a friend.
 - Pause menu: PauseMenu.host_of_team() (Game.team_match online + host, coop or multi): QUIT MATCH's
   question also holds QuitWarning, PauseMenu.HOST_WARNING (coop) / HOST_WARNING_ALL (all-human).
 - Tests: tests/team_hud_unit.gd (stand-in arena); the HUD tour's team part

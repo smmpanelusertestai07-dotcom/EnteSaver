@@ -501,7 +501,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > 2.6 and not _result_shown and (not _awaits_final() or _end_t > 2.6 + FINAL_WAIT_S):
+			elif _end_t > RESULTS_DELAY_S and not _result_shown and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -821,7 +821,8 @@ func scoreboard_rows() -> Array:
 			"kills": int(st.get("kills", 0)), "damage": roundi(float(st.get("damage", 0.0))), "headshots": int(st.get("headshots", 0)),
 			"accuracy": roundi(acc), "rounds": int(team_score[f.team]), "weapon": String(f.gun().def.name),
 			"team": f.team, "ally": f.team == my_team, "slot": f.slot, "status": status_of(f),
-			"knocks": int(st.get("knocks", 0)), "revives": int(st.get("revives", 0)), "bot": bool(_entry(f.slot).get("bot", false))})
+			"knocks": int(st.get("knocks", 0)), "revives": int(st.get("revives", 0)), "bot": bool(_entry(f.slot).get("bot", false)),
+			"deaths": int(st.get("deaths", 0))})
 	return rows
 
 

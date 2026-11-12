@@ -78,6 +78,7 @@ func _ready() -> void:
 	_test_career()
 	_test_history()
 	_test_honour()
+	_test_results_pages()
 	_test_signed_cards()
 	_test_card_v2()
 	_test_blocking()
@@ -1723,6 +1724,56 @@ func _test_honour() -> void:
 	_check(ResultsScreen.honour({"won": true, "hp_left": 170, "taken": 30}) == "UNTOUCHABLE", "under 50 damage taken and alive")
 	_check(ResultsScreen.honour({"won": false, "hp_left": 0, "taken": 30}) == "FIGHTER", "a dead player is never untouchable")
 	_check(ResultsScreen.honour({"invalid": true, "won": true, "hp_left": 20, "headshots": 3}) == "", "a voided match has no honour")
+
+
+## The results in two pages: the side names (two different ones, the same for the same match), the
+## K/D/A text, and the page flow (CONTINUE to page 2, back to page 1, back again = today's rule).
+func _test_results_pages() -> void:
+	var same := true
+	var differ := true
+	var seen := {}
+	for i in 400:
+		var a := ResultsScreen.side_names(i * 7919 - 1000)
+		same = same and a == ResultsScreen.side_names(i * 7919 - 1000)
+		differ = differ and a.size() == 2 and a[0] != a[1] and ResultsScreen.SIDE_NAMES.has(a[0]) and ResultsScreen.SIDE_NAMES.has(a[1])
+		seen[a[0]] = true
+	_check(same, "the side names are the same for the same match")
+	_check(differ, "the two sides never get the same name, both from our own list")
+	_check(seen.size() >= 15, "the side names vary from match to match (%d first names seen)" % seen.size())
+	_check(ResultsScreen.SIDE_NAMES.size() >= 20, "about twenty side names")
+	var two_words := true
+	for n: String in ResultsScreen.SIDE_NAMES:
+		two_words = two_words and n.split(" ").size() == 2 and n == n.to_upper()
+	_check(two_words, "every side name is two words in capitals")
+	_check(ResultsScreen.kda(3, 1, 0) == "3/1/0", "K/D/A reads kills/deaths/assists")
+	_check(ResultsScreen.value_name("K/D/A") == "Value_KDA" and ResultsScreen.value_name("HP LEFT") == "Value_HP_LEFT",
+		"value labels have plain node names")
+	_check(ResultsScreen.tagline("victory", 5) == ResultsScreen.tagline("victory", 5) and ResultsScreen.tagline("defeat", -3) != "",
+		"the line under the title is picked per match")
+	var keep_online := Game.online
+	Game.online = false
+	var rs := ResultsScreen.new()
+	add_child(rs)
+	rs.setup({"won": true, "draw": false, "invalid": false, "kills": 3, "damage": 640, "headshots": 1, "accuracy": 40.0, "time": 120.0,
+		"xp": 0, "enemy": "BOT KAI", "mode": "TRAINING GROUND", "mode_id": "training", "map": "CARGO CAGE", "weapon": "M4A1",
+		"score_player": 3, "score_bot": 1, "hp_left": 80, "difficulty": "NORMAL", "taken": 120, "deaths": 1})
+	var p1 := rs.find_child("Page1", true, false) as Control
+	var p2 := rs.find_child("Page2", true, false) as Control
+	var go := rs.find_child("Continue", true, false) as Button
+	var lobby := rs.find_child("Lobby", true, false) as Button
+	_check(rs.page == 1 and p1.visible and not p2.visible and go.visible and not lobby.visible, "the results open on page 1 with CONTINUE")
+	_check(rs.find_child("HeroModel", true, false) is CharacterModel, "page 1 shows the player's character")
+	_check((rs.find_child("HeroKills", true, false) as Label).text == "3" and (rs.find_child("HeroDamage", true, false) as Label).text == "640",
+		"page 1's plate: eliminations and damage")
+	_check(rs.find_child("PlayAgain", true, false).get_parent() == rs, "PLAY AGAIN stays on both pages")
+	go.pressed.emit()
+	_check(rs.page == 2 and p2.visible and not p1.visible and lobby.visible and not go.visible, "CONTINUE opens page 2 with LOBBY")
+	var row := rs.find_child("YourRow", true, false)
+	_check(row != null and (row.find_child("Value_KDA", true, false) as Label).text == "3/1/0", "page 2: your K/D/A first")
+	rs.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	_check(rs.page == 1 and p1.visible and not p2.visible, "Android back on page 2 goes back to page 1")
+	rs.free()
+	Game.online = keep_online
 
 
 ## Player cards and waiting friend requests are signed with the phone's own key: a good signature
