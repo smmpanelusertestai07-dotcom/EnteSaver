@@ -339,6 +339,21 @@ func gun() -> WeaponState:
 	return weapons[0]
 
 
+## Whether weapon `index` of the kit is in hand (RemoteFighter: or was, a moment ago).
+func held_recently(index: int) -> bool:
+	return index == current
+
+
+## The weapons whose numbers bound this fighter's hits as the other phone reports them
+## (TeamArenaNet.max_hit_by, _hit_rate_ok): its gun and the fists always, the sidearm while it
+## is (or was a moment ago) in hand. A reported hit does not say which weapon made it.
+func net_arms() -> Array:
+	var out: Array = [gun().def, Weapons.DEFS.fists]
+	if held_recently(Weapons.SIDE):
+		out.append(Weapons.DEFS[Weapons.SIDEARM])
+	return out
+
+
 ## The kit's sidearm (Weapons.SIDE); null on a fighter that has no kit yet.
 func sidearm() -> WeaponState:
 	return weapons[Weapons.SIDE] if weapons.size() > Weapons.SIDE else null

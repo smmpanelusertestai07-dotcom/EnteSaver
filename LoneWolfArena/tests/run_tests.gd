@@ -58,6 +58,7 @@ func _ready() -> void:
 	_test_weapon_state()
 	_test_kit()
 	_test_bot_sidearm()
+	_test_sidearm_caps()
 	_test_hud_layout()
 	_test_hud_touch_areas()
 	_test_guard()
@@ -367,6 +368,47 @@ func _test_bot_sidearm() -> void:
 	b._choose_arm(3.0)
 	_check(b.current == Weapons.FISTS, "the fists only when both are dry")
 	b.free()
+
+
+## Online, the other phone's hits are capped by this round's gun and the fists, and by the sidearm
+## only while its states have the sidearm in hand (or had it within HELD_GRACE_MS: a hit may come
+## before the state that says the hand changed): a shotgun round's pellet cap is not loosened while
+## the shotgun is held. The state carries the kit index and the copy shows the sidearm in hand.
+func _test_sidearm_caps() -> void:
+	var a: Node3D = load("res://scripts/arena.gd").new()
+	var r := RemoteFighter.new()
+	r.process_mode = Node.PROCESS_MODE_DISABLED
+	add_child(r)
+	r.set_loadout("sg")
+	a.set("bot", r)
+	a.set("picked_weapon", "sg")
+	var sd: Dictionary = Weapons.DEFS[Weapons.SIDEARM]
+	var gun_head := Weapons.hit_cap([Weapons.DEFS.sg, Weapons.DEFS.fists], "head") * 1.02
+	_near(a.call("_max_remote_hit", "head"), gun_head, "the shotgun held: one pellet or a punch to the head at most, as before")
+	var st := PackedFloat32Array([0, 1, 0, 0, 0, 0, 8, Weapons.SIDE, 200, 1])
+	r.apply_state(st)
+	var side_head := float(sd.damage) * float(sd.head_mult) * 1.02
+	_check(r.current == Weapons.SIDE and r.weapon().id == Weapons.SIDEARM, "the other phone's sidearm is in its copy's hand")
+	_near(a.call("_max_remote_hit", "head"), maxf(gun_head, side_head), "the sidearm held: its head shot passes")
+	var rate_side := Weapons.hit_rate([Weapons.DEFS.sg, Weapons.DEFS.fists, sd])
+	_check(rate_side.x >= 1.5 / float(sd.interval), "hit reports as fast as the sidearm fires pass")
+	st[7] = Weapons.GUN
+	r.apply_state(st)
+	_check(r.current == Weapons.GUN and r.held_recently(Weapons.SIDE), "back on the gun, the sidearm counts a moment longer")
+	r._held_ms[Weapons.SIDE] = Time.get_ticks_msec() - RemoteFighter.HELD_GRACE_MS - 10
+	_near(a.call("_max_remote_hit", "head"), gun_head, "the gun held again: the gun's cap, not loosened")
+	st[7] = 7.0
+	r.apply_state(st)
+	_check(r.current == Weapons.SIDE, "an index past the kit is clamped to it")
+	var b := Bot.new()
+	b.set_loadout("ar")
+	_check(b.net_arms().size() == 2, "a fighter with the gun out: the gun and the fists bound its hits")
+	b.current = Weapons.SIDE
+	_check(b.net_arms().size() == 3 and Weapons.hit_cap(b.net_arms(), "head") == Weapons.hit_cap([Weapons.DEFS.ar], "head"),
+		"the sidearm out adds its numbers, never above the rifle's")
+	b.free()
+	r.free()
+	a.free()
 
 
 func _test_hud_layout() -> void:

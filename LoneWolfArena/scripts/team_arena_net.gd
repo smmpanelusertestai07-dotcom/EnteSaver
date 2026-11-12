@@ -1002,27 +1002,24 @@ func _decision_ok(kind: String, data: Array) -> bool:
 
 
 ## The most one reported hit by `attacker` can do in this zone: a bullet (one pellet) of its gun this
-## round at point-blank range, a punch, or (on the body) a frag at its centre, before the armour,
-## x 1.02.
+## round (or of the sidearm while its states have it in hand: Fighter.net_arms) at point-blank
+## range, a punch, or (on the body) a frag at its centre, before the armour, x 1.02.
 func max_hit_by(attacker: Fighter, zone: String) -> float:
-	var best := 0.0
-	for d: Dictionary in [attacker.gun().def, Weapons.DEFS.fists]:
-		best = maxf(best, float(d.damage) * Weapons.zone_mult(d, zone, 0.0) * Weapons.pen_mult(d, zone))
+	var best := Weapons.hit_cap(attacker.net_arms(), zone)
 	if zone == "body":
 		best = maxf(best, Grenade.MAX_DAMAGE)
 	return best * 1.02
 
 
-## Hit reports from one attacker: no faster than its gun fires (all its pellets), with headroom for
-## network bunching (Arena._remote_hit_allowed per fighter).
+## Hit reports from one attacker: no faster than the weapons it may hold fire (all their pellets),
+## with headroom for network bunching (Arena._remote_hit_allowed per fighter).
 func _hit_rate_ok(attacker: Fighter) -> bool:
-	var d: Dictionary = attacker.gun().def
-	var rate := maxf(float(d.pellets) / maxf(float(d.interval), 0.05), 1.0 / 0.45) * 1.5 + 3.0
-	return _net_rate_ok("hit%d" % attacker.slot, rate, maxf(float(d.pellets) * 3.0, 12.0))
+	var r := Weapons.hit_rate(attacker.net_arms())
+	return _net_rate_ok("hit%d" % attacker.slot, r.x, r.y)
 
 
 func _shot_rate_ok(f: Fighter) -> bool:
-	var interval := minf(float(f.gun().def.interval), float(Weapons.DEFS.fists.interval))
+	var interval := Weapons.min_interval(f.net_arms())
 	return _net_rate_ok("shot%d" % f.slot, 1.5 / maxf(interval, 0.05) + 2.0, 8.0)
 
 

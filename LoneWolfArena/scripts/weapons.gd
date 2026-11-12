@@ -199,6 +199,34 @@ const HELMET_REDUCTION := 0.35
 const VEST_REDUCTION := 0.35
 
 
+## The most one reported hit can do in `zone` with any of `defs` (the weapons the sender may be
+## holding): one bullet (one pellet) at point-blank range, before the armour.
+static func hit_cap(defs: Array, zone: String) -> float:
+	var best := 0.0
+	for d: Dictionary in defs:
+		best = maxf(best, float(d.damage) * zone_mult(d, zone, 0.0) * pen_mult(d, zone))
+	return best
+
+
+## How fast hit reports may come from a sender holding any of `defs`: x the token bucket's refill
+## per second (1.5 x the fastest's pellets per second, at least a punch's, + 3), y its burst.
+static func hit_rate(defs: Array) -> Vector2:
+	var rate := 1.0 / 0.45
+	var burst := 12.0
+	for d: Dictionary in defs:
+		rate = maxf(rate, float(d.pellets) / maxf(float(d.interval), 0.05))
+		burst = maxf(burst, float(d.pellets) * 3.0)
+	return Vector2(rate * 1.5 + 3.0, burst)
+
+
+## The shortest time between two trigger pulls of any of `defs`.
+static func min_interval(defs: Array) -> float:
+	var best := INF
+	for d: Dictionary in defs:
+		best = minf(best, float(d.interval))
+	return best
+
+
 static func damage_at(def: Dictionary, base: float, dist: float) -> float:
 	var r: float = def.range
 	var fs: float = def.falloff_start
