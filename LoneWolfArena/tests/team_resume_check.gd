@@ -12,7 +12,10 @@ extends Node
 ##    same data folder): with no tap it is back in the same match (the session file, REJOINING
 ##    MATCH..., the arena, the host's "sync" and "all"): round 1, the fight, the host's fighter out,
 ##    nothing counted again. The others saw its fighter AWAY and back meanwhile.
-## 3. The host's teammate then goes down in the zone: the host's team is wiped and every copy ends
+## 3. Then the HOST is killed and started again: the members see its fighter AWAY and back; its
+##    fresh arena enters round 1's fight from its stand-in's "sync" (its player out, as decided
+##    before) and rebuilds its referee from the members' "rep".
+## 4. The host's teammate then goes down in the zone: the host's team is wiped and every copy ends
 ##    with the same result (the host's team DEFEAT, the other VICTORY).
 ## Prints "TEAM RESUME CHECK DONE bad=N" ("TEAM RESUME PART 1 DONE bad=N" before the kill).
 
@@ -118,14 +121,33 @@ func run(autotest: Node) -> int:
 	if not await _until(func() -> bool: return is_instance_valid(arena) and not kf.away, 40.0):
 		return _done("the killed member never came back")
 	at.log_line("%s: the killed member is back" % role)
-	# 3. The host's teammate goes down: the host's team is wiped.
-	if int(ids[me]) == mate:
+	# 3. The host killed and started again.
+	if host:
 		await at.wait(3.0)
+		at.log_line("TEAM RESUME PART 1 DONE bad=%d" % bad)
+		OS.kill(OS.get_process_id())
+		return bad
+	var err := await _host_restart(arena, hf as RemoteFighter)
+	if err != "":
+		return _done(err)
+	# 4. The host's teammate goes down: the host's team is wiped.
+	if int(ids[me]) == mate:
+		await at.wait(10.0)              # (the host's fresh arena loads and enters the match)
 		await _go_down(arena)
 	return await _end(arena, hslot)
 
 
-## The killed member's new process: back in the same match with no tap.
+## A member: the host's fighter AWAY while the host restarts, then back.
+func _host_restart(arena: Node, hf: RemoteFighter) -> String:
+	if not await _until(func() -> bool: return is_instance_valid(arena) and hf.away, 30.0):
+		return "the killed host's fighter was never AWAY"
+	if not await _until(func() -> bool: return is_instance_valid(arena) and not hf.away, 60.0):
+		return "the host never came back after its restart"
+	at.log_line("%s: the host is back after its restart" % role)
+	return ""
+
+
+## The killed copy's new process (a member, or the host): back in the same match with no tap.
 func _again() -> int:
 	var saw_rejoin := [false]
 	var watch := func() -> bool:
@@ -150,12 +172,23 @@ func _again() -> int:
 	var me := arena.get("player") as Fighter
 	at.log_line("%s: rejoined round %d, phase %d, host's fighter alive %s, own HP %.1f, matches %d" % [role, int(arena.get("round_index")),
 		int(arena.get("phase")), hf.alive, me.hp, int(Game.profile.matches)])
-	if int(arena.get("round_index")) != 1 or hf.alive or not me.alive:
+	if int(arena.get("round_index")) != 1 or hf.alive or (me.alive == host):
 		_fail("the rejoined arena is not in round 1 with the host's fighter out")
+	if host:
+		await at.wait(5.0)                # (the members' "rep")
+		var ref := arena.get("referee") as TeamReferee
+		at.log_line("host: its referee after the reps: %s" % str(ref.status))
+		if int(ref.status.get(hslot, -1)) != TeamReferee.OUT:
+			_fail("the resumed host's referee does not have its own fighter out")
 	if int(Game.profile.matches) != 0:
 		_fail("the rejoined match was counted again (%d)" % int(Game.profile.matches))
+	if host:
+		return await _end(arena, hslot)
+	var err := await _host_restart(arena, hf as RemoteFighter)
+	if err != "":
+		return _done(err)
 	if int(ids[cloud.my_id]) == _mate_of(arena, hslot):
-		await at.wait(3.0)
+		await at.wait(10.0)
 		await _go_down(arena)
 	return await _end(arena, hslot)
 

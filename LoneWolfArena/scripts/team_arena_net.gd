@@ -543,6 +543,9 @@ func _on_net_event(kind: String, data: Array) -> void:
 				if stand_in_id() == Game.session.my_id:
 					_send_team_sync(f)
 				_send_rep()
+				for d: Array in _dn_log:        # (a host back after a restart never heard them)
+					if int(d[1]) == round_index and phase == Phase.FIGHT:
+						Game.session.send_event("dn", d)
 		"sync":
 			if not am_host and (not multi or _from == host_id) and data.size() == 13 and _slot_at(data, 0) == player:
 				_on_team_sync(data)
