@@ -993,8 +993,12 @@ func _on_inbox(d: Dictionary) -> void:
 			_incoming = inv
 			if typeof(d.get("quick")) == TYPE_BOOL and bool(d.quick):
 				# QUICK MATCH: taken at once from a seeker this search saw (and may play), never
-				# shown; any other quick challenge is declined at once.
-				answer(seeking and seek_team == 0 and quick_seen.has(from) and _room == "" and challenge_allowed(from, d) and invite_proven(d, from))
+				# shown; any other quick challenge is declined at once, and so is every one while a
+				# GROUP INVITE waits for this player's answer (a friend's duel challenge waiting
+				# already declines it above).
+				inv.quick = true
+				answer(seeking and seek_team == 0 and quick_seen.has(from) and _room == "" and _ginv.is_empty()
+					and challenge_allowed(from, d) and invite_proven(d, from))
 				return
 			# The host of the custom room this phone asked to join starts the match: it knows the
 			# room's password, so it is accepted at once with the room's rules.
@@ -1270,9 +1274,14 @@ func _tagged(d: Dictionary, inv: Dictionary, what: String, sender: String) -> bo
 		_tag(inv, what, sender).to_utf8_buffer(), String(d.mac).to_utf8_buffer())
 
 
-## Challenges a listed player: its public key wraps a fresh room name and the room's keys.
+## Challenges a listed player: its public key wraps a fresh room name and the room's keys. A
+## QUICK MATCH challenge (extra "quick") never goes out while a challenge or a group invite waits
+## for this player's answer (answer_waiting): the popup's ACCEPT would enter the friend's room over
+## it and leave the stranger waiting alone.
 func invite(peer_id: String, extra := {}) -> bool:
 	if in_session or session_multi or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
+		return false
+	if bool(extra.get("quick", false)) and answer_waiting():
 		return false
 	var pub := CryptoKey.new()
 	if pub.load_from_string(String(peers[peer_id].pk), true) != OK:
@@ -1344,6 +1353,12 @@ static func requests_allowed() -> bool:
 
 func has_invite() -> bool:
 	return not _incoming.is_empty()
+
+
+## True while a duel challenge, a TEAM INVITE or a GROUP INVITE waits for this player's answer (a
+## popup is up): QUICK MATCH neither challenges nor takes a quick challenge meanwhile (NetMatch).
+func answer_waiting() -> bool:
+	return not _incoming.is_empty() or not _ginv.is_empty()
 
 
 ## Who the challenge waiting for an answer here comes from: {"id", "name", "team"} ({} when none);
@@ -1457,6 +1472,8 @@ func answer(accept: bool, rules := {}) -> void:
 	if not accept:
 		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
+	if seeking and seek_team == 0 and not bool(inv.get("quick", false)):
+		seek_stop()                      # a friend's challenge taken ends the QUICK MATCH search (NetMatch sees it)
 	is_host = false
 	session_rules = rules
 	session_team = (inv.get("team", {}) as Dictionary).duplicate()
@@ -3037,7 +3054,7 @@ const CODE_LEN := 10           # 2 bucket digits + 8 secret digits
 const CODE_STRETCH := 10000    # HMAC rounds that make a code's key
 var my_code := ""              # this phone's group code (CODE_LEN digits), made once per run
 var code_join := false         # the leader's switch JOIN BY CODE (off until turned on, every run)
-var code_state := ""           # this phone's own JOIN BY CODE: "", "asking", "in", "full", "none", "blocked"
+var code_state := ""           # this phone's own JOIN BY CODE: "", "asking", "in", "full", "none", "blocked", "failed"
 var _cjoin := {}               # {"code", "key", "t", "ask_t"}: the join by code under way
 var _code_topic := ""          # the bucket this phone listens on for asks with its code
 var _code_keys := {}           # code -> its stretched key (the own one, the one being joined)
@@ -3099,11 +3116,22 @@ func _code_tag(key: PackedByteArray, what: String) -> String:
 	return _crypto.hmac_digest(HashingContext.HASH_SHA256, key, what.to_utf8_buffer()).hex_encode()
 
 
-## The leader's (or a solo's) switch JOIN BY CODE.
+## The leader's (or a solo's) switch JOIN BY CODE. A leader's roster carries it at once ("cj"), so
+## a member shows the code only while it works (code_open).
 func set_code_join(on: bool) -> void:
 	if code_join != on:
 		code_join = on
+		_group_roster()
 		group_changed.emit()
+
+
+## Whether the GROUP CODE this phone shows lets anyone in: a leader's or a solo's own switch, a
+## member's from the leader's roster ("cj"; off until a roster says on). A member shows the code and
+## COPY only while it is on (its COPY cannot turn the leader's switch on).
+func code_open() -> bool:
+	if not group.is_empty() and String(group.leader) != my_id:
+		return bool(group.get("code_join", false))
+	return code_join
 
 
 ## JOIN BY CODE: "" when the ask went out (code_state then tells how it goes), else the notice.
@@ -3111,6 +3139,9 @@ func join_group_code(code: String) -> String:
 	code = code.replace(" ", "").replace("-", "").strip_edges()
 	if not is_group_code(code):
 		return "A GROUP CODE HAS %d DIGITS" % CODE_LEN
+	if code_state == "in" and bool(_grp.get("joining", false)) and not in_room() and code == String(group.get("code", "")):
+		_group_close(true)               # the same code again while its join waits to be let in: asked afresh
+		code_state = ""
 	if code == group_code():
 		return "THIS IS YOUR OWN GROUP CODE"
 	if in_group() or in_room() or (not group.is_empty() and String(group.leader) != my_id):
@@ -3231,10 +3262,11 @@ func _on_code_answer(from: String, d: Dictionary) -> void:
 		code_state = "blocked"           # never into the group of a leader this player blocked
 		group_changed.emit()
 		return
-	if in_group() or in_room() or in_session or session_multi or _key == null:
-		return
-	var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(sec_text))
-	if sec.size() != 81 or not int(sec[80]) in [1, 2, 4]:
+	var sec := PackedByteArray() if _key == null else _crypto.decrypt(_key, Marshalls.base64_to_raw(sec_text))
+	if in_group() or in_room() or in_session or session_multi or sec.size() != 81 or not int(sec[80]) in [1, 2, 4]:
+		_cjoin = {}
+		code_state = "failed"            # the leader's answer cannot be taken here: COULD NOT JOIN
+		group_changed.emit()
 		return
 	var code := String(_cjoin.code)
 	_cjoin = {}
@@ -3545,15 +3577,24 @@ func _group_send(d: Dictionary) -> void:
 func _group_roster() -> void:
 	if group.is_empty() or String(group.leader) != my_id:
 		return
+	_group_send(_roster_msg())
+
+
+## The leader's "groster" as it goes out: the members, mode, size, status and, out of a room, the
+## GROUP CODE with the switch JOIN BY CODE ("cj"), inside the group room's encryption.
+func _roster_msg() -> Dictionary:
 	var msg := {"k": "groster", "members": NetGroup.pack_members(group.members), "mode": String(group.mode),
 		"size": int(group.size), "status": String(group.status), "found": search_found}
 	if not in_room():
 		msg.code = group_code()          # (inside the group room's encryption: only members read it)
-	_group_send(msg)
+		msg.cj = code_join
+	return msg
 
 
 ## Leaves the group here (tell: "gleave", the leader's "gend") and forgets its keys.
 func _group_close(tell: bool) -> void:
+	if code_state == "in" and bool(_grp.get("joining", false)):
+		code_state = "failed"            # a join by code the leader never let in (it started a match, filled up...)
 	if not _grp.is_empty():
 		if tell:
 			_group_send({"k": "gend"} if String(group.get("leader", "")) == my_id else {"k": "gleave"})
@@ -3692,11 +3733,14 @@ func _on_groster(d: Dictionary) -> void:
 	if g_status not in ["idle", "searching", "starting", "in_match"]:
 		g_status = "idle"
 	var mode := String(d.get("mode", "lonewolf")).left(16) if typeof(d.get("mode")) == TYPE_STRING else "lonewolf"
-	var before := JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed])
+	var before := JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed, group.get("code", ""), group.get("code_join", false)])
+	if bool(_grp.joining) and code_state == "in":
+		code_state = ""                  # the join by code is done: in the group
 	_grp.joining = false
 	var gc: Variant = d.get("code")
-	if typeof(gc) == TYPE_STRING and String(gc).length() == 6 and String(gc).is_valid_int():
+	if typeof(gc) == TYPE_STRING and is_group_code(String(gc)):
 		group.code = String(gc)
+	group.code_join = typeof(d.get("cj")) == TYPE_BOOL and bool(d.cj)
 	group.members = list
 	group.status = g_status
 	group.mode = mode
@@ -3704,7 +3748,7 @@ func _on_groster(d: Dictionary) -> void:
 	search_needed = 2 * size if g_status == "searching" and size in [2, 4] else 0
 	var found: Variant = d.get("found")
 	search_found = clampi(int(found) if (found is float or found is int) else list.size(), list.size(), search_needed) if search_needed > 0 else 0
-	if JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed]) != before:
+	if JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed, group.get("code", ""), group.get("code_join", false)]) != before:
 		group_changed.emit()
 
 

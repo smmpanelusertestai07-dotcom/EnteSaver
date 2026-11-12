@@ -810,6 +810,12 @@ func _reset_tab() -> void:
 	_show_tab(_current)
 
 
+## Closes the panel the way its X does (saved, `closed` emitted, freed); nothing while a task runs
+## (busy: DELETE MY DATA keeps its waiting screen). The lobby calls it when a match is found.
+func close_panel() -> void:
+	_close()
+
+
 func _close() -> void:
 	if busy:
 		return

@@ -15,7 +15,11 @@ extends RefCounted
 ##   says so, a wrong code finds nobody, a blocked player is never answered, a leader the joiner
 ##   blocked is never joined, the switch off answers nobody, too many tries wait;
 ## - the DUEL in a group of two: START's route, SELECT MODE's chip, the member's phone taking the
-##   leader's tagged challenge at once (and nobody else's tag).
+##   leader's tagged challenge at once (and nobody else's tag);
+## - QUICK MATCH behind a waiting DUEL CHALLENGE / GROUP INVITE (two Clouds): no quick challenge goes
+##   out and none is taken while the popup waits; ACCEPT ends the search, DECLINE lets it go on;
+## - JOIN BY CODE that never gets in (COULD NOT JOIN: TRY AGAIN, then JOIN again) and the leader's
+##   switch carried in the roster (a member shows the code only while it is on).
 
 var t: Node
 
@@ -32,6 +36,8 @@ static func run(runner: Node) -> void:
 	me._room_cloud()
 	me._group_code()
 	me._duel()
+	me._quick_behind_popup()
+	me._code_leftovers()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -75,6 +81,14 @@ func _gating() -> void:
 
 func _placement() -> void:
 	_check(Lobby.MEMBER_SPOTS.size() == 3, "up to 3 other members on the podium")
+	_check(Lobby.podium_invite_shown(true, true, 1, 4, false) and Lobby.podium_invite_shown(true, true, 3, 4, false)
+		and not Lobby.podium_invite_shown(true, true, 4, 4, false) and not Lobby.podium_invite_shown(true, false, 2, 4, false)
+		and not Lobby.podium_invite_shown(true, true, 2, 4, true) and not Lobby.podium_invite_shown(false, true, 1, 4, false),
+		"the podium's +: the leader or a solo with room, never full, for a member, during a search or without the GROUP bar")
+	_check(Lobby.podium_invite_spot({}) == 1 and Lobby.podium_invite_spot({"a": 0}) == 1 and Lobby.podium_invite_spot({"a": 0, "b": 1}) == 2
+		and Lobby.podium_invite_spot({"a": 1, "b": 2}) == -1, "the podium's + stands over the first free spot right of the hero")
+	for i: int in Lobby.INVITE_SPOTS:
+		_check((Lobby.MEMBER_SPOTS[i] as Vector3).x > 0.0, "the + plate's spot %d is right of the hero" % i)
 	for i in Lobby.MEMBER_SPOTS.size():
 		var p: Vector3 = Lobby.MEMBER_SPOTS[i]
 		_check(p.z < -0.3 and absf(p.x) > 0.5, "member spot %d stands behind and beside the hero (%s)" % [i, str(p)])
@@ -406,3 +420,117 @@ func _duel() -> void:
 	_check(mem.in_group() and lead.in_group(), "both stay in the group")
 	lead.free()
 	mem.free()
+
+
+## The challenge `from` sent `to` (from._outgoing), rebuilt as it went out (no relay), with `extra`.
+func _inv_msg(from: Cloud, to: Cloud, extra := {}) -> Dictionary:
+	var pub := CryptoKey.new()
+	pub.load_from_string(to._pk_pem, true)
+	var sec: PackedByteArray = String(from._outgoing.room).hex_decode()
+	sec.append_array(from._outgoing.aes as PackedByteArray)
+	sec.append_array(from._outgoing.mac as PackedByteArray)
+	var sec_text := Marshalls.raw_to_base64(Crypto.new().encrypt(pub, sec))
+	var msg := {"t": "inv", "from": from.my_id, "name": "P", "bundle": "default", "sec": sec_text, "pk": from._pk_pem,
+		"sig": from._sign(Cloud.invite_text(from.my_id, to.my_id, sec_text))}
+	msg.merge(extra)
+	return msg
+
+
+## QUICK MATCH and a popup waiting for this player's answer (design/GROUPS.txt 7): two seekers.
+func _quick_behind_popup() -> void:
+	var a := _peer(Cloud.new(), 2048)
+	var b := _peer(Cloud.new(), 2048)
+	for pair: Array in [[a, b], [b, a]]:
+		var x: Cloud = pair[0]
+		var y: Cloud = pair[1]
+		x.peers[y.my_id] = {"name": "Y", "bundle": "default", "pk": y._pk_pem, "seen": Time.get_ticks_msec()}
+		x.seek_start()
+		x.quick_seen[y.my_id] = Time.get_ticks_msec()
+	# A friend's challenge waits on a's phone: a's search sends no quick challenge.
+	a._incoming = {"id": "f".repeat(32), "name": "FRIEND", "room": "00".repeat(16), "aes": PackedByteArray(), "mac": PackedByteArray(), "t": Time.get_ticks_msec()}
+	_check(a.answer_waiting() and not a.invite(b.my_id, {"quick": true}) and a._outgoing.is_empty(),
+		"a waiting DUEL CHALLENGE: QUICK MATCH sends no quick challenge")
+	a._incoming = {}
+	a._ginv = {"id": "f".repeat(32), "name": "FRIEND", "gid": "00".repeat(16), "room": "00".repeat(16), "aes": PackedByteArray(),
+		"mac": Crypto.new().generate_random_bytes(32), "size": 2, "t": Time.get_ticks_msec()}
+	_check(a.answer_waiting() and not a.invite(b.my_id, {"quick": true}), "a waiting GROUP INVITE: QUICK MATCH sends no quick challenge")
+	# b's quick challenge reaches a while the GROUP INVITE waits: declined at once, nothing taken.
+	_check(b.invite(a.my_id, {"quick": true}), "the other seeker challenges")
+	var quick := _inv_msg(b, a, {"quick": true})
+	a._inbox_budget = 8.0
+	a._on_inbox(quick)
+	_check(a.opponent.is_empty() and a._incoming.is_empty() and not a._ginv.is_empty() and a.seeking,
+		"a quick challenge behind a GROUP INVITE is declined; the invite still waits, the search goes on")
+	# DECLINE: the search goes on, and a quick challenge is taken again.
+	a.answer_group_invite(false)
+	_check(a.seeking and not a.answer_waiting(), "DECLINE of the popup lets the search go on")
+	a._inbox_budget = 8.0
+	a._on_inbox(quick)
+	_check(String(a.opponent.get("id", "")) == b.my_id and a.seeking, "with no popup waiting, the quick challenge is taken (the match follows)")
+	a.free()
+	b.free()
+	# ACCEPT of a friend's challenge ends the search (NetMatch stops when Cloud is no longer seeking).
+	var c := _peer(Cloud.new(), 2048)
+	var f := _peer(Cloud.new(), 2048)
+	c.seek_start()
+	f.peers[c.my_id] = {"name": "C", "bundle": "default", "pk": c._pk_pem, "seen": Time.get_ticks_msec()}
+	_check(f.invite(c.my_id), "a friend challenges a searching player")
+	c._inbox_budget = 8.0
+	c._incoming = {}
+	var who_may: Variant = Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE)
+	Game.settings.challenges_from = Game.CHALLENGES_EVERYONE
+	c.invited.connect(func(_n: String) -> void: pass)
+	c._on_inbox(_inv_msg(f, c))
+	Game.settings.challenges_from = who_may
+	_check(c.has_invite() and c.seeking, "the friend's challenge waits for an answer; the search still runs")
+	c.answer(true)
+	_check(not c.seeking and String(c.opponent.get("id", "")) == f.my_id, "ACCEPT ends the QUICK MATCH search and enters the friend's room")
+	c.free()
+	f.free()
+
+
+## JOIN BY CODE's failure state and the leader's switch in the roster (design/GROUPS.txt 7).
+func _code_leftovers() -> void:
+	var host := _peer(Cloud.new())
+	var guest := _peer(Cloud.new())
+	host.my_code = "6612345678"
+	host.set_code_join(true)
+	guest.join_group_code("6612345678")
+	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
+	_check(guest.code_state == "in", "a valid answer: JOINING THE GROUP...")
+	# The leader never lets the joiner in (it entered a match, the group filled): the join fails.
+	guest._grp.leader_ms = Time.get_ticks_msec() - Cloud.JOIN_TIMEOUT_MS - 10
+	guest._tick_group(0.0, Time.get_ticks_msec())
+	_check(guest.code_state == "failed" and guest.group.is_empty() and LobbyTeam.code_state_text("failed") == "COULD NOT JOIN: TRY AGAIN",
+		"never let in: COULD NOT JOIN: TRY AGAIN, out of the half-joined group (%s)" % guest.code_state)
+	_check(guest.join_group_code("6612345678") == "" and guest.code_state == "asking", "after COULD NOT JOIN, JOIN asks again")
+	# JOIN again while a join waits to be let in: the waiting one is dropped and the ask goes out.
+	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
+	_check(guest.code_state == "in" and not guest.group.is_empty(), "let in again")
+	_check(guest.join_group_code("6612345678") == "" and guest.code_state == "asking" and guest.group.is_empty(),
+		"JOIN while still waiting to be let in asks afresh (no EXIT YOUR GROUP FIRST)")
+	# An answer this phone cannot take (wrapped for another phone's key): failed, not stuck.
+	var other := _peer(Cloud.new())
+	other.join_group_code("6612345678")
+	var not_mine := host._on_code_ask(other._code_ask_msg())
+	guest._on_code_answer(host.my_id, not_mine)
+	_check(guest.code_state == "failed" and guest.group.is_empty(), "an answer that cannot be taken: COULD NOT JOIN (%s)" % guest.code_state)
+	# In at last: the roster with this phone in it ends the join (no line left over).
+	guest.join_group_code("6612345678")
+	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
+	host._on_gjoin(guest.my_id, {"name": "GUEST", "bundle": "default"})
+	host.set_code_join(false)
+	guest._on_groster(host._roster_msg())
+	_check(guest.in_group() and guest.code_state == "", "in the group: the join by code is done")
+	# The switch in the roster: a member shows the code only while the leader's switch is on.
+	_check(String(guest.group.get("code", "")) == "6612345678" and guest.group_code() == "6612345678", "the roster carries the 10-digit code")
+	_check(not guest.code_open() and not host.code_open(), "the leader's JOIN BY CODE off: the member's code is not open")
+	host.set_code_join(true)
+	guest._on_groster(host._roster_msg())
+	_check(guest.code_open() and host.code_open(), "the leader turns it on: the member's code is open")
+	var no_cj := host._roster_msg()
+	no_cj.erase("cj")
+	guest._on_groster(no_cj)
+	_check(not guest.code_open(), "a roster without the switch reads as off")
+	for c: Cloud in [host, guest, other]:
+		c.free()

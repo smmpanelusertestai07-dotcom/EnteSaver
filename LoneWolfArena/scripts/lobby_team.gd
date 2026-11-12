@@ -4,13 +4,15 @@ extends RefCounted
 ## GROUP_MAX (4) players: the first invite makes this player the LEADER. The bar lists the members
 ## (leader first, then in join order: GroupMember_<n>, a LEADER tag on the leader, YOU on this
 ## player), the leader's REMOVE on each other member (GroupRemove_<n>), "+ INVITE" (GroupInvite:
-## the leader's, or a solo's, while the group is not full; greyed otherwise), TEAMS (GroupTeams: the
+## the leader's, or a solo's; greyed for a member; no row at all in a full group), TEAMS (GroupTeams: the
 ## BLUE / ORANGE slot panel, the leader moves members, the others see it), and EXIT GROUP
 ## (GroupExit, a member) or DISBAND GROUP (GroupDisband, the leader). INVITE opens the list of online
 ## friends (GroupInviteList: Cloud.peers ∩ friends, never blocked ones; GroupAsk_<code> ->
 ## Cloud.group_invite(id)), then a popup says INVITED <NAME> and how they answered (GroupInvited).
 ## Every group has a GROUP CODE (Cloud.group_code; a solo's is the code of the group it would lead)
-## shown under the head with COPY and, for the leader, the switch JOIN BY CODE: ON / OFF; a solo also
+## shown under the head with COPY and, for the leader, the switch JOIN BY CODE: ON / OFF (a member
+## sees the code and COPY only while the leader's switch is on, Cloud.code_open, else the line
+## GroupCodeNote THE LEADER SHARES THE GROUP CODE); a solo also
 ## has JOIN BY CODE: a friend's code puts this player in their group at once, no invite needed
 ## (Cloud.join_group_code; full, wrong code, blocked: the popup says so).
 ## Hidden while Game.TEAMS_ONLINE is off, and outside LONE WOLF unless the player is in a group.
@@ -21,13 +23,15 @@ extends RefCounted
 ## in_group / is_leader / group_max / search_progress). A CUSTOM ROOM with slots is a group too
 ## (Cloud.in_room): its players show in the room's own slot panel (LobbyFriends), not in this bar.
 ## Node names: GroupBar, GroupHead, GroupMember_<n>, GroupRemove_<n>, GroupInvite, GroupTeams,
-## GroupExit, GroupDisband, GroupCodeRow (GroupCode, GroupCodeCopy, GroupCodeSwitch), GroupJoinCode,
+## GroupExit, GroupDisband, GroupCodeRow (GroupCode, GroupCodeCopy, GroupCodeSwitch), GroupCodeNote, GroupJoinCode,
 ## JoinCodePopup (JoinGroupCode, JoinGroupGo, JoinGroupState), GroupInviteList, GroupFriend_<code>, GroupAsk_<code>, GroupListNote,
 ## GroupFriends, GroupInvited, GroupInvitedOk, GroupTeamPanel (with a SlotPanel).
 
 const TILE_W := 280.0
 const ONLINE_GREEN := Color(0.38, 0.86, 0.44)
 const GROUP_MAX_DEFAULT := 4
+## A member's line where the GROUP CODE would be while the leader's JOIN BY CODE is off.
+const CODE_NOTE := "THE LEADER SHARES THE GROUP CODE"
 
 var lobby: Lobby
 var bar: VBoxContainer
@@ -185,7 +189,7 @@ func refresh() -> void:
 	var grouped := in_group()
 	var leader := is_leader()
 	var cloud := Game.cloud_service()
-	var sig := "%s|%s|%s|%d|%s|%s|%s|%s" % [str(list), grouped, leader, Game.team_size, Game.mode, _invited_id, cloud.group_code(), cloud.code_join]
+	var sig := "%s|%s|%s|%d|%s|%s|%s|%s" % [str(list), grouped, leader, Game.team_size, Game.mode, _invited_id, cloud.group_code(), cloud.code_open()]
 	if sig == _sig:
 		return
 	_sig = sig
@@ -199,11 +203,14 @@ func refresh() -> void:
 	var head := UI.shadowed(UI.label("YOUR GROUP  %d/%d" % [maxi(list.size(), 1), group_max()], 15, UI.TEXT, "heavy"))
 	head.name = "GroupHead"
 	bar.add_child(head)
-	if cloud.group_code() != "":
-		bar.add_child(_code_row(cloud.group_code(), leader, cloud.code_join))
+	if cloud.group_code() != "" and (leader or cloud.code_open()):
+		bar.add_child(_code_row(cloud.group_code(), leader, cloud.code_open()))
+	elif grouped and not leader:
+		bar.add_child(_code_note())
 	for i in list.size():
 		bar.add_child(_member_tile(i + 1, list[i], bool(acts.remove)))
-	bar.add_child(_invite_tile(list.size() + 1 if grouped else 2, bool(acts.invite_on)))
+	if not grouped or list.size() < group_max():
+		bar.add_child(_invite_tile(list.size() + 1 if grouped else 2, bool(acts.invite_on)))   # (none in a full group)
 	if not grouped:
 		bar.add_child(_action_button("JOIN BY CODE", "GroupJoinCode", "dark", open_join_code))
 	if acts.teams:
@@ -309,8 +316,7 @@ func _invite_tile(n: int, on: bool) -> Button:
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(h)
 	h.add_child(_badge(mini(n, group_max())))
-	var full := members().size() >= group_max()
-	var sub := "A FRIEND ONLINE JOINS" if on else ("THE GROUP IS FULL" if full else "THE LEADER INVITES")
+	var sub := "A FRIEND ONLINE JOINS" if on else "THE LEADER INVITES"
 	h.add_child(_tile_text("+ INVITE", UI.ACCENT if on else UI.TEXT_DIM, sub))
 	if not on:
 		h.modulate = Color(1, 1, 1, 0.55)
@@ -359,6 +365,20 @@ func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
 	return p
 
 
+## A member's line in the code's place while the leader's JOIN BY CODE is off (GroupCodeNote): the
+## code would not let anyone in, and a member's COPY cannot turn the leader's switch on.
+func _code_note() -> PanelContainer:
+	var p := PanelContainer.new()
+	p.name = "GroupCodeNote"
+	p.add_theme_stylebox_override("panel", _tile_style(Color(0.02, 0.02, 0.025, 0.5), Color(1, 1, 1, 0.1)))
+	p.custom_minimum_size = Vector2(TILE_W, 34)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l := UI.label(CODE_NOTE, 12, UI.TEXT_DIM, "bold")
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	p.add_child(UI.ellipsis(l))
+	return p
+
+
 ## What JOIN BY CODE's status line says for Cloud.code_state ("" while nothing is under way).
 static func code_state_text(state: String) -> String:
 	match state:
@@ -372,12 +392,16 @@ static func code_state_text(state: String) -> String:
 			return "NO GROUP WITH THIS CODE"
 		"blocked":
 			return "YOU BLOCKED THIS GROUP'S LEADER"
+		"failed":
+			return "COULD NOT JOIN: TRY AGAIN"
 	return ""
 
 
 ## JOIN BY CODE (a solo's GROUP bar): the Cloud.CODE_LEN-digit code (JoinGroupCode, spaces allowed) and JOIN (JoinGroupGo):
 ## Cloud.join_group_code; the line under it (JoinGroupState) follows Cloud.code_state, and the popup
-## closes once this player is in the group (no invite needed).
+## closes once this player is in the group (no invite needed). A join the leader never lets in, or
+## an answer that cannot be taken, reads COULD NOT JOIN: TRY AGAIN; JOIN then asks again, and the
+## popup's X closes it at any time.
 func open_join_code() -> void:
 	var v := lobby.dialogs.open_modal("JOIN BY CODE", 640.0, true)
 	v.name = "JoinCodePopup"

@@ -30,6 +30,7 @@ extends Node3D
 ## LobbyProfile (`profile_ui`: PROFILE and another player's card) and LobbyTeam (`team`: the TEAM
 ## bar and its invites).
 ## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard, BottomBar,
+## PodiumInvite (the podium's "+": a place to add a teammate, _build_podium_invite),
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
 ## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader, MatchingPlate, SearchLayer
 ## with SearchTab (SearchLine, SearchTimer, SearchPlayers, SearchCancel); 3D: GroupMembers with
@@ -125,6 +126,11 @@ var search_tab: SearchTab
 var _search_layer: CanvasLayer
 var _matching: Button
 var _search_was := ""
+## The member the leader's DUEL challenge went to (start_duel), "" when none waits: MATCHING...
+## stands in START's place until the match loads, or a notice says why not.
+var _duel_with := ""
+## The "+" plate on the podium (PodiumInvite): a place to add a teammate, right of the hero.
+var _podium_invite: Button
 
 
 func _ready() -> void:
@@ -591,6 +597,7 @@ func _build_ui() -> void:
 	_build_right_column(root)
 	_build_bottom_bar(root)
 	team.build(root)
+	_build_podium_invite(root)
 	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
 	# so the search stays in sight and its X in reach while the player looks around.
 	_search_layer = CanvasLayer.new()
@@ -1021,11 +1028,34 @@ func start_group(size: int) -> void:
 ## A group of exactly two with SOLO: the leader's START plays the plain 1 vs 1 between the two
 ## (Cloud.group_duel: a duel challenge the member's phone takes at once from its leader); the match
 ## and its results are the usual 1 vs 1's, and both come back to the lobby still in the group.
+## Meanwhile the greyed MATCHING... plate stands in START's place (duel_waiting) until the match
+## loads; a duel the member's phone never takes (declined, not reached, timed out) gives the plate
+## back to START with a notice.
 func start_duel() -> void:
 	Game.team_match = {}
-	var why := Game.cloud_service().group_duel()
+	var cloud := Game.cloud_service()
+	var why := cloud.group_duel()
 	if why != "":
 		dialogs.notice("DUEL", why)
+		return
+	_duel_with = cloud.waiting_for()
+	update_start_gate()
+
+
+## True while the leader's DUEL challenge waits for the member's phone or its match is starting;
+## once it ended otherwise, false and a notice (unless another one, such as COULD NOT BE REACHED,
+## is already up).
+func duel_waiting() -> bool:
+	if _duel_with == "":
+		return false
+	var c := Game.cloud_service()
+	if c.in_session or c.waiting_for_id() != "":
+		return true
+	var who := _duel_with
+	_duel_with = ""
+	if not start_btn.disabled and dialogs.modal == null:
+		dialogs.notice("DUEL", "%s did not take the duel: it did not start." % who)
+	return false
 
 
 ## What the lobby is searching for now: "quick" (the 1 vs 1 QUICK MATCH, NetMatch), "group" (a DUO
@@ -1077,13 +1107,15 @@ func _follow_search(delta: float) -> void:
 
 
 ## A match was found: every window on the lobby goes (a popup, SETTINGS, PROFILE, WARDROBE), so
-## the match loads in their place.
+## the match loads in their place. SETTINGS closes as its own X closes it (SettingsPanel.close_panel:
+## saved, its `closed` emitted; nothing in the lobby waits on that signal, the ping chip and the
+## lobby's back handling read the tree), except while it runs DELETE MY DATA (busy), which keeps
+## its waiting screen until the scene changes.
 func close_layers() -> void:
 	dialogs.close_modal()
 	var sp := _find_settings()
 	if sp:
-		sp.queue_free()
-		Game.save_settings()
+		sp.close_panel()
 	if profile_ui.layer:
 		profile_ui.close()
 	if wardrobe:
@@ -1119,7 +1151,8 @@ func on_group_changed() -> void:
 
 ## START or, for a member, who starts in its place; while a search runs (search_kind) the greyed
 ## MATCHING... plate (MatchingPlate) for everyone, the leader's and a member's phone alike (the
-## search tab at the top shows the rest). Polled 4 times a second.
+## search tab at the top shows the rest), and on the leader's phone while its DUEL waits
+## (duel_waiting). Polled 4 times a second.
 func update_start_gate() -> void:
 	if _wait_leader == null:
 		return
@@ -1130,8 +1163,82 @@ func update_start_gate() -> void:
 	if _wait_label.text != text:
 		_wait_label.text = text
 	_wait_leader.visible = text != ""
-	_matching.visible = searching and not start_btn.disabled
+	_matching.visible = (searching or duel_waiting()) and not start_btn.disabled
 	start_btn.visible = text == "" and not _matching.visible
+
+
+## The "+" plate on the podium (PodiumInvite, GROUPS.txt 1): while the group has room and this
+## player may invite (the leader, or a solo in LONE WOLF), a small plate in the lobby's chamfered
+## style floats at chest height over the first free member spot right of the hero (INVITE_SPOTS);
+## a tap opens the same INVITE list as the GROUP bar's + INVITE. Hidden during a search, in a
+## CUSTOM ROOM, with the wardrobe open, and when both right spots are taken.
+const INVITE_SPOTS := [1, 2]
+const INVITE_PLATE := Vector2(64, 64)
+const INVITE_LIFT := 1.05
+
+
+func _build_podium_invite(root: Control) -> void:
+	var b := Button.new()
+	b.name = "PodiumInvite"
+	b.text = "+"
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = INVITE_PLATE
+	b.size = INVITE_PLATE
+	b.add_theme_font_override("font", UI.font("heavy"))
+	b.add_theme_font_size_override("font_size", 40)
+	for st: String in ["font_color", "font_focus_color"]:
+		b.add_theme_color_override(st, UI.ACCENT)
+	for st: String in ["font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(st, UI.INK)
+	var normal := UI.chamfer(Color(0.02, 0.02, 0.025, 0.62), 10, 2, Color(UI.ACCENT, 0.8), 0.0, ["tl", "br"])
+	var lit := UI.chamfer(UI.ACCENT, 10, 2, UI.ACCENT, 0.0, ["tl", "br"])
+	for st: String in ["normal", "focus"]:
+		b.add_theme_stylebox_override(st, normal)
+	for st: String in ["hover", "pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(st, lit)
+	b.visible = false
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		team.open_list())
+	root.add_child(b)
+	_podium_invite = b
+
+
+## Whether the podium's "+" plate shows: the GROUP bar shows (`bar_shown`, not in a room), this
+## player may invite (the leader or a solo) into a group with room, and no search runs.
+static func podium_invite_shown(bar_on: bool, leader: bool, count: int, max_n: int, searching: bool) -> bool:
+	return bar_on and leader and count < max_n and not searching
+
+
+## The member spot the "+" plate stands over: the first of INVITE_SPOTS no member takes (`taken`:
+## id -> spot, as member_slots gives), -1 when both are taken.
+static func podium_invite_spot(taken: Dictionary) -> int:
+	for i: int in INVITE_SPOTS:
+		if not taken.values().has(i):
+			return i
+	return -1
+
+
+## Every frame: the "+" plate's place over its spot (the camera's projection) and whether it shows.
+func _follow_podium_invite() -> void:
+	if _podium_invite == null or camera == null:
+		return
+	var cloud := Game.cloud_service()
+	var grouped := LobbyTeam.in_group()
+	var spot := podium_invite_spot(_member_slot)
+	var on := wardrobe == null and _cam_t >= 1.0 and spot >= 0 and not start_btn.disabled and not cloud.in_room() \
+		and podium_invite_shown(LobbyTeam.bar_shown(Game.mode, grouped), LobbyTeam.is_leader(),
+			LobbyTeam.members().size() if grouped else 1, LobbyTeam.group_max(), search_kind() != "")
+	if on:
+		var p: Vector3 = MEMBER_SPOTS[spot] + Vector3(0, INVITE_LIFT, 0)
+		on = not camera.is_position_behind(p)
+		var at := camera.unproject_position(p) - INVITE_PLATE * 0.5
+		# never over the mode card or START (they sit bottom-right)
+		if mode_card and mode_card.is_visible_in_tree():
+			at.y = minf(at.y, mode_card.get_global_rect().position.y - INVITE_PLATE.y - 8.0)
+		_podium_invite.global_position = at.round()
+	if _podium_invite.visible != on:
+		_podium_invite.visible = on
 
 
 ## Which of the 3 spots each other member takes: a member keeps theirs while in the group, a new one
@@ -1377,6 +1484,7 @@ func _process(delta: float) -> void:
 	_follow_search(delta)
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
+	_follow_podium_invite()
 	_gate_t -= delta
 	if _gate_t <= 0.0:
 		_gate_t = 0.25

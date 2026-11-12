@@ -8,7 +8,8 @@ extends Node
 ## - the mode card's line in LONE WOLF SQUAD and TRAINING SOLO (the GROUP bar that replaced the
 ##   TEAM bar in 1.5 has its own check: tests/group_lobby_check.gd);
 ## - a stand-in TEAM INVITE (Cloud._incoming with a team) shows TEAM INVITE; DECLINE closes it;
-## - START in LONE WOLF SOLO clears a team match left over (the 1 vs 1 QUICK MATCH);
+## - START in LONE WOLF SOLO clears a team match left over (the 1 vs 1 QUICK MATCH); the podium's
+##   "+" plate hides during that search and during the DUO one;
 ## - LONE WOLF x DUO searches real players only (Cloud's search: the search tab PLAYERS 1/4, no bots, no
 ##   match against bots ever); CANCEL stops it;
 ## - TRAINING GROUND x SQUAD loads scenes/team_arena.tscn with eight fighters' roster;
@@ -138,9 +139,14 @@ func _quick_clears(lobby: Lobby) -> void:
 	var nm := lobby.get_node_or_null("NetMatch") as NetMatch
 	if nm == null or not nm.searching or not Game.team_match.is_empty():
 		_fail("START in LONE WOLF SOLO did not start the 1 vs 1 search with no team match")
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	if plus == null or plus.is_visible_in_tree():
+		_fail("the podium's + plate shows during the 1 vs 1 search")
 	if nm:
 		nm.cancel()
 	await at.wait(0.3)
+	if plus == null or not plus.is_visible_in_tree():
+		_fail("the podium's + plate does not come back after the search (a solo in LONE WOLF)")
 
 
 ## LONE WOLF x DUO: the search for real players (Cloud.group_start: a solo is a unit of one),
@@ -159,6 +165,9 @@ func _team_search(lobby: Lobby) -> void:
 	var plate := lobby.find_child("MatchingPlate", true, false) as Control
 	if plate == null or not plate.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree():
 		_fail("START does not turn into the MATCHING... plate while searching")
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	if plus == null or plus.is_visible_in_tree():
+		_fail("the podium's + plate shows during the DUO search")
 	for l in tab.find_children("*", "Label", true, false):
 		if (l as Label).text.contains("BOT"):
 			_fail("the search mentions bots: %s" % (l as Label).text)
