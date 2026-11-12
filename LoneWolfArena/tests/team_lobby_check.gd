@@ -168,6 +168,7 @@ func _size_box(lobby: Lobby) -> void:
 		_fail("LONE WOLF's team-size box is not SOLO / DUO / SQUAD (%s)" % str(words))
 	await at.shot("t02c_size_box_lone_wolf")
 	lobby.dialogs.close_size_box()
+	await at.wait(0.2)
 	await _pick_size(lobby, "training", 2)
 
 

@@ -5,7 +5,8 @@ extends Node
 ## with guns on cooldown and the ROUNDS strip; the waiting side's read-only panel), PREPARE
 ## countdown, round banner,
 ## the bot in view (red crosshair; on the minimap its arrowhead, and the fading marks of shots fired
-## out of sight), firing (each shot its own damage number, hit marker),
+## out of sight), the quiet stage change of the 1 vs 1 (no band, no ZONE SHRINKING, no zone strip),
+## the minimap turned with the view and NORTH UP, firing (each shot its own damage number, hit marker),
 ## separate damage numbers in a row (never on top of each other), red-dot ADS, the RELOAD button
 ## (grey on a full magazine) and the reload ring, the kit's three small slots with each one held
 ## (the gun, the WREN 9 sidearm with its rounds, the fists) and SWITCH's cycle through them, the
@@ -17,7 +18,7 @@ extends Node
 ## damage arcs, the elimination (red X, badge, the 1 vs 1's one kill feed line with the gun), the ELIMINATED BY card (by the bot, by
 ## the zone), the break between rounds step by step (result band, score plates before and after
 ## the tick, the next round's band, then round 2's prep and fight with nothing over them) and the
-## HUD editor (select + drag).
+## HUD editor (its minimap stand-in turned and north up; select + drag).
 ## Then DUO / SQUAD in TRAINING GROUND (team_tour, alone with LW_TOUR=team): the BLUE vs ORANGE prep
 ## line, the teammates panel and ally tags, a knocked teammate (marker on them and pinned to the
 ## edge), REVIVE (a real tap) and reviving, the player knocked (BLEEDING OUT, BEING REVIVED),
@@ -142,6 +143,40 @@ func run(at: Node) -> int:
 	await at.shot("hud_05b_minimap_marks")
 	await _until(at, func() -> bool: return hud.shots_heard.is_empty(), 10.0)     # (game time: the capture box runs slowly)
 	_check(hud.shots_heard.is_empty(), "the shot marks fade out after about 2 s", at)
+	# A quiet stage change in the 1 vs 1: no SAFE ZONE SHRINKS IN band in stage 1's last seconds, no
+	# ZONE SHRINKING line at the change; the clock just starts stage 2 and the zone closes in.
+	var clock0 := [float(arena.get("elapsed")), float(arena.get("time_left")), float(arena.get("zone_radius")), arena.get("zone_center")]
+	arena.set("zone_state", "stationary")
+	arena.set("elapsed", RoundRules.STAGE1_S - 4.0)
+	arena.set("time_left", float(arena.call("round_time")) - (RoundRules.STAGE1_S - 4.0))
+	await at.wait(0.3)
+	_check(String(arena.get("zone_warning")) == "" and String(arena.zone_state) == "stationary",
+		"the 1 vs 1 shows no SAFE ZONE SHRINKS IN band before the stage change", at)
+	await _until(at, func() -> bool: return String(arena.zone_state) != "stationary", 10.0)
+	await at.wait(0.3)
+	_check(String(arena.zone_state) == "shrinking" and String(hud._center.text) != "ZONE SHRINKING" and String(arena.get("zone_warning")) == "",
+		"the 1 vs 1's stage change is quiet: no ZONE SHRINKING line, no band", at)
+	_check(bool(arena.call("quiet_stage_change")), "the 1 vs 1 arena changes stage quietly", at)
+	await at.shot("hud_05c_stage_change")
+	# The minimap turns with the view by default (the bot's arrowhead turned with it, N on the edge);
+	# NORTH UP keeps north up.
+	b.hp = maxf(b.hp, 150.0)
+	p.hp = maxf(p.hp, 150.0)
+	_check(HudMinimap.turns(), "the minimap turns with the view by default", at)
+	await at.shot("hud_05d_minimap_turned")
+	Game.settings.minimap_turns = false
+	await at.wait(0.3)
+	await at.shot("hud_05e_minimap_north_up")
+	Game.settings.minimap_turns = true
+	b.hp = maxf(b.hp, 150.0)
+	p.hp = maxf(p.hp, 150.0)
+	# (back to the clock the tour had: the rest of it needs the round's time)
+	arena.set("elapsed", minf(float(clock0[0]), RoundRules.STAGE1_S - 12.0))
+	arena.set("time_left", float(arena.call("round_time")) - float(arena.get("elapsed")))
+	arena.set("zone_state", "stationary")
+	arena.set("zone_radius", clock0[2])
+	arena.set("zone_center", clock0[3])
+	arena.call("_update_zone_mesh")
 	# Fire with the right fire button (drag-aim keeps it on the bot).
 	var fire_c := HudLayout.center(hud.layout.fire_r, vs)
 	var hits0 := int(p.stats.hits)
@@ -424,6 +459,13 @@ func run(at: Node) -> int:
 	await at.shot("hud_17_editor")
 	var ed := at.get_tree().current_scene
 	var eh: HUD = ed.get("hud")
+	# The editor's minimap stand-in follows the setting: turned (arrow up, N) or north up.
+	Game.settings.minimap_turns = false
+	eh.minimap.queue_redraw()
+	await at.wait(0.3)
+	await at.shot("hud_17b_editor_north_up")
+	Game.settings.minimap_turns = true
+	eh.minimap.queue_redraw()
 	var c := HudLayout.center(eh.layout.jump, eh.size)
 	_touch(at, 3, c, true)
 	await at.wait(0.1)

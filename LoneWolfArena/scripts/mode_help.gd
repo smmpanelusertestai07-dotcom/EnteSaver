@@ -235,7 +235,6 @@ static func _score_box(ci: CanvasItem, c: Vector2, n: int, col: Color, sz := 46.
 
 static func _pic_duel(ci: CanvasItem, s: Vector2) -> void:
 	var g := s.y * 0.88
-	ci.draw_circle(Vector2(s.x * 0.5, g - 4), s.y * 0.07, Color(1, 1, 1, 0.05), true, -1.0, true)
 	_fighter(ci, Vector2(s.x * 0.3, g), s.y * 0.56, HudDraw.BLUE, 1)
 	_fighter(ci, Vector2(s.x * 0.7, g), s.y * 0.56, HudDraw.ORANGE, -1)
 	HudDraw.text(ci, "VS", Vector2(s.x * 0.5, g - s.y * 0.3), int(s.y * 0.14), UI.ACCENT, 1, 4, "heavy")
@@ -277,18 +276,18 @@ static func _pic_pick(ci: CanvasItem, s: Vector2) -> void:
 			HudDraw.icon(ci, HudDraw.tex("v_timer"), r.get_center() + Vector2(0, ch * 0.22), Vector2(20, 20), Color(1, 1, 1, 0.8))
 			HudDraw.text(ci, "4 ROUNDS", r.get_center() + Vector2(0, ch * 0.38), 13, Color(1, 1, 1, 0.8), 1, 0, "bold")
 		ci.draw_rect(r, UI.ACCENT if picked else Color(1, 1, 1, 0.18), false, 3.0 if picked else 1.0)
-	# The pick goes to both fighters.
+	# The pick goes to both fighters: the gun over the two of them.
 	var from := Vector2(s.x * 0.08 + (cw + 12) + cw * 0.5, s.y * 0.32 + ch)
-	var foot_l := Vector2(s.x * 0.8, s.y * 0.9)
-	var foot_r := Vector2(s.x * 0.92, s.y * 0.9)
-	_fighter(ci, foot_l, s.y * 0.42, HudDraw.BLUE, 1)
-	_fighter(ci, foot_r, s.y * 0.42, HudDraw.ORANGE, -1)
-	var to := Vector2(s.x * 0.86, s.y * 0.36)
-	ci.draw_polyline(PackedVector2Array([from + Vector2(0, 6), from + Vector2(0, 26), Vector2(to.x - 40, from.y + 26), to + Vector2(-40, 0), to]),
-		Color(UI.ACCENT, 0.85), 3.0, true)
-	ci.draw_colored_polygon(PackedVector2Array([to + Vector2(8, 0), to + Vector2(-4, -7), to + Vector2(-4, 7)]), UI.ACCENT)
-	HudDraw.icon(ci, HudDraw.tex("weapon_smg"), to + Vector2(40, 0), Vector2(64, 30), Color.WHITE)
-	HudDraw.text(ci, "BOTH", to + Vector2(40, 26), 14, UI.ACCENT, 1, 2, "heavy")
+	_fighter(ci, Vector2(s.x * 0.84, s.y * 0.9), s.y * 0.4, HudDraw.BLUE)
+	_fighter(ci, Vector2(s.x * 0.94, s.y * 0.9), s.y * 0.4, HudDraw.ORANGE)
+	var gun := Vector2(s.x * 0.89, s.y * 0.3)
+	var lane := s.x * 0.77
+	var bottom := from.y + 22.0
+	ci.draw_polyline(PackedVector2Array([from + Vector2(0, 6), Vector2(from.x, bottom), Vector2(lane, bottom), Vector2(lane, gun.y),
+		Vector2(gun.x - 44, gun.y)]), Color(UI.ACCENT, 0.85), 3.0, true)
+	ci.draw_colored_polygon(PackedVector2Array([Vector2(gun.x - 36, gun.y), Vector2(gun.x - 46, gun.y - 7), Vector2(gun.x - 46, gun.y + 7)]), UI.ACCENT)
+	HudDraw.icon(ci, HudDraw.tex("weapon_smg"), gun, Vector2(64, 30), Color.WHITE)
+	HudDraw.text(ci, "BOTH", gun + Vector2(0, 28), 15, UI.ACCENT, 1, 2, "heavy")
 
 
 static func _pic_clock(ci: CanvasItem, s: Vector2) -> void:
@@ -352,7 +351,7 @@ static func _pic_bot(ci: CanvasItem, s: Vector2) -> void:
 	var g := s.y * 0.86
 	_fighter(ci, Vector2(s.x * 0.18, g), s.y * 0.56, HudDraw.BLUE, 1)
 	_fighter(ci, Vector2(s.x * 0.48, g), s.y * 0.56, Color(0.62, 0.64, 0.68), -1)
-	HudDraw.text(ci, "BOT", Vector2(s.x * 0.48, g - s.y * 0.64), 16, Color.WHITE, 1, 2, "heavy")
+	HudDraw.text(ci, "BOT", Vector2(s.x * 0.48, g - s.y * 0.59), 16, Color.WHITE, 1, 2, "heavy")
 	var levels := ["EASY", "NORMAL", "HARD"]
 	for i in 3:
 		var r := Rect2(Vector2(s.x * 0.3 + i * 92.0, s.y * 0.08), Vector2(84, 34))

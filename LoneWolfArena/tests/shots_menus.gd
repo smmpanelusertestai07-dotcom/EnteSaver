@@ -6,7 +6,7 @@ extends Node
 ## menu, stats chips, name plate or version; drag to turn the character, START position report),
 ## the modes (mode card, SELECT MODE with the opponent chips, the "?" picture help of each mode
 ## card (every page; arrow, swipe, dot; X and back), the DUMMY chip, LONE WOLF's START opens
-## the QUICK MATCH search, CANCEL; the size chips: DUO shows the TEAM bar, SOLO hides it), name edit (pencil tap, long name ends in "..."), the player card (opens
+## the QUICK MATCH search, CANCEL; the size chips and the mode card's team-size box), name edit (pencil tap, long name ends in "..."), the player card (opens
 ## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
 ## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
 ## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
@@ -512,17 +512,35 @@ func _tour_modes(lobby: Node) -> void:
 	var duo := popup.find_child("Mode_training", true, false).find_child("Size_2", true, false) as Control if popup else null
 	await _tap(duo)
 	await _settle(0.5)
-	var team_bar := lobby.find_child("TeamBar", true, false) as Control
-	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and team_bar != null
-		and team_bar.is_visible_in_tree() and team_bar.find_child("TeamInvite", true, false) != null, "DUO: the mode card says so, the TEAM bar shows + INVITE")
-	await _at.shot("m02f_lobby_duo_team_bar")
+	# (The TEAM bar became LONE WOLF's GROUP bar in 1.5: TRAINING GROUND's DUO plays with bots and
+	# shows no group bar; tests/group_lobby_check.gd checks the bar.)
+	var group_bar := lobby.find_child("GroupBar", true, false) as Control
+	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and group_bar != null
+		and not group_bar.is_visible_in_tree(), "TRAINING DUO: the mode card says so, no GROUP bar (bot teammates)")
+	await _at.shot("m02f_lobby_duo")
+	# The team-size box from the figure at the card's right end: DUO lit; SOLO there picks SOLO.
+	await _tap(card.find_child("SizeBoxButton", true, false) as Control)
+	await _settle(0.4)
+	var box := lobby.get("dialogs").size_box as Control
+	_check(box != null and box.find_child("SizeTile_2", true, false) != null and lobby.get("_modal") == null,
+		"the mode card's figure opens the team-size box (not SELECT MODE)")
+	await _at.shot("m02g_size_box")
+	await _tap(box.find_child("SizeTile_1", true, false) as Control if box else null)
+	await _settle(0.4)
+	_check(Game.team_size == 1 and lobby.get("dialogs").size_box == null and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
+		"SOLO in the box picks SOLO and closes it")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Mode_training", true, false).find_child("Size_2", true, false) as Control if popup else null)
+	await _settle(0.5)
 	await _tap(card)
 	await _settle(0.5)
 	popup = lobby.get("_modal") as Control
 	await _tap(popup.find_child("Mode_training", true, false).find_child("Size_1", true, false) as Control if popup else null)
 	await _settle(0.5)
-	_check(Game.team_size == 1 and not team_bar.is_visible_in_tree() and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
-		"SOLO again: no TEAM bar")
+	_check(Game.team_size == 1 and group_bar != null and not group_bar.is_visible_in_tree() and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
+		"SOLO again")
 
 
 ## The "?" on each SELECT MODE card: its picture help (ModeHelp) with a page per shot, turned by
