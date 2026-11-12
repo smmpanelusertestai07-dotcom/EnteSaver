@@ -6,6 +6,8 @@ extends RefCounted
 ## - the 1 vs 1 weapon cooldown: a gun picked for a pair of rounds rests for the next 4 rounds
 ##   (4 ROUNDS, then 2), whoever picked it; both phones replace a pick that breaks it alike, and a
 ##   phone back from being away gets the same cooldowns from the "sync" text;
+## - the pick panel: its header names the pair of rounds the pick holds for; the side that does not
+##   pick sees it read-only (no choice, no tap, no callback, also when its ring runs out);
 ## - the kit: 3 shield walls a round.
 
 const ArenaCode := preload("res://scripts/arena.gd")     # (the arena script has no class name)
@@ -19,6 +21,7 @@ static func run(runner: Node) -> void:
 	me._stage_clock()
 	me._zone_over_time()
 	me._cooldown()
+	me._pick_panel()
 	me._kit()
 
 
@@ -107,6 +110,38 @@ func _cooldown() -> void:
 	_check(a.pick_cooldowns().is_empty() and a.legal_pick("ar") == "ar", "the target dummy has no cooldown")
 	Game.settings.last_pick = saved
 	a.free()
+
+
+func _pick_panel() -> void:
+	_check(RoundRules.pick_span(1, 9) == "ROUNDS 1-2" and RoundRules.pick_span(4, 9) == "ROUNDS 3-4"
+		and RoundRules.pick_span(9, 9) == "ROUND 9" and RoundRules.pick_span(1, 1) == "ROUND 1", "the pick covers a pair of rounds (the last one alone)")
+	var words := func(parts: Array) -> String:
+		var out := ""
+		for p: Array in parts:
+			out += String(p[0])
+		return out
+	_check(words.call(HudPanels.pick_header(1, 9)) == "PICK FOR ROUNDS 1-2", "the picker's header names its rounds")
+	_check(words.call(HudPanels.pick_header(3, 9, "Rex")) == "WAITING FOR REX TO PICK FOR ROUNDS 3-4", "the waiting side's header")
+	_check(words.call(HudPanels.pick_header(2, 3, "", true)) == "PICK YOUR WEAPON FOR ROUND 2"
+		and words.call(HudPanels.pick_header(1, 0)) == "PICK YOUR WEAPON", "DUO / SQUAD and the target dummy headers")
+	var hp := HudPanels.new()
+	hp.size = Vector2(1560, 720)
+	var got := []
+	var cb := func(id: String) -> void: got.append(id)
+	hp.open_pick(Weapons.PICKABLE, "ar", 14.0, cb, 3, {"ar": 4}, RoundRules.picker_rows(9, true), "REX", 9)
+	_check(hp.watching() and hp.pick_choice == "", "the waiting side's panel is read-only with no choice marked")
+	hp.tap(hp.card_rect(1).get_center())
+	hp.tap(hp.select_rect().get_center())
+	_check(hp.pick_choice == "" and hp.pick_open and got.is_empty(), "a card or SELECT tap does nothing there")
+	hp.tick(20.0, 0.1)
+	_check(hp.pick_open and got.is_empty() and hp.pick_left == 0.0, "its ring runs out without a pick")
+	hp.tap(hp.pick_close_rect().get_center())
+	_check(not hp.pick_open and not hp.watching(), "its X closes it")
+	hp.open_pick(Weapons.PICKABLE, "ar", 14.0, cb, 1, {}, RoundRules.picker_rows(9, true), "", 9)
+	_check(not hp.watching() and hp.pick_choice == "ar", "the picker's panel keeps its choice")
+	hp.tick(20.0, 0.1)
+	_check(got == ["ar"] and not hp.pick_open, "the picker's timer still picks")
+	hp.free()
 
 
 func _kit() -> void:

@@ -87,7 +87,12 @@ listed here. If a part needs something new from the core, add it in its own file
   cooldown := {} (gun -> rounds left: greyed, not pickable), strip := [] (per round of the match:
   true when this player picks; the ROUNDS strip))`
   must call `on_pick` exactly once (tap SELECT, or the timer runs out -> current choice);
-  `close_weapon_pick()` closes it without a callback.
+  `close_weapon_pick()` closes it without a callback. The header names the rounds the pick holds
+  for (`HudPanels.pick_header`, `RoundRules.pick_span`: "PICK FOR ROUNDS 1-2").
+- `watch_weapon_pick(options, seconds, picker: String, cooldown := {}, strip := [])`: the 1 vs 1
+  side that does not pick sees the same panel read-only ("WAITING FOR <NAME> TO PICK FOR ROUNDS
+  3-4", no choice, nothing to tap, SELECT dimmed, the countdown ring); the HUD closes it once
+  `arena.picked_weapon` is set or the prep is over (`panels.watching()` while it is open).
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
   (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
 - `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),

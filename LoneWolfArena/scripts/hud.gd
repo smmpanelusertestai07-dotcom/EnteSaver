@@ -176,10 +176,25 @@ func show_round_result(title: String, mine: int, theirs: int) -> void:
 ## The weapon pick panel (HudPanels.open_pick); a 1 vs 1 passes the guns on cooldown and the ROUNDS
 ## strip (who picks for each round).
 func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, cooldown := {}, strip := []) -> void:
-	var r := 1
-	if arena != null:
-		r = int(arena.get("round_index"))
-	panels.open_pick(options, preselect, seconds, on_pick, r, cooldown, strip)
+	panels.open_pick(options, preselect, seconds, on_pick, _round(), cooldown, strip, "", _last_round())
+
+
+## The side that does not pick: the same panel read-only (HudPanels.open_pick's `watch`) with
+## `picker`'s name in the header; _process closes it once arena.picked_weapon is set or the prep
+## is over.
+func watch_weapon_pick(options: Array, seconds: float, picker: String, cooldown := {}, strip := []) -> void:
+	panels.open_pick(options, "", seconds, Callable(), _round(), cooldown, strip, picker if picker != "" else "THE OTHER PLAYER", _last_round())
+
+
+func _round() -> int:
+	return int(arena.get("round_index")) if arena != null else 1
+
+
+## The match's last round for the pick header's pair of rounds (0 against the target dummy).
+func _last_round() -> int:
+	if arena == null or bool(arena.get("practice")) or not arena.has_method("last_round"):
+		return 0
+	return int(arena.call("last_round"))
 
 
 func close_weapon_pick() -> void:
@@ -730,6 +745,8 @@ func _process(delta: float) -> void:
 	if real > 0.0:
 		_fps_smooth = lerpf(_fps_smooth, 1.0 / real, 0.05)
 	panels.tick(delta, real)
+	if panels.watching() and arena != null and (String(arena.get("picked_weapon")) != "" or int(arena.get("phase")) != 0):
+		panels.close_pick()              # the pick watched arrived (or the prep is over)
 	if panels.board_open:
 		panels.avoid = _board_avoid()
 	_place_minimap(size)

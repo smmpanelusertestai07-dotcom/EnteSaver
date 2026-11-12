@@ -65,6 +65,14 @@ static func pick_round_of(r: int) -> int:
 	return r - (r - 1) % PICK_ROUNDS
 
 
+## The rounds the pick of round `r` holds for, as the pick panel's header names them: "ROUNDS 3-4",
+## or "ROUND 9" when the pair's second round would be past the match's `last` round.
+static func pick_span(r: int, last: int) -> String:
+	var first := pick_round_of(r)
+	var second := mini(first + PICK_ROUNDS - 1, maxi(last, first))
+	return "ROUND %d" % first if second <= first else "ROUNDS %d-%d" % [first, second]
+
+
 ## Rounds a gun still waits before it can be picked again, at the pick of round `r`: `picks` maps
 ## each earlier pick round to the gun picked for it. A gun picked for rounds p and p + 1 is out for
 ## rounds p + 2 .. p + 1 + COOLDOWN_ROUNDS (shown as 4 ROUNDS at the next pick, 2 at the one after).

@@ -870,13 +870,16 @@ func _start_prep() -> void:
 	_bot_pick_t = -1.0
 	if pick_round:
 		picked_weapon = ""
+		var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
 		if _i_pick():
-			var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
 			hud.open_weapon_pick(Weapons.PICKABLE, preselected_pick(), prep_left - 1.0, _on_weapon_picked, pick_cooldowns(), strip)
 		else:
+			# The same panel read-only, until the other side's pick lands (the HUD watches
+			# picked_weapon); the line under PREPARE says it too once the panel is closed.
 			pick_note = "%s IS PICKING THE WEAPON" % bot.display_name
+			hud.watch_weapon_pick(Weapons.PICKABLE, prep_left - 1.0, bot.display_name, pick_cooldowns(), strip)
 			if not online:
-				_bot_pick_t = _rng.randf_range(1.5, 3.5)
+				_bot_pick_t = _rng.randf_range(2.5, 5.0)      # (long enough to see the panel it watches)
 	else:
 		pick_note = "WEAPON: " + String(player.gun().def.name)
 	if round_index == 1 and int(Game.profile.matches) < 3:
