@@ -24,6 +24,8 @@ const ZONE_MARGIN := 2.5
 const ZONE_AHEAD_S := 8.0
 ## Where the zone is going is this small (m): the bot walks straight to its centre and stands there.
 const ZONE_HOLD_R := 3.0
+## ... and walks the last this many metres straight (the navigation path ends 0.9 m short).
+const ZONE_STEP_M := 1.5
 
 var target: Fighter
 var state := S.SEARCH
@@ -296,8 +298,9 @@ func _zone_pressure(delta: float) -> bool:
 	var r: float = ahead[1]
 	var flat := Vector2(global_position.x - c.x, global_position.z - c.z).length()
 	if r <= ZONE_HOLD_R:
-		# The last seconds: the zone ends on a spot, so go and stand on it.
-		var close := flat < ZONE_HOLD_R + 1.5
+		# The last seconds: the zone ends on a spot, so go and stand on it: along the navigation
+		# path (around the cover) until it is a step away, then straight onto it.
+		var close := flat < ZONE_STEP_M
 		if close or flat > r - minf(ZONE_MARGIN, r * 0.3):
 			_zone_goal = Vector3(c.x, global_position.y, c.z) if close else arena.closest_nav_point(c)
 			_zone_hold = close
