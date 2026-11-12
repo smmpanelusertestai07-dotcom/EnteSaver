@@ -233,11 +233,11 @@ func _member(lobby: Lobby) -> void:
 	# the MATCHING... plate in START's place instead of WAITING FOR.
 	var tab := lobby.search_tab
 	var x := tab.find_child("SearchCancel", true, false) as Control
-	var plate := lobby.find_child("MatchingPlate", true, false) as Control
+	var matching := lobby.find_child("MatchingPlate", true, false) as Control
 	if not tab.is_visible_in_tree() or _text(tab, "SearchPlayers") != "PLAYERS 5/8" or x.is_visible_in_tree() \
-			or wait.is_visible_in_tree() or plate == null or not plate.is_visible_in_tree():
+			or wait.is_visible_in_tree() or matching == null or not matching.is_visible_in_tree():
 		_fail("a member does not see the group's search tab without its X (%s)" % _text(tab, "SearchPlayers"))
-	_no_overlap([tab, plate, bar])
+	_no_overlap([tab, matching, bar])
 	await at.shot("g05b_member_searching")
 	# TEAMS opened meanwhile: its popup stays clear of the search tab.
 	await _tap(bar.find_child("GroupTeams", true, false) as Control)
