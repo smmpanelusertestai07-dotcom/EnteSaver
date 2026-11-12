@@ -96,6 +96,10 @@ func _init(is_host: bool, room_mac: PackedByteArray, local := false) -> void:
 	# Keys of their own, derived from the match's HMAC key: a relay message never opens here.
 	_aes = _crypto.hmac_digest(HashingContext.HASH_SHA256, room_mac, "lonewolf-direct-aes".to_utf8_buffer())
 	_mac = _crypto.hmac_digest(HashingContext.HASH_SHA256, room_mac, "lonewolf-direct-mac".to_utf8_buffer())
+	# The sequence starts at the wall clock (ms), not at 0: a phone that comes back into its match
+	# after its app was closed makes a new path with the same keys, and its packets must count as
+	# newer than every one the other phone already took (a path sends far less than 1000 a second).
+	_out_seq = int(Time.get_unix_time_from_system() * 1000.0)
 
 
 ## Opens the socket and starts gathering (now: the tick clock). False when no socket could open.
@@ -287,7 +291,8 @@ func _send_to(d: Dictionary, ip: String, to_port: int, now: int) -> void:
 # ---------------------------------------------------------------- sealed packets
 
 ## A packet as it goes out: MAGIC, direction (0 host -> guest, 1 guest -> host), sequence number
-## (8 bytes, one more each packet), IV, AES-256-CBC of the payload, HMAC-SHA256 over all of it.
+## (8 bytes, one more each packet, starting at the wall clock in ms so that it stays ahead across
+## an app restart), IV, AES-256-CBC of the payload, HMAC-SHA256 over all of it.
 func seal(payload: PackedByteArray) -> PackedByteArray:
 	_out_seq += 1
 	var body := PackedByteArray([MAGIC, 0 if host else 1])

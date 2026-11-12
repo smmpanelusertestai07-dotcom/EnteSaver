@@ -134,6 +134,17 @@ func _sealing() -> void:
 	_check(guest.open_packet(p2).is_empty(), "a replayed packet is dropped")
 	_check(guest.open_packet(p1).is_empty(), "an older packet that comes late is dropped")
 	_check(not guest.open_packet(host.seal(msg)).is_empty(), "the next one is taken")
+	# The app closed and opened again in the same match: a new path object with the same keys. Its
+	# packets must pass the other phone's "newer than the last one" rule (the sequence starts at the
+	# wall clock in ms and a path sends some 25 packets a second, so a later start is always ahead
+	# of an earlier path's count; the check keeps to that rate: 20 packets, then 60 ms).
+	for i in 20:
+		guest.open_packet(host.seal(msg))
+	OS.delay_msec(60)
+	var host_again := NetDirect.new(true, key)
+	_check(not guest.open_packet(host_again.seal(msg)).is_empty(), "after a restart the new path's first packet is taken by the other phone")
+	_check(not host_again.open_packet(guest.seal(msg)).is_empty(), "and the restarted phone takes the other phone's next packet")
+	_check(guest.open_packet(host.seal(msg)).is_empty(), "a packet of the path from before the restart is not newer than the new one's")
 	_check(host.open_packet(guest.seal(msg)).get("t") == 7, "and the other way")
 
 
