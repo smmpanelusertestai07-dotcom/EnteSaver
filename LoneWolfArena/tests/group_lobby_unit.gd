@@ -10,7 +10,12 @@ extends RefCounted
 ## - the CUSTOM ROOM with slots: SOLO 2, DUO 4, SQUAD 8 places, a player takes an empty place only,
 ##   a newcomer joins the smaller team, the host's roster off the wire, START's gate, the panel's
 ##   entries, and Cloud's room handshake (the group keys RSA-wrapped in "rin", tagged with the
-##   password's key; a KICK is never let in again).
+##   password's key; a KICK is never let in again);
+## - the GROUP CODE between Clouds (no relay): JOIN BY CODE lets a player in at once, a full group
+##   says so, a wrong code finds nobody, a blocked player is never answered, a leader the joiner
+##   blocked is never joined, the switch off answers nobody, too many tries wait;
+## - the DUEL in a group of two: START's route, SELECT MODE's chip, the member's phone taking the
+##   leader's tagged challenge at once (and nobody else's tag).
 
 var t: Node
 
@@ -25,6 +30,8 @@ static func run(runner: Node) -> void:
 	me._real_api()
 	me._room_rules()
 	me._room_cloud()
+	me._group_code()
+	me._duel()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -223,3 +230,125 @@ func _room_cloud() -> void:
 	_check(not host.in_room() and host.group.is_empty(), "CLOSE ROOM ends the room's group")
 	host.free()
 	guest.free()
+
+
+func _peer(c: Cloud, bits := 1024) -> Cloud:
+	c._use_key(Crypto.new().generate_rsa(bits))
+	c._connected = true                      # (no relay: what it publishes goes nowhere)
+	return c
+
+
+## JOIN BY CODE between Clouds: the asks and answers rebuilt here as they would go out.
+func _group_code() -> void:
+	var host := _peer(Cloud.new())
+	var guest := _peer(Cloud.new())
+	host.my_code = "135790"
+	_check(host.group_code() == "135790" and host.group.is_empty(), "a solo has a GROUP CODE of its own")
+	_check(not Cloud.code_topic("135790").contains("135790"), "the topic never names the code")
+	_check(guest.join_group_code("12345") != "" and guest.join_group_code("135790") == "" and guest.code_state == "asking",
+		"JOIN BY CODE takes 6 digits and asks")
+	var reply := host._on_code_ask(guest._code_ask_msg())
+	_check(String(reply.get("t", "")) == "gin" and not host.group.is_empty() and (host._grp.invited as Dictionary).has(guest.my_id),
+		"the right code: the solo's group is made and a place waits for the joiner")
+	var forged := reply.duplicate()
+	forged.rt = "00".repeat(32)
+	guest._on_code_answer(host.my_id, forged)
+	_check(guest.group.is_empty() and guest.code_state == "asking", "a \"gin\" without the code's tag lets nobody in")
+	guest._on_code_answer(host.my_id, reply)
+	_check(guest.code_state == "in" and String(guest.group.leader) == host.my_id and guest._grp.aes == host._grp.aes
+		and String(guest.group.code) == "135790", "the right \"gin\": the joiner holds the group's keys, no invite needed")
+	host._on_gjoin(guest.my_id, {"name": "GUEST", "bundle": "default"})
+	_check(host.group_members().size() == 2, "the joiner's \"gjoin\" seats it")
+	_check(guest.join_group_code("246802") == "EXIT YOUR GROUP FIRST", "a member cannot join another group by code")
+	# A wrong code: nobody answers, and the search gives up with NO GROUP WITH THIS CODE.
+	var lost := _peer(Cloud.new())
+	_check(lost.join_group_code("000001") == "", "a wrong code still asks")
+	_check(host._on_code_ask(lost._code_ask_msg()).is_empty(), "another code's ask is not answered")
+	lost._cjoin.t = Time.get_ticks_msec() - Cloud.CODE_WAIT_MS - 10
+	lost._tick_code(0.0, Time.get_ticks_msec())
+	_check(lost.code_state == "none" and LobbyTeam.code_state_text(lost.code_state) == "NO GROUP WITH THIS CODE", "a wrong code: NO GROUP WITH THIS CODE")
+	# Full: four in the group (members and places waiting) answer "gno".
+	for n in 2:
+		host.group.members.append({"id": ("filler %d" % n).sha256_text().left(32), "name": "F%d" % n, "bundle": "default", "team": 0, "slot": -1})
+	var late := _peer(Cloud.new())
+	late.join_group_code("135790")
+	var no := host._on_code_ask(late._code_ask_msg())
+	late._on_code_answer(host.my_id, no)
+	_check(String(no.get("t", "")) == "gno" and late.code_state == "full" and LobbyTeam.code_state_text("full") == "THE GROUP IS FULL",
+		"a full group answers THE GROUP IS FULL")
+	host.group.members.resize(2)
+	# A blocked player is never answered.
+	var shady := _peer(Cloud.new())
+	shady.join_group_code("135790")
+	Game.block(shady.my_id, "SHADY")
+	_check(host._on_code_ask(shady._code_ask_msg()).is_empty(), "a blocked player never joins (no answer)")
+	Game.unblock(shady.my_id)
+	# A joiner never enters the group of a leader it blocked.
+	var wary := _peer(Cloud.new())
+	wary.join_group_code("135790")
+	var gin := host._on_code_ask(wary._code_ask_msg())
+	Game.block(host.my_id, "HOST")
+	wary._on_code_answer(host.my_id, gin)
+	_check(String(gin.get("t", "")) == "gin" and wary.group.is_empty() and wary.code_state == "blocked", "never into a blocked leader's group")
+	Game.unblock(host.my_id)
+	# The switch off: nobody is answered.
+	host.set_code_join(false)
+	var shut := _peer(Cloud.new())
+	shut.join_group_code("135790")
+	_check(host._on_code_ask(shut._code_ask_msg()).is_empty(), "JOIN BY CODE: OFF lets nobody in")
+	host.code_join = true
+	# Too many tries in a minute wait.
+	var eager := _peer(Cloud.new())
+	var said := ""
+	for n in Cloud.CODE_TRIES_MAX + 1:
+		eager.code_state = ""
+		said = eager.join_group_code("%06d" % (500000 + n))
+	_check(said == "TOO MANY TRIES: WAIT A MINUTE", "join attempts are rate-limited (%s)" % said)
+	for c: Cloud in [host, guest, lost, late, shady, wary, shut, eager]:
+		c.free()
+
+
+## The DUEL in a group of two: START routes it, SELECT MODE names it, the member takes it at once.
+func _duel() -> void:
+	_check(Lobby.start_route("lonewolf", 1, true, 2) == "duel" and Lobby.start_route("lonewolf", 1, true, 0) == "quick"
+		and Lobby.start_route("lonewolf", 1, true, 3) == "quick" and Lobby.start_route("lonewolf", 2, true, 2) == "team_search"
+		and Lobby.start_route("training", 1, true, 2) == "training", "START: a group of two with SOLO plays the DUEL, 3 or 4 keep the notice")
+	var two := [{"id": "a", "name": "ME", "me": true}, {"id": "b", "name": "VIPER", "me": false}]
+	_check(LobbyDialogs.size_chip_text("lonewolf", 1, two) == "DUEL · YOU VS VIPER" and LobbyDialogs.size_chip_text("lonewolf", 1, []) == "SOLO"
+		and LobbyDialogs.size_chip_text("lonewolf", 2, two) == "DUO" and LobbyDialogs.size_chip_text("training", 1, two) == "SOLO"
+		and LobbyDialogs.size_chip_text("lonewolf", 1, two + [{"id": "c", "name": "Z"}]) == "SOLO", "SELECT MODE's SOLO chip: DUEL · YOU VS <NAME>")
+	var lead := _peer(Cloud.new(), 2048)        # (a challenge's signature is checked as a 2048-bit one)
+	var mem := _peer(Cloud.new())
+	lead.my_code = "777001"
+	mem.join_group_code("777001")
+	mem._on_code_answer(lead.my_id, lead._on_code_ask(mem._code_ask_msg()))
+	lead._on_gjoin(mem.my_id, {"name": "MEM", "bundle": "default"})
+	mem.group.members = [{"id": lead.my_id, "name": "LEAD", "bundle": "default", "team": 0, "slot": 0},
+		{"id": mem.my_id, "name": "MEM", "bundle": "default", "team": 0, "slot": 1}]
+	mem._grp.joining = false
+	_check(lead.in_group() and mem.in_group() and lead.group_duel_tag(lead.my_id) == mem.group_duel_tag(lead.my_id) and lead.group_duel_tag(lead.my_id) != "",
+		"both phones make the same group tag")
+	_check(mem.group_duel() == "ONLY THE LEADER CAN START", "only the leader starts the duel")
+	lead.peers[mem.my_id] = {"name": "MEM", "bundle": "default", "pk": mem._pk_pem, "seen": Time.get_ticks_msec()}
+	_check(lead.group_duel() == "" and String(lead._outgoing.get("id", "")) == mem.my_id, "the leader's START challenges the member")
+	# The challenge as it went out (rebuilt: no relay), into the member's inbox.
+	var pub := CryptoKey.new()
+	pub.load_from_string(mem._pk_pem, true)
+	var sec: PackedByteArray = String(lead._outgoing.room).hex_decode()
+	sec.append_array(lead._outgoing.aes as PackedByteArray)
+	sec.append_array(lead._outgoing.mac as PackedByteArray)
+	var sec_text := Marshalls.raw_to_base64(Crypto.new().encrypt(pub, sec))
+	var inv := {"t": "inv", "from": lead.my_id, "name": "LEAD", "bundle": "default", "sec": sec_text, "pk": lead._pk_pem,
+		"sig": lead._sign(Cloud.invite_text(lead.my_id, mem.my_id, sec_text)), "gd": "00".repeat(32)}
+	mem._inbox_budget = 8.0
+	mem._on_inbox(inv)
+	_check(String(mem.opponent.get("id", "")) != lead.my_id, "a challenge with a wrong group tag is not taken at once")
+	mem._incoming = {}
+	inv.gd = lead.group_duel_tag(lead.my_id)
+	mem._inbox_budget = 8.0
+	mem._on_inbox(inv)
+	_check(String(mem.opponent.get("id", "")) == lead.my_id and mem._incoming.is_empty() and not mem.is_host,
+		"the member takes the leader's DUEL at once (the usual 1 vs 1 session)")
+	_check(mem.in_group() and lead.in_group(), "both stay in the group")
+	lead.free()
+	mem.free()

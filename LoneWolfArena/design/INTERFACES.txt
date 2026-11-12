@@ -403,8 +403,17 @@ listed here. If a part needs something new from the core, add it in its own file
   one; `Cloud.quick_seen`). When the other's `saw` lists this phone, the lower id calls
   `Cloud.invite(id, {"quick": true})`; a quick challenge is accepted at once only while seeking,
   from a seeker in `quick_seen`, proven and allowed by DUEL CHALLENGES FROM, else declined at once
-  (never shown). Popup `Modal`: `QuickStatus`, `QuickTimer`, `QuickNote`, `QuickCancel` (X and back
-  cancel too); `NetMatch.GIVE_UP_S` ends it with a note. Test: tests/quick_check.gd.
+  (never shown). No popup and no time limit (it runs until cancelled): the lobby's search tab
+  (`SearchTab`, scripts/lobby_search.gd, `Lobby.search_tab` on its own CanvasLayer `SearchLayer` over
+  the lobby's windows) drops from the top centre: `SearchLine` ("ESTIMATED 0:10" for the first
+  `SearchTab.ESTIMATE_S` s, then "STILL SEARCHING..."; `NetMatch.status_line()` CONNECTING... /
+  OPPONENT FOUND), `SearchTimer` (m:ss counting up), `SearchPlayers` ("PLAYERS n/N", DUO / SQUAD
+  only), `SearchCancel` (the X; a group member's tab has none). `Lobby.search_kind()` ("quick",
+  "group": Cloud.search_needed > 0, or "") drives it; START is replaced by the greyed `MatchingPlate`
+  "MATCHING..."; the lobby stays usable (WARDROBE, SETTINGS, PROFILE, FRIENDS, chat), a tap on the
+  mode card says "CANCEL THE SEARCH FIRST", Android back cancels only with no window open
+  (`Lobby.cancel_search`), and the session that starts closes any open window
+  (`Lobby.close_layers`, from LobbyFriends._on_net_session). Test: tests/quick_check.gd.
 - Online extras: ping `NetPing` (colours, bars; `NetPing.lobby_chip()` "PingChip" in the lobby's
   top bar: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
   `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`; `Cloud.match_ping()` is the
@@ -695,3 +704,23 @@ listed here. If a part needs something new from the core, add it in its own file
   decisions / tk / fin); tests/team_online_check.gd (step team_online, mock port 47820: coop invite
   vs bots with a knock and a revive across the phones, a random DUO with the guest's pause menu and
   quit, a plain duel after them; both tables must match and every relay state must arrive).
+
+## GROUPS in the lobby: GROUP CODE and the DUEL in a group of two (1.6)
+- GROUP CODE (`Cloud.group_code()`: 6 digits, a solo's own `Cloud.my_code`, a member's the leader's
+  from "groster"'s "code"; none in a CUSTOM ROOM): the GROUP bar's `GroupCodeRow` (`GroupCode`,
+  `GroupCodeCopy`, and for the leader or a solo `GroupCodeSwitch` "JOIN BY CODE: ON / OFF" =
+  `Cloud.set_code_join`, `Cloud.code_join` ON by default). A solo's bar has `GroupJoinCode`: the popup
+  `JoinCodePopup` (`JoinGroupCode`, `JoinGroupGo`, `JoinGroupState`) calls
+  `Cloud.join_group_code(code)` ("" = asking, else the notice: 6 digits, own code, EXIT YOUR GROUP
+  FIRST, offline, TOO MANY TRIES: WAIT A MINUTE after `Cloud.CODE_TRIES_MAX` a minute) and follows
+  `Cloud.code_state` ("asking", "in", "full" THE GROUP IS FULL, "none" NO GROUP WITH THIS CODE after
+  `Cloud.CODE_WAIT_MS`, "blocked"): `LobbyTeam.code_state_text`. Wire: see Cloud's GROUP CODE
+  comment and design/GROUPS.txt 7 ("gask" on ROOT/gc/<2 hex of the code's hash>, "gin" / "gno" in
+  the inbox, tagged with the code's stretched key; the group's keys RSA-wrapped for the joiner).
+- DUEL: in a group of exactly 2, SELECT MODE's `Size_1` reads "DUEL · YOU VS <NAME>"
+  (`LobbyDialogs.size_chip_text`), `Lobby.start_route(m, size, teams_online, group_n)` gives "duel"
+  and the leader's START calls `Lobby.start_duel()` -> `Cloud.group_duel()`: a plain duel challenge
+  (`invite`) with "gd" = `Cloud.group_duel_tag(leader)` (HMAC with the group's MAC key), which the
+  member's phone takes at once from its leader only. The usual 1 vs 1 match and results; the group
+  stays. A group of 3 or 4 with SOLO keeps the notice. Tests: tests/group_lobby_unit.gd (_group_code,
+  _duel), tests/group_lobby_check.gd (the member's search tab, plate and TEAMS never overlap).

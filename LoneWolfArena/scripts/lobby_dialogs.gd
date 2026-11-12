@@ -7,7 +7,8 @@ extends RefCounted
 ## dialog. The lobby makes it (Lobby.dialogs) and its parts open popups through it; everything is
 ## built under the lobby's UI layer. (HOW TO PLAY is in SETTINGS: scripts/how_to_play.gd.)
 ## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, Sizes with
-## Size_<1|2|4> (SOLO, DUO, SQUAD: on both mode cards), Difficulty with
+## Size_<1|2|4> (SOLO, DUO, SQUAD: on both mode cards; LONE WOLF's SOLO in a group of two reads
+## DUEL · YOU VS <NAME>: size_chip_text), Difficulty with
 ## Diff_<EASY|NORMAL|HARD|DUMMY>, ModeStats, NameEdit, NameRandom, NamePreview, NameOk,
 ## ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt"
 ## and "ui name_ok" (the emulator test taps OK there).
@@ -266,7 +267,10 @@ func _size_chips(m: String) -> HBoxContainer:
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var group := ButtonGroup.new()
 	for n: int in Game.TEAM_SIZES:
-		var b := _chip(String(SIZE_NAMES[n]), "Size_%d" % n, n == Game.team_size, group)
+		var word := size_chip_text(m, n, LobbyTeam.members())
+		var b := _chip(word, "Size_%d" % n, n == Game.team_size, group)
+		if word.length() > 8:
+			b.add_theme_font_size_override("font_size", 14)
 		b.pressed.connect(func() -> void:
 			Audio.play("ui_select", -6.0)
 			Game.team_size = n
@@ -275,6 +279,17 @@ func _size_chips(m: String) -> HBoxContainer:
 			_pick(m))
 		row.add_child(b)
 	return row
+
+
+## A size chip's word: SOLO / DUO / SQUAD; in LONE WOLF with a group of exactly two, SOLO is the
+## duel between the two: "DUEL · YOU VS <NAME>" (START plays it: Lobby.start_duel). `members`:
+## Cloud.group_members() (this player marked "me").
+static func size_chip_text(m: String, n: int, members: Array) -> String:
+	if m == "lonewolf" and n == 1 and members.size() == 2:
+		for p: Dictionary in members:
+			if not bool(p.get("me", false)):
+				return "DUEL · YOU VS %s" % String(p.get("name", "PLAYER"))
+	return String(SIZE_NAMES.get(n, "SOLO"))
 
 
 ## TRAINING GROUND's opponent (row Difficulty): EASY, NORMAL and HARD bots, then the target dummy

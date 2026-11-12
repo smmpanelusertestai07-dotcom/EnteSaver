@@ -24,7 +24,7 @@ TRAINING GROUND keeps its bots (offline, unchanged).
   - DUO (2 vs 2, 4 humans):
       group of 4 -> the match starts at once among them: BLUE = leader + first member who joined,
                     ORANGE = the other two;
-      group of 2 or solo -> matchmaking: "SEARCHING PLAYERS 3/4" until 4 humans in two teams of 2
+      group of 2 or solo -> matchmaking: the search tab "PLAYERS 3/4" until 4 humans in two teams of 2
                     (a group of 2 is always one team); CANCEL any time. No timer, no bots.
       group of 3 -> START says "DUO needs a group of 1, 2 or 4".
   - SQUAD (4 vs 4, 8 humans): matchmaking the same way ("PLAYERS n/8"), a group (1-4) always on
@@ -121,8 +121,8 @@ CORE: scripts/cloud.gd, scripts/team_arena.gd, scripts/team_arena_net.gd, script
       (Cloud / match sections).
 UI:   scripts/lobby.gd (member models on the podium, layout), scripts/lobby_team.gd (GROUP bar:
       INVITE, members, EXIT / DISBAND / REMOVE, START gating text), scripts/lobby_dialogs.gd and the
-      rest of scripts/lobby_friends.gd (GROUP INVITE popup via group_invited; search popup
-      "SEARCHING PLAYERS n/N" + CANCEL from search_found / search_needed; no BOTS IN), SELECT MODE
+      rest of scripts/lobby_friends.gd (GROUP INVITE popup via group_invited; the search tab
+      "PLAYERS n/N" + its X from search_found / search_needed; no BOTS IN), SELECT MODE
       card texts ("DUO · 2 VS 2 · REAL PLAYERS"), tests/group_lobby_unit.gd,
       tests/group_lobby_check.gd (a stand-in group: set Cloud.group + emit group_changed),
       design/INTERFACES.txt (lobby sections).
@@ -143,3 +143,26 @@ START is the host's only (Cloud.room_start): SOLO = the 1 vs 1 with the room's r
 (start_room_match), DUO / SQUAD = _group_launch: the all-human match of the players in their places
 (uneven allowed, empty places stay empty, no bots). The room closes when its match starts. A player
 out of the room (gkick, gend, the host silent) gets Cloud.room_notice, shown once by the lobby.
+
+7. GROUP CODE AND THE DUEL IN A GROUP (1.6, the lobby builder)
+-------------------------------------------------------------
+- Every group has a 6-digit GROUP CODE (a solo's is the code of the group it would lead, made once a
+  run); the GROUP bar shows it with COPY. A solo's bar has JOIN BY CODE: the code puts the player in
+  that group at once, no invite. Built on the custom room's discovery and key exchange, the code the
+  secret: "gask" {from, name, bundle, pk, mac = HMAC(K, "gask" + from)} on ROOT/gc/<the first 2 hex
+  of sha256("lonewolfarena-gcode|" + code)> (256 buckets: the topic never names the code), K the
+  code stretched with 2000 HMAC rounds. A leader on that bucket answers only a tag of its own code:
+  "gin" {name, bundle, sec = RSA(joiner pk, gid + aes + mac + size byte), rt = HMAC(K, "gin" + sec +
+  leader)} or "gno" {full: true, rt = HMAC(K, "gno" + leader)}, in the joiner's inbox; then "gjoin"
+  as for an invite (the leader keeps a place in _grp.invited). Never answered: a blocked player, a
+  switch OFF (nobody listens then), a room, a match. Never taken: a "gin" from a leader the joiner
+  blocked. Limits: a leader checks CODE_RATE asks a second and one every 2 s per asker; a joiner
+  starts CODE_TRIES_MAX attempts a minute, asks every CODE_ASK_S and gives up after CODE_WAIT_MS. A
+  listener on the bucket who saw an ask could test codes against its tag offline (10^6 codes, each
+  2000 HMACs); a code is meant to be passed around, so the leader's switch is the way to close it.
+- DUEL: a group of exactly 2 with SOLO plays the plain 1 vs 1 between the two: the leader's START is
+  a duel challenge ("inv" with "gd" = HMAC(group mac, "gduel" + gid + leader)), taken at once by the
+  member from its leader only. Results and REMATCH as any 1 vs 1; both stay in the group (its room
+  beats on through the match). A group of 3 or 4 with SOLO keeps the notice.
+- No search popup: the search tab at the top (see INTERFACES.txt, QUICK MATCH); a member sees the
+  group's search there without the X, and MATCHING... in START's place.

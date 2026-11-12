@@ -2860,7 +2860,7 @@ func join_group_code(code: String) -> String:
 		return "A GROUP CODE HAS 6 DIGITS"
 	if code == group_code():
 		return "THIS IS YOUR OWN GROUP CODE"
-	if in_group() or in_room():
+	if in_group() or in_room() or (not group.is_empty() and String(group.leader) != my_id):
 		return "EXIT YOUR GROUP FIRST"
 	if in_session or session_multi:
 		return "A MATCH IS ALREADY STARTING"
