@@ -359,6 +359,7 @@ func run(at: Node) -> int:
 	await at.wait(0.35)
 	await at.shot("hud_15_kill")
 	_check(not b.alive, "the bot is eliminated", at)
+	_check(arena.find_children("EliminatedTag*", "Label3D", true, false).size() >= 1, "ELIMINATED floats over the bot's body", at)
 	_check(hud.feed_lines == 1 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
 		"the 1 vs 1 kill feed is one line with the gun's silhouette", at)
 	hud.add_kill_feed("ZONE", "BOT", "", "", false, false)
@@ -387,6 +388,29 @@ func run(at: Node) -> int:
 	arena.set("eliminated_by", {"cause": "zone"})
 	await at.wait(0.2)
 	await at.shot("hud_16d_eliminated_by_zone")
+	# The SPECTATING card (staged, the arena held): the kit the player still carried and, against
+	# another player online, ADD FRIEND for the one watched.
+	b.alive = true
+	p.spectating = b
+	p.set("_spectate_wait", 0.0)
+	p.kit_at_death = {"walls": 2, "frags": 1, "medkits": 0}
+	arena.process_mode = Node.PROCESS_MODE_DISABLED
+	arena.set("online", true)
+	arena.set("_enemy_id", "ab".repeat(16))
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	hud.queue_redraw()
+	await at.shot("hud_16i_spectating")
+	_check(hud.spectate_friend_state(b) == "add" and hud._spec_friend_rect.has_area(), "the SPECTATING card offers ADD FRIEND online", at)
+	arena.set("online", false)
+	arena.set("_enemy_id", "")
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	_check(hud.spectate_friend_state(b) == "" and not hud._spec_friend_rect.has_area(), "no ADD FRIEND against a bot", at)
+	arena.process_mode = Node.PROCESS_MODE_INHERIT
+	b.alive = false
+	p.spectating = null
+	p.kit_at_death = {}
 	# The break between rounds, step by step (staged: the player won round 1 but the ELIMINATED BY
 	# card is up, to see that it stays readable over the dimmed screen).
 	Engine.time_scale = 1.0

@@ -5,7 +5,8 @@ extends Node
 ## pick, and both hold that gun, never the one of rounds 1-2, which rests on its cooldown); each
 ## fight starts in stage 1 of the two-stage clock (00:20); the player's elimination in round 2 fills
 ## the ELIMINATED BY card (the bot, its gun, the 200 damage it dealt); the match ends at 2 wins with the right result, which the
-## profile's HISTORY and CAREER hold as played. Then a second match, quit with QUIT MATCH in
+## profile's HISTORY and CAREER hold as played (the app sent to the background before the results
+## records it at once, and the results still open without counting it twice). Then a second match, quit with QUIT MATCH in
 ## round 2: HISTORY says LEFT (a defeat) with the round won before, CAREER counts it, no win.
 ## Prints one line per round and "ROUNDS CHECK DONE bad=N".
 
@@ -72,14 +73,22 @@ func run(autotest: Node) -> int:
 			if String(e.get("cause", "")) != "gun" or String(e.get("name", "")) != b.display_name or int(e.get("damage", 0)) != 200 \
 					or String(e.get("gun", "")) != String(b.gun().def.name):
 				_fail("round 2: the ELIMINATED BY card does not name the bot, its gun and its 200 damage")
+	# The app sent to the background in the wait before the results: the decided match is in the
+	# profile at once (a phone that never comes back keeps the win); the results still open, once.
+	if arena.get("phase") == 2:          # (Phase.END)
+		arena.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+		if Game.profile.matches != 1 or Game.profile.wins != 1 or arena.get("_results_open") or _last_match().get("result") != "won":
+			_fail("the match won was not recorded when the app went to the background before its results")
+	else:
+		_fail("the last round did not end the match")
 	var t := 0.0
-	while not arena.get("_result_shown") and t < 30.0:
+	while not arena.get("_results_open") and t < 30.0:
 		await at.wait(0.25)
 		t += 0.25
 	Engine.time_scale = 1.0
 	var sc: Dictionary = arena.get("score")
 	at.log_line("result: score %s, winner %s, won %s" % [str(sc), "player" if arena.get("_winner") == p else "other", Game.last_result.get("won")])
-	if not arena.get("_result_shown"):
+	if not arena.get("_results_open"):
 		return _done("results never shown")
 	if int(sc.player) != 2 or int(sc.bot) != 1 or arena.get("_winner") != p or not bool(Game.last_result.get("won", false)):
 		_fail("the match result is wrong")

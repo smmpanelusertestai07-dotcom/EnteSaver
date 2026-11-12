@@ -32,6 +32,9 @@ const ZONE_EDGE := 4.0
 const MAX_ROUNDS := 9
 ## Online the results wait this long (real seconds) at most for the other phone's own numbers.
 const FINAL_WAIT_S := 3.0
+## The results open this long (real seconds) after the match's last round ends: the cheer, the
+## round's plates and a look at the arena first.
+const RESULTS_DELAY_S := 5.5
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
 const DUMMY_NAME := "TARGET DUMMY"
 
@@ -75,6 +78,7 @@ var _outside := {}                  # fighter -> seconds outside the zone (never
 var _last_count := 99
 var _end_t := 0.0
 var _result_shown := false
+var _results_open := false          # the ResultsScreen is up (the result can be in before: _record_decided)
 var _winner: Fighter
 var _draw := false
 var _invalid := false
@@ -89,6 +93,7 @@ var _break_t := 0.0
 var _bot_pick_t := -1.0
 var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
+var _downs := {"player": 0, "bot": 0}   # times each fighter was eliminated (the results' K/D/A)
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 var _counted := false            # Game.count_match counted this match (its first fight began)
 var _quiet_round := 0            # a rejoin landed in this round (its prep or fight): its band never shows
@@ -1090,7 +1095,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > 2.6 and not _result_shown and (not _awaits_final() or _end_t > 2.6 + FINAL_WAIT_S):
+			elif _end_t > RESULTS_DELAY_S and not _results_open and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -1270,6 +1275,7 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	Game.mark("%s eliminated" % ("player" if victim == player else "bot"))
 	if victim == player:
 		_deaths += 1
+	_downs["player" if victim == player else "bot"] = int(_downs["player" if victim == player else "bot"]) + 1
 	var cause := death_cause(victim, killer)
 	_down_cause[victim] = cause
 	if victim == player:
@@ -1596,9 +1602,17 @@ func _awaits_final() -> bool:
 	return online and not _forfeit and not _invalid and _their_final.is_empty() and not _net_left and Game.session.in_session
 
 
+## The player id behind fighter `f` that a friend request can go to: the opponent of an internet
+## match (not one without internet), else "" (a bot, this phone's own player).
+func watched_player_id(f: Fighter) -> String:
+	if not online or f == null or f != bot or Game.local_match() or not Game.is_player_id(_enemy_id):
+		return ""
+	return _enemy_id
+
+
 ## Rows for the in-match scoreboard and the results: you first, then the opponent. Online, once the
 ## match is over, the opponent's row has the numbers its own phone sent ("fin"), and the guest shows
-## the host's HP (_shown_hp).
+## the host's HP (_shown_hp). "deaths": the times this phone saw that fighter eliminated (K/D/A).
 func scoreboard_rows() -> Array:
 	var rows := []
 	for f in [player, bot]:
@@ -1609,7 +1623,7 @@ func scoreboard_rows() -> Array:
 		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": _shown_hp(f),
 			"kills": int(st.kills), "damage": roundi(st.damage), "headshots": int(st.headshots),
 			"accuracy": roundi(acc), "rounds": int(score["player" if f == player else "bot"]),
-			"weapon": String(f.gun().def.name)})
+			"weapon": String(f.gun().def.name), "deaths": int(_downs["player" if f == player else "bot"])})
 	return rows
 
 
@@ -1618,15 +1632,26 @@ func scoreboard_rows() -> Array:
 func _show_results() -> void:
 	close_pause()
 	Engine.time_scale = 1.0
-	result = _final_result()
-	if not _invalid and _counted:          # (a match is counted when its first fight begins)
-		Game.record_match(result)
-	if online and Game.session != null:
-		Game.session.match_recorded()      # (the session file goes: nothing to rejoin or record later)
+	_results_open = true
+	_record_decided()
 	var screen := ResultsScreen.new()
 	pause_layer.add_child(screen)
 	screen.setup(result)
 	Game.mark("results shown")
+
+
+## The decided match goes into the profile once (Game.record_match; online the session file goes
+## with it: nothing left to rejoin or record later): when the results open, or sooner when the app
+## is sent to the background or closed during the wait before them (RESULTS_DELAY_S), so a match
+## decided there is never lost, nor recorded as LEFT on the next launch. The screen still opens.
+func _record_decided() -> void:
+	if _result_shown:
+		return
+	result = _final_result()
+	if not _invalid and _counted:          # (a match is counted when its first fight begins)
+		Game.record_match(result)
+	if online and Game.session != null:
+		Game.session.match_recorded()
 
 
 ## The decided match's result (phase END); from here on it counts as shown (_result_shown).
@@ -1718,6 +1743,9 @@ func close_pause() -> void:
 
 
 func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_CLOSE_REQUEST] and phase == Phase.END and not _called_off \
+			and not _left_scene and is_instance_valid(player):
+		_record_decided()                  # (the app may never come back to open the results)
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if phase != Phase.END:
 			open_pause()

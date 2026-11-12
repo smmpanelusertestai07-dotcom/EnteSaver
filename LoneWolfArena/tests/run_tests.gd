@@ -78,6 +78,8 @@ func _ready() -> void:
 	_test_career()
 	_test_history()
 	_test_honour()
+	_test_results_pages()
+	_test_spectating_card()
 	_test_signed_cards()
 	_test_card_v2()
 	_test_blocking()
@@ -1723,6 +1725,118 @@ func _test_honour() -> void:
 	_check(ResultsScreen.honour({"won": true, "hp_left": 170, "taken": 30}) == "UNTOUCHABLE", "under 50 damage taken and alive")
 	_check(ResultsScreen.honour({"won": false, "hp_left": 0, "taken": 30}) == "FIGHTER", "a dead player is never untouchable")
 	_check(ResultsScreen.honour({"invalid": true, "won": true, "hp_left": 20, "headshots": 3}) == "", "a voided match has no honour")
+
+
+## The results in two pages: the side names (two different ones, the same for the same match), the
+## K/D/A text, and the page flow (CONTINUE to page 2, back to page 1, back again = today's rule).
+func _test_results_pages() -> void:
+	var same := true
+	var differ := true
+	var seen := {}
+	for i in 400:
+		var a := ResultsScreen.side_names(i * 7919 - 1000)
+		same = same and a == ResultsScreen.side_names(i * 7919 - 1000)
+		differ = differ and a.size() == 2 and a[0] != a[1] and ResultsScreen.SIDE_NAMES.has(a[0]) and ResultsScreen.SIDE_NAMES.has(a[1])
+		seen[a[0]] = true
+	_check(same, "the side names are the same for the same match")
+	_check(differ, "the two sides never get the same name, both from our own list")
+	_check(seen.size() >= 15, "the side names vary from match to match (%d first names seen)" % seen.size())
+	_check(ResultsScreen.SIDE_NAMES.size() >= 20, "about twenty side names")
+	var pair := ResultsScreen.side_names(42)
+	var host_coop := TeamArena.link_match(2, true, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, true, 7)
+	var guest_coop := TeamArena.link_match(2, true, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, false, 7)
+	_check(ResultsScreen.sides_for(pair, host_coop, false)[0] == ResultsScreen.sides_for(pair, guest_coop, true)[0],
+		"a co-op guest and the host see one name for their own side")
+	var host_vs := TeamArena.link_match(2, false, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, true, 7)
+	var guest_vs := TeamArena.link_match(2, false, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, false, 7)
+	_check(ResultsScreen.sides_for(pair, host_vs, false) == pair and ResultsScreen.sides_for(pair, guest_vs, true) == PackedStringArray([pair[1], pair[0]]),
+		"on opposite teams each phone names its own side by its team")
+	var group := [{"slot": 0, "id": "a", "team": 0}, {"slot": 1, "id": "b", "team": 0}, {"slot": 2, "id": "c", "team": 1}, {"slot": 3, "id": "d", "team": 1}]
+	_check(ResultsScreen.sides_for(pair, TeamArena.link_roster(2, group, "a", "a", 1), false)[0] == ResultsScreen.sides_for(pair, TeamArena.link_roster(2, group, "b", "a", 1), true)[0]
+		and ResultsScreen.sides_for(pair, TeamArena.link_roster(2, group, "c", "a", 1), true)[0] == pair[1],
+		"in a group match every teammate of the host names their side as the host does")
+	_check(ResultsScreen.sides_for(pair, {}, false) == pair and ResultsScreen.sides_for(pair, {}, true) == PackedStringArray([pair[1], pair[0]]),
+		"the 1 vs 1: the host's side takes the first name")
+	var two_words := true
+	for n: String in ResultsScreen.SIDE_NAMES:
+		two_words = two_words and n.split(" ").size() == 2 and n == n.to_upper()
+	_check(two_words, "every side name is two words in capitals")
+	_check(ResultsScreen.kda(3, 1, 0) == "3/1/0", "K/D/A reads kills/deaths/assists")
+	_check(ResultsScreen.value_name("K/D/A") == "Value_KDA" and ResultsScreen.value_name("HP LEFT") == "Value_HP_LEFT",
+		"value labels have plain node names")
+	_check(ResultsScreen.tagline("victory", 5) == ResultsScreen.tagline("victory", 5) and ResultsScreen.tagline("defeat", -3) != "",
+		"the line under the title is picked per match")
+	var keep_online := Game.online
+	Game.online = false
+	var rs := ResultsScreen.new()
+	add_child(rs)
+	rs.setup({"won": true, "draw": false, "invalid": false, "kills": 3, "damage": 640, "headshots": 1, "accuracy": 40.0, "time": 120.0,
+		"xp": 0, "enemy": "BOT KAI", "mode": "TRAINING GROUND", "mode_id": "training", "map": "CARGO CAGE", "weapon": "M4A1",
+		"score_player": 3, "score_bot": 1, "hp_left": 80, "difficulty": "NORMAL", "taken": 120, "deaths": 1})
+	var p1 := rs.find_child("Page1", true, false) as Control
+	var p2 := rs.find_child("Page2", true, false) as Control
+	var go := rs.find_child("Continue", true, false) as Button
+	var lobby := rs.find_child("Lobby", true, false) as Button
+	_check(rs.page == 1 and p1.visible and not p2.visible and go.visible and not lobby.visible, "the results open on page 1 with CONTINUE")
+	_check(rs.find_child("HeroModel", true, false) is CharacterModel, "page 1 shows the player's character")
+	_check((rs.find_child("HeroKills", true, false) as Label).text == "3" and (rs.find_child("HeroDamage", true, false) as Label).text == "640",
+		"page 1's plate: eliminations and damage")
+	_check(rs.find_child("PlayAgain", true, false).get_parent() == rs, "PLAY AGAIN stays on both pages")
+	go.pressed.emit()
+	_check(rs.page == 2 and p2.visible and not p1.visible and lobby.visible and not go.visible, "CONTINUE opens page 2 with LOBBY")
+	var row := rs.find_child("YourRow", true, false)
+	_check(row != null and (row.find_child("Value_KDA", true, false) as Label).text == "3/1/0", "page 2: your K/D/A first")
+	rs.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	_check(rs.page == 1 and p1.visible and not p2.visible, "Android back on page 2 goes back to page 1")
+	rs.free()
+	Game.online = keep_online
+
+
+## The SPECTATING card: the kit the player carried when eliminated, ADD FRIEND's states for the
+## player watched (a stub arena names their id), and the ELIMINATED tag over a body.
+func _test_spectating_card() -> void:
+	var p := Player.new()
+	add_child(p)
+	p.process_mode = Node.PROCESS_MODE_DISABLED
+	p.set_loadout("smg")
+	p.shields = 1
+	p.grenades = 0
+	p.medkits = 2
+	_check(p.kit_at_death.is_empty(), "nothing on the card while alive")
+	p.die(null)
+	_check(p.kit_at_death == {"walls": 1, "frags": 0, "medkits": 2}, "the card keeps what the player carried when eliminated")
+	var tags := 0
+	for c in get_tree().root.find_children("EliminatedTag*", "Label3D", true, false):
+		if (c as Label3D).text == "ELIMINATED" and not c.is_queued_for_deletion():
+			tags += 1
+			c.free()
+	_check(tags == 1, "an ELIMINATED tag floats over the body")
+	p.free()
+	var id := "ef".repeat(16)
+	var stub := GDScript.new()
+	stub.source_code = "extends Node\nvar id := \"\"\nfunc watched_player_id(_f: Variant) -> String:\n\treturn id\n"
+	stub.reload()
+	var arena := Node.new()
+	arena.set_script(stub)
+	var hud := HUD.new()
+	hud.arena = arena
+	var who := Bot.new()
+	var keep_friends: Dictionary = (Game.profile.friends as Dictionary).duplicate()
+	var keep_out: Dictionary = (Game.profile.friend_out as Dictionary).duplicate()
+	Game.profile.friends.erase(id)
+	Game.profile.friend_out.erase(id)
+	_check(hud.spectate_friend_state(who) == "", "no ADD FRIEND for a bot or a match without internet")
+	arena.set("id", id)
+	_check(hud.spectate_friend_state(who) == "add", "ADD FRIEND for the player watched online")
+	Game.profile.friend_out[id] = {"name": "ACE"}
+	_check(hud.spectate_friend_state(who) == "sent", "greyed REQUEST SENT once the request went out")
+	Game.profile.friends[id] = {"name": "ACE"}
+	_check(hud.spectate_friend_state(who) == "friends", "greyed FRIENDS when they already are")
+	Game.profile.friends = keep_friends
+	Game.profile.friend_out = keep_out
+	who.free()
+	hud.free()
+	arena.free()
 
 
 ## Player cards and waiting friend requests are signed with the phone's own key: a good signature

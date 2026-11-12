@@ -390,6 +390,8 @@ func run(at: Node) -> int:
 	# LOBBY tap, back on results, PLAY AGAIN tap.
 	var rs2 := await _results_scene(_sample("defeat"))
 	await _settle(0.6)
+	await _tap(rs2.find_child("Continue", true, false) as Control)       # (LOBBY is on page 2)
+	await _settle(0.4)
 	await _tap(rs2.find_child("Lobby", true, false) as Control)
 	_check(await _wait_scene("Lobby", 30.0) != null, "LOBBY returns to the lobby")
 	rs2 = await _results_scene(_sample("draw"))
