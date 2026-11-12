@@ -177,10 +177,10 @@ func _test_geometry() -> void:
 	var ht := HudTeam.new()
 	ht.hud = hud
 	ht.arena = a
-	var marks := HudMinimap.ally_marks(ht, Vector2.ZERO, 2.0)
+	var marks := HudMinimap.ally_marks(ht, Transform2D(0.0, Vector2(2, 2), 0.0, Vector2.ZERO))
 	_check(marks.size() == 1 and int(marks[0].n) == 2 and bool(marks[0].knocked) and (marks[0].pos as Vector2) == Vector2(6, 8),
 		"the minimap marks the knocked teammate (2) at its place; not the player, the one out or the one who left")
-	_check(HudMinimap.ally_marks(null, Vector2.ZERO, 2.0).is_empty(), "no teammates on a 1 vs 1 minimap")
+	_check(HudMinimap.ally_marks(null, Transform2D.IDENTITY).is_empty(), "no teammates on a 1 vs 1 minimap")
 	ht.free()
 	hud.free()
 	root.free()

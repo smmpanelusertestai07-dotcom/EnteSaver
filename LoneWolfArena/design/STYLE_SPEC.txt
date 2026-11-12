@@ -53,7 +53,7 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 - a camera cutout on a short side moves the edge-anchored widgets in by its width.
 | Element | Position (x, y) | Size | Style |
 |---|---|---|---|
-| Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above (north up, never rotated), player arrow, each enemy in sight a red arrowhead pointing where it faces, out of sight its shots leave small red marks that fade over 2 s (no live position), red footprints of its running steps; safe-zone strip under it in DUO / SQUAD only |
+| Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above that turns with the view by default (the player in the middle, its arrow up, everything on the map turning with it, a small N on the edge where north is; SETTINGS > DISPLAY > MINIMAP: TURNS WITH VIEW / NORTH UP), player arrow, each enemy in sight a red arrowhead pointing where it faces, out of sight its shots leave small red marks that fade over 2 s (no live position), red footprints of its running steps; safe-zone strip under it in DUO / SQUAD only |
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
 | Zone warning | under the score bar | text 0.03 h | "OUTSIDE THE SAFE ZONE - MOVE IN!" (red, every mode); "SAFE ZONE SHRINKS IN 7s" in DUO / SQUAD only |
 | Eliminated by | bottom left, 0.56 u wide | 0.13 u high | 1 vs 1, while the eliminated player spectates: dark plate with a red left edge, "ELIMINATED BY <NAME>" (the name red; THE ZONE / A FALL / YOUR OWN FRAG), a thin rule, then the killer's name, the gun's silhouette and name, and "DMG n" (what that player dealt this round) in yellow at the right |

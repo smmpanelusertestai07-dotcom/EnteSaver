@@ -141,7 +141,10 @@ listed here. If a part needs something new from the core, add it in its own file
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
   ({Fighter: bool} line of sight, refreshed 10x per second)
 - helpers live in their own files: `hud_draw.gd` (HudDraw: icons, buttons, text, shapes shared
-  with the editor), `hud_minimap.gd` (HudMinimap), `hud_panels.gd` (HudPanels)
+  with the editor), `hud_minimap.gd` (HudMinimap: `view_xform(pp, yaw, side, map_rect, turn)` maps
+  world X/Z to minimap pixels, turned with the view while the setting `minimap_turns` is on (the
+  default; `HudMinimap.turns()`), north up otherwise; `ally_marks` / `enemy_marks` take that
+  transform), `hud_panels.gd` (HudPanels)
 - online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
   round trip to the other phone under the gear (NetPing), CHAT / MUTE (NetChat) and TALK / SOUND
   (NetVoice) right of the minimap, the chat feed under the score bar (`feed`, `add_line`, `send`),
@@ -445,7 +448,8 @@ listed here. If a part needs something new from the core, add it in its own file
   full phone). Their keys: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
   files are migrated by settings_version: version 6 dropped the FPS counter, crosshair colour and
   size, fire-button drag and master volume, made show_fps / sens_fire `FIXED_SETTINGS` and gave
-  the reference's defaults: joystick DYNAMIC, free look button off), the profile keys
+  the reference's defaults: joystick DYNAMIC, free look button off; version 7 added
+  `minimap_turns`, true (TURNS WITH VIEW) for every older file), the profile keys
   `Game.DEFAULT_PROFILE` (signed as a whole; older profiles are migrated by profile_version).
   Crosshair (fixed): `Game.crosshair_color()` (white), `Game.crosshair_scale()`. Vibration:
   `Game.vibrate(ms, kind)` / `Game.vibration_on(kind)`, kind a key of `Game.VIBRATE_KEYS`:
