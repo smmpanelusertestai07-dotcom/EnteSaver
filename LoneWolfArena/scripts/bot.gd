@@ -17,10 +17,13 @@ const DIFF := [
 	{"reaction": 0.68, "error": 5.4, "head": 0.1, "burst_min": 3, "burst_max": 6, "pause": 0.6, "turn": 185.0, "strafe": 0.65, "shield": 0.3, "crouch": 0.08, "hear": 38.0, "sg_range": 6.0, "jump": 0.06, "grenade": 0.2},
 	{"reaction": 0.24, "error": 2.0, "head": 0.3, "burst_min": 6, "burst_max": 12, "pause": 0.28, "turn": 380.0, "strafe": 1.0, "shield": 0.75, "crouch": 0.35, "hear": 60.0, "sg_range": 9.0, "jump": 0.25, "grenade": 0.6},
 ]
-## The zone keeps closing: stay this far inside its edge (m), and start moving in this many
-## seconds before the shrink begins.
+## The zone keeps closing: stay this far inside the edge (m) of where it will be ZONE_AHEAD_S from
+## now (Arena.zone_at). The circles of stage 2 are nested, so a spot inside that one stays inside
+## the zone meanwhile; the bot starts heading in that long before the closing begins.
 const ZONE_MARGIN := 2.5
-const ZONE_EARLY := 6.0
+const ZONE_AHEAD_S := 8.0
+## Where the zone is going is this small (m): the bot walks straight to its centre and stands there.
+const ZONE_HOLD_R := 3.0
 
 var target: Fighter
 var state := S.SEARCH
@@ -57,6 +60,7 @@ var _shield_cooldown := 0.0
 var _decision_timer := 0.0
 var _grenade_timer := 0.0
 var _zone_goal := Vector3.INF
+var _zone_hold := false         # _zone_goal is the zone's last spot, walked to straight (_zone_pressure)
 var _zone_goal_timer := 0.0
 var nav_ready := false
 ## DUO / SQUAD (TeamArena sets them; empty in the 1 vs 1, where `target` stays the one opponent):
@@ -191,7 +195,14 @@ func _think(delta: float) -> void:
 			cancel_heal()
 		if state == S.HEAL or state == S.COVER:
 			state = S.ENGAGE if see_target else S.CHASE
-		_move_to(_zone_goal, delta)
+		if _zone_hold:
+			# Straight onto the zone's last spot (it is off the cover), and stand still there.
+			var to := _zone_goal - global_position
+			to.y = 0.0
+			_set_move_world(to if to.length() > 0.2 else Vector3.ZERO)
+			sprinting = false
+		else:
+			_move_to(_zone_goal, delta)
 		if see_target:
 			_aim_and_shoot(delta)
 		else:
@@ -269,22 +280,24 @@ func _decide(delta: float) -> void:
 		state = S.SEARCH
 
 
-## True while the bot should head into the safe zone; keeps _zone_goal (a nav point well inside).
+## True while the bot should head into the safe zone; keeps _zone_goal (a nav point well inside
+## the circle the zone will be ZONE_AHEAD_S from now, on the bot's own side of its centre).
 func _zone_pressure(delta: float) -> bool:
 	if arena == null or arena.get("phase") != 1:
 		return false
-	var c: Vector3 = arena.zone_center
+	var ahead: Array = arena.zone_at(float(arena.get("elapsed")) + ZONE_AHEAD_S)
+	var c: Vector3 = ahead[0]
+	var r: float = ahead[1]
 	var flat := Vector2(global_position.x - c.x, global_position.z - c.z).length()
-	var r: float = arena.zone_radius
-	var st := String(arena.zone_state)
-	if st == "stationary":
-		if float(arena.zone_next()) > ZONE_EARLY:
-			if flat <= r - 0.5:
-				return false
-		r = minf(r, float(arena.zone_start_radius) * 0.7)
-	elif st == "shrinking":
-		r = maxf(r - 4.0, 3.0)     # where the edge will be in a few seconds
+	if r <= ZONE_HOLD_R:
+		# The last seconds: the zone ends on a spot, so go and stand on it.
+		var close := flat < ZONE_HOLD_R + 1.5
+		if close or flat > r - minf(ZONE_MARGIN, r * 0.3):
+			_zone_goal = Vector3(c.x, global_position.y, c.z) if close else arena.closest_nav_point(c)
+			_zone_hold = close
+			return true
 	var need := flat > r - minf(ZONE_MARGIN, r * 0.3)
+	_zone_hold = false
 	if not need:
 		_zone_goal = Vector3.INF
 		_zone_best = INF

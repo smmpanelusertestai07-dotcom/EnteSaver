@@ -2,9 +2,9 @@ extends Node3D
 ## Match controller of a 1 vs 1 on the warehouse arena CARGO CAGE, first to rounds_to_win rounds:
 ## TRAINING GROUND against the bot or the target dummy (practice), LONE WOLF against another
 ## phone online (`mode`, `mode_name`). Each round: PREP (spawn alcoves behind a red barrier,
-## weapon pick for both players, red countdown) -> FIGHT (round banner, 90 s timer, safe zone that
-## holds then shrinks) -> a break, or END (kill, time-out on HP, or an integrity flag) -> results
-## screen. Also renders the top-down minimap image once, runs the pause menu and feeds the HUD and
+## weapon pick for both players, red countdown) -> FIGHT (round banner, the two-stage clock of
+## RoundRules: stage 1 with the zone over the whole hall, stage 2 with the zone closing) -> a break,
+## or END (kill, time-out on HP, or an integrity flag) -> results screen. Also renders the top-down minimap image once, runs the pause menu and feeds the HUD and
 ## scoreboard.
 
 enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two rounds
@@ -13,14 +13,19 @@ enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two round
 ## results screen offers to accept it.
 signal rematch_asked
 
-const PREP_TIME := 10.0
+## The prep of a round that opens a pick pair (the pick panel closes a second before it ends).
+const PREP_TIME := 15.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
 const BREAK_TIME := 3.5
 const SPECTATE_EXTRA := 1.5       # s more between rounds while the eliminated player watches the killer
-const ROUND_TIME := 90.0
-const ZONE_HOLD := 25.0
-const ZONE_SHRINK := 40.0
-const ZONE_MIN := 4.0
+## The 1 vs 1's fight: stage 1 (the zone holds over the whole hall) and stage 2 (it closes to
+## ZONE_MIN); RoundRules has the clock, team_arena.gd a longer SQUAD stage 2 (stage2_time).
+const ROUND_TIME := 110.0          # RoundRules.STAGE1_S + RoundRules.STAGE2_S
+const ZONE_HOLD := 20.0            # RoundRules.STAGE1_S
+const ZONE_SHRINK := 90.0          # RoundRules.STAGE2_S
+const ZONE_MIN := 0.5              # RoundRules.ZONE_FINAL_R
+## The final centre keeps this far (m, and a metre more) from the hall's walls (zone_final_for).
+const ZONE_EDGE := 4.0
 ## The most rounds a match lasts (the best-of, 2 x rounds_to_win - 1, is never longer): rounds that
 ## keep ending in draws still end the match, which the most rounds won wins (level: a DRAW).
 const MAX_ROUNDS := 9
@@ -51,7 +56,7 @@ var pick_note := ""                # prep line under PREPARE: who picks the gun,
 var zone_center := Vector3.ZERO
 var zone_radius := 999.0
 var zone_start_radius := 30.0
-var zone_state := "stationary"      # "stationary" (before the shrink), "shrinking", "closed"
+var zone_state := "stationary"      # "stationary" (stage 1), "shrinking" (stage 2), "closed"
 var zone_warning := ""
 var map_name := "CARGO CAGE"
 var map_rect := Rect2(-22, -16, 44, 32)   # world XZ area shown by the minimap
@@ -123,6 +128,9 @@ var _last_rend: Array = []       # the host's last "rend" (sent again after a "s
 ## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
 ## map's centre while it shrinks.
 var zone_final := Vector3.ZERO
+## The 1 vs 1 weapon cooldown (RoundRules.cooldown_left): pick round -> the gun picked for that pair
+## of rounds, whoever picked it. Both phones fill it alike from the same picks.
+var picks := {}
 
 
 func _ready() -> void:
@@ -440,8 +448,8 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 	if Weapons.PICKABLE.has(gun) and gun != picked_weapon:
 		_apply_pick(gun)
 	if phase == Phase.FIGHT and ph == int(Phase.FIGHT):
-		elapsed = clampf(clock, 0.0, ROUND_TIME)
-		time_left = ROUND_TIME - elapsed
+		elapsed = clampf(clock, 0.0, round_time())
+		time_left = round_time() - elapsed
 	elif phase == Phase.PREP and ph == int(Phase.PREP):
 		prep_left = clampf(clock, 0.0, PREP_TIME)
 
@@ -840,7 +848,7 @@ func _start_fight() -> void:
 	for f in fighters:
 		f.hold_fire = false
 		f.frozen = false
-	time_left = ROUND_TIME
+	time_left = round_time()
 	elapsed = 0.0
 	zone_radius = zone_start_radius
 	zone_state = "stationary"
@@ -965,31 +973,61 @@ func _refill_practice_ammo() -> void:
 		w.reserve = int(w.def.get("reserve", 0))
 
 
-## Seconds until the zone changes state (for the HUD's "SAFE ZONE SHRINKS IN" text).
+## Stage 2's length (s): RoundRules.STAGE2_S; a SQUAD's is longer (team_arena.gd).
+func stage2_time() -> float:
+	return RoundRules.STAGE2_S
+
+
+## The whole fight of a round (s): stage 1 and stage 2.
+func round_time() -> float:
+	return RoundRules.fight_time(stage2_time())
+
+
+## The stage being fought (1 or 2; the HUD's clock and the checks read it).
+func stage() -> int:
+	return RoundRules.stage_at(elapsed)
+
+
+## What the top clock shows in the fight: the seconds left of the current stage.
+func stage_left() -> float:
+	return RoundRules.stage_left(elapsed, stage2_time())
+
+
+## Seconds until the zone changes state (for the HUD's "SAFE ZONE" strip): to the start of the
+## closing in stage 1, to its end in stage 2.
 func zone_next() -> float:
-	if zone_state == "stationary":
-		return maxf(ZONE_HOLD - elapsed, 0.0)
-	if zone_state == "shrinking":
-		return maxf(ZONE_HOLD + ZONE_SHRINK - elapsed, 0.0)
-	return 0.0
+	if zone_state == "closed":
+		return 0.0
+	return RoundRules.zone_next(elapsed, stage2_time())
+
+
+## Where the zone will be `t` s into this round's fight: [centre, radius] (the bot heads there).
+func zone_at(t: float) -> Array:
+	return [RoundRules.zone_center_at(t, map.zone_center, zone_final, stage2_time()),
+		RoundRules.zone_radius_at(t, zone_start_radius, stage2_time())]
+
+
+## Whether this arena applies the zone's damage to `f` (team_arena.gd: only fighters run here).
+func zone_hurts(f: Fighter) -> bool:
+	return f.alive
 
 
 func _update_zone(delta: float) -> void:
-	var to_start := ZONE_HOLD - elapsed
+	var to_start := RoundRules.STAGE1_S - elapsed
 	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 else ""
-	if elapsed >= ZONE_HOLD:
+	if elapsed >= RoundRules.STAGE1_S:
 		if zone_state == "stationary":
 			zone_state = "shrinking"
 			hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
 			Audio.play("countdown_beep", -6.0, 0.7)
-		var t := clampf((elapsed - ZONE_HOLD) / ZONE_SHRINK, 0.0, 1.0)
-		zone_radius = lerpf(zone_start_radius, ZONE_MIN, t)
-		zone_center = map.zone_center.lerp(zone_final, t)
-		if t >= 1.0:
+		var z := zone_at(elapsed)
+		zone_center = z[0]
+		zone_radius = z[1]
+		if RoundRules.zone_t(elapsed, stage2_time()) >= 1.0:
 			zone_state = "closed"
 		_update_zone_mesh()
 	for f in fighters:
-		if f.alive and not in_zone(f.global_position):
+		if zone_hurts(f) and not in_zone(f.global_position):
 			_outside[f] = float(_outside[f]) + delta
 			var o: float = _outside[f]
 			var dps := 5.0 if o < 10.0 else (10.0 if o < 20.0 else 20.0)
@@ -1002,15 +1040,16 @@ func _update_zone_mesh() -> void:
 
 
 ## Where the safe zone closes in round `r`: a random spot of the hall's floor, the last circle inside
-## the walls (MapBuilder.HX / HZ less ZONE_MIN and a margin) and its centre off the cover (the
+## the walls (MapBuilder.HX / HZ less ZONE_EDGE and a margin) and its centre off the cover (the
 ## obstacles), a new one every round. Online every phone gets the same (Cloud.match_seed: the room's
 ## key and the round); TRAINING draws it at random. (The start circle, from the map's centre, always
-## holds the final one: the hall's farthest spot is closer than zone_start_radius - ZONE_MIN.)
+## holds the final one, and the circles of stage 2 are nested: the centre moves at most 18.9 m in
+## stage 2, less than the 27.1 m the radius shrinks.)
 func zone_final_for(r: int) -> Vector3:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = Game.session.match_seed("zone%d" % r) if online and Game.session != null else _rng.randi()
-	var mx := MapBuilder.HX - ZONE_MIN - 1.0
-	var mz := MapBuilder.HZ - ZONE_MIN - 1.0
+	var mx := MapBuilder.HX - ZONE_EDGE - 1.0
+	var mz := MapBuilder.HZ - ZONE_EDGE - 1.0
 	var best := Vector3(map.zone_center.x, 0.0, map.zone_center.z)
 	for i in 16:
 		var p := Vector3(rng.randf_range(-mx, mx), 0.0, rng.randf_range(-mz, mz))

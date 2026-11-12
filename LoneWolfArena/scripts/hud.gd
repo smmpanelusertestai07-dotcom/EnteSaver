@@ -1506,7 +1506,14 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		theirs = int(sc.get("bot", 0))
 		goal = int(arena.get("rounds_to_win"))
 		var phase := int(arena.get("phase"))
-		t = float(arena.get("prep_left")) if phase == 0 else float(arena.get("time_left"))
+		# The fight's clock counts each stage down on its own (RoundRules): 00:20 to 00:00, then
+		# stage 2 from its full length; red in the prep and the last 10 s of a stage.
+		if phase == 0:
+			t = float(arena.get("prep_left"))
+		elif bool(arena.get("practice")):
+			t = float(arena.get("time_left"))
+		else:
+			t = float(arena.call("stage_left"))
 		red = phase == 0 or (t <= 10.0 and not bool(arena.get("practice")))
 		if player != null:
 			hp_me = clampf(player.hp / Fighter.MAX_HP, 0.0, 1.0)

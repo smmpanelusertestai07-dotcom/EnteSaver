@@ -497,7 +497,7 @@ func _on_team_sync(data: Array) -> void:
 		elapsed = clampf(float(data[3]), 0.0, round_time())
 		time_left = round_time() - elapsed
 	elif phase == Phase.PREP and ph == int(Phase.PREP):
-		prep_left = clampf(float(data[3]), 0.0, PREP_TIME)
+		prep_left = clampf(float(data[3]), 0.0, TEAM_PREP_S)
 	if ph != int(phase) or not player.alive or phase != Phase.FIGHT:
 		return
 	var pos := Vector3(float(data[8]), float(data[9]), float(data[10]))

@@ -28,11 +28,8 @@ extends "res://scripts/arena.gd"
 ##  - kills are the referee's eliminations (Fighter stats "kills", "knocks", "revives").
 
 const TEAM_ROUNDS_TO_WIN := 4             # LW_ROUNDS_TO_WIN overrides it in test runs
-## Round length and zone (hold, then shrink) by team size: DUO as the 1 vs 1, SQUAD longer.
-const DUO_ROUND_S := 90.0
-const SQUAD_ROUND_S := 120.0
-const SQUAD_ZONE_HOLD := 35.0
-const SQUAD_ZONE_SHRINK := 55.0
+## The prep of every team round (every fighter picks its own gun in it).
+const TEAM_PREP_S := 10.0
 const REVIVE_CANCEL_M := 2.5              # a revive stops when the two are farther apart than this
 const SPAWN_SIDE := 1.2                   # m beside the alcove's middle line (members 0 / 1 of a team)
 const SPAWN_BACK := 2.0                   # m deeper into the alcove (members 2 / 3)
@@ -287,16 +284,10 @@ static func spawn_spot(base: Vector3, yaw: float, index: int) -> Vector3:
 	return base + b * Vector3(side, 0.0, back)
 
 
-func round_time() -> float:
-	return SQUAD_ROUND_S if team_size >= 4 else DUO_ROUND_S
-
-
-func zone_hold() -> float:
-	return SQUAD_ZONE_HOLD if team_size >= 4 else ZONE_HOLD
-
-
-func zone_shrink() -> float:
-	return SQUAD_ZONE_SHRINK if team_size >= 4 else ZONE_SHRINK
+## The round's clock by team size (RoundRules, as the 1 vs 1): stage 1 the same, stage 2 of a DUO
+## as the 1 vs 1's, a SQUAD's longer.
+func stage2_time() -> float:
+	return RoundRules.SQUAD_STAGE2_S if team_size >= 4 else RoundRules.STAGE2_S
 
 
 # ---------------------------------------------------------------- the match (offline semantics)
@@ -399,7 +390,7 @@ func _start_prep() -> void:
 	_net_spawns.clear()
 	_my_spawns.clear()
 	phase = Phase.PREP
-	prep_left = PREP_TIME
+	prep_left = TEAM_PREP_S
 	map.set_barriers(true)
 	referee.reset_round()
 	_picked.clear()
@@ -552,35 +543,8 @@ func _update_shadow_cut(delta: float) -> void:
 				mi.remove_meta("lw_shadow_cut")
 
 
-func zone_next() -> float:
-	if zone_state == "stationary":
-		return maxf(zone_hold() - elapsed, 0.0)
-	if zone_state == "shrinking":
-		return maxf(zone_hold() + zone_shrink() - elapsed, 0.0)
-	return 0.0
-
-
-func _update_zone(delta: float) -> void:
-	var hold := zone_hold()
-	var to_start := hold - elapsed
-	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 else ""
-	if elapsed >= hold:
-		if zone_state == "stationary":
-			zone_state = "shrinking"
-			hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
-			Audio.play("countdown_beep", -6.0, 0.7)
-		var t := clampf((elapsed - hold) / zone_shrink(), 0.0, 1.0)
-		zone_radius = lerpf(zone_start_radius, ZONE_MIN, t)
-		zone_center = map.zone_center.lerp(zone_final, t)
-		if t >= 1.0:
-			zone_state = "closed"
-		_update_zone_mesh()
-	for f in fighters:
-		if f.alive and runs_here(f) and not in_zone(f.global_position):
-			_outside[f] = float(_outside[f]) + delta
-			var o: float = _outside[f]
-			var dps := 5.0 if o < 10.0 else (10.0 if o < 20.0 else 20.0)
-			f.take_damage(dps * delta, "zone", null, f.global_position, "zone")
+func zone_hurts(f: Fighter) -> bool:
+	return f.alive and runs_here(f)
 
 
 ## Revives in progress by fighters that run here: cancelled, or done after Fighter.REVIVE_S.
