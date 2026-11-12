@@ -62,6 +62,22 @@ listed here. If a part needs something new from the core, add it in its own file
 - Cloud: a frame gap while a match loads or in the first `Cloud.LOAD_STALL_MS` after its arena
   listens is the load (shader compiles), not this phone away (`Cloud.load_stall`); an app pause
   still counts. The other phone, told by "ka" keep-alives that it loads, waits that much longer.
+- Cloud away rules: a player silent `AWAY_AFTER_MS` is AWAY (frozen, its HP decided on the other
+  phone), LEFT only after `grace_ms()` (`AWAY_GRACE_MS` 90 s; checks shorten it with
+  LW_AWAY_GRACE_MS, read only outside a release build); this phone away `self_grace_ms()` (1.5 s
+  less) has dropped out ("connection lost"). A "ka" keep-alive does not end AWAY (a phone back
+  after a restart says it while its arena loads; its fighter stays frozen and hittable meanwhile).
+- Rejoining after the app was closed (1 vs 1 over the relay only; never PLAY WITHOUT INTERNET,
+  DUO / SQUAD or all-human matches): Cloud keeps the live session in `Cloud.resume_path()` (sealed
+  AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
+  this phone's counter `SEQ_RESERVE` ahead; the "last in the match" time every `RESUME_SAVE_MS`;
+  the arena's `note_match(counted, mine, theirs, mode)`), deleted whenever the session ends. The
+  lobby calls `try_resume()` when it opens: in time, REJOINING MATCH... (LEAVE MATCH) until the
+  relay is up, then `session_started` loads the arena as a challenge does; `Cloud.resumed` tells
+  the arena it is fresh: it does not count the match again, holds its prep and, on the other
+  phone's "sync", enters the match where it stands (`Arena._resume_into`: round, phase, clock,
+  score, gun, cooldowns; HP never above the other's word), the host included. Too late (or LEAVE
+  MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once.
 
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
@@ -710,14 +726,19 @@ listed here. If a part needs something new from the core, add it in its own file
 - RemoteFighter: takes hits from the player or a net_local fighter (never a teammate) and sends
   them through arena.net_hit_by when the arena has it (else the 1 vs 1's net_hit). pack() adds
   flags 16 knocked (the hp number is then the knock HP) and 32 reviving; apply_state shows them
-  (the reviving motion is the healing one). 1 vs 1 packets and behaviour are unchanged.
+  (the reviving motion is the healing one). 1 vs 1 packets and behaviour are unchanged. AWAY and
+  decided here (`decided_here`: the host, for a member's or the guest's fighter), it takes hits and
+  the zone as a fighter's own and, knocked, bleeds out (knock_finished, "bleed") as one run here.
+  The host's own fighter while the HOST is away is not decided anywhere (no stand-in referee).
 - The end: once phase END (not called off) each phone sends "fin" for every fighter it runs;
   final_stats[slot] fills from the other phone's, and the results wait for all of them
   (FINAL_WAIT_S at most). The session ending (_on_net_ended): "connection lost" or before the first
   fight: as the 1 vs 1 (the notice names the other player); against the other player: a forfeit
   win; coop, on the host: referee_leave(guest_slot), "<NAME> LEFT", the bots play on; coop, on the
   guest: back to the lobby, "THE HOST LEFT - THE MATCH ENDED", recorded with result["ended"].
-- Not done tonight: PLAY AGAIN TOGETHER ("rm" is ignored in team matches), 3-4 phones, rejoin.
+- Not done tonight: PLAY AGAIN TOGETHER ("rm" is ignored in team matches), 3-4 phones, rejoin
+  after an app restart (only the 1 vs 1 keeps a session file; a team match's phone that comes
+  back from an absence inside the grace still rejoins with "back" / "sync").
 - Checks: tests/team_net_unit.gd (invites, searches, the notice, stand-in arenas for hits / dn /
   decisions / tk / fin); tests/team_online_check.gd (step team_online, mock port 47820: coop invite
   vs bots with a knock and a revive across the phones, a random DUO with the guest's pause menu and

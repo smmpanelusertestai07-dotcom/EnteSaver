@@ -85,6 +85,7 @@ func _ready() -> void:
 	LanUnitCheck.run(self)        # PLAY WITHOUT INTERNET: code, discovery, pairing, tampering (tests/lan_unit_check.gd)
 	DirectCheck.run(self)         # the direct UDP path: STUN, sealed packets, fallback (tests/direct_check.gd)
 	_test_session_ends()
+	_test_session_file()
 	_test_release_fixes()
 	_test_safe_saves()
 	_test_clear_cache()
@@ -2022,6 +2023,87 @@ func _test_session_ends() -> void:
 	_check(cl.join_state == "none" and heard.room == 1, "a joined room whose host stopped answering is noticed")
 	cl.free()
 	them.free()
+	Game.profile = saved_profile
+	Game.autotest = at
+
+
+## The session file (Cloud: rejoining after the app was closed): sealed with this install's key,
+## a counter that never repeats, deleted when it fails its check, too late, or the session ends.
+func _test_session_file() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	var at := Game.autotest
+	Game.autotest = "unit"
+	Game.profile = Game.DEFAULT_PROFILE.duplicate(true)
+	var keys := Crypto.new()
+	var key := keys.generate_rsa(1024)
+	var cl := Cloud.new()
+	cl._use_key(key)
+	var x := "opponent-y".sha256_text().left(32)
+	var room := keys.generate_random_bytes(16).hex_encode()
+	var start := func(c: Cloud) -> void:
+		c.in_session = true
+		c._room = room
+		c._aes = keys.generate_random_bytes(32)
+		c._mac = keys.generate_random_bytes(32)
+		c.opponent = {"id": x, "name": "YARA", "bundle": "default"}
+		c.is_host = true
+		c._seq = 41
+		c._their_seq = 17
+		c._in_match_unix = Time.get_unix_time_from_system()
+	start.call(cl)
+	cl.note_match(true, 1, 2, "LONE WOLF")
+	var raw := FileAccess.get_file_as_bytes(Cloud.resume_path())
+	_check(raw.size() > 64 and not raw.get_string_from_ascii().contains(room) and not raw.get_string_from_ascii().contains("YARA"),
+		"the session file is written, and sealed (no room name or player name readable)")
+	_check(cl._seq_kept == 41 + Cloud.SEQ_RESERVE, "the file keeps a counter SEQ_RESERVE ahead of the one in use")
+	var d := cl.load_resume()
+	_check(String(d.get("room", "")) == room and int(d.get("seq", 0)) == 41 + Cloud.SEQ_RESERVE and int(d.get("their", 0)) == 17
+		and bool((d.get("note", {}) as Dictionary).get("counted", false)), "the file opens with its own key and holds the session")
+	for i in Cloud.SEQ_RESERVE - 120:
+		cl._room_packet({"k": "x"})
+	_check(cl._seq_kept > cl._seq + 100, "the file's counter moves ahead before the one in use reaches it")
+	# A restart: a new service with the same key enters the session again, away from it.
+	var again := Cloud.new()
+	again._use_key(key)
+	var started := [0]
+	again.session_started.connect(func(_h: bool) -> void: started[0] += 1)
+	_check(again.try_resume() and again.in_session and again.resumed and again.rejoining() and again._room == room
+		and again.is_host and again._seq > cl._seq and again._their_seq >= 17 and String(again.opponent.get("id", "")) == x,
+		"opened again in time, the saved session is entered (its counter above every one used, still away)")
+	_check(again._resume_emit, "it says the session started once the relay is up")
+	again.end_session("connection lost")
+	_check(not FileAccess.file_exists(Cloud.resume_path()), "the file goes when the session ends")
+	_check((Game.profile.history as Array).size() == 1 and String((Game.profile.history as Array)[0].get("result")) == "left",
+		"a rejoined match lost before its arena was up counts as LEFT, once")
+	# Tampered, another install's key, another player, too late: none is entered, the file goes.
+	start.call(cl)
+	cl.note_match(true, 0, 0, "LONE WOLF")
+	var bad := FileAccess.get_file_as_bytes(Cloud.resume_path())
+	bad[bad.size() / 2] = bad[bad.size() / 2] ^ 1
+	var f := FileAccess.open(Cloud.resume_path(), FileAccess.WRITE)
+	f.store_buffer(bad)
+	f.close()
+	var other := Cloud.new()
+	other._use_key(key)
+	_check(not other.try_resume() and not other.in_session and not FileAccess.file_exists(Cloud.resume_path()),
+		"a file that fails its check is deleted and ignored")
+	cl._save_resume()
+	var stranger := Cloud.new()
+	stranger._use_key(keys.generate_rsa(1024))
+	_check(stranger.load_resume().is_empty() and not FileAccess.file_exists(Cloud.resume_path()),
+		"a file sealed by another install's key does not open (and goes)")
+	cl._in_match_unix = Time.get_unix_time_from_system() - float(Cloud.SELF_GRACE_MS) / 1000.0 - 5.0
+	cl._save_resume()
+	var late := Cloud.new()
+	late._use_key(key)
+	var before := (Game.profile.history as Array).size()
+	_check(not late.try_resume() and not late.in_session and not FileAccess.file_exists(Cloud.resume_path())
+		and (Game.profile.history as Array).size() == before + 1 and int(Game.profile.matches) == 0,
+		"opened after the grace: no rejoin, the file goes, the match is LEFT once (counted nowhere twice)")
+	var lan := Lan.new()
+	_check(not lan.resume_allowed(), "PLAY WITHOUT INTERNET keeps no session file")
+	for c: Node in [cl, again, other, stranger, late, lan]:
+		c.free()
 	Game.profile = saved_profile
 	Game.autotest = at
 

@@ -8,13 +8,20 @@ extends Node
 ##    then quits in the first prep (QUIT MATCH): the match never began, so the host counts no win,
 ##    no XP and no match, and its lobby says the other player left.
 ## 2. A second challenge; as its arena appears the guest freezes 8 s (a phone's first load compiles
-##    its shaders): neither phone takes that for leaving, the match begins. 1 s into the first
-##    fight the guest freezes for 9 s (an app in the background, a phone out of signal). The host
-##    takes the silence for leaving: a forfeit, its VICTORY, with the real score (no round added);
-##    the VICTORY screen says the other player left (their row reads LEFT).
-##    The guest, back, knows it was the one away: CONNECTION LOST, the match counts as LEFT (a
-##    defeat), never a second win.
+##    its shaders): neither phone takes that for leaving, the match begins. In the first fight the
+##    guest goes silent ABSENCE_MS twice (an app in the background, a phone out of signal): its
+##    fighter stands frozen on the host, which damages it the first time (back, the guest shows no
+##    more HP than the host told it) and eliminates it the second; both end with the same result
+##    (the host's VICTORY, the guest's DEFEAT), no forfeit, no LEFT.
+## 3. A third challenge; in its fight the guest goes silent past the grace (the step shortens it
+##    with LW_AWAY_GRACE_MS). The host takes that for leaving: a forfeit, its VICTORY, with the
+##    real score (no round added); the VICTORY screen says the other player left (their row reads
+##    LEFT). The guest, back, knows it was the one away: CONNECTION LOST, the match counts as LEFT
+##    (a defeat), never a second win, and only once.
 ## Prints "DROP CHECK DONE bad=N".
+
+## How long the guest goes silent in match 2: past AWAY (Cloud.AWAY_AFTER_MS), well inside the grace.
+const ABSENCE_MS := 5000
 
 var bad := 0
 var at: Node
@@ -89,7 +96,7 @@ func run(autotest: Node) -> int:
 			return _done("the guest did not get back to the lobby")
 		if int(Game.profile.matches) != 0 or not (Game.profile.history as Array).is_empty():
 			_fail("quitting before the first fight counted a match")
-	# 2. The guest goes away 9 s in the first fight.
+	# 2. A short absence keeps the match (twice), then 3. one past the grace ends it.
 	await at.wait(2.0)
 	arena = await _match()
 	if arena == null:
@@ -103,15 +110,35 @@ func run(autotest: Node) -> int:
 	if not is_instance_valid(arena) or arena.get("phase") != 1:
 		return _done("match 2 never reached its fight")
 	await at.wait(1.0)
+	var err := ""
 	if host:
-		if not await _until(func() -> bool: return is_instance_valid(arena) and bool(arena.get("_result_shown")), 30.0) \
+		err = await _short_absences_host(arena)
+	else:
+		err = await _short_absences_guest(arena)
+	if err != "":
+		return _done(err)
+	Game.goto_lobby()
+	if not await _until(func() -> bool: return _in_lobby() and not cloud.in_session, 15.0):
+		return _done("not back in the lobby after match 2")
+	await at.wait(2.0)
+	arena = await _match()
+	if arena == null:
+		return _done("match 3 did not load")
+	await at.wait_for_phase(arena, 1, 40.0)
+	if not is_instance_valid(arena) or arena.get("phase") != 1:
+		return _done("match 3 never reached its fight")
+	await at.wait(1.0)
+	var wins0 := int(Game.profile.wins)
+	var matches0 := int(Game.profile.matches)
+	if host:
+		if not await _until(func() -> bool: return is_instance_valid(arena) and bool(arena.get("_result_shown")), 40.0) \
 				or not is_instance_valid(arena):
-			return _done("the host's match did not end with its result while the guest was away")
+			return _done("the host's match did not end with its result while the guest was away past the grace")
 		var h: Dictionary = (Game.profile.history as Array)[0] if not (Game.profile.history as Array).is_empty() else {}
 		at.log_line("host: forfeit %s, winner me %s, history %s, wins %d" % [arena.get("_forfeit"), arena.get("_winner") == arena.get("player"),
 			str(h.get("result")), int(Game.profile.wins)])
-		if not bool(arena.get("_forfeit")) or h.get("result") != "won" or int(Game.profile.wins) != 1:
-			_fail("the host did not win when the guest dropped out")
+		if not bool(arena.get("_forfeit")) or h.get("result") != "won" or int(Game.profile.wins) != wins0 + 1:
+			_fail("the host did not win when the guest stayed away past the grace")
 		var sc: Dictionary = arena.get("score")
 		if int(sc.player) != 0 or int(sc.bot) != 0 or int(h.get("score", -1)) != 0:
 			_fail("the forfeit added a round to the score (%s)" % str(sc))
@@ -126,19 +153,84 @@ func run(autotest: Node) -> int:
 			_fail("the forfeit's VICTORY screen does not say that the opponent left")
 		await at.wait(2.0)
 	else:
-		at.log_line("guest: frozen for 9 s")
-		OS.delay_msec(9000)
+		var gone_ms := cloud.grace_ms() + 2500
+		at.log_line("guest: frozen for %d ms (the grace is %d ms)" % [gone_ms, cloud.grace_ms()])
+		OS.delay_msec(gone_ms)
 		if not await _until(func() -> bool: return _in_lobby(), 15.0):
-			return _done("the guest stayed in the match after it was away")
+			return _done("the guest stayed in the match after it was away past the grace")
 		var h: Dictionary = (Game.profile.history as Array)[0] if not (Game.profile.history as Array).is_empty() else {}
 		var notice: String = await _notice_text()
-		at.log_line("guest back in the lobby: \"%s\"; history %s, matches %d, wins %d, xp %d" % [notice, str(h.get("result")),
-			int(Game.profile.matches), int(Game.profile.wins), int(Game.profile.xp)])
-		if h.get("result") != "left" or int(Game.profile.wins) != 0 or int(Game.profile.matches) != 1 or int(Game.profile.xp) != 0:
-			_fail("the phone that dropped out was not given a LEFT (a defeat)")
+		at.log_line("guest back in the lobby: \"%s\"; history %s, matches %d, wins %d" % [notice, str(h.get("result")),
+			int(Game.profile.matches), int(Game.profile.wins)])
+		if h.get("result") != "left" or int(Game.profile.wins) != wins0 or int(Game.profile.matches) != matches0:
+			_fail("the phone that stayed away was not given a LEFT (a defeat), or the match counted twice")
 		if not notice.contains("connection was lost"):
 			_fail("the lobby did not say that the connection was lost")
 	return _done("")
+
+
+## Match 2 on the host: the guest goes silent twice (ABSENCE_MS, well inside the grace). Each time its
+## fighter stands frozen here and this phone decides its HP: the first time it takes damage (the
+## guest, back, may show no more HP than this phone told it), the second time it is eliminated, and
+## the round (the match: one round to win) is this phone's, no forfeit.
+func _short_absences_host(arena: Node) -> String:
+	var remote := arena.get("bot") as RemoteFighter
+	var me := arena.get("player") as Fighter
+	for i in 2:
+		if not await _until(func() -> bool: return is_instance_valid(arena) and remote.away, 15.0):
+			return "absence %d: the guest's fighter was never taken for AWAY" % (i + 1)
+		var goal := 120.0 if i == 0 else 0.0
+		var n := 0
+		while is_instance_valid(arena) and remote.alive and remote.hp > goal and n < 40:
+			n += 1
+			remote.take_damage(30.0, "body", me, me.global_position)
+		at.log_line("host: absence %d, the frozen guest's fighter at %.1f HP, alive %s" % [i + 1, remote.hp, remote.alive])
+		if (i == 0 and (not remote.alive or remote.hp > goal)) or (i == 1 and remote.alive):
+			return "absence %d: the frozen fighter could not be %s here" % [i + 1, "damaged" if i == 0 else "eliminated"]
+		if i == 0:
+			if not await _until(func() -> bool: return is_instance_valid(arena) and not remote.away, 15.0):
+				return "the guest never came back from its first absence"
+			if not cloud.in_session or int(arena.get("phase")) != 1:
+				return "the match did not go on after the guest's short absence"
+			await at.wait(2.0)
+			if remote.hp > goal + 0.5:
+				return "the guest's fighter healed back what it lost while away (%.1f HP)" % remote.hp
+	if not await _until(func() -> bool: return is_instance_valid(arena) and bool(arena.get("_result_shown")), 30.0):
+		return "the host's match 2 did not end with its result"
+	var h: Dictionary = (Game.profile.history as Array)[0] if not (Game.profile.history as Array).is_empty() else {}
+	at.log_line("host: match 2 %s, forfeit %s" % [str(h.get("result")), arena.get("_forfeit")])
+	if h.get("result") != "won" or bool(arena.get("_forfeit")):
+		return "the host did not win match 2 by the elimination (%s)" % str(h.get("result"))
+	await at.wait(4.0)               # (the guest, back, takes the last word and shows its result)
+	return ""
+
+
+## Match 2 on the guest: away ABSENCE_MS twice. Back from the first it takes the host's word (its HP
+## no higher than the host's) and plays on; back from the second it learns it was eliminated and
+## ends with the same result as the host (a defeat, never LEFT).
+func _short_absences_guest(arena: Node) -> String:
+	var me := arena.get("player") as Fighter
+	for i in 2:
+		at.log_line("guest: away %d ms (absence %d)" % [ABSENCE_MS, i + 1])
+		OS.delay_msec(ABSENCE_MS)
+		await at.wait(0.3)               # (the next frames notice the gap and ask for the host's word)
+		if not await _until(func() -> bool: return is_instance_valid(arena) and not cloud.rejoining(), 10.0):
+			return "absence %d: the host's word (\"sync\") never came" % (i + 1)
+		if i == 0:
+			await at.wait(0.5)
+			at.log_line("guest: back with %.1f HP, alive %s" % [me.hp, me.alive])
+			if not cloud.in_session or int(arena.get("phase")) != 1 or not me.alive:
+				return "the match did not go on after the short absence"
+			if me.hp > 120.5:
+				return "the guest kept more HP (%.1f) than the host told it" % me.hp
+			await at.wait(3.0)
+	if not await _until(func() -> bool: return is_instance_valid(arena) and bool(arena.get("_result_shown")), 30.0):
+		return "the guest's match 2 did not end with its result"
+	var h: Dictionary = (Game.profile.history as Array)[0] if not (Game.profile.history as Array).is_empty() else {}
+	at.log_line("guest: match 2 %s" % str(h.get("result")))
+	if h.get("result") != "lost":
+		return "the guest's match 2 did not end as the host's did (%s)" % str(h.get("result"))
+	return ""
 
 
 ## Challenges (host) or waits to be challenged (guest), then waits for the arena.

@@ -19,7 +19,7 @@ extends RefCounted
 const RELAY_WAIT_S := 6.0
 const FLUSH_S := 1.2
 ## What a save, its .bak / .tmp or a key is kept in at the top of user:// (erase_files).
-const SAVE_EXTENSIONS := ["json", "key", "bak", "tmp"]
+const SAVE_EXTENSIONS := ["json", "key", "bak", "tmp", "bin"]     # (bin: the session file a match is rejoined from, Cloud.resume_path)
 const DELETE_TEXT := ("Delete everything Wolf Arena keeps on this phone: your profile and player ID, level, stats and "
 	+ "match history, friends, blocked players and chats, your settings and HUD layout? Online, the game also asks "
 	+ "the relay to delete your player card and the friend requests and messages waiting there.")

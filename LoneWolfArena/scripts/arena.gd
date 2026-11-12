@@ -124,6 +124,9 @@ var rematch_they_take := true    # ... and their phone takes this one's challeng
 ## ("back", once a second while Cloud.rejoining) and takes the other phone's word ("sync",
 ## _send_sync) before it sends its own states again.
 var _back_t := 0.0
+## The app was closed in this match and opened again (Cloud.resumed): this fresh arena holds still
+## until the other phone's "sync" says where the match stands, then enters it there (_resume_into).
+var _resuming := false
 var _last_rend: Array = []       # the host's last "rend" (sent again after a "sync")
 ## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
 ## map's centre while it shrinks.
@@ -162,6 +165,8 @@ func _ready() -> void:
 		var lost := Game.session != null and Game.session.last_end_reason != "left"
 		Game.match_notice = ["CONNECTION LOST" if lost else "OPPONENT LEFT", ("The connection was lost" if lost
 			else "The other player left") + " before the match began. Nothing was counted."]
+		if Game.session != null and Game.session.resumed:
+			Game.match_notice = ["CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat)."]
 		Game.goto_lobby.call_deferred()
 		return
 	_build_zone()
@@ -201,6 +206,9 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	Audio.stop_ambience()
+	if online and Game.session != null and Game.session.app_paused() and Game.session.resume_allowed():
+		_net_left = true                 # the app closes in the background: the match stays to be rejoined
+		return
 	leave_session()
 
 
@@ -232,6 +240,14 @@ func _net_setup() -> void:
 	Game.session.peer_away_changed.connect(_on_peer_away)
 	var queued: Array = Game.session.queue.duplicate()
 	Game.session.queue.clear()
+	if Game.session.resumed:
+		# Back after a restart: the match began long ago and was counted then (the file's note).
+		_resuming = true
+		_net_begun = true
+		_counted = bool(Game.session.resume_note.get("counted", false))
+		score.player = maxi(int(Game.session.resume_note.get("mine", 0)), 0)
+		score.bot = maxi(int(Game.session.resume_note.get("theirs", 0)), 0)
+		Game.mark("online match rejoined after a restart")
 	Game.session.send_event("ready")
 	for q: Array in queued:
 		_on_net_event(String(q[0]), q[1])
@@ -420,7 +436,12 @@ func _on_sync(data: Array) -> void:
 	if r < 1 or r > MAX_ROUNDS or ph < 0 or ph > 3:
 		return
 	Game.session.rejoined()
-	if not _net_host:
+	if _resuming:
+		_resuming = false
+		if data.size() == 13:
+			picks = RoundRules.picks_from_text(String(data[12]), Weapons.PICKABLE)     # (the host's own were lost too)
+		_resume_into(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
+	elif not _net_host:
 		if data.size() == 13:
 			picks = RoundRules.picks_from_text(String(data[12]), Weapons.PICKABLE)     # the host's cooldowns
 		_follow_round(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
@@ -461,6 +482,42 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 		time_left = round_time() - elapsed
 	elif phase == Phase.PREP and ph == int(Phase.PREP):
 		prep_left = clampf(clock, 0.0, PREP_TIME)
+
+
+## A fresh arena after a restart (_resuming) enters the match where the other phone's word says it
+## stands: that round in that phase with the score, the gun and the clock. In a break the host
+## starts the next round on both (its "round"), the guest waits for it; a match over on the other
+## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync").
+func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String) -> void:
+	score.bot = maxi(their_score, 0)
+	score.player = maxi(my_score, 0)
+	Game.mark("rejoined: round %d, phase %d" % [r, ph])
+	if ph == int(Phase.BREAK):
+		round_index = r
+		if _net_host:
+			_next_round()
+		else:
+			_freeze_all()
+			phase = Phase.BREAK
+			_break_t = 0.0
+		return
+	if ph == int(Phase.END) and _net_host:
+		round_index = r
+		_freeze_all()
+		_conclude()
+		_show_match_end()
+		return
+	round_index = r - 1
+	_next_round()                        # that round's prep, both at their spawns
+	if Weapons.PICKABLE.has(gun):
+		_apply_pick(gun)
+		hud.close_weapon_pick()
+	if ph == int(Phase.PREP):
+		prep_left = clampf(clock, 0.5, PREP_TIME)
+	else:
+		_start_fight()
+		elapsed = clampf(clock, 0.0, round_time())
+		time_left = round_time() - elapsed
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
@@ -885,6 +942,8 @@ func _start_fight() -> void:
 	if not practice and round_index == 1 and not _counted:
 		Game.count_match(mode)
 		_counted = true
+	if online and session_up():
+		Game.session.note_match(_counted, int(score.player), int(score.bot), mode_name)     # (the session file)
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(preselected_pick())
@@ -922,7 +981,7 @@ func _physics_process(delta: float) -> void:
 				_back_t = 1.0                # back from being away: the other phone's word first ("sync")
 				Game.session.send_event("back")
 	match phase:
-		Phase.PREP when online and not _net_begun:
+		Phase.PREP when online and (not _net_begun or _resuming):
 			pass        # online the first prep starts on both phones together (_net_begin), never alone
 		Phase.PREP:
 			if _bot_pick_t > 0.0:
@@ -1280,6 +1339,8 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 		score["player" if winner == player else "bot"] += 1
 	var mine := int(score.player)
 	var theirs := int(score.bot)
+	if online and session_up():
+		Game.session.note_match(_counted, mine, theirs, mode_name)
 	var decided := practice or _forfeit or match_over_after(round_index, mine, theirs, rounds_to_win)
 	var line := "%d  -  %d" % [mine, theirs]
 	_freeze_all()

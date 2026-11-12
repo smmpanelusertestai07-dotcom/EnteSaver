@@ -38,9 +38,14 @@
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
 #   tests/quick_check.gd   QUICK MATCH: a lone search never pairs with itself and CANCEL stops it; two
 #                          searching copies find each other and play the match (lower id hosts)
-#   tests/drop_check.gd    online matches that end early: a slow load is waited for, a quit before
-#                          the first fight counts nowhere, the phone that was away gets LEFT and
-#                          the other the win; a load that freezes 8 s is no disconnect
+#   tests/drop_check.gd    online matches that end early or nearly: a slow load is waited for, a quit
+#                          before the first fight counts nowhere, a load that freezes 8 s is no
+#                          disconnect; a short absence keeps the match (the frozen fighter is
+#                          damaged and eliminated on the other copy, both end alike); an absence past
+#                          the grace (LW_AWAY_GRACE_MS shortens it) is LEFT for it, a win for the other
+#   tests/resume_check.gd  an online 1 vs 1 whose guest app is killed in a fight: started again in time it
+#                          rejoins the same match with no tap and both end alike; started after the
+#                          grace it opens in the lobby with the match LEFT, counted once
 #   tests/sync_check.gd    online rounds decided once, by the host, under a 600 ms round trip: both
 #                          dying in the zone together, no kill credit for the zone, the match
 #                          clock running under the online pause menu; both copies end alike
@@ -101,10 +106,10 @@ if [ "${1:-}" != "quick" ]; then
     LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/quick_check.gd > "$0" 2>&1 &
     h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/quick_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/quick_host.txt"
-  step drop bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47812 > /dev/null 2>&1 & m=$!
-    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47812
-    LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd > "$0" 2>&1 &
-    h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd; g=$?
+  step drop bash -c 'timeout 270 godot --headless -s res://tests/mqtt_mock.gd -- 47812 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47812 LW_AWAY_GRACE_MS=10000
+    LW_NET_ROLE=host timeout 240 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 240 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/drop_host.txt"
   step sync bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47816 300 > /dev/null 2>&1 & m=$!
     sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47816 LW_ROUNDS_TO_WIN=2
@@ -112,6 +117,22 @@ if [ "${1:-}" != "quick" ]; then
     h=$!; LW_NET_ROLE=guest LW_SYNC_OUT="$0.guest" timeout 170 godot --headless --path . -- --autotest=script:res://tests/sync_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- as each saw it:"; cat "$0.host" "$0.guest"
     [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest"' "$LOGS/sync_host.txt"
+  # tests/resume_check.gd: an online 1 vs 1 whose guest process is killed in a fight and started again (run 1 at
+  # once: it rejoins the same match, which both end alike; run 2 after the grace: the normal lobby, nothing counted
+  # twice). Mock port 47824; host and guest keep their own data folders (the guest's survives its restart).
+  step resume bash -c 'timeout 420 godot --headless -s res://tests/mqtt_mock.gd -- 47824 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47824 LW_ROUNDS_TO_WIN=2 LW_AWAY_GRACE_MS=20000; ok=0; d="$XDG_DATA_HOME"
+    for n in 1 2; do
+      XDG_DATA_HOME="$d/rh$n" LW_RESUME_RUN=$n LW_NET_ROLE=host timeout 180 godot --headless --path . -- --autotest=script:res://tests/resume_check.gd > "$0.h$n" 2>&1 &
+      h=$!
+      XDG_DATA_HOME="$d/rg$n" LW_RESUME_RUN=$n LW_RESUME_PART=1 LW_NET_ROLE=guest timeout 120 godot --headless --path . -- --autotest=script:res://tests/resume_check.gd > "$0.g$n" 2>&1
+      grep -q "RESUME PART 1 DONE bad=0" "$0.g$n" || ok=1
+      if [ $n = 2 ]; then sleep 24; else sleep 4; fi      # (the player opens the app again: in time, or after the grace)
+      XDG_DATA_HOME="$d/rg$n" LW_RESUME_RUN=$n LW_RESUME_PART=2 LW_NET_ROLE=guest timeout 120 godot --headless --path . -- --autotest=script:res://tests/resume_check.gd; g=$?
+      wait $h; r=$?
+      echo "--- run $n, the host:"; cat "$0.h$n"; echo "--- run $n, the guest before its restart:"; cat "$0.g$n"
+      if [ $g -ne 0 ] || [ $r -ne 0 ]; then ok=1; fi
+    done; kill $m 2>/dev/null; [ $ok -eq 0 ]' "$LOGS/resume.txt"
   # --- DUO / SQUAD: WP-B1's steps (team_lobby) go right below this line ---
   step team_lobby env LW_FILL_S=3 LW_MQTT_URL=ws://127.0.0.1:9 godot --headless --path . -- --autotest=script:res://tests/team_lobby_check.gd
   # GROUPS and the CUSTOM ROOM with slots in the lobby: one copy, a group put in Cloud by the check, nothing leaves the machine
