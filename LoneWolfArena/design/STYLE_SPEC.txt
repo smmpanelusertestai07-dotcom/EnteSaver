@@ -125,7 +125,8 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   y 0-0.12): a small line "ESTIMATED 0:10" for the first 10 s, then "STILL SEARCHING...", a big m:ss
   count-up, "PLAYERS n/N" for DUO / SQUAD, a cancel X at its right end (none for a group member);
   START becomes a greyed "MATCHING..." plate and the rest of the lobby stays usable. The GROUP bar
-  shows the 6-digit GROUP CODE with COPY (the leader: JOIN BY CODE ON / OFF; a solo: JOIN BY CODE). No text
+  shows the 10-digit GROUP CODE ("12 3456 7890") with COPY (the leader: JOIN BY CODE ON / OFF, OFF at
+  start, COPY turns it on; a solo: JOIN BY CODE). No text
   menu, stats chips, name plate, outfit or version text (CUSTOM HUD and HOW TO PLAY are in
   SETTINGS).
 - Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);

@@ -146,20 +146,30 @@ out of the room (gkick, gend, the host silent) gets Cloud.room_notice, shown onc
 
 7. GROUP CODE AND THE DUEL IN A GROUP (1.6, the lobby builder)
 -------------------------------------------------------------
-- Every group has a 6-digit GROUP CODE (a solo's is the code of the group it would lead, made once a
-  run); the GROUP bar shows it with COPY. A solo's bar has JOIN BY CODE: the code puts the player in
+- Every group has a 10-digit GROUP CODE (Cloud.CODE_LEN; a solo's is the code of the group it would
+  lead, made once a run): 2 random bucket digits, then 8 random secret digits, shown "12 3456 7890";
+  the GROUP bar shows it with COPY. A solo's bar has JOIN BY CODE: the code puts the player in
   that group at once, no invite. Built on the custom room's discovery and key exchange, the code the
-  secret: "gask" {from, name, bundle, pk, mac = HMAC(K, "gask" + from)} on ROOT/gc/<the first 2 hex
-  of sha256("lonewolfarena-gcode|" + code)> (256 buckets: the topic never names the code), K the
-  code stretched with 2000 HMAC rounds. A leader on that bucket answers only a tag of its own code:
+  secret: "gask" {from, name, bundle, pk, mac = HMAC(K, "gask" + from)} on ROOT/gc/<the code's 2
+  bucket digits> (100 buckets, random apart from the secret: the topic tells nothing of the 8 secret
+  digits), K the code stretched with CODE_STRETCH (10000) HMAC rounds. A leader on that bucket answers only a tag of its own code:
   "gin" {name, bundle, sec = RSA(joiner pk, gid + aes + mac + size byte), rt = HMAC(K, "gin" + sec +
   leader)} or "gno" {full: true, rt = HMAC(K, "gno" + leader)}, in the joiner's inbox; then "gjoin"
-  as for an invite (the leader keeps a place in _grp.invited). Never answered: a blocked player, a
-  switch OFF (nobody listens then), a room, a match. Never taken: a "gin" from a leader the joiner
-  blocked. Limits: a leader checks CODE_RATE asks a second and one every 2 s per asker; a joiner
+  as for an invite (the leader keeps a place in _grp.invited). The switch JOIN BY CODE starts OFF
+  every run (nobody listens then); the leader's (or solo's) ON, or COPY of the code, turns it on.
+  Never answered: a player DUEL CHALLENGES FROM keeps out (NetMatch.allowed: blocked, NOBODY, a
+  stranger with FRIENDS), a player the leader REMOVEd this run (Cloud._code_kicked; an invite from
+  the leader lifts it), a room, a match, a phone in QUICK MATCH (it does not listen then). Never
+  taken: a "gin" from a leader the joiner blocked. JOIN BY CODE is refused (CANCEL THE SEARCH FIRST)
+  while this phone is in QUICK MATCH or a DUO / SQUAD search, and a group made or joined here ends a
+  QUICK MATCH search (Cloud.seek_stop; NetMatch stops when Cloud is no longer seeking). Limits: a leader checks CODE_RATE asks a second and one every 2 s per asker; a joiner
   starts CODE_TRIES_MAX attempts a minute, asks every CODE_ASK_S and gives up after CODE_WAIT_MS. A
-  listener on the bucket who saw an ask could test codes against its tag offline (10^6 codes, each
-  2000 HMACs); a code is meant to be passed around, so the leader's switch is the way to close it.
+  listener on the bucket who saw an ask could test codes against its tag offline (10^8 codes, each
+  10000 HMACs); a code is meant to be passed around, so the leader's switch and REMOVE (which
+  sticks) are the way to close it.
+- Leaving the lobby (CUSTOM HUD, a PLAY WITHOUT INTERNET match) ends the DUO / SQUAD search this
+  phone runs as leader or solo (LobbyFriends.on_lobby_exit -> Cloud.group_search_stop): a match found
+  later would have no lobby to load it.
 - DUEL: a group of exactly 2 with SOLO plays the plain 1 vs 1 between the two: the leader's START is
   a duel challenge ("inv" with "gd" = HMAC(group mac, "gduel" + gid + leader)), taken at once by the
   member from its leader only. Results and REMATCH as any 1 vs 1; both stay in the group (its room

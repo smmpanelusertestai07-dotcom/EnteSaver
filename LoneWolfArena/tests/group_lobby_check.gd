@@ -206,10 +206,10 @@ func _member(lobby: Lobby) -> void:
 	var marks := 0
 	for cm: CharacterModel in _models(lobby):
 		var mark := cm.get_node_or_null(^"LeaderMark") as Label3D
-		var plate := cm.get_node_or_null(^"NamePlate") as Label3D
+		var name_plate := cm.get_node_or_null(^"NamePlate") as Label3D
 		if mark and mark.visible:
 			marks += 1
-			if plate == null or plate.text != "ZORA":
+			if name_plate == null or name_plate.text != "ZORA":
 				_fail("the LEADER mark is not on ZORA's model")
 	if marks != 1:
 		_fail("%d models show the LEADER mark, not 1" % marks)

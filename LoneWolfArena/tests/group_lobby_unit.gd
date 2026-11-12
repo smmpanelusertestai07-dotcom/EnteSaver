@@ -242,11 +242,21 @@ func _peer(c: Cloud, bits := 1024) -> Cloud:
 func _group_code() -> void:
 	var host := _peer(Cloud.new())
 	var guest := _peer(Cloud.new())
-	host.my_code = "135790"
-	_check(host.group_code() == "135790" and host.group.is_empty(), "a solo has a GROUP CODE of its own")
-	_check(not Cloud.code_topic("135790").contains("135790"), "the topic never names the code")
-	_check(guest.join_group_code("12345") != "" and guest.join_group_code("135790") == "" and guest.code_state == "asking",
-		"JOIN BY CODE takes 6 digits and asks")
+	var made := _peer(Cloud.new())
+	_check(Cloud.is_group_code(made.group_code()) and made.group_code().length() == 10 and Cloud.code_display("4213579086") == "42 1357 9086",
+		"a made GROUP CODE has 10 digits, shown as 42 1357 9086")
+	made.free()
+	host.my_code = "4213579086"
+	_check(host.group_code() == "4213579086" and host.group.is_empty(), "a solo has a GROUP CODE of its own")
+	_check(Cloud.code_topic("4213579086") == Cloud.ROOT + "/gc/42", "the topic names only the 2 bucket digits, never the 8 secret ones")
+	var said_9 := guest.join_group_code("421357908")
+	_check(said_9 == "A GROUP CODE HAS 10 DIGITS" and guest.join_group_code("+421357908") == said_9 and guest.join_group_code("135790") == said_9,
+		"JOIN BY CODE takes exactly 10 digits (%s)" % said_9)
+	var said_ok := guest.join_group_code("42 1357 9086")
+	_check(said_ok == "" and guest.code_state == "asking" and String(guest._cjoin.get("code", "")) == "4213579086",
+		"JOIN BY CODE takes the code as shown (spaces) and asks (%s)" % said_ok)
+	_check(not host.code_join and host._on_code_ask(guest._code_ask_msg()).is_empty(), "JOIN BY CODE is OFF until the player turns it on")
+	host.set_code_join(true)
 	var reply := host._on_code_ask(guest._code_ask_msg())
 	_check(String(reply.get("t", "")) == "gin" and not host.group.is_empty() and (host._grp.invited as Dictionary).has(guest.my_id),
 		"the right code: the solo's group is made and a place waits for the joiner")
@@ -256,13 +266,13 @@ func _group_code() -> void:
 	_check(guest.group.is_empty() and guest.code_state == "asking", "a \"gin\" without the code's tag lets nobody in")
 	guest._on_code_answer(host.my_id, reply)
 	_check(guest.code_state == "in" and String(guest.group.leader) == host.my_id and guest._grp.aes == host._grp.aes
-		and String(guest.group.code) == "135790", "the right \"gin\": the joiner holds the group's keys, no invite needed")
+		and String(guest.group.code) == "4213579086", "the right \"gin\": the joiner holds the group's keys, no invite needed")
 	host._on_gjoin(guest.my_id, {"name": "GUEST", "bundle": "default"})
 	_check(host.group_members().size() == 2, "the joiner's \"gjoin\" seats it")
-	_check(guest.join_group_code("246802") == "EXIT YOUR GROUP FIRST", "a member cannot join another group by code")
+	_check(guest.join_group_code("1124680211") == "EXIT YOUR GROUP FIRST", "a member cannot join another group by code")
 	# A wrong code: nobody answers, and the search gives up with NO GROUP WITH THIS CODE.
 	var lost := _peer(Cloud.new())
-	_check(lost.join_group_code("000001") == "", "a wrong code still asks")
+	_check(lost.join_group_code("4200000001") == "", "a wrong code still asks")
 	_check(host._on_code_ask(lost._code_ask_msg()).is_empty(), "another code's ask is not answered")
 	lost._cjoin.t = Time.get_ticks_msec() - Cloud.CODE_WAIT_MS - 10
 	lost._tick_code(0.0, Time.get_ticks_msec())
@@ -271,7 +281,7 @@ func _group_code() -> void:
 	for n in 2:
 		host.group.members.append({"id": ("filler %d" % n).sha256_text().left(32), "name": "F%d" % n, "bundle": "default", "team": 0, "slot": -1})
 	var late := _peer(Cloud.new())
-	late.join_group_code("135790")
+	late.join_group_code("4213579086")
 	var no := host._on_code_ask(late._code_ask_msg())
 	late._on_code_answer(host.my_id, no)
 	_check(String(no.get("t", "")) == "gno" and late.code_state == "full" and LobbyTeam.code_state_text("full") == "THE GROUP IS FULL",
@@ -279,22 +289,65 @@ func _group_code() -> void:
 	host.group.members.resize(2)
 	# A blocked player is never answered.
 	var shady := _peer(Cloud.new())
-	shady.join_group_code("135790")
+	shady.join_group_code("4213579086")
 	Game.block(shady.my_id, "SHADY")
 	_check(host._on_code_ask(shady._code_ask_msg()).is_empty(), "a blocked player never joins (no answer)")
 	Game.unblock(shady.my_id)
 	# A joiner never enters the group of a leader it blocked.
 	var wary := _peer(Cloud.new())
-	wary.join_group_code("135790")
+	wary.join_group_code("4213579086")
 	var gin := host._on_code_ask(wary._code_ask_msg())
 	Game.block(host.my_id, "HOST")
 	wary._on_code_answer(host.my_id, gin)
 	_check(String(gin.get("t", "")) == "gin" and wary.group.is_empty() and wary.code_state == "blocked", "never into a blocked leader's group")
 	Game.unblock(host.my_id)
+	# DUEL CHALLENGES FROM: NOBODY lets nobody in by code, FRIENDS only friends.
+	var who_may: Variant = Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE)
+	var odd := _peer(Cloud.new())
+	odd.join_group_code("4213579086")
+	Game.settings.challenges_from = Game.CHALLENGES_NOBODY
+	var nobody := host._on_code_ask(odd._code_ask_msg())
+	Game.settings.challenges_from = Game.CHALLENGES_FRIENDS
+	var friends := host._on_code_ask(odd._code_ask_msg())
+	Game.settings.challenges_from = who_may
+	_check(nobody.is_empty() and friends.is_empty(), "DUEL CHALLENGES FROM NOBODY / FRIENDS: a stranger's code ask is not answered")
+	# REMOVE: the removed player's code asks are not answered again this run (an invite still can).
+	host.kick_from_group(guest.my_id)
+	guest._group_close(false)
+	guest.code_state = ""
+	_check(guest.join_group_code("4213579086") == "" and host._on_code_ask(guest._code_ask_msg()).is_empty() and host.group_members().size() == 1,
+		"a REMOVEd player cannot come back by the code")
+	# QUICK MATCH: a searching phone neither listens for code joins nor joins by code, and a group
+	# made or joined ends its QUICK MATCH search.
+	var seeker := _peer(Cloud.new())
+	seeker.my_code = "5500000001"
+	seeker.set_code_join(true)
+	seeker.seek_start()
+	var asker := _peer(Cloud.new())
+	asker.join_group_code("5500000001")
+	_check(seeker.join_group_code("4213579086") == "CANCEL THE SEARCH FIRST" and seeker._on_code_ask(asker._code_ask_msg()).is_empty(),
+		"in QUICK MATCH: no join by code, no code joins answered")
+	seeker._want_lobby = true
+	seeker._tick_code(0.0, Time.get_ticks_msec())
+	var quiet := seeker._code_topic
+	seeker.seek_stop()
+	seeker._tick_code(0.0, Time.get_ticks_msec())
+	_check(quiet == "" and seeker._code_topic == Cloud.code_topic("5500000001"), "in QUICK MATCH nobody listens on the code's bucket; after it, the leader does")
+	seeker.search_needed = 4
+	_check(seeker.join_group_code("4213579086") == "CANCEL THE SEARCH FIRST", "in a DUO / SQUAD search: no join by code")
+	seeker.search_needed = 0
+	var welcome := seeker._on_code_ask(asker._code_ask_msg())
+	asker.seek_start()                       # (as if QUICK MATCH began while the ask was out)
+	asker._on_code_answer(seeker.my_id, welcome)
+	_check(asker.code_state == "in" and not asker.seeking, "joining a group by code ends this phone's QUICK MATCH search")
+	var lone := _peer(Cloud.new())
+	lone.seek_start()
+	lone._group_create(2)
+	_check(not lone.seeking, "a group made here ends this phone's QUICK MATCH search")
 	# The switch off: nobody is answered.
 	host.set_code_join(false)
 	var shut := _peer(Cloud.new())
-	shut.join_group_code("135790")
+	shut.join_group_code("4213579086")
 	_check(host._on_code_ask(shut._code_ask_msg()).is_empty(), "JOIN BY CODE: OFF lets nobody in")
 	host.code_join = true
 	# Too many tries in a minute wait.
@@ -302,9 +355,9 @@ func _group_code() -> void:
 	var said := ""
 	for n in Cloud.CODE_TRIES_MAX + 1:
 		eager.code_state = ""
-		said = eager.join_group_code("%06d" % (500000 + n))
+		said = eager.join_group_code("%010d" % (4200500000 + n))
 	_check(said == "TOO MANY TRIES: WAIT A MINUTE", "join attempts are rate-limited (%s)" % said)
-	for c: Cloud in [host, guest, lost, late, shady, wary, shut, eager]:
+	for c: Cloud in [host, guest, lost, late, shady, wary, shut, eager, odd, seeker, asker, lone]:
 		c.free()
 
 
@@ -319,8 +372,9 @@ func _duel() -> void:
 		and LobbyDialogs.size_chip_text("lonewolf", 1, two + [{"id": "c", "name": "Z"}]) == "SOLO", "SELECT MODE's SOLO chip: DUEL · YOU VS <NAME>")
 	var lead := _peer(Cloud.new(), 2048)        # (a challenge's signature is checked as a 2048-bit one)
 	var mem := _peer(Cloud.new())
-	lead.my_code = "777001"
-	mem.join_group_code("777001")
+	lead.my_code = "7700777001"
+	lead.code_join = true
+	mem.join_group_code("7700777001")
 	mem._on_code_answer(lead.my_id, lead._on_code_ask(mem._code_ask_msg()))
 	lead._on_gjoin(mem.my_id, {"name": "MEM", "bundle": "default"})
 	mem.group.members = [{"id": lead.my_id, "name": "LEAD", "bundle": "default", "team": 0, "slot": 0},

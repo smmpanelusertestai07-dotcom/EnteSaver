@@ -98,6 +98,9 @@ func _process(delta: float) -> void:
 	if cloud.in_session:
 		stop()                       # paired: the lobby loads the match
 		return
+	if not cloud.seeking:
+		stop()                       # Cloud ended it: this phone joined or made a group (no random 1 vs 1)
+		return
 	elapsed += delta
 	_seek_t -= delta
 	if _seek_t <= 0.0:

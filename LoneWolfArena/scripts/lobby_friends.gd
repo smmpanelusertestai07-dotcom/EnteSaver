@@ -90,6 +90,10 @@ func on_lobby_exit() -> void:
 	if not cloud.in_session:
 		cloud.close_room()
 		cloud.leave_join()
+	# A DUO / SQUAD search this phone runs (a leader's or a solo's) ends with the lobby: a match
+	# found later would have no lobby here to load it (CUSTOM HUD, a PLAY WITHOUT INTERNET match).
+	if not cloud.in_session and not cloud.session_multi and cloud.search_needed > 0 and cloud.is_group_leader():
+		cloud.group_search_stop()
 	# presence stays on through a match: friends keep seeing this phone online
 
 
