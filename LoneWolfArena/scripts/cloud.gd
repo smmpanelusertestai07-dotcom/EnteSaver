@@ -2274,7 +2274,7 @@ func _room_enter(host: String, d: Dictionary) -> void:
 		_group_close(true)                # (a group this phone was in is left for the room)
 	var gid := sec.slice(0, 16).hex_encode()
 	_grp = {"gid": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
-		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": true, "manual": true}
+		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "join_ms": Time.get_ticks_msec(), "joining": true, "manual": true}
 	group = {"gid": gid, "leader": host, "members": [{"id": host, "name": "HOST", "bundle": "default", "team": 0, "slot": 0}],
 		"status": "joining", "mode": "lonewolf", "size": int(sec[80]), "room": String(_join.code)}
 	_subscribe(ROOT + "/g/" + gid)
@@ -2951,7 +2951,7 @@ func answer_group_invite(accept: bool) -> void:
 	if not group.is_empty():
 		_group_close(false)
 	_grp = {"gid": inv.gid, "aes": inv.aes, "mac": inv.mac, "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
-		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": true, "manual": false}
+		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "join_ms": Time.get_ticks_msec(), "joining": true, "manual": false}
 	group = {"gid": inv.gid, "leader": inv.id, "members": [{"id": inv.id, "name": inv.name, "bundle": inv.bundle, "team": 0, "slot": 0}],
 		"status": "joining", "mode": "lonewolf", "size": int(inv.size)}
 	_subscribe(ROOT + "/g/" + String(inv.gid))
@@ -3316,7 +3316,7 @@ func _on_code_answer(from: String, d: Dictionary) -> void:
 	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
 	var gid := sec.slice(0, 16).hex_encode()
 	_grp = {"gid": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
-		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": true, "manual": false}
+		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "join_ms": Time.get_ticks_msec(), "joining": true, "manual": false}
 	group = {"gid": gid, "leader": from, "members": [{"id": from, "name": who if who != "" else "PLAYER", "bundle": b, "team": 0, "slot": 0}],
 		"status": "joining", "mode": "lonewolf", "size": int(sec[80]), "code": code}
 	_subscribe(ROOT + "/g/" + gid)
@@ -3788,6 +3788,8 @@ func _on_groster(d: Dictionary) -> void:
 
 
 ## Every frame while in a group: "gjoin" until in, the beats, the silent dropped, invites expired.
+## A join the leader has not let in within JOIN_TIMEOUT_MS of its start (_grp.join_ms) fails,
+## however often the leader's rosters (without this phone) still arrive.
 func _tick_group(delta: float, now: int) -> void:
 	var leader := String(group.leader)
 	if bool(_grp.joining):
@@ -3795,7 +3797,7 @@ func _tick_group(delta: float, now: int) -> void:
 		if float(_grp.join_t) <= 0.0:
 			_grp.join_t = GROUP_JOIN_S
 			_group_send({"k": "gjoin", "name": String(Game.profile.name), "bundle": String(Game.profile.bundle)})
-		if now - int(_grp.leader_ms) > JOIN_TIMEOUT_MS:
+		if now - int(_grp.join_ms) > JOIN_TIMEOUT_MS:
 			if in_room():
 				_room_gone("ROOM %s DID NOT LET YOU IN")
 			else:
