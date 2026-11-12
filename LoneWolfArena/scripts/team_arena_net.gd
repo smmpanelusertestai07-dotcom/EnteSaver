@@ -583,6 +583,8 @@ func _on_peer_away(id: String, away: bool) -> void:
 	if am_host:
 		for f in back:
 			_send_team_sync(f)
+		if multi and not back.is_empty():
+			_send_all()                  # (a member back after a restart takes every fighter from it)
 	elif not multi or id == host_id:
 		for d: Array in _dn_log:
 			if int(d[1]) == round_index and phase == Phase.FIGHT:
