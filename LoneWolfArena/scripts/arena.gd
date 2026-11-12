@@ -16,8 +16,9 @@ signal rematch_asked
 ## The prep of a round that opens a pick pair (the pick panel closes a second before it ends).
 const PREP_TIME := 15.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
-const BREAK_TIME := 3.5
-const SPECTATE_EXTRA := 1.5       # s more between rounds while the eliminated player watches the killer
+## Between two rounds (Phase.BREAK): RoundRules' timed break, the same length on both phones
+## (online the host's "round" ends it; the guest goes on alone 8 s later if that never comes).
+const BREAK_TIME := RoundRules.BREAK_S
 ## The 1 vs 1's fight: stage 1 (the zone holds over the whole hall) and stage 2 (it closes to
 ## ZONE_MIN); RoundRules has the clock, team_arena.gd a longer SQUAD stage 2 (stage2_time).
 const ROUND_TIME := 110.0          # RoundRules.STAGE1_S + RoundRules.STAGE2_S
@@ -971,11 +972,16 @@ func _start_fight() -> void:
 		_place_dummy()
 		zone_radius = 999.0
 		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
-	else:
-		var point := rounds_to_win > 1 and maxi(int(score.player), int(score.bot)) == rounds_to_win - 1
-		var final := rounds_to_win > 1 and round_index >= last_round()
-		hud.show_round_banner(round_index, map_name, "FINAL ROUND" if final else ("MATCH POINT!" if point else ""))
+	elif round_index == 1:
+		# (Later rounds show their band at the end of the break, before the prep: nothing covers
+		# the fight's start then.)
+		hud.show_round_banner(round_index, map_name, round_sub(round_index))
 	Audio.play("countdown_go", 0.0)
+
+
+## The sub-line of round `r`'s band from the score now: FINAL ROUND, MATCH POINT! or "".
+func round_sub(r: int) -> String:
+	return RoundRules.round_sub(r, last_round(), int(score.player), int(score.bot), rounds_to_win)
 
 
 func _physics_process(delta: float) -> void:
@@ -1042,8 +1048,7 @@ func _physics_process(delta: float) -> void:
 			if _break_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
 			# Online the host starts the next round; the guest goes on alone if that never comes.
-			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
-			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 8.0:
+			if (_break_t >= BREAK_TIME and (not online or Game.session.is_host)) or _break_t >= BREAK_TIME + 8.0:
 				_next_round()
 
 
@@ -1361,7 +1366,8 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 		_break_t = 0.0
 		Game.mark("round over")
 	if not decided:
-		hud.show_round_result("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs)
+		hud.show_break("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs,
+			0 if winner == null else (1 if winner == player else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
 		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line)
 	elif winner != player and winner != null and not player.alive:

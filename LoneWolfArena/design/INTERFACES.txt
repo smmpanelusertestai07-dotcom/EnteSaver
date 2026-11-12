@@ -82,7 +82,12 @@ listed here. If a part needs something new from the core, add it in its own file
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
 - `show_center(text, seconds, color := Color.WHITE, size := 96, sub := "")`
-- `show_round_banner(round_index: int, area: String)`  (blue->orange band "ROUND 1 / AREA: ...")
+- `show_round_banner(round_index: int, area: String, sub := "")`  (blue->orange band "ROUND 1 / AREA: ...";
+  only round 1 at its fight's start: later rounds' bands end the break)
+- `show_break(title, mine, theirs, won: int (1 / -1 / 0), next_round: int, area: String, sub := "")`: a round
+  that does not end the match; the HUD plays RoundRules' break steps on its own clock from this call
+  (`break_step()`: "beat", "result", "score", "band"; `break_score(mine)` the plates' numbers) while
+  the arena is in Phase.BREAK (BREAK_TIME = RoundRules.BREAK_S, the same on both phones)
 - `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id),
   cooldown := {} (gun -> rounds left: greyed, not pickable), strip := [] (per round of the match:
   true when this player picks; the ROUNDS strip))`

@@ -439,8 +439,8 @@ func _draw_strip(a: float, u: float) -> void:
 			HudDraw.ring(self, c, dr + 0.006 * u, Color(HudDraw.YELLOW, a), maxf(2.0, 0.004 * u))
 		HudDraw.text(self, str(rr), c, int(0.024 * u), Color(1, 1, 1, a), 1, 0, "number")
 	var nx := strip_disc(pick_strip.size()).x + 0.05 * u
-	HudDraw.text(self, "THE GUN YOU PICK RESTS FOR THE %d ROUNDS AFTER" % RoundRules.COOLDOWN_ROUNDS, Vector2(nx, cy),
-		_fit("THE GUN YOU PICK RESTS FOR THE 4 ROUNDS AFTER", 0.02 * u, pr.end.x - nx - 0.03 * u, "semi"),
+	var note := "THE GUN %s RESTS FOR THE %d ROUNDS AFTER" % ["PICKED" if pick_watch != "" else "YOU PICK", RoundRules.COOLDOWN_ROUNDS]
+	HudDraw.text(self, note, Vector2(nx, cy), _fit(note, 0.02 * u, pr.end.x - nx - 0.03 * u, "semi"),
 		Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
 
 

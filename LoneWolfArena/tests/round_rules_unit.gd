@@ -3,6 +3,9 @@ extends RefCounted
 ## - the two-stage clock: stage 1 is 20 s, stage 2 90 s (SQUAD 120 s), each counted down on its own;
 ## - the zone over time: the whole hall and still through stage 1, closing evenly in stage 2 to
 ##   0.5 m exactly at its end, the centre sliding to the final spot; the circles are nested;
+## - the break between rounds: its steps in order (beat, result, score plates with the tick, the next
+##   round's band) and about 10.5 s, so a round without a pick starts about 15.5 s after the kill;
+##   the band's FINAL ROUND / MATCH POINT! line;
 ## - the 1 vs 1 weapon cooldown: a gun picked for a pair of rounds rests for the next 4 rounds
 ##   (4 ROUNDS, then 2), whoever picked it; both phones replace a pick that breaks it alike, and a
 ##   phone back from being away gets the same cooldowns from the "sync" text;
@@ -21,6 +24,7 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._stage_clock()
 	me._zone_over_time()
+	me._break_steps()
 	me._cooldown()
 	me._pick_panel()
 	me._kit()
@@ -73,6 +77,29 @@ func _zone_over_time() -> void:
 	_check(nested, "each later circle lies inside the earlier ones")
 	_check(is_equal_approx(RoundRules.zone_next(5.0, s2), 15.0) and is_equal_approx(RoundRules.zone_next(30.0, s2), 80.0),
 		"zone_next: to the closing in stage 1, to its end in stage 2")
+
+
+func _break_steps() -> void:
+	var order := []
+	var at := 0.0
+	while at < 12.0:
+		var st := RoundRules.break_step(at)
+		if order.is_empty() or order[-1] != st:
+			order.append(st)
+		at += 0.05
+	_check(order == ["beat", "result", "score", "band", "done"], "the break: a beat, the result, the score plates, the round band (%s)" % str(order))
+	_check(RoundRules.BREAK_RESULT_AT >= 1.0 and RoundRules.BREAK_RESULT_AT <= 3.0, "the result band comes after a short beat")
+	_check(RoundRules.BREAK_S >= 10.0 and RoundRules.BREAK_S <= 11.0 and ArenaCode.BREAK_TIME == RoundRules.BREAK_S,
+		"the break lasts 10-11 s, the arena's break too")
+	var to_go := RoundRules.BREAK_S + ArenaCode.PREP_SHORT
+	_check(to_go >= 15.0 and to_go <= 16.5, "a round without a pick starts about 16 s after the kill (%.1f s)" % to_go)
+	_check(RoundRules.break_step(RoundRules.BREAK_S - 0.01) == "band" and RoundRules.break_step(RoundRules.BREAK_BAND_AT - 0.01) == "score",
+		"the next round's band closes the break, before the prep")
+	_check(RoundRules.break_score(RoundRules.BREAK_SCORE_AT + 0.1, 2, 3) == 2 and RoundRules.break_score(RoundRules.BREAK_TICK_AT, 2, 3) == 3
+		and RoundRules.BREAK_TICK_AT > RoundRules.BREAK_SCORE_AT and RoundRules.BREAK_TICK_AT < RoundRules.BREAK_BAND_AT,
+		"the winner's number counts up on the plates, from the old score")
+	_check(RoundRules.round_sub(9, 9, 4, 4, 5) == "FINAL ROUND" and RoundRules.round_sub(6, 9, 4, 1, 5) == "MATCH POINT!"
+		and RoundRules.round_sub(3, 9, 1, 1, 5) == "" and RoundRules.round_sub(2, 1, 0, 0, 1) == "", "the band's FINAL ROUND / MATCH POINT! line")
 
 
 func _cooldown() -> void:

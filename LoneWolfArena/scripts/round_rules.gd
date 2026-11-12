@@ -8,6 +8,11 @@ extends RefCounted
 ##  - the SAFE ZONE: through stage 1 it covers the whole hall and stays put; from the first second
 ##    of stage 2 it closes continuously and evenly to ZONE_FINAL_R exactly when stage 2 ends, its
 ##    centre sliding from the map's centre to the round's final centre;
+##  - the BREAK between two rounds: one timer (s since the round was decided) that both phones run,
+##    BREAK_S long, in steps: a beat (the elimination in slow motion), the result band near the
+##    top, a dimmed screen with the two score plates (the winner's number counts up from the old
+##    score at BREAK_TICK_AT), then the next round's band; the prep follows (5 s, or the 15 s pick),
+##    so a round without a pick starts about 15.5 s after the kill;
 ##  - the 1 vs 1 WEAPON COOLDOWN: a gun picked for a pair of rounds cannot be picked again for the
 ##    next COOLDOWN_ROUNDS rounds, whoever picks.
 
@@ -17,6 +22,11 @@ const SQUAD_STAGE2_S := 120.0
 const ZONE_FINAL_R := 0.5           # m: the zone's radius when stage 2 ends
 const COOLDOWN_ROUNDS := 4
 const PICK_ROUNDS := 2              # one pick holds for this many rounds
+const BREAK_S := 10.5               # the whole break, from the round's decision to the next prep
+const BREAK_RESULT_AT := 2.5        # the result band (VICTORY / DEFEAT / DRAW) near the top
+const BREAK_SCORE_AT := 5.0         # the dimmed screen with the two score plates
+const BREAK_TICK_AT := 6.0          # ... where the winner's number goes up
+const BREAK_BAND_AT := 8.0          # the next round's band (ROUND n / AREA), to the end of the break
 
 
 ## The whole fight of a round (s): both stages.
@@ -58,6 +68,34 @@ static func zone_next(elapsed: float, stage2: float) -> float:
 	if elapsed < STAGE1_S:
 		return STAGE1_S - elapsed
 	return maxf(STAGE1_S + stage2 - elapsed, 0.0)
+
+
+## The step of the break `t` s after the round was decided: "beat", "result", "score", "band",
+## then "done" (the next prep).
+static func break_step(t: float) -> String:
+	if t < BREAK_RESULT_AT:
+		return "beat"
+	if t < BREAK_SCORE_AT:
+		return "result"
+	if t < BREAK_BAND_AT:
+		return "score"
+	return "band" if t < BREAK_S else "done"
+
+
+## What a score plate shows `t` s into the break: the score before the round until BREAK_TICK_AT,
+## then the one after it.
+static func break_score(t: float, before: int, after: int) -> int:
+	return before if t < BREAK_TICK_AT else after
+
+
+## The sub-line of round `r`'s band: "FINAL ROUND" (the match's last possible round), "MATCH
+## POINT!" (a side is one round from `goal`), else "" (the band names the area).
+static func round_sub(r: int, last: int, mine: int, theirs: int, goal: int) -> String:
+	if goal <= 1:
+		return ""
+	if r >= last:
+		return "FINAL ROUND"
+	return "MATCH POINT!" if maxi(mine, theirs) == goal - 1 else ""
 
 
 ## The round that opens the pick pair round `r` belongs to (1, 3, 5, ...).

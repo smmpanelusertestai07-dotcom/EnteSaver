@@ -84,6 +84,7 @@ var _zone_hurt := 0.0
 var _hurt_sound_t := 0.0
 var _center := {"text": "", "sub": "", "t": 0.0, "dur": 1.0, "col": Color.WHITE, "size": 96}
 var _round_banner := {"t": 0.0, "round": 1, "area": ""}
+var _break := {}                   # the break between rounds on screen (show_break), "age" in s
 var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
 var steps: Array[Dictionary] = []     # enemy footprints for the minimap: {p (x, z), dir, side, t}
@@ -167,10 +168,33 @@ func show_round_banner(round_index: int, area: String, sub := "") -> void:
 	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area, "sub": sub}
 
 
-## End of a round that does not end the match: VICTORY / DEFEAT / DRAW over the same band with
-## the score on it (yours on the blue side, theirs on the orange one).
-func show_round_result(title: String, mine: int, theirs: int) -> void:
-	_round_banner = {"t": 2.6, "dur": 2.6, "title": title, "mine": mine, "theirs": theirs}
+## End of a round that does not end the match: the break's timed sequence (RoundRules.break_step,
+## on the HUD's own clock from this call, which the arena makes as its break timer starts):
+## a beat, then `title` (VICTORY / DEFEAT / DRAW) on a band near the top; then the screen dims
+## under the two score plates (yours blue, theirs orange) where the winner's number (`won`: 1
+## yours, -1 theirs, 0 a draw) counts up from the old score, while the top clock counts the break
+## down in red; then round `next_round`'s band (`area`, or `sub`: MATCH POINT! / FINAL ROUND)
+## until the prep. `mine` / `theirs` are the scores after the round. The ELIMINATED BY and
+## SPECTATING cards stay on top.
+func show_break(title: String, mine: int, theirs: int, won: int, next_round: int, area: String, sub := "") -> void:
+	_break = {"age": 0.0, "title": title, "mine": mine, "theirs": theirs, "won": won, "round": next_round,
+		"area": area, "sub": sub}
+	_round_banner.t = 0.0
+
+
+## The step of the break on screen ("" outside one): "beat", "result", "score", "band", "done".
+func break_step() -> String:
+	if _break.is_empty() or arena == null or int(arena.get("phase")) != 3:
+		return ""
+	return RoundRules.break_step(float(_break.age))
+
+
+## A score plate's number now: the old score until the break's tick, then the new one
+## (`mine`: this side's plate).
+func break_score(mine: bool) -> int:
+	var after := int(_break.mine if mine else _break.theirs)
+	var gained := int(_break.won) == (1 if mine else -1)
+	return RoundRules.break_score(float(_break.age), after - 1 if gained else after, after)
 
 
 ## The weapon pick panel (HudPanels.open_pick); a 1 vs 1 passes the guns on cooldown and the ROUNDS
@@ -720,6 +744,10 @@ func _process(delta: float) -> void:
 	_hurt_sound_t = maxf(_hurt_sound_t - real, 0.0)
 	_center.t = maxf(float(_center.t) - real, 0.0)
 	_round_banner.t = maxf(float(_round_banner.t) - real, 0.0)
+	if not _break.is_empty():
+		_break.age = float(_break.age) + real
+		if arena == null or int(arena.get("phase")) != 3:
+			_break = {}                  # (the prep began: the host's "round" may end it early)
 	_kill_banner.t = maxf(float(_kill_banner.t) - real, 0.0)
 	tips_time = maxf(tips_time - real, 0.0)
 	for n in _dmg_numbers:
@@ -905,6 +933,7 @@ func _draw() -> void:
 	_draw_zone_strip(vs)
 	_draw_zone_banner(vs, u)
 	_draw_prep(vs, u)
+	_draw_break(vs, u)
 	_draw_round_banner(vs, u)
 	_draw_kill_banner(vs, u)
 	_draw_spectating(vs, u)
@@ -1563,10 +1592,16 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		theirs = int(sc.get("bot", 0))
 		goal = int(arena.get("rounds_to_win"))
 		var phase := int(arena.get("phase"))
+		if break_step() != "":
+			mine = break_score(true)           # (the plates' tick moves these too)
+			theirs = break_score(false)
 		# The fight's clock counts each stage down on its own (RoundRules): 00:20 to 00:00, then
 		# stage 2 from its full length; red in the prep and the last 10 s of a stage.
 		if phase == 0:
 			t = float(arena.get("prep_left"))
+		elif break_step() != "":
+			t = RoundRules.BREAK_S - float(_break.age)      # the break counts down, red
+			phase = 0
 		elif bool(arena.get("practice")):
 			t = float(arena.get("time_left"))
 		else:
@@ -1812,10 +1847,17 @@ func _draw_round_banner(vs: Vector2, u: float) -> void:
 	if t <= 0.0:
 		return
 	var age := float(_round_banner.get("dur", ROUND_BANNER_TIME)) - t
-	var a := clampf(age / 0.18, 0.0, 1.0) * clampf(t / 0.4, 0.0, 1.0)
+	_draw_round_band(vs, u, int(_round_banner.round), String(_round_banner.area), String(_round_banner.get("sub", "")), age, t)
+
+
+## "ROUND n / AREA: name" (or the sub-line: MATCH POINT! / FINAL ROUND) on a band fading from blue
+## (left) to orange (right), `age` s after it came and `left` s before it goes (it slides in and
+## fades out).
+func _draw_round_band(vs: Vector2, u: float, round_n: int, area: String, sub: String, age: float, left: float) -> void:
+	var a := clampf(age / 0.18, 0.0, 1.0) * clampf(left / 0.4, 0.0, 1.0)
 	var slide := (1.0 - ease(clampf(age / 0.28, 0.0, 1.0), 0.35)) * vs.x * 0.12
 	var h := 0.13 * u
-	var y0 := vs.y * (0.5 if _round_banner.has("mine") else 0.3)      # a result sits under the kill badge
+	var y0 := vs.y * 0.3
 	var w := minf(vs.x * 0.66, 1.3 * u)
 	var x0 := (vs.x - w) * 0.5 - slide
 	var xm := x0 + w * 0.5
@@ -1831,27 +1873,104 @@ func _draw_round_banner(vs: Vector2, u: float) -> void:
 		PackedColorArray([orange, Color(orange, 0.0), Color(orange, 0.0), orange]))
 	draw_line(Vector2(x0 + fade, y0), Vector2(x0 + w - fade, y0), Color(1, 1, 1, 0.25 * a), 1.5)
 	draw_line(Vector2(x0 + fade, y0 + h), Vector2(x0 + w - fade, y0 + h), Color(1, 1, 1, 0.25 * a), 1.5)
-	if _round_banner.has("mine"):
-		var title := String(_round_banner.title)
-		var tcol := HudDraw.YELLOW if title == "VICTORY" else Color(0.86, 0.86, 0.86)
-		HudDraw.text(self, title, Vector2(xm, y0 - 0.05 * u), int(0.05 * u), Color(tcol, a), 1, 3, "bold")
-		HudDraw.text_parts(self, [[str(int(_round_banner.mine)), Color.WHITE], ["   VS   ", Color(1, 1, 1, 0.9)],
-			[str(int(_round_banner.theirs)), Color.WHITE]], Vector2(xm, y0 + h * 0.52), int(0.085 * u), 1, 3, "title", a)
-		return
 	var tc := Vector2(xm, y0 + h * 0.4)
-	HudDraw.text_parts(self, [["ROUND ", Color.WHITE], [str(int(_round_banner.round)), HudDraw.YELLOW]], tc, int(0.078 * u), 1, 3, "bold", a)
-	if String(_round_banner.get("sub", "")) != "":
-		HudDraw.text(self, String(_round_banner.sub), Vector2(xm, y0 + h * 0.8), int(0.032 * u), Color(HudDraw.YELLOW, a), 1, 2, "bold")
+	HudDraw.text_parts(self, [["ROUND ", Color.WHITE], [str(round_n), HudDraw.YELLOW]], tc, int(0.078 * u), 1, 3, "bold", a)
+	if sub != "":
+		HudDraw.text(self, sub, Vector2(xm, y0 + h * 0.8), int(0.032 * u), Color(HudDraw.YELLOW, a), 1, 2, "bold")
 	else:
-		HudDraw.text_parts(self, [["AREA: ", Color(1, 1, 1, 0.95)], [String(_round_banner.area), HudDraw.YELLOW]],
+		HudDraw.text_parts(self, [["AREA: ", Color(1, 1, 1, 0.95)], [area, HudDraw.YELLOW]],
 			Vector2(xm, y0 + h * 0.8), int(0.03 * u), 1, 2, "bold", a)
+
+
+## The break between rounds, step by step (show_break): the result band near the top, the dimmed
+## screen with the score plates, the next round's band.
+func _draw_break(vs: Vector2, u: float) -> void:
+	var step := break_step()
+	var age := float(_break.age) if step != "" else 0.0
+	match step:
+		"result":
+			_draw_break_result(vs, u, age - RoundRules.BREAK_RESULT_AT, RoundRules.BREAK_SCORE_AT - age)
+		"score":
+			_draw_break_score(vs, u, age - RoundRules.BREAK_SCORE_AT, RoundRules.BREAK_BAND_AT - age)
+		"band":
+			_draw_round_band(vs, u, int(_break.round), String(_break.area), String(_break.sub),
+				age - RoundRules.BREAK_BAND_AT, RoundRules.BREAK_S - age + 0.3)
+
+
+## VICTORY (yellow) / DEFEAT (grey) / DRAW (white) on a dark band at y 0.15 that fades at both ends,
+## "ROUND n" under the word.
+func _draw_break_result(vs: Vector2, u: float, age: float, left: float) -> void:
+	var a := clampf(age / 0.25, 0.0, 1.0) * clampf(left / 0.35, 0.0, 1.0)
+	var title := String(_break.title)
+	var col: Color = HudDraw.YELLOW if title == "VICTORY" else (Color(0.8, 0.82, 0.85) if title == "DEFEAT" else Color.WHITE)
+	var cy := vs.y * 0.15
+	var h := 0.12 * u
+	var w := minf(vs.x * 0.7, 1.4 * u)
+	var x0 := (vs.x - w) * 0.5
+	var fade := w * 0.3
+	var bg := Color(0.03, 0.04, 0.06, 0.72 * a)
+	var y0 := cy - h * 0.5
+	draw_polygon(PackedVector2Array([Vector2(x0, y0), Vector2(x0 + fade, y0), Vector2(x0 + fade, y0 + h), Vector2(x0, y0 + h)]),
+		PackedColorArray([Color(bg, 0.0), bg, bg, Color(bg, 0.0)]))
+	draw_rect(Rect2(x0 + fade, y0, w - fade * 2.0, h), bg)
+	draw_polygon(PackedVector2Array([Vector2(x0 + w - fade, y0), Vector2(x0 + w, y0), Vector2(x0 + w, y0 + h), Vector2(x0 + w - fade, y0 + h)]),
+		PackedColorArray([bg, Color(bg, 0.0), Color(bg, 0.0), bg]))
+	var line := Color(col, 0.55 * a)
+	draw_line(Vector2(x0 + fade * 0.5, y0), Vector2(x0 + w - fade * 0.5, y0), line, 1.5)
+	draw_line(Vector2(x0 + fade * 0.5, y0 + h), Vector2(x0 + w - fade * 0.5, y0 + h), line, 1.5)
+	var pop := 1.0 + 0.18 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
+	HudDraw.text(self, title, Vector2(vs.x * 0.5, cy - h * 0.1), int(0.075 * u * pop), Color(col, a), 1, 4, "title")
+	HudDraw.text(self, "ROUND %d" % (int(_break.round) - 1), Vector2(vs.x * 0.5, cy + h * 0.34), int(0.024 * u),
+		Color(1, 1, 1, 0.8 * a), 1, 2, "bold")
+
+
+## The dimmed screen with the two score plates mid-screen: yours (blue, left) VS theirs (orange,
+## right), the names under them; the winner's number goes up at the tick with a pop and a flash.
+func _draw_break_score(vs: Vector2, u: float, age: float, left: float) -> void:
+	var a := clampf(age / 0.3, 0.0, 1.0) * clampf(left / 0.3, 0.0, 1.0)
+	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.6 * a))
+	var cx := vs.x * 0.5
+	var cy := vs.y * 0.5
+	var ph := 0.2 * u
+	var pw := 0.24 * u
+	var sl := 0.045 * u
+	var gap := 0.11 * u
+	var tick := float(_break.age) - RoundRules.BREAK_TICK_AT
+	var names := ["YOUR TEAM", "THE OTHER TEAM"] if team != null else [player.display_name if player != null else "YOU", _their_name()]
+	for side in 2:
+		var mine := side == 0
+		var x0 := cx - gap - pw if mine else cx + gap
+		var col: Color = HudDraw.BLUE if mine else HudDraw.ORANGE
+		HudDraw.slanted(self, x0, x0 + pw, cy - ph * 0.5, ph, sl if mine else -sl, Color(col, 0.95 * a))
+		HudDraw.slanted(self, x0, x0 + pw, cy - ph * 0.5, ph * 0.42, (sl if mine else -sl) * 0.42, Color(1, 1, 1, 0.12 * a))
+		var gained := int(_break.won) == (1 if mine else -1)
+		var pop := 1.0
+		if gained and tick >= 0.0:
+			pop = 1.0 + 0.4 * (1.0 - clampf(tick / 0.35, 0.0, 1.0))
+			var flash := 1.0 - clampf(tick / 0.6, 0.0, 1.0)
+			if flash > 0.0:
+				HudDraw.slanted(self, x0, x0 + pw, cy - ph * 0.5, ph, sl if mine else -sl, Color(1, 1, 1, 0.45 * flash * a))
+		var nc := Vector2(x0 + pw * 0.5 + (sl if mine else -sl) * 0.5, cy)
+		HudDraw.text(self, str(break_score(mine)), nc, int(0.15 * u * pop), Color(1, 1, 1, a), 1, 4, "number")
+		var nm := String(names[side]).to_upper()
+		HudDraw.text(self, nm, Vector2(nc.x, cy + ph * 0.5 + 0.04 * u), _fit_fs(nm, int(0.03 * u), pw * 1.3),
+			Color(HudTeam.BLUE_TEXT if mine else HudTeam.ORANGE_TEXT, a), 1, 3, "bold")
+	HudDraw.text(self, "VS", Vector2(cx, cy), int(0.06 * u), Color(1, 1, 1, 0.9 * a), 1, 4, "title")
+	HudDraw.text(self, String(_break.title), Vector2(cx, cy - ph * 0.5 - 0.06 * u), int(0.04 * u),
+		Color(HudDraw.YELLOW if String(_break.title) == "VICTORY" else Color(0.86, 0.88, 0.9), a), 1, 3, "bold")
+
+
+## The 1 vs 1 opponent's name (the score plates).
+func _their_name() -> String:
+	var b: Variant = arena.get("bot") if arena != null else null
+	return (b as Fighter).display_name if b is Fighter else "OPPONENT"
 
 
 ## Elimination badge (our own emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
 func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var t := float(_kill_banner.t)
-	if t <= 0.0:
-		return
+	if t <= 0.0 or break_step() not in ["", "beat"]:
+		return                           # (the break's result band takes over from the badge)
 	var age := KILL_BANNER_TIME - t
 	var a := clampf(age / 0.1, 0.0, 1.0) * clampf(t / 0.45, 0.0, 1.0)
 	var pop := 1.0 + 0.45 * (1.0 - clampf(age / 0.2, 0.0, 1.0))

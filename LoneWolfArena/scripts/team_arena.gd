@@ -456,9 +456,8 @@ func _start_fight() -> void:
 	_reset_zone()
 	zone_final = zone_final_for(round_index)
 	Game.mark("match started")
-	var point := rounds_to_win > 1 and maxi(int(team_score[0]), int(team_score[1])) == rounds_to_win - 1
-	var final := rounds_to_win > 1 and round_index >= last_round()
-	hud.show_round_banner(round_index, map_name, "FINAL ROUND" if final else ("MATCH POINT!" if point else ""))
+	if round_index == 1:
+		hud.show_round_banner(round_index, map_name, round_sub(round_index))      # (later: at the break's end)
 	Audio.play("countdown_go", 0.0)
 
 
@@ -508,8 +507,7 @@ func _physics_process(delta: float) -> void:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
 			if _break_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
-			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
-			if (_break_t >= brk and is_referee()) or _break_t >= brk + 8.0:
+			if (_break_t >= BREAK_TIME and is_referee()) or _break_t >= BREAK_TIME + 8.0:
 				_next_round()
 	_update_spectate()
 	_update_shadow_cut(delta)
@@ -658,7 +656,8 @@ func _end_team_round(win_team: int, timed_out: bool) -> void:
 		_break_t = 0.0
 		Game.mark("round over")
 	if not decided:
-		hud.show_round_result("DRAW" if win_team < 0 else ("VICTORY" if win_team == my_team else "DEFEAT"), mine, theirs)
+		hud.show_break("DRAW" if win_team < 0 else ("VICTORY" if win_team == my_team else "DEFEAT"), mine, theirs,
+			0 if win_team < 0 else (1 if win_team == my_team else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
 		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if win_team < 0 else ("YOUR TEAM HAS MORE HP" if win_team == my_team
 			else "THE OTHER TEAM HAS MORE HP")) + "    %d  -  %d" % [mine, theirs])

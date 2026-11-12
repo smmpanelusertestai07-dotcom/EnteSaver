@@ -11,7 +11,9 @@ extends Node
 ## button), the settings gear (over the weapon panel's corner), scoreboard (tap on the score bar,
 ## clear of the weapon panel), healing, low HP with
 ## damage arcs, the elimination (red X, badge, kill feed), the ELIMINATED BY card (by the bot, by
-## the zone) and the HUD editor (select + drag).
+## the zone), the break between rounds step by step (result band, score plates before and after
+## the tick, the next round's band, then round 2's prep and fight with nothing over them) and the
+## HUD editor (select + drag).
 ## Then DUO / SQUAD in TRAINING GROUND (team_tour, alone with LW_TOUR=team): the BLUE vs ORANGE prep
 ## line, the teammates panel and ally tags, a knocked teammate (marker on them and pinned to the
 ## edge), REVIVE (a real tap) and reviving, the player knocked (BLEEDING OUT, BEING REVIVED),
@@ -283,6 +285,8 @@ func run(at: Node) -> int:
 	await at.wait(0.35)
 	await at.shot("hud_15_kill")
 	_check(not b.alive, "the bot is eliminated", at)
+	_check(int(arena.get("phase")) == 3 and hud.break_step() != "", "the round's end starts the break between rounds", at)
+	arena.set("_break_t", -1000.0)          # (the break is held while its steps are looked at)
 	await at.wait(1.0)
 	await at.shot("hud_16_kill_late")
 	# A camera cutout on the left side: the edge-anchored widgets move off it.
@@ -303,8 +307,37 @@ func run(at: Node) -> int:
 	arena.set("eliminated_by", {"cause": "zone"})
 	await at.wait(0.2)
 	await at.shot("hud_16d_eliminated_by_zone")
+	# The break between rounds, step by step (staged: the player won round 1 but the ELIMINATED BY
+	# card is up, to see that it stays readable over the dimmed screen).
+	Engine.time_scale = 1.0
+	hud._kill_banner.t = 0.0                # (the staged steps come seconds after the kill badge ended)
+	arena.set("eliminated_by", {"cause": "gun", "name": b.display_name, "gun": String(b.gun().def.name), "gun_id": String(b.gun().id), "damage": 187})
+	for st: Array in [["result", 3.0, "hud_16e_break_result"], ["score", 5.4, "hud_16f_break_score"],
+			["score", 6.9, "hud_16g_break_tick"], ["band", 9.2, "hud_16h_break_band"]]:
+		hud._break.age = float(st[1])
+		hud.process_mode = Node.PROCESS_MODE_DISABLED
+		hud.queue_redraw()
+		await at.get_tree().process_frame
+		hud.queue_redraw()
+		await at.shot(String(st[2]))
+		hud.process_mode = Node.PROCESS_MODE_INHERIT
+		_check(hud.break_step() == String(st[0]), "%.1f s into the break: %s (got %s)" % [st[1], st[0], hud.break_step()], at)
+		if st[2] == "hud_16f_break_score":
+			_check(hud.break_score(true) == 0 and hud.break_score(false) == 0, "the plates start from the old score", at)
+		elif st[2] == "hud_16g_break_tick":
+			_check(hud.break_score(true) == 1 and hud.break_score(false) == 0, "the winner's number counts up", at)
 	p.alive = true
 	arena.set("eliminated_by", {})
+	arena.set("_break_t", RoundRules.BREAK_S - 0.3)
+	await at.wait_for_phase(arena, 0, 10.0)
+	await at.wait(0.3)
+	_check(int(arena.get("round_index")) == 2 and hud.break_step() == "" and float(hud._round_banner.t) <= 0.0,
+		"the prep of round 2 follows the break with nothing over it", at)
+	await at.shot("hud_16i_round2_prep")
+	await at.wait_for_phase(arena, 1, 12.0)
+	await at.wait(0.3)
+	_check(float(hud._round_banner.t) <= 0.0, "nothing covers the fight when round 2 starts (its band closed the break)", at)
+	await at.shot("hud_16j_round2_go")
 	# HUD editor.
 	Game.goto_hud_editor()
 	await at.wait(1.2)
@@ -569,7 +602,7 @@ func team_tour(at: Node) -> void:
 	if not arena is TeamArena or hud.team == null:
 		_check(false, "a DUO match has the team layer", at)
 		return
-	arena.set("rounds_to_win", 1)
+	arena.set("rounds_to_win", 2)              # (a break between the rounds, with the team score)
 	team = hud.team
 	await at.wait_for_phase(arena, 1)
 	await at.wait(0.6)
@@ -584,6 +617,23 @@ func team_tour(at: Node) -> void:
 	_check(hud.banner_kind() == "knock", "knocking an enemy shows the KNOCKED plate (got '%s')" % hud.banner_kind(), at)
 	await at.shot("team_14_knock_banner")
 	await _wipe(at, duo_foes, me)
+	await _until(at, func() -> bool: return int(arena.get("phase")) == 3, 10.0)
+	arena.set("_break_t", -1000.0)
+	Engine.time_scale = 1.0
+	_check(hud.break_step() != "", "DUO: the break between rounds", at)
+	hud._kill_banner.t = 0.0
+	hud._break.age = 6.9
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	hud.queue_redraw()
+	await at.shot("team_14b_duo_break_score")
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
+	_check(hud.break_score(true) == 1 and hud.break_score(false) == 0, "DUO: the team score counts up on the plates", at)
+	arena.set("_break_t", RoundRules.BREAK_S - 0.3)
+	await at.wait_for_phase(arena, 1, 25.0)
+	await at.wait(0.5)
+	await _wipe(at, team.members(1 - team.my_team()), me)
 	await _until(at, func() -> bool: return _results_of(arena) != null, 25.0)
 	await at.wait(1.6)
 	await at.shot("team_15_results_duo")
