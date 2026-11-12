@@ -1187,14 +1187,24 @@ func zone_hurts(f: Fighter) -> bool:
 	return f.alive
 
 
+## Whether stage 1 turns into stage 2 without a word: the 1 vs 1 (online and TRAINING GROUND)
+## announces nothing there (no SAFE ZONE SHRINKS IN n s band, no ZONE SHRINKING line, no beep;
+## the clock just starts stage 2 and the zone closes in); DUO / SQUAD keep them (team_arena.gd).
+## The red OUTSIDE THE SAFE ZONE warning shows in both.
+func quiet_stage_change() -> bool:
+	return true
+
+
 func _update_zone(delta: float) -> void:
 	var to_start := RoundRules.STAGE1_S - elapsed
-	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 else ""
+	var quiet := quiet_stage_change()
+	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 and not quiet else ""
 	if elapsed >= RoundRules.STAGE1_S:
 		if zone_state == "stationary":
 			zone_state = "shrinking"
-			hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
-			Audio.play("countdown_beep", -6.0, 0.7)
+			if not quiet:
+				hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
+				Audio.play("countdown_beep", -6.0, 0.7)
 		var z := zone_at(elapsed)
 		zone_center = z[0]
 		zone_radius = z[1]

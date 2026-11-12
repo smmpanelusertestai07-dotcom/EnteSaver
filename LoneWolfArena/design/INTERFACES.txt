@@ -20,7 +20,8 @@ listed here. If a part needs something new from the core, add it in its own file
   (each stage counted down on its own); `time_left` / `elapsed` stay the whole fight's.
 - zone: `zone_state` ("stationary" stage 1 | "shrinking" stage 2 | "closed"), `zone_next()` (s
   until it changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text
-  or ""), `zone_at(t)` ([centre, radius] t s into the fight: the whole hall through stage 1, then
+  or ""; always "" in the 1 vs 1: `quiet_stage_change()` true there, so its stage change shows no
+  band, no ZONE SHRINKING line and plays no beep; TeamArena returns false and keeps them), `zone_at(t)` ([centre, radius] t s into the fight: the whole hall through stage 1, then
   closing evenly to `RoundRules.ZONE_FINAL_R` 0.5 m at the end of stage 2, the centre sliding to
   `zone_final`, a new spot every round from `zone_final_for(round)`, alike on both phones)
 - 1 vs 1 weapon cooldown: `picks` (pick round -> gun), `pick_cooldowns()` (gun -> rounds left,
