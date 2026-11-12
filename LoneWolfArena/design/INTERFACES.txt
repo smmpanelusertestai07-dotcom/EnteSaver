@@ -297,7 +297,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `Title` + `Tagline` (`ResultsScreen.tagline(kind, seed)`), `HeroPlate` (name, `HeroKills`,
   `HeroDamage`), honour + XP, and `Continue`; `Page2` = `SideScore` ("<side> a VS b <side>",
   `SideName_0/1` from `ResultsScreen.side_names(seed)`: two different names of SIDE_NAMES; online
-  the seed is `Game.session.match_seed("sides")` and the host's side takes the first) and the
+  the seed is `Game.session.match_seed("sides")`; `ResultsScreen.sides_for`: a DUO / SQUAD names
+  sides by team, BLUE (team 0) the first, the 1 vs 1's host's side takes the first) and the
   tables (`Stats`: `SideHead_0`, YourRow, `SideHead_1`, EnemyRow; columns COLUMNS = K/D/A, DAMAGE,
   HEADSHOTS, ACCURACY, TIME, HP LEFT, labels `ResultsScreen.value_name(column)`), and `Lobby`.
   `Head` (mode, map) and PLAY AGAIN / `Rematch` / `PlayAgainTogether` with `RematchStatus` show on

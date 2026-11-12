@@ -1742,6 +1742,21 @@ func _test_results_pages() -> void:
 	_check(differ, "the two sides never get the same name, both from our own list")
 	_check(seen.size() >= 15, "the side names vary from match to match (%d first names seen)" % seen.size())
 	_check(ResultsScreen.SIDE_NAMES.size() >= 20, "about twenty side names")
+	var pair := ResultsScreen.side_names(42)
+	var host_coop := TeamArena.link_match(2, true, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, true, 7)
+	var guest_coop := TeamArena.link_match(2, true, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, false, 7)
+	_check(ResultsScreen.sides_for(pair, host_coop, false)[0] == ResultsScreen.sides_for(pair, guest_coop, true)[0],
+		"a co-op guest and the host see one name for their own side")
+	var host_vs := TeamArena.link_match(2, false, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, true, 7)
+	var guest_vs := TeamArena.link_match(2, false, {"id": "h", "name": "H"}, {"id": "g", "name": "G"}, false, 7)
+	_check(ResultsScreen.sides_for(pair, host_vs, false) == pair and ResultsScreen.sides_for(pair, guest_vs, true) == PackedStringArray([pair[1], pair[0]]),
+		"on opposite teams each phone names its own side by its team")
+	var group := [{"slot": 0, "id": "a", "team": 0}, {"slot": 1, "id": "b", "team": 0}, {"slot": 2, "id": "c", "team": 1}, {"slot": 3, "id": "d", "team": 1}]
+	_check(ResultsScreen.sides_for(pair, TeamArena.link_roster(2, group, "a", "a", 1), false)[0] == ResultsScreen.sides_for(pair, TeamArena.link_roster(2, group, "b", "a", 1), true)[0]
+		and ResultsScreen.sides_for(pair, TeamArena.link_roster(2, group, "c", "a", 1), true)[0] == pair[1],
+		"in a group match every teammate of the host names their side as the host does")
+	_check(ResultsScreen.sides_for(pair, {}, false) == pair and ResultsScreen.sides_for(pair, {}, true) == PackedStringArray([pair[1], pair[0]]),
+		"the 1 vs 1: the host's side takes the first name")
 	var two_words := true
 	for n: String in ResultsScreen.SIDE_NAMES:
 		two_words = two_words and n.split(" ").size() == 2 and n == n.to_upper()

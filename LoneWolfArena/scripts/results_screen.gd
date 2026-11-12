@@ -352,11 +352,26 @@ static func tagline(kind: String, seed_value: int) -> String:
 	return String(lines[absi(seed_value) % lines.size()])
 
 
-## [this player's side name, the other side's]: online the host's side takes the first of the pair
-## (both phones show the same name for the same side).
+## [this player's side name, the other side's]: every phone shows the same name for the same side
+## (see sides_for).
 func _pick_sides() -> PackedStringArray:
-	var pair := side_names(_seed())
-	if Game.online and not _am_host():
+	return sides_for(side_names(_seed()), Game.team_match if _team else {}, Game.online and not _am_host())
+
+
+## [this player's side name, the other side's] from the match's `pair` (side_names). A DUO / SQUAD
+## (`team_match`: Game.team_match, not empty) names sides by team: team 0 (BLUE) takes the first of
+## the pair, team 1 the second, so a co-op guest and the host, or every teammate of a group match,
+## see one name for their own side. The 1 vs 1 (`team_match` empty) gives the host's side the first;
+## `swap` is true on the other phone of an online 1 vs 1.
+static func sides_for(pair: PackedStringArray, team_match: Dictionary, swap: bool) -> PackedStringArray:
+	if not team_match.is_empty():
+		var my_team := 0
+		var slot := int(team_match.get("my_slot", 0))
+		for e: Variant in team_match.get("roster", []):
+			if e is Dictionary and int((e as Dictionary).get("slot", -1)) == slot:
+				my_team = clampi(int((e as Dictionary).get("team", 0)), 0, 1)
+		return PackedStringArray([pair[my_team], pair[1 - my_team]])
+	if swap:
 		return PackedStringArray([pair[1], pair[0]])
 	return pair
 
