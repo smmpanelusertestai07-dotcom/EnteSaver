@@ -69,8 +69,18 @@ func _check_texts() -> void:
 	shown.sort()
 	_check(shown == ["avatar", "banner", "bundle", "career", "level", "name", "signature"], "the player card shows what the notice lists (%s)" % str(shown))
 	_check(Cloud.CAREER_KEYS == ["matches", "wins", "kills", "kd", "hs"], "the career summary is what the notice lists")
+	# The lobby announce: the ID, name, outfit and public key, and in a match only the flag "im".
+	var hello := Cloud.new()
+	var hi_keys := hello.hello_msg().keys()
+	hello.in_session = true
+	var hi_match := hello.hello_msg().keys()
+	hello.free()
+	hi_keys.sort()
+	hi_match.sort()
+	_check(hi_keys == ["bundle", "id", "name", "pk", "t"] and hi_match == ["bundle", "id", "im", "name", "pk", "t"],
+		"the lobby announce carries what the notice lists (%s / %s)" % [str(hi_keys), str(hi_match)])
 	for what: String in ["random player ID, name, outfit and public key", "name card (profile picture, banner and signature line) and level",
-			"the time you were last online", "match history", "blocked players", "end-to-end encrypted",
+			"the time you were last online", "whether you are in a match right now (only that, nothing about the match)", "match history", "blocked players", "end-to-end encrypted",
 			"career summary (matches, wins, kills, K/D and headshot rate) unless you turn SHOW MY CAREER off",
 			"last %d chat messages with each friend" % NetChat.HISTORY_MAX, "only your friend's phone can read it",
 			"keeps your last unread message", "never a blocked player", "only while you hold TALK", "never stored",

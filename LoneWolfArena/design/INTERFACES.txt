@@ -587,7 +587,10 @@ listed here. If a part needs something new from the core, add it in its own file
   DUO", TeamInvite ("+ INVITE"; "WAITING..." + the name while an invite waits), TeamBot_<3|4>. INVITE
   -> TeamInviteList: profile friends (never blocked ones), the ones in `Cloud.peers` first with
   TeamAsk_<code> -> `Cloud.team_invite(id, Game.team_size, true)` (false: "<NAME> COULD NOT BE
-  REACHED", TeamListNote); offline rows greyed, INVITE disabled; no friends: a note and TeamFriends
+  REACHED", TeamListNote); offline rows greyed, INVITE disabled; a friend whose lobby announce
+  ("hi", `Cloud.hello_msg`) carries "im" (in a match: `Cloud.peer_in_match`, no more about the match;
+  older builds send none and read ONLINE) reads IN A MATCH with INVITE greyed (GroupAsk_<code>), and
+  in the FRIENDS / ONLINE lists with DUEL 1 VS 1 greyed (Duel_<code>) until it is back in the lobby; no friends: a note and TeamFriends
   (opens FRIENDS). Then TeamWait "WAITING FOR <NAME>" + TeamWaitCancel (`Cloud.cancel_invite`); a no
   (`Cloud.invite_answered(false, name)`, also the 25 s time-out) reads "<NAME> DECLINED" (LobbyFriends
   hands answers on: `LobbyTeam.on_answered`).

@@ -19,7 +19,9 @@ extends RefCounted
 ## - QUICK MATCH behind a waiting DUEL CHALLENGE / GROUP INVITE (two Clouds): no quick challenge goes
 ##   out and none is taken while the popup waits; ACCEPT ends the search, DECLINE lets it go on;
 ## - JOIN BY CODE that never gets in (COULD NOT JOIN: TRY AGAIN, then JOIN again) and the leader's
-##   switch carried in the roster (a member shows the code only while it is on).
+##   switch carried in the roster (a member shows the code only while it is on);
+## - IN A MATCH: the lobby announce's flag (only while in a match, never the room), read from a
+##   "hi" (an older build's, without it, reads as in the lobby), the rows' words and greyed buttons.
 
 var t: Node
 
@@ -38,6 +40,7 @@ static func run(runner: Node) -> void:
 	me._duel()
 	me._quick_behind_popup()
 	me._code_leftovers()
+	me._presence()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -569,3 +572,40 @@ func _code_leftovers() -> void:
 	_check(not guest.code_open(), "a roster without the switch reads as off")
 	for c: Cloud in [host, guest, other]:
 		c.free()
+
+
+## IN A MATCH in the FRIENDS / ONLINE lists and the group's INVITE list: the lobby announce's "im".
+func _presence() -> void:
+	var me := _peer(Cloud.new())
+	var other := _peer(Cloud.new())
+	var hi := other.hello_msg()
+	_check(not hi.has("im") and String(hi.get("t", "")) == "hi", "in the lobby the announce carries no IN A MATCH flag")
+	other.in_session = true
+	hi = other.hello_msg()
+	_check(bool(hi.get("im", false)) and hi.keys().size() == 6,
+		"in a match the announce says so (\"im\"), and nothing of the session")
+	other.in_session = false
+	var changed := [0]
+	me.peers_changed.connect(func() -> void: changed[0] += 1)
+	me._on_lobby(other.hello_msg())
+	_check(me.peers.has(other.my_id) and not me.peer_in_match(other.my_id) and changed[0] == 1, "a player in the lobby reads ONLINE")
+	other.session_multi = true
+	me._on_lobby(other.hello_msg())
+	_check(me.peer_in_match(other.my_id) and changed[0] == 2, "their announce from a match: IN A MATCH, the lists redraw")
+	var old_build := other.hello_msg()
+	old_build.erase("im")
+	me._on_lobby(old_build)
+	_check(not me.peer_in_match(other.my_id) and changed[0] == 3, "back in the lobby (or an older build, no flag): ONLINE again")
+	var odd := other.hello_msg()
+	odd["im"] = "yes"
+	me._on_lobby(odd)
+	_check(not me.peer_in_match(other.my_id), "a flag that is not a plain true reads as in the lobby")
+	_check(LobbyFriends.presence_tag("  ·  ONLINE", true) == "  ·  IN A MATCH" and LobbyFriends.presence_tag("  ·  ONLINE", false) == "  ·  ONLINE"
+		and LobbyFriends.presence_tag("  ·  OFFLINE", true) == "  ·  OFFLINE", "a row reads IN A MATCH only for an online player in a match")
+	var a := "pa".sha256_text().left(32)
+	var b := "pb".sha256_text().left(32)
+	var rows := LobbyTeam.invite_rows({a: {"name": "ACE"}, b: {"name": "BEA"}}, {a: {"im": true}, b: {}})
+	_check(rows.size() == 2 and bool(rows[0].in_match) and not bool(rows[1].in_match) and rows[0].online and rows[1].online,
+		"the INVITE list marks a friend in a match (%s)" % str(rows))
+	me.free()
+	other.free()

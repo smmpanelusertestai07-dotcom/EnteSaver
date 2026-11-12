@@ -197,6 +197,7 @@ var _mac := PackedByteArray()
 var _seq := 0
 var _their_seq := -1
 var _join_t := 0.0
+var _announced_im := false     # the "im" (in a match) flag of this phone's last lobby announce
 var _outgoing := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _last_heard := 0
@@ -652,10 +653,12 @@ func _process(delta: float) -> void:
 		_check_card(_dir_queue.pop_front())
 	if _want_lobby:
 		_announce_t -= delta
+		if in_match_now() != _announced_im:
+			_announce_t = minf(_announce_t, 0.0)     # (a match began or ended: friends see it at once)
 		if _announce_t <= 0.0:
 			_announce_t = ANNOUNCE_S
-			_publish_json(ROOT + "/lobby", {"t": "hi", "id": my_id, "name": String(Game.profile.name),
-				"bundle": String(Game.profile.bundle), "pk": _pk_pem})
+			_announced_im = in_match_now()
+			_publish_json(ROOT + "/lobby", hello_msg())
 	var now := Time.get_ticks_msec()
 	var gone := []
 	for id in peers:
@@ -969,6 +972,27 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 
 # ---------------------------------------------------------------- lobby and invites
 
+## The lobby announce ("hi"): the id, name, outfit and public key, and "im": true while this phone
+## plays a match (in_match_now: the FRIENDS / ONLINE rows read IN A MATCH there). Only that flag:
+## never the session's room or code. Without "im" (as before, and every older build) a player
+## reads as in the lobby.
+func hello_msg() -> Dictionary:
+	var d := {"t": "hi", "id": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle), "pk": _pk_pem}
+	if in_match_now():
+		d["im"] = true
+	return d
+
+
+## Whether this phone is in a match now (a session running, or an all-human one starting).
+func in_match_now() -> bool:
+	return in_session or session_multi
+
+
+## Whether the player `id` in the lobby said it is in a match (its last "hi": "im").
+func peer_in_match(id: String) -> bool:
+	return peers.has(id) and bool((peers[id] as Dictionary).get("im", false))
+
+
 func _on_lobby(d: Dictionary) -> void:
 	if String(d.get("t", "")) != "hi":
 		return
@@ -979,9 +1003,10 @@ func _on_lobby(d: Dictionary) -> void:
 		return
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
-	var known := peers.has(id) and String(peers[id].name) == who
+	var im := typeof(d.get("im")) == TYPE_BOOL and bool(d.im)
+	var known := peers.has(id) and String(peers[id].name) == who and bool((peers[id] as Dictionary).get("im", false)) == im
 	var new_here := not peers.has(id)
-	peers[id] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec()}
+	peers[id] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec(), "im": im}
 	if new_here and _want_lobby:
 		_announce_t = minf(_announce_t, ANNOUNCE_REPLY_S * randf_range(0.5, 1.0))   # so it sees this phone soon too
 	if not known:

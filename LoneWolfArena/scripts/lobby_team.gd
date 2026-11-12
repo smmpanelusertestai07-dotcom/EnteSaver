@@ -119,7 +119,8 @@ static func start_gate_text(grouped: bool, leader: bool, leader_n: String) -> St
 	return "WAITING FOR %s TO START" % (leader_n if leader_n != "" else "THE LEADER")
 
 
-## The friends to invite: [{"id", "name", "online"}], online ones first, then by name; blocked
+## The friends to invite: [{"id", "name", "online", "in_match"}], online ones first, then by name;
+## "in_match": its lobby announce says it plays a match (IN A MATCH, INVITE greyed); blocked
 ## players never (`friends`: profile "friends", `online_ids`: Cloud.peers); members left out.
 static func invite_rows(friends: Dictionary, online_ids: Dictionary, in_group_ids: Array = []) -> Array:
 	var out: Array = []
@@ -128,7 +129,9 @@ static func invite_rows(friends: Dictionary, online_ids: Dictionary, in_group_id
 			continue
 		var f: Variant = friends[id]
 		var who := String((f as Dictionary).get("name", "PLAYER")) if f is Dictionary else "PLAYER"
-		out.append({"id": id, "name": who if who != "" else "PLAYER", "online": online_ids.has(id)})
+		var seen: Variant = online_ids.get(id)
+		out.append({"id": id, "name": who if who != "" else "PLAYER", "online": online_ids.has(id),
+			"in_match": seen is Dictionary and bool((seen as Dictionary).get("im", false))})
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		if a.online != b.online:
 			return a.online
@@ -558,11 +561,13 @@ func _friend_row(r: Dictionary) -> PanelContainer:
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	v.add_child(UI.ellipsis(UI.label(String(r.name), 22, UI.TEXT, "heavy")))
-	v.add_child(UI.label("#%s  ·  %s" % [code, "ONLINE" if r.online else "OFFLINE"], 13, ONLINE_GREEN if r.online else UI.TEXT_DIM, "bold"))
+	var playing := bool(r.online) and bool(r.get("in_match", false))
+	v.add_child(UI.label("#%s  ·  %s" % [code, "IN A MATCH" if playing else ("ONLINE" if r.online else "OFFLINE")], 13,
+		ONLINE_GREEN if r.online and not playing else UI.TEXT_DIM, "bold"))
 	h.add_child(v)
 	var ask := UI.button("INVITE", 20, "primary", Vector2(160, 56))
 	ask.name = "GroupAsk_" + code
-	ask.disabled = not bool(r.online)
+	ask.disabled = not bool(r.online) or playing
 	ask.pressed.connect(ask_friend.bind(id, String(r.name)))
 	h.add_child(ask)
 	if not r.online:
