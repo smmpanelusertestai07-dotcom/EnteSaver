@@ -2158,6 +2158,30 @@ func _test_session_file() -> void:
 	mf.end_session("connection lost")
 	_check((Game.profile.history as Array).size() > 0 and String((Game.profile.history as Array)[0].get("mode", "")) == "duo",
 		"an all-human match lost before its arena was up is LEFT as that mode")
+	_check(not mf.resumed and mf.resume_note.is_empty(), "a session's end clears resumed and its note (a later session never counts it)")
+	# The host quits (its "bye", or it falls silent) while this member rejoins: the host's doing, ENDED, no LEFT here.
+	start.call(cl)
+	cl.opponent = {}
+	cl.is_host = false
+	cl.session_multi = true
+	cl.session_roster = squad
+	cl.session_host_id = ids[1]
+	cl.session_team = {"size": 2, "coop": false}
+	cl._resume_off = false
+	cl._multi = {"ids": {}, "seq": {ids[1]: 95}, "heard": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	cl.note_match(true, 1, 1, "DUO", 2, "", "duo")
+	var hq := Cloud.new()
+	hq._use_key(key)
+	var rows := (Game.profile.history as Array).size()
+	_check(hq.try_resume() and hq.session_multi and hq.resumed, "the member rejoins the all-human match")
+	hq._multi_member_left(ids[1])
+	_check(not hq.in_session and (Game.profile.history as Array).size() == rows + 1
+		and String((Game.profile.history as Array)[0].get("result", "")) == "ended" and hq.rejoin_notice.size() == 2
+		and String(hq.rejoin_notice[0]) == "THE HOST LEFT" and String(hq.rejoin_notice[1]).contains("BEA")
+		and String(hq.rejoin_notice[1]).contains("ENDED"),
+		"the host gone during a member's rejoin ends it as the host's doing: ENDED (no LEFT here), the notice names the host (%s)" % str(hq.rejoin_notice))
+	_check(not hq.resumed and hq.resume_note.is_empty(), "and resumed and its note are cleared")
+	hq.free()
 	_check(Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {"nobody": 3}}, ids[0]).is_empty()
 		and Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": "member-x".sha256_text().left(32), "size": 2, "seqs": {}},
 		ids[0]).is_empty() and Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {}},

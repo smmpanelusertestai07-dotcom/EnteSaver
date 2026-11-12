@@ -84,7 +84,9 @@ listed here. If a part needs something new from the core, add it in its own file
   sends no "sync" of its own blanks; both apps closed, the resumed host takes the guest's "back"
   as its cue and enters its note's round from the prep (`Arena._resume_from_note`). Too late (or
   LEAVE MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once;
-  the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it).
+  the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it);
+  in an all-human match the host's "bye" or silence meanwhile is the host's doing: ENDED when
+  counted, never LEFT ("THE HOST LEFT"). Every session end clears `resumed` and `resume_note`.
   An all-human match's file adds "multi" (`Cloud.multi_from_file`: the roster as
   `NetGroup.pack_roster`, the host's id, the size, every member's counter, the ids of members who
   already left, rewritten when one leaves) and its note

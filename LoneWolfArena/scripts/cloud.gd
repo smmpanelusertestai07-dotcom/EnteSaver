@@ -1794,12 +1794,13 @@ func try_resume() -> bool:
 
 
 ## A match entered from the file that ends before its arena is up (too late, LEAVE MATCH, lost
-## again): counted when its first fight began, it goes into the profile as QUIT MATCH puts it.
-func _record_resume_left() -> void:
+## again): counted when its first fight began, it goes into the profile as QUIT MATCH puts it;
+## `ended`: an all-human match its host left meanwhile, as ENDED (no win, no loss).
+func _record_resume_left(ended := false) -> void:
 	if not bool(resume_note.get("counted", false)):
 		return
 	resume_note.counted = false
-	Game.record_match({"won": false, "draw": false, "left": true, "invalid": false, "kills": 0, "damage": 0, "headshots": 0,
+	Game.record_match({"won": false, "draw": false, "left": not ended, "ended": ended, "invalid": false, "kills": 0, "damage": 0, "headshots": 0,
 		"accuracy": 0.0, "time": 0.0, "xp": 0, "enemy": String(opponent.get("name", "PLAYER")), "mode": String(resume_note.get("mode", "")),
 		"mode_id": String(resume_note.get("mode_id", "lonewolf")), "map": "", "weapon": "", "score_player": int(resume_note.get("mine", 0)),
 		"score_bot": int(resume_note.get("theirs", 0)), "hp_left": 0, "difficulty": "ONLINE", "taken": 0, "shots": 0, "hits": 0,
@@ -2669,16 +2670,28 @@ func _on_room(msg: PackedByteArray) -> void:
 ## one leaves the arena) or "connection lost" (this phone lost the relay or was away too long).
 ## A session entered from the file whose arena is not up yet: this phone's own end (LEAVE MATCH,
 ## lost again) puts a counted match into the profile as LEFT; the other phone's "bye" meanwhile
-## (it quit, or lost its own link: a LEFT for it) never does.
+## (it quit, or lost its own link: a LEFT for it) never does. In an all-human match that is the
+## host's (`theirs`: it quit or fell silent): the match ENDED, counted as ENDED (no win, no loss)
+## when its first fight began. Whatever ends it, resumed and resume_note are cleared after
+## (rejoin_notice keeps what the rejoin's end said, [] for any other end).
 func end_session(reason := "left", theirs := false) -> void:
 	var was := in_session
 	if in_session:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
+		rejoin_notice = []
 		if resumed and not _arena_listens():
 			# (entered from the file, ended before its arena was up)
 			var counted := bool(resume_note.get("counted", false))
-			if theirs:
+			if theirs and session_multi:
+				var host := "THE HOST"
+				for e: Dictionary in session_roster:
+					if String(e.get("id", "")) == session_host_id:
+						host = String(e.get("name", host))
+				_record_resume_left(true)
+				rejoin_notice = ["THE HOST LEFT", "%s left while you were rejoining - THE MATCH ENDED. " % host
+					+ ("It counts as ENDED: no win, no loss." if counted else "Nothing was counted.")]
+			elif theirs:
 				rejoin_notice = ["OPPONENT LEFT", "%s left the match while you were rejoining: it does not count as a defeat."
 					% String(opponent.get("name", "PLAYER"))]
 			else:
@@ -2686,6 +2699,8 @@ func end_session(reason := "left", theirs := false) -> void:
 				rejoin_notice = [] if reason == "left" else ["CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat)."
 					if counted else "The match could not be rejoined in time. Nothing was counted."]
 	in_session = false
+	resumed = false
+	resume_note = {}
 	_resume_emit = false
 	_resume_wait = false
 	clear_resume()
@@ -4196,7 +4211,7 @@ func _multi_member_left(f: String) -> void:
 	_multi.left[f] = true
 	_away_ids.erase(f)
 	if f == session_host_id:
-		end_session("left")
+		end_session("left", true)    # (the host's doing: rejoining, this phone is not LEFT)
 		return
 	_save_resume()                   # (a restart keeps it LEFT: the file's "left")
 	if in_session:
