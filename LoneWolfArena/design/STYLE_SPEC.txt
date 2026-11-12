@@ -126,7 +126,8 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   count-up, "PLAYERS n/N" for DUO / SQUAD, a cancel X at its right end (none for a group member);
   START becomes a greyed "MATCHING..." plate and the rest of the lobby stays usable. The GROUP bar
   shows the 10-digit GROUP CODE ("12 3456 7890") with COPY (the leader: JOIN BY CODE ON / OFF, OFF at
-  start, COPY turns it on; a solo: JOIN BY CODE). No text
+  start, COPY turns it on; a solo: JOIN BY CODE; a member only while the leader's switch is on,
+  else the small line THE LEADER SHARES THE GROUP CODE). No text
   menu, stats chips, name plate, outfit or version text (CUSTOM HUD and HOW TO PLAY are in
   SETTINGS).
 - Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);

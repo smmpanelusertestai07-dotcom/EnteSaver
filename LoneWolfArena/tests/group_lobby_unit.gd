@@ -17,7 +17,9 @@ extends RefCounted
 ## - the DUEL in a group of two: START's route, SELECT MODE's chip, the member's phone taking the
 ##   leader's tagged challenge at once (and nobody else's tag);
 ## - QUICK MATCH behind a waiting DUEL CHALLENGE / GROUP INVITE (two Clouds): no quick challenge goes
-##   out and none is taken while the popup waits; ACCEPT ends the search, DECLINE lets it go on.
+##   out and none is taken while the popup waits; ACCEPT ends the search, DECLINE lets it go on;
+## - JOIN BY CODE that never gets in (COULD NOT JOIN: TRY AGAIN, then JOIN again) and the leader's
+##   switch carried in the roster (a member shows the code only while it is on).
 
 var t: Node
 
@@ -35,6 +37,7 @@ static func run(runner: Node) -> void:
 	me._group_code()
 	me._duel()
 	me._quick_behind_popup()
+	me._code_leftovers()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -476,3 +479,50 @@ func _quick_behind_popup() -> void:
 	_check(not c.seeking and String(c.opponent.get("id", "")) == f.my_id, "ACCEPT ends the QUICK MATCH search and enters the friend's room")
 	c.free()
 	f.free()
+
+
+## JOIN BY CODE's failure state and the leader's switch in the roster (design/GROUPS.txt 7).
+func _code_leftovers() -> void:
+	var host := _peer(Cloud.new())
+	var guest := _peer(Cloud.new())
+	host.my_code = "6612345678"
+	host.set_code_join(true)
+	guest.join_group_code("6612345678")
+	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
+	_check(guest.code_state == "in", "a valid answer: JOINING THE GROUP...")
+	# The leader never lets the joiner in (it entered a match, the group filled): the join fails.
+	guest._grp.leader_ms = Time.get_ticks_msec() - Cloud.JOIN_TIMEOUT_MS - 10
+	guest._tick_group(0.0, Time.get_ticks_msec())
+	_check(guest.code_state == "failed" and guest.group.is_empty() and LobbyTeam.code_state_text("failed") == "COULD NOT JOIN: TRY AGAIN",
+		"never let in: COULD NOT JOIN: TRY AGAIN, out of the half-joined group (%s)" % guest.code_state)
+	_check(guest.join_group_code("6612345678") == "" and guest.code_state == "asking", "after COULD NOT JOIN, JOIN asks again")
+	# JOIN again while a join waits to be let in: the waiting one is dropped and the ask goes out.
+	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
+	_check(guest.code_state == "in" and not guest.group.is_empty(), "let in again")
+	_check(guest.join_group_code("6612345678") == "" and guest.code_state == "asking" and guest.group.is_empty(),
+		"JOIN while still waiting to be let in asks afresh (no EXIT YOUR GROUP FIRST)")
+	# An answer this phone cannot take (wrapped for another phone's key): failed, not stuck.
+	var other := _peer(Cloud.new())
+	other.join_group_code("6612345678")
+	var not_mine := host._on_code_ask(other._code_ask_msg())
+	guest._on_code_answer(host.my_id, not_mine)
+	_check(guest.code_state == "failed" and guest.group.is_empty(), "an answer that cannot be taken: COULD NOT JOIN (%s)" % guest.code_state)
+	# In at last: the roster with this phone in it ends the join (no line left over).
+	guest.join_group_code("6612345678")
+	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
+	host._on_gjoin(guest.my_id, {"name": "GUEST", "bundle": "default"})
+	host.set_code_join(false)
+	guest._on_groster(host._roster_msg())
+	_check(guest.in_group() and guest.code_state == "", "in the group: the join by code is done")
+	# The switch in the roster: a member shows the code only while the leader's switch is on.
+	_check(String(guest.group.get("code", "")) == "6612345678" and guest.group_code() == "6612345678", "the roster carries the 10-digit code")
+	_check(not guest.code_open() and not host.code_open(), "the leader's JOIN BY CODE off: the member's code is not open")
+	host.set_code_join(true)
+	guest._on_groster(host._roster_msg())
+	_check(guest.code_open() and host.code_open(), "the leader turns it on: the member's code is open")
+	var no_cj := host._roster_msg()
+	no_cj.erase("cj")
+	guest._on_groster(no_cj)
+	_check(not guest.code_open(), "a roster without the switch reads as off")
+	for c: Cloud in [host, guest, other]:
+		c.free()

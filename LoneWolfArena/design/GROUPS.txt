@@ -45,7 +45,7 @@ current members (plus a "gjoin" from an id the leader invited).
         match, not already in a group (busy -> "dec" with the invite's tag).
   group room messages (k):
         "gjoin"   {name, bundle}                      the invitee after ACCEPT (every 1 s until "groster")
-        "groster" {members:[[id,name,bundle],...], mode, size, status}   leader, on every change and
+        "groster" {members:[[id,name,bundle],...], mode, size, status, code, cj}   leader, on every change and
                                                       every GROUP_BEAT_S (3 s): the truth for everyone
         "gbeat"   {}                                  each member every GROUP_BEAT_S; a member silent
                                                       GROUP_TIMEOUT_MS (12 s) is dropped by the leader;
@@ -157,12 +157,18 @@ out of the room (gkick, gend, the host silent) gets Cloud.room_notice, shown onc
   leader)} or "gno" {full: true, rt = HMAC(K, "gno" + leader)}, in the joiner's inbox; then "gjoin"
   as for an invite (the leader keeps a place in _grp.invited). The switch JOIN BY CODE starts OFF
   every run (nobody listens then); the leader's (or solo's) ON, or COPY of the code, turns it on.
+  The roster carries the code and the switch ("cj"): a member sees the code and COPY only while
+  the switch is on (Cloud.code_open), else THE LEADER SHARES THE GROUP CODE. A joiner the leader
+  never lets in within JOIN_TIMEOUT_MS (it entered a match, the group filled) or whose "gin" cannot
+  be taken reads COULD NOT JOIN: TRY AGAIN (code_state "failed") and may JOIN again.
   Never answered: a player DUEL CHALLENGES FROM keeps out (NetMatch.allowed: blocked, NOBODY, a
   stranger with FRIENDS), a player the leader REMOVEd this run (Cloud._code_kicked; an invite from
   the leader lifts it), a room, a match, a phone in QUICK MATCH (it does not listen then). Never
   taken: a "gin" from a leader the joiner blocked. JOIN BY CODE is refused (CANCEL THE SEARCH FIRST)
   while this phone is in QUICK MATCH or a DUO / SQUAD search, and a group made or joined here ends a
-  QUICK MATCH search (Cloud.seek_stop; NetMatch stops when Cloud is no longer seeking). Limits: a leader checks CODE_RATE asks a second and one every 2 s per asker; a joiner
+  QUICK MATCH search (Cloud.seek_stop; NetMatch stops when Cloud is no longer seeking). While a
+  DUEL CHALLENGE / GROUP INVITE popup waits for this player's answer, QUICK MATCH neither challenges
+  nor takes a quick challenge (Cloud.answer_waiting); ACCEPT ends the search, DECLINE lets it go on. Limits: a leader checks CODE_RATE asks a second and one every 2 s per asker; a joiner
   starts CODE_TRIES_MAX attempts a minute, asks every CODE_ASK_S and gives up after CODE_WAIT_MS. A
   listener on the bucket who saw an ask could test codes against its tag offline (10^8 codes, each
   10000 HMACs); a code is meant to be passed around, so the leader's switch and REMOVE (which

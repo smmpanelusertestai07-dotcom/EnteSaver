@@ -421,7 +421,10 @@ listed here. If a part needs something new from the core, add it in its own file
   one; `Cloud.quick_seen`). When the other's `saw` lists this phone, the lower id calls
   `Cloud.invite(id, {"quick": true})`; a quick challenge is accepted at once only while seeking,
   from a seeker in `quick_seen`, proven and allowed by DUEL CHALLENGES FROM, else declined at once
-  (never shown). No popup and no time limit (it runs until cancelled): the lobby's search tab
+  (never shown). While a DUEL CHALLENGE, TEAM INVITE or GROUP INVITE waits for this player's answer
+  (`Cloud.answer_waiting()`), the search neither challenges (NetMatch and `Cloud.invite` with
+  "quick" both refuse) nor takes a quick challenge (declined); ACCEPT ends the search
+  (`Cloud.answer` / `answer_group_invite` call `seek_stop`), DECLINE lets it go on. No popup and no time limit (it runs until cancelled): the lobby's search tab
   (`SearchTab`, scripts/lobby_search.gd, `Lobby.search_tab` on its own CanvasLayer `SearchLayer` over
   the lobby's windows) drops from the top centre: `SearchLine` ("ESTIMATED 0:10" for the first
   `SearchTab.ESTIMATE_S` s, then "STILL SEARCHING..."; `NetMatch.status_line()` CONNECTING... /
@@ -726,14 +729,19 @@ listed here. If a part needs something new from the core, add it in its own file
 ## GROUPS in the lobby: GROUP CODE and the DUEL in a group of two (1.6)
 - GROUP CODE (`Cloud.group_code()`: `Cloud.CODE_LEN` = 10 digits, 2 bucket + 8 secret, shown by
   `Cloud.code_display` as "12 3456 7890", checked by `Cloud.is_group_code`; a solo's own `Cloud.my_code`, a member's the leader's
-  from "groster"'s "code"; none in a CUSTOM ROOM): the GROUP bar's `GroupCodeRow` (`GroupCode`,
+  from "groster"'s "code", the leader's switch in its "cj" = `Cloud.code_open()`; none in a CUSTOM
+  ROOM): the GROUP bar's `GroupCodeRow` (a member's only while `code_open()`, else the line
+  `GroupCodeNote` "THE LEADER SHARES THE GROUP CODE"; `GroupCode`,
   `GroupCodeCopy`, and for the leader or a solo `GroupCodeSwitch` "JOIN BY CODE: ON / OFF" =
   `Cloud.set_code_join`, `Cloud.code_join` OFF at the start of every run; `GroupCodeCopy` turns it on). A solo's bar has `GroupJoinCode`: the popup
   `JoinCodePopup` (`JoinGroupCode`, `JoinGroupGo`, `JoinGroupState`) calls
   `Cloud.join_group_code(code)` (spaces allowed; "" = asking, else the notice: 10 digits, own code,
   EXIT YOUR GROUP FIRST, CANCEL THE SEARCH FIRST in QUICK MATCH or a DUO / SQUAD search, offline, TOO MANY TRIES: WAIT A MINUTE after `Cloud.CODE_TRIES_MAX` a minute) and follows
-  `Cloud.code_state` ("asking", "in", "full" THE GROUP IS FULL, "none" NO GROUP WITH THIS CODE after
-  `Cloud.CODE_WAIT_MS`, "blocked"): `LobbyTeam.code_state_text`. Wire: see Cloud's GROUP CODE
+  `Cloud.code_state` ("asking", "in" JOINING THE GROUP... until the roster has it, then "", "full"
+  THE GROUP IS FULL, "none" NO GROUP WITH THIS CODE after `Cloud.CODE_WAIT_MS`, "blocked", "failed"
+  COULD NOT JOIN: TRY AGAIN when the leader never lets it in within `Cloud.JOIN_TIMEOUT_MS` or its
+  answer cannot be taken; JOIN asks again, the same code while still waiting asks afresh):
+  `LobbyTeam.code_state_text`. Wire: see Cloud's GROUP CODE
   comment and design/GROUPS.txt 7 ("gask" on ROOT/gc/<the code's 2 bucket digits>, "gin" / "gno" in
   the inbox, tagged with the code's stretched key; the group's keys RSA-wrapped for the joiner;
   answered only for players `NetMatch.allowed` lets in and not REMOVEd this run). A group made or
