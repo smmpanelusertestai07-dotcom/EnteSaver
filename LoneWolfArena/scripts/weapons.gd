@@ -1,7 +1,7 @@
 class_name Weapons
 extends RefCounted
 ## Weapon data and shared ballistic helpers. Lone Wolf rules: before the round one gun is
-## picked and BOTH fighters get it (plus fists). The guns follow the classic mobile battle-royale
+## picked and BOTH fighters get it, with the sidearm and the fists (the kit: GUN, FISTS, SIDE). The guns follow the classic mobile battle-royale
 ## roster and its numbers (2026 public stat guides): rifles kill in 7-8 body shots or 3 to the
 ## head, the lever shotgun in two shells, the hand cannon and the bolt rifle one-tap the head;
 ## the names are generic designations or our own, the models are ours.
@@ -145,6 +145,22 @@ const DEFS := {
 		"fire_move": 0.6, "equip": 0.55, "assist": 0.5, "crosshair": "dot",
 		"tint": Color(0.72, 0.5, 0.32), "attach": ["SCOPE 8X"],
 	},
+	# The kit's sidearm (SIDEARM): every fighter carries it besides the round's gun and the fists,
+	# whatever gun was picked; it is never in the pick grid. A light pistol for when the gun runs
+	# dry up close: clearly weaker per shot than the pickable pistols, twelve rounds and two spare
+	# magazines, the quickest draw of any gun. The pistol model and a compact silhouette of its
+	# own, told apart by a blue-grey tint.
+	"sidearm": {
+		"name": "WREN 9", "class": "PISTOL", "icon": "weapon_sidearm", "model": "weapon_pistol", "sound": "pistol_shot", "pitch": 1.18,
+		"damage": 32.0, "min_damage": 18.0, "falloff_start": 10.0, "range": 35.0,
+		"head_mult": 2.0, "head_far_mult": 1.0, "limb_mult": 0.75, "pen": 0.0,
+		"interval": 0.2, "auto": false, "mag": 12, "reserve": 24,
+		"reload": 1.4, "pellets": 1, "spread_hip": 1.2, "spread_ads": 0.35, "spread_move": 0.9, "spread_air": 3.0,
+		"spread_per_shot": 0.5, "spread_max": 2.2, "spread_recover": 8.0,
+		"recoil_v": 0.45, "recoil_h": 0.15, "recoil_ramp": 0.0, "scope": "reddot", "ads_fov": 58.0,
+		"fire_move": 0.95, "equip": 0.15, "assist": 1.0, "crosshair": "ring",
+		"tint": Color(0.62, 0.7, 0.82), "attach": [],
+	},
 	"fists": {
 		"name": "FISTS", "class": "MELEE", "icon": "v_fist", "model": "", "sound": "hit_body",
 		"damage": 30.0, "min_damage": 30.0, "falloff_start": 2.0, "range": 2.0,
@@ -160,6 +176,16 @@ const DEFS := {
 ## Order of the weapon-pick grid (the classic picks first).
 const PICKABLE := ["ar", "smg", "lever", "sg", "pistol", "sniper", "ak", "groza", "bizon", "m1917", "sks", "kar98k"]
 const DEFAULT_PICK := "ar"
+## The kit (Fighter.set_loadout): the weapon indexes every fighter carries, in every mode. The
+## fists stay at 1 and the sidearm comes last, so an older build on the other phone still reads a
+## known index for the gun and the fists (it shows the sidearm's index as the fists).
+const GUN := 0
+const FISTS := 1
+const SIDE := 2
+## The sidearm's weapon id (DEFS.sidearm): the same whatever the round's gun is.
+const SIDEARM := "sidearm"
+## SWITCH's order through the kit: the gun, the sidearm, the fists, and round again.
+const CYCLE := [GUN, SIDE, FISTS]
 
 ## Movement speed while each class is in hand, x the fighter's base speeds (Fighter.RUN_SPEED etc.,
 ## which are the rifles' speeds). The reference's armoury lists assault rifles at 100, marksman
@@ -171,6 +197,34 @@ const CLASS_MOVE := {"MELEE": 1.15, "SMG": 1.06, "AR": 1.0, "PISTOL": 1.0, "SG":
 ## Armour (Lone Wolf gives level 2 of both every round): the share of damage each one stops.
 const HELMET_REDUCTION := 0.35
 const VEST_REDUCTION := 0.35
+
+
+## The most one reported hit can do in `zone` with any of `defs` (the weapons the sender may be
+## holding): one bullet (one pellet) at point-blank range, before the armour.
+static func hit_cap(defs: Array, zone: String) -> float:
+	var best := 0.0
+	for d: Dictionary in defs:
+		best = maxf(best, float(d.damage) * zone_mult(d, zone, 0.0) * pen_mult(d, zone))
+	return best
+
+
+## How fast hit reports may come from a sender holding any of `defs`: x the token bucket's refill
+## per second (1.5 x the fastest's pellets per second, at least a punch's, + 3), y its burst.
+static func hit_rate(defs: Array) -> Vector2:
+	var rate := 1.0 / 0.45
+	var burst := 12.0
+	for d: Dictionary in defs:
+		rate = maxf(rate, float(d.pellets) / maxf(float(d.interval), 0.05))
+		burst = maxf(burst, float(d.pellets) * 3.0)
+	return Vector2(rate * 1.5 + 3.0, burst)
+
+
+## The shortest time between two trigger pulls of any of `defs`.
+static func min_interval(defs: Array) -> float:
+	var best := INF
+	for d: Dictionary in defs:
+		best = minf(best, float(d.interval))
+	return best
 
 
 static func damage_at(def: Dictionary, base: float, dist: float) -> float:

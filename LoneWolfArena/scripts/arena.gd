@@ -581,13 +581,11 @@ func _on_net_ended(reason: String) -> void:
 		else "%s left before the match began. Nothing was counted." % bot.display_name))]
 
 
-## The most one reported hit can do in this zone: a bullet (one pellet) of this round's gun at
-## point-blank range, a punch, or (on the body) a frag at its centre, before the armour.
+## The most one reported hit can do in this zone: a bullet (one pellet) of this round's gun (or of
+## the sidearm while the other phone has it in hand) at point-blank range, a punch, or (on the
+## body) a frag at its centre, before the armour.
 func _max_remote_hit(zone: String) -> float:
-	var best := 0.0
-	for id: String in [_round_gun(), "fists"]:
-		var d: Dictionary = Weapons.DEFS[id]
-		best = maxf(best, float(d.damage) * Weapons.zone_mult(d, zone, 0.0) * Weapons.pen_mult(d, zone))
+	var best := Weapons.hit_cap(_remote_arms(), zone)
 	if zone == "body":
 		best = maxf(best, Grenade.MAX_DAMAGE)
 	return best * 1.02
@@ -597,18 +595,29 @@ func _round_gun() -> String:
 	return picked_weapon if Weapons.DEFS.has(picked_weapon) else Weapons.DEFAULT_PICK
 
 
-## Hit reports may not come faster than the round's gun fires (all its pellets), with headroom for
-## network bunching: a token bucket refilled at 1.5 x that rate.
+## The weapons whose numbers bound the other phone's reports (a hit does not say which weapon made
+## it): this round's gun (the same on both phones, not that fighter's own) and the fists always,
+## and the sidearm while that phone's states have it in hand or had it within
+## RemoteFighter.HELD_GRACE_MS. So the gun's cap is never loosened while the gun is held.
+func _remote_arms() -> Array:
+	var out: Array = [Weapons.DEFS[_round_gun()], Weapons.DEFS.fists]
+	var remote := bot as RemoteFighter
+	if remote != null and remote.held_recently(Weapons.SIDE):
+		out.append(Weapons.DEFS[Weapons.SIDEARM])
+	return out
+
+
+## Hit reports may not come faster than the weapons it may hold fire (all their pellets), with
+## headroom for network bunching: a token bucket refilled at 1.5 x that rate (Weapons.hit_rate).
 func _remote_hit_allowed() -> bool:
-	var d: Dictionary = Weapons.DEFS[_round_gun()]
-	var rate := maxf(float(d.pellets) / maxf(float(d.interval), 0.05), 1.0 / 0.45) * 1.5 + 3.0
-	return _net_rate_ok("hit", rate, maxf(float(d.pellets) * 3.0, 12.0))
+	var r := Weapons.hit_rate(_remote_arms())
+	return _net_rate_ok("hit", r.x, r.y)
 
 
-## Shot reports (one per trigger pull, pellets included): the round's gun or the fists, whichever
-## fires faster, with the same headroom.
+## Shot reports (one per trigger pull, pellets included): the fastest of the weapons it may hold,
+## with the same headroom.
 func _remote_shot_allowed() -> bool:
-	var interval := minf(float(Weapons.DEFS[_round_gun()].interval), float(Weapons.DEFS.fists.interval))
+	var interval := Weapons.min_interval(_remote_arms())
 	return _net_rate_ok("shot", 1.5 / maxf(interval, 0.05) + 2.0, 8.0)
 
 
@@ -1117,7 +1126,7 @@ func _place_dummy() -> void:
 	bot.aim_yaw = atan2(-d.x, -d.z)
 
 
-## Against the target dummy the gun never runs dry (the magazine still needs reloading).
+## Against the target dummy the gun and the sidearm never run dry (the magazine still needs reloading).
 func _refill_practice_ammo() -> void:
 	var w := player.weapon()
 	if not w.infinite() and w.reserve < int(w.def.mag):

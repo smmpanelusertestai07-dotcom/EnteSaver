@@ -115,7 +115,7 @@ listed here. If a part needs something new from the core, add it in its own file
   3-4", no choice, nothing to tap, SELECT dimmed, the countdown ring); the HUD closes it once
   `arena.picked_weapon` is set or the prep is over (`panels.watching()` while it is open).
   Until a pick round's pick lands, `Fighter.await_pick()` leaves both fighters with the fists only
-  (`awaiting_pick`, slot 0 cannot be drawn; `set_loadout` ends it, the fight's start gives a pick
+  (`awaiting_pick`, only the fists can be drawn: `can_draw(i)`; `set_loadout` ends it, the fight's start gives a pick
   that never came the preselected gun meanwhile) and `weapon_picking()` puts the weapon panel in
   its PICKING... state.
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
@@ -125,8 +125,12 @@ listed here. If a part needs something new from the core, add it in its own file
   in `HUD.OUT_LINES`; no badge, no red X, a line in its place), `banner_kind()` ("", "kill" or the cause),
   `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
   kill, which the other phone reports as its death)
-- the target dummy (`arena.practice`): the weapon panel's middle slot reads CHANGE GUN and calls
-  `arena.repick()`, which opens the weapon pick during the fight
+- the weapon panel (`_draw_weapon_panel`): the main slot is about `_panel_weapon()` (the gun or the
+  sidearm in hand, the gun while the fists are out); small slots "weapons:0..2" = `Weapons.CYCLE`
+  (gun, sidearm, fists), a tap draws that one
+- the target dummy (`arena.practice`): a CHANGE GUN plate left of the small slots
+  (`HudLayout.weapon_repick`, hit id "weapons:repick") calls `arena.repick()`, which opens the
+  weapon pick during the fight
 - `reveal(f: Fighter, seconds)` (enemy shows on the minimap), `match_over: bool`, `tips_time: float`
 - `editor_mode`, `selected_id`, `layout` (used by the HUD editor)
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
@@ -149,8 +153,8 @@ listed here. If a part needs something new from the core, add it in its own file
   left of SCOPE: the reference's place beside the score bar is under the panel below 18:9); no
   two default touch areas overlap from 16:10 to 22:9 but the gear's on the panel's corner.
   RELOAD (`reload`, up and left of FIRE; grey on a full magazine, without reserve or with the fists
-  out) and SWITCH (`swap`, right beside RELOAD on its left, the reference's place: gun <-> fists,
-  showing the other one; a layout saved with it at its old place under the panel takes the new).
+  out) and SWITCH (`swap`, right beside RELOAD on its left, the reference's place:
+  `select_weapon(next_weapon())`, gun -> sidearm -> fists -> gun, showing the next one; a layout saved with it at its old place under the panel takes the new).
   `HUD.button_enabled(id)`: the settings left_fire (2 = OFF), reload_button, switch_button and
   freelook_button turn those buttons off in a match; the editor still places them (label "OFF").
 - `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
@@ -184,7 +188,7 @@ listed here. If a part needs something new from the core, add it in its own file
 ## Player (scripts/player.gd) -> called by the HUD's touch controls
 - movement `move_dir: Vector2` (joystick, length 0..1, y forward), `set_sprint(on)`
 - `add_look(rel_px: Vector2, from_fire_button: bool)`, `set_firing(on)`, `toggle_ads()`,
-  `do_jump()`, `toggle_crouch()`, `toggle_prone()`, `do_reload()`, `select_weapon(i)` (0 gun, 1 fists),
+  `do_jump()`, `toggle_crouch()`, `toggle_prone()`, `do_reload()`, `select_weapon(i)` (a kit index: 0 gun, 1 fists, 2 sidearm),
   `use_medkit()`, `use_shield()`, `use_grenade()`
 - state: `hp` (0..Fighter.MAX_HP=200), `alive`, `weapons[i]` (WeaponState: `def`, `ammo`,
   `reserve`, `reloading`, `reload_progress()`, `infinite()`), `current`, `stance`
@@ -217,6 +221,23 @@ listed here. If a part needs something new from the core, add it in its own file
   `crosshair` ("ring" | "wide" | "dot"), `scope`, `auto`. `Weapons.PICKABLE` = pick-grid order.
   Movement by class: `Weapons.CLASS_MOVE` / `move_mult(def)` x `Fighter.RUN_SPEED` etc. (the rifle's
   speeds): fists 1.15, SMG 1.06, rifle and pistol 1.0, shotgun 0.97, marksman 0.95, sniper 0.92.
+- The kit (`Fighter.set_loadout(gun_id)`, every mode): `weapons` = [the gun, fists, the sidearm],
+  indexes `Weapons.GUN` 0, `FISTS` 1, `SIDE` 2 (the fists stay at 1 so an older build reads the gun
+  and the fists; it shows index 2 as the fists). `Weapons.SIDEARM` = "sidearm" (WREN 9, not in
+  PICKABLE, the same whatever the gun). `Fighter.sidearm()`, `next_weapon()` (SWITCH's order
+  `Weapons.CYCLE` = [GUN, SIDE, FISTS], skipping what `can_draw(i)` refuses: before a pick only the
+  fists), `CharacterModel.back_model` (the gun on the back while the sidearm or the fists are out).
+- Online hit checks (a hit does not say which weapon made it): `Fighter.net_arms()` = the gun and
+  the fists, + the sidearm while `held_recently(Weapons.SIDE)` (a RemoteFighter: its states had
+  index 2 now or within `RemoteFighter.HELD_GRACE_MS`); `Weapons.hit_cap(defs, zone)`,
+  `hit_rate(defs)`, `min_interval(defs)` bound the damage, the hit and the shot rate
+  (`Arena._remote_arms()`: the round's gun, the fists, the sidearm when held; TeamArenaNet
+  `max_hit_by`, `_hit_rate_ok`, `_shot_rate_ok` per sender). The gun's cap is not loosened while
+  the gun is held. The bot draws the sidearm on an empty magazine within `Bot.SIDEARM_DRAW_M`
+  (`_choose_arm`), and goes back to the gun past `SIDEARM_KEEP_M`, on an empty sidearm magazine
+  (reloading or not, while the gun has rounds) or when the fight breaks off; `_arm_up` runs that
+  choice at the end of every path of `_think` (the zone run and team errands too) before the
+  reload of an empty magazine.
 
 ## Map (scripts/map_builder.gd) -> used by arena.gd
 - `build(parent: Node3D)` creates the environment (`env: WorldEnvironment`, `sun: DirectionalLight3D`),

@@ -26,6 +26,10 @@ const ZONE_AHEAD_S := 8.0
 const ZONE_HOLD_R := 3.0
 ## ... and walks the last this many metres straight (the navigation path ends 0.9 m short).
 const ZONE_STEP_M := 1.5
+## The sidearm (_choose_arm): drawn when the gun's magazine runs empty with the enemy in sight this
+## close (m), instead of a reload in the open; put away for the gun past SIDEARM_KEEP_M.
+const SIDEARM_DRAW_M := 8.0
+const SIDEARM_KEEP_M := 12.0
 
 var target: Fighter
 var state := S.SEARCH
@@ -215,12 +219,14 @@ func _think(delta: float) -> void:
 			_aim_and_shoot(delta)
 		else:
 			_face_point(_zone_goal + Vector3.UP * 1.5, delta, 0.6)
+		_arm_up()
 		if weapon().ammo <= 0 and not weapon().reloading:
 			start_reload()
 		_check_stuck(delta)
 		return
 	_maybe_grenade()
 	if (state == S.SEARCH or state == S.CHASE) and not allies.is_empty() and _team_errand(delta, state == S.SEARCH):
+		_arm_up()
 		if weapon().ammo <= 0 and not weapon().reloading:
 			start_reload()
 		_check_stuck(delta)
@@ -244,6 +250,7 @@ func _think(delta: float) -> void:
 					state = S.ENGAGE
 		_:
 			_search(delta)
+	_arm_up()
 	if weapon().ammo <= 0 and not weapon().reloading:
 		start_reload()
 	_zone_clamp_move()
@@ -377,11 +384,9 @@ func _engage(delta: float) -> void:
 	var to := tpos - global_position
 	to.y = 0.0
 	var dist := to.length()
-	# One gun per round (Lone Wolf): keep the range that suits it; fists only when it is dry.
-	if current != 0 and (gun().ammo > 0 or gun().reserve > 0):
-		switch_weapon(0)
-	elif current == 0 and gun().ammo <= 0 and gun().reserve <= 0 and not gun().reloading:
-		switch_weapon(1)
+	# One gun per round (Lone Wolf): keep the range that suits it; the sidearm when the gun runs
+	# empty up close, the fists only when both are dry.
+	_choose_arm(dist)
 	# Strafe left/right, keep a comfortable distance.
 	strafe_timer -= delta
 	if strafe_timer <= 0.0:
@@ -447,6 +452,50 @@ func _aim_and_shoot(delta: float) -> void:
 			burst_left -= 1
 			if burst_left <= 0:
 				burst_pause = float(p.pause) * rng.randf_range(0.7, 1.4)
+
+
+## Which weapon of the kit to hold in a fight with the enemy `dist` m away: the gun while it has
+## rounds; its magazine empty with the enemy within SIDEARM_DRAW_M, the sidearm instead of a reload
+## in the open (unless the reload is nearly done); back to the gun (which _think then reloads) once
+## the sidearm's magazine is empty (even with its reload begun: the gun's reserve first) or the
+## enemy is past SIDEARM_KEEP_M (out of sight, or the fight over: _arm_up); the fists only when
+## the gun and the sidearm are both dry.
+func _choose_arm(dist: float) -> void:
+	var g := gun()
+	var sa := sidearm()
+	var gun_dry := g.ammo <= 0 and g.reserve <= 0 and not g.reloading
+	var side_dry := sa == null or (sa.ammo <= 0 and sa.reserve <= 0 and not sa.reloading)
+	match current:
+		Weapons.SIDE:
+			if not gun_dry and (sa.ammo <= 0 or dist > SIDEARM_KEEP_M):
+				switch_weapon(Weapons.GUN)
+			elif gun_dry and side_dry:
+				switch_weapon(Weapons.FISTS)
+		Weapons.GUN:
+			if g.ammo <= 0 and dist <= SIDEARM_DRAW_M and sa != null and sa.ammo > 0 \
+					and not (g.reloading and g.reload_progress() > 0.6):
+				switch_weapon(Weapons.SIDE)
+			elif gun_dry:
+				switch_weapon(Weapons.FISTS if side_dry else Weapons.SIDE)
+		_:
+			if not gun_dry:
+				switch_weapon(Weapons.GUN)
+			elif not side_dry:
+				switch_weapon(Weapons.SIDE)
+
+
+## The kit at the end of every path of _think, just before its reload of an empty magazine: in a
+## fight with the enemy in sight, _choose_arm (so a magazine emptied this frame is answered now:
+## the sidearm drawn up close, or the gun back for an emptied sidearm, never a reload of the
+## sidearm while the gun has rounds); otherwise (fight broken off, healing, heading into the zone,
+## on a team errand) the sidearm goes away for the gun, reloaded out of sight.
+func _arm_up() -> void:
+	if state == S.ENGAGE and see_target and target != null:
+		var to := target.global_position - global_position
+		to.y = 0.0
+		_choose_arm(to.length())
+	elif current == Weapons.SIDE and (gun().ammo > 0 or gun().reserve > 0 or gun().reloading):
+		switch_weapon(Weapons.GUN)
 
 
 ## Preferred fighting distance (min, max) for the round's gun.

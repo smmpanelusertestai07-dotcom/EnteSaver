@@ -35,6 +35,12 @@ var _smooth := NetSmoother.new()
 var away := false
 var decided_here := false
 var hp_cap := -1.0
+## The kit index each of its states reported, with when (this phone's clock, ms): the hit checks
+## allow what a weapon it held within HELD_GRACE_MS can do, since a hit and the state that says the
+## hand changed may arrive in either order. An older build's index 2 does not exist (it has no
+## sidearm); this build's index 2 reads as the sidearm on an older build's phone as its fists.
+const HELD_GRACE_MS := 750
+var _held_ms := {}
 
 
 ## Its player went away (frozen; `here`: decided by this phone) or came back.
@@ -50,7 +56,13 @@ func set_away(on: bool, here: bool) -> void:
 		hp_cap = hp
 
 
-## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; flags: 1 sprint, 2 ads,
+## Whether its states had weapon `index` in hand now or within HELD_GRACE_MS.
+func held_recently(index: int) -> bool:
+	return index == current or Time.get_ticks_msec() - int(_held_ms.get(index, -1000000)) <= HELD_GRACE_MS
+
+
+## [x, y, z, yaw, pitch, stance, flags, weapon index, hp, round]; the weapon index is the kit's
+## (Weapons.GUN, FISTS, SIDE), clamped to the kit on arrival; flags: 1 sprint, 2 ads,
 ## 4 healing, 8 on the floor; DUO / SQUAD only (never in the 1 vs 1): 16 knocked (the hp value is
 ## then the knock HP), 32 reviving a teammate.
 static func pack(f: Fighter, round_index := 1) -> PackedFloat32Array:
@@ -70,6 +82,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	hp_left = hp
 	_hp_reported = hp
 	hp_cap = -1.0
+	_held_ms.clear()
 	_smooth.clear()
 
 
@@ -97,6 +110,7 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 		_net_heal = heal
 		model.play_heal(heal)
 	var wi := clampi(int(s[7]), 0, weapons.size() - 1)
+	_held_ms[wi] = Time.get_ticks_msec()
 	if wi != current:
 		switch_weapon(wi)
 	if (flags & 16) != 0:

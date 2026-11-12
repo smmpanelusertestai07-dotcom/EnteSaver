@@ -216,7 +216,8 @@ static func weapon_main(w: Dictionary, vs: Vector2) -> Rect2:
 	return Rect2(tl, Vector2(PANEL_W * s, s))
 
 
-## The three small slots under the main slot, left to right: gun, (empty), fists.
+## The three small slots under the main slot, left to right: the kit in SWITCH's order
+## (Weapons.CYCLE): the gun, the sidearm, the fists.
 static func weapon_slots(w: Dictionary, vs: Vector2) -> Array[Rect2]:
 	var s := size_px(w, vs)
 	var tl := center(w, vs) - Vector2(PANEL_W, PANEL_H) * s * 0.5
@@ -226,6 +227,15 @@ static func weapon_slots(w: Dictionary, vs: Vector2) -> Array[Rect2]:
 	for i in 3:
 		out.append(Rect2(Vector2(tl.x + i * (sw + gap), tl.y + s * 1.1), Vector2(sw, s * 0.95)))
 	return out
+
+
+## TRAINING GROUND's CHANGE GUN (HUD._can_repick): a small plate left of the small slots' row,
+## below the score bar's band, as tall as half a slot.
+static func weapon_repick(w: Dictionary, vs: Vector2) -> Rect2:
+	var s := size_px(w, vs)
+	var row := weapon_slots(w, vs)[0]
+	var size := Vector2(s * 1.25, s * 0.56)
+	return Rect2(Vector2(row.position.x - s * 0.1 - size.x, row.get_center().y - size.y * 0.5), size)
 
 
 static func minimap_rect(w: Dictionary, vs: Vector2) -> Rect2:

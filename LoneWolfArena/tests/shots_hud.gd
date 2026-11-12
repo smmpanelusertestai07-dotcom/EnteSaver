@@ -6,7 +6,9 @@ extends Node
 ## countdown, round banner,
 ## the bot in view (red crosshair), firing (each shot its own damage number, hit marker),
 ## separate damage numbers in a row (never on top of each other), red-dot ADS, the RELOAD button
-## (grey on a full magazine) and the reload ring, fists and back with SWITCH, the lever shotgun's
+## (grey on a full magazine) and the reload ring, the kit's three small slots with each one held
+## (the gun, the WREN 9 sidearm with its rounds, the fists) and SWITCH's cycle through them, the
+## sidearm's reload, the lever shotgun's
 ## own silhouette, sniper scope, sprint (stick past the ring and the
 ## button), the settings gear (over the weapon panel's corner), scoreboard (tap on the score bar,
 ## clear of the weapon panel), healing, low HP with
@@ -178,19 +180,41 @@ func run(at: Node) -> int:
 	await at.wait(0.6)
 	await at.shot("hud_08_reload")
 	await at.wait(2.0)
-	# Fists from their slot, then SWITCH (showing the gun now) back to the gun and to the fists.
-	await _tap(at, HudLayout.weapon_slots(hud.layout.weapons, vs)[2].get_center())
+	# The kit: the gun held (its slot lit), the sidearm from its small slot (its rounds shown), the
+	# fists from theirs, then SWITCH round the cycle gun -> sidearm -> fists -> gun.
+	var slots := HudLayout.weapon_slots(hud.layout.weapons, vs)
+	_check(p.current == Weapons.GUN and p.weapons.size() == 3 and p.sidearm().id == Weapons.SIDEARM, "the kit: gun, fists, sidearm", at)
+	await at.shot("hud_08b_gun_held")
+	await _tap(at, slots[1].get_center())
+	await at.wait(0.4)
+	_check(p.current == Weapons.SIDE and p.weapon().id == Weapons.SIDEARM, "the middle slot draws the sidearm", at)
+	_check(hud._panel_weapon() == p.sidearm(), "the main slot shows the sidearm's magazine", at)
+	p.sidearm().ammo = 5
+	await _tap(at, HudLayout.center(hud.layout.reload, vs))
+	_check(p.sidearm().reloading, "RELOAD reloads the sidearm in hand", at)
+	await at.wait(0.3)
+	await at.shot("hud_08c_sidearm_reload")
+	var rt := 0.0
+	while p.sidearm().reloading and rt < 12.0:      # (the capture box runs the game slower than the clock)
+		await at.wait(0.25)
+		rt += 0.25
+	_check(p.sidearm().ammo == 12 and p.sidearm().reserve == int(Weapons.DEFS[Weapons.SIDEARM].reserve) - 7,
+		"the sidearm's reload takes from its spare rounds (%d / %d)" % [p.sidearm().ammo, p.sidearm().reserve], at)
+	await at.shot("hud_08d_sidearm_held")
+	await _tap(at, slots[2].get_center())
 	await at.wait(0.4)
 	await at.shot("hud_09_fists")
-	_check(p.current == 1, "fist slot selects the fists", at)
+	_check(p.current == Weapons.FISTS, "fist slot selects the fists", at)
 	var swap_c := HudLayout.center(hud.layout.swap, vs)
-	await _tap(at, swap_c)
-	var back_to_gun := p.current == 0
-	await at.wait(0.3)
-	await _tap(at, swap_c)
-	_check(back_to_gun and p.current == 1, "SWITCH swaps the gun and the fists", at)
+	var cycle: Array[int] = []
+	for i in 3:
+		await _tap(at, swap_c)
+		cycle.append(p.current)
+		await at.wait(0.3)
+	_check(cycle == [Weapons.GUN, Weapons.SIDE, Weapons.FISTS], "SWITCH cycles gun -> sidearm -> fists (%s)" % [cycle], at)
 	await _tap(at, HudLayout.weapon_main(hud.layout.weapons, vs).get_center())
 	await at.wait(0.3)
+	_check(p.current == Weapons.GUN, "the main slot draws the gun with the fists out", at)
 	# The lever shotgun in the weapon panel (its own silhouette, not the pump gun's).
 	p.set_loadout("lever")
 	await at.wait(0.6)
