@@ -115,6 +115,9 @@ const AWAY_MS := SILENCE_MS - 1500
 const AWAY_AFTER_MS := 3000
 const AWAY_GRACE_MS := 90000
 const SELF_GRACE_MS := AWAY_GRACE_MS - 1500
+## What a phone says while its match loads (keep-alive, the direct link's offer): heard from an
+## AWAY phone, these do not bring its fighter back (its arena is not up to report it yet).
+const LOAD_KINDS := ["ka", "dh", "dc"]
 const QUIET_MS := 15000        # nothing at all from the relay this long outside a match: the link is dead
 const KEEP_ALIVE_MS := 60000   # the keep-alive CONNECT asks for: the relay has dropped a phone away longer
 const LOAD_KEEP_MS := 30000    # a new session's keep-alives while its arena loads stop after this
@@ -197,6 +200,7 @@ var _join_t := 0.0
 var _outgoing := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _last_heard := 0
+var _last_live := 0             # the last message from the other phone that its arena is up (LOAD_KINDS aside)
 var _inbox_budget := 8.0
 var _crypto := Crypto.new()
 var _dir_wants := {}           # who wants the player cards (the ONLINE window, PROFILE): listened to while any does
@@ -659,7 +663,9 @@ func _process(delta: float) -> void:
 	if in_session and session_multi:
 		_check_members(now)
 	elif in_session:
-		_set_away(String(opponent.get("id", "")), now - _last_heard > AWAY_AFTER_MS)
+		# (an AWAY phone stays so while it only says it is loading: LOAD_KINDS)
+		var opp := String(opponent.get("id", ""))
+		_set_away(opp, now - (_last_live if _away_ids.has(opp) else _last_heard) > AWAY_AFTER_MS)
 	if in_session and now - _last_heard > wait_ms:
 		end_session("left")
 	if not _ginv.is_empty() and now - int(_ginv.t) > INVITE_TIMEOUT_MS:
@@ -2453,9 +2459,10 @@ func _on_room(msg: PackedByteArray) -> void:
 	_last_heard = Time.get_ticks_msec()
 	_present(_last_heard)            # (this phone is back in the match: it hears the other one)
 	var kind := String((d as Dictionary).get("k", ""))
-	if in_session and kind != "ka":
-		# (a phone that comes back after a restart says "ka" while its arena loads: its fighter
-		# stays frozen here, and can be hit, until the arena is up)
+	if in_session and not kind in LOAD_KINDS:
+		# (a phone that comes back after a restart says "ka" while its arena loads, and offers
+		# its direct link: its fighter stays frozen here, and can be hit, until the arena is up)
+		_last_live = _last_heard
 		_set_away(String(opponent.get("id", "")), false)
 	match kind:
 		"join", "joined":

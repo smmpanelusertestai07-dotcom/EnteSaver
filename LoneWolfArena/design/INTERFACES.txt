@@ -65,8 +65,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - Cloud away rules: a player silent `AWAY_AFTER_MS` is AWAY (frozen, its HP decided on the other
   phone), LEFT only after `grace_ms()` (`AWAY_GRACE_MS` 90 s; checks shorten it with
   LW_AWAY_GRACE_MS, read only outside a release build); this phone away `self_grace_ms()` (1.5 s
-  less) has dropped out ("connection lost"). A "ka" keep-alive does not end AWAY (a phone back
-  after a restart says it while its arena loads; its fighter stays frozen and hittable meanwhile).
+  less) has dropped out ("connection lost"). A "ka" keep-alive (or a direct-link "dh" / "dc") does
+  not end AWAY, in the message nor in the frame check (`Cloud.LOAD_KINDS`: a phone back after a
+  restart says them while its arena loads; its fighter stays frozen and hittable meanwhile).
 - Rejoining after the app was closed (1 vs 1 over the relay only; never PLAY WITHOUT INTERNET,
   DUO / SQUAD or all-human matches): Cloud keeps the live session in `Cloud.resume_path()` (sealed
   AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
