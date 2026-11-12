@@ -1,14 +1,19 @@
 class_name HudPanels
 extends Control
 ## Overlay panels of the in-match HUD, drawn above everything else:
-##  - the pre-round weapon pick: near-black panel with corner brackets, "SELECT WEAPON FOR
-##    ROUND n", a "| WEAPON" label, a 6-column grid of gun cards (silhouette, name, class; the
+##  - the pre-round weapon pick: near-black panel with corner brackets, a header that names the
+##    rounds the pick holds for ("PICK FOR ROUNDS 1-2"; DUO / SQUAD "PICK YOUR WEAPON FOR ROUND n",
+##    the target dummy "PICK YOUR WEAPON", see pick_header), a "| WEAPON" label, a 6-column grid of gun cards (silhouette, name, class; the
 ##    choice gets a yellow outline and a tick), the choice's bars, magazine and attachments, a
 ##    countdown and a yellow SELECT button. It calls on_pick exactly once: SELECT or the close X
 ##    confirm the current choice, so does the timer. A 1 vs 1 adds the ROUNDS strip under the title
 ##    (a numbered disc per round of the match: blue the rounds this player picks for, orange the
 ##    other's, the pair being picked ringed in yellow) and greys the guns on cooldown (our clock
-##    glyph and "n ROUNDS" on the card; a tap on one does nothing);
+##    glyph and "n ROUNDS" on the card; a tap on one does nothing). The side that does not pick
+##    sees the same panel read-only (open_pick with `watch` = the picker's name): the cards, the
+##    strip from its own view and the countdown ring, no choice marked, nothing to tap, SELECT
+##    dimmed, the header "WAITING FOR <NAME> TO PICK FOR ROUNDS 3-4"; it never calls on_pick and
+##    the HUD closes it once the pick arrives (its X closes it sooner);
 ##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs. It stays
 ##    between the widgets listed in `avoid` (the HUD passes the minimap and the weapon panel),
 ##    so on 16:9 it gets narrower and its header and columns shrink to fit instead of covering them.
@@ -31,6 +36,8 @@ var pick_total := 1.0
 var pick_round := 1
 var pick_cooldown := {}           # gun -> rounds it still waits (RoundRules.cooldowns): greyed, not pickable
 var pick_strip: Array = []        # per round of the match: true when this player picks its gun (ROUNDS strip)
+var pick_watch := ""              # the picker's name while this side only watches the pick (read-only)
+var pick_last := 0                # the match's last round (0: no pairs, the target dummy)
 var board_open := false
 var avoid: Array[Rect2] = []      # screen rects the scoreboard keeps clear of (set by the HUD)
 var _pick_cb := Callable()
@@ -49,36 +56,65 @@ func _ready() -> void:
 
 # ---------------------------------------------------------------- weapon pick
 
+## `watch`: the picker's name when this side only watches (read-only: no choice, no callback);
+## `last`: the match's last round, for the header's pair of rounds (0: just "PICK YOUR WEAPON").
 func open_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, round_index := 1,
-		cooldown := {}, strip := []) -> void:
+		cooldown := {}, strip := [], watch := "", last := 0) -> void:
 	pick_options = options.duplicate()
 	if pick_options.is_empty():
 		pick_options = [Weapons.DEFAULT_PICK]
 	pick_cooldown = cooldown.duplicate()
 	pick_strip = strip.duplicate()
+	pick_watch = watch
+	pick_last = last
 	pick_choice = preselect if pick_options.has(preselect) and not pick_cooldown.has(preselect) else String(pick_options[0])
 	if pick_cooldown.has(pick_choice):
 		for o: String in pick_options:
 			if not pick_cooldown.has(o):
 				pick_choice = o
 				break
+	if watch != "":
+		pick_choice = ""                 # (the other side chooses: nothing is marked here)
 	pick_total = maxf(seconds, 0.1)
 	pick_left = pick_total
 	pick_round = round_index
-	_pick_cb = on_pick
-	_pick_done = false
+	_pick_cb = Callable() if watch != "" else on_pick
+	_pick_done = watch != ""
 	pick_open = true
 	board_open = false
 	_anim = 0.0
 	visible = true
 
 
-## Closes the panel without a callback (the arena picked for the player).
+## Closes the panel without a callback (the arena picked for the player, or the pick watched
+## arrived).
 func close_pick() -> void:
 	_pick_done = true
 	_pick_cb = Callable()
 	pick_open = false
+	pick_watch = ""
 	visible = board_open
+
+
+## The panel is open read-only: the other side picks (see open_pick's `watch`).
+func watching() -> bool:
+	return pick_open and pick_watch != ""
+
+
+## The header as text parts [[text, colour], ...]: the picker "PICK FOR ROUNDS 1-2" (a pair cut
+## short by the match's last round "PICK FOR ROUND 9"), the side that waits "WAITING FOR <NAME> TO
+## PICK FOR ROUNDS 3-4", DUO / SQUAD (`own`: every fighter picks for its round) "PICK YOUR WEAPON
+## FOR ROUND n", the target dummy (`last` 0) "PICK YOUR WEAPON".
+static func pick_header(r: int, last: int, watch := "", own := false) -> Array:
+	var white := Color(1, 1, 1)
+	if own:
+		return [["PICK YOUR WEAPON FOR ", white], ["ROUND %d" % r, HudDraw.YELLOW]]
+	if last <= 0:
+		return [["PICK YOUR WEAPON", white]]
+	var span := RoundRules.pick_span(r, last)
+	if watch != "":
+		return [["WAITING FOR ", white], [watch.to_upper(), Color(1.0, 0.72, 0.52)], [" TO PICK FOR ", white], [span, HudDraw.YELLOW]]
+	return [["PICK FOR ", white], [span, HudDraw.YELLOW]]
 
 
 ## Confirms the current choice: calls on_pick once and closes.
@@ -126,6 +162,8 @@ func tick(delta: float, real: float) -> void:
 		if pick_left <= 0.0:
 			pick_left = 0.0
 			finish_pick()
+	elif watching():
+		pick_left = maxf(pick_left - delta, 0.0)      # (the ring runs; the picker's phone picks)
 	if board_open and arena != null:
 		_rows_t -= real
 		if _rows_t <= 0.0:
@@ -233,6 +271,12 @@ func board_close_rect() -> Rect2:
 # ---------------------------------------------------------------- input
 
 func tap(pos: Vector2) -> bool:
+	if watching():
+		if pick_close_rect().grow(6).has_point(pos):
+			close_pick()                     # (the prep line under PREPARE still says who picks)
+			Audio.play("ui_back", -6.0)
+			return true
+		return pick_rect().has_point(pos)    # read-only: no card, no SELECT
 	if pick_open:
 		if pick_rect().has_point(pos):
 			if select_rect().grow(4).has_point(pos) or pick_close_rect().grow(6).has_point(pos):
@@ -280,10 +324,16 @@ func _draw_pick() -> void:
 	HudDraw.vband(self, Rect2(r.position, Vector2(r.size.x, 0.08 * u)), Color(1, 1, 1, 0.07 * a), Color(1, 1, 1, 0.02 * a))
 	draw_line(Vector2(r.position.x, r.position.y + 0.08 * u), Vector2(r.end.x, r.position.y + 0.08 * u), Color(1, 1, 1, 0.1 * a), 1.0)
 	HudDraw.corner_brackets(self, r.grow(-4), 0.035 * u, Color(1, 1, 1, 0.4 * a), 2.0)
-	# Header: "SELECT WEAPON FOR ROUND 1" with the key part in yellow.
-	HudDraw.text_parts(self, [["SELECT WEAPON FOR ", Color(1, 1, 1)], ["ROUND %d" % pick_round, HudDraw.YELLOW]],
-		Vector2(r.get_center().x, r.position.y + 0.042 * u), int(0.038 * u), 1, 0, "bold", a)
+	# Header: "PICK FOR ROUNDS 1-2" (waiting: "WAITING FOR <NAME> TO PICK FOR ...") with the
+	# rounds in yellow, smaller when a long name would reach the X.
 	var xr := pick_close_rect()
+	var head := pick_header(pick_round, pick_last, pick_watch, arena is TeamArena)
+	var hfs := int(0.038 * u)
+	var room := (xr.position.x - r.get_center().x) * 2.0 - 0.04 * u
+	var hw := HudDraw.parts_width(head, hfs)
+	if hw > room:
+		hfs = maxi(10, int(hfs * room / hw))
+	HudDraw.text_parts(self, head, Vector2(r.get_center().x, r.position.y + 0.042 * u), hfs, 1, 0, "bold", a)
 	HudDraw.close_button(self, xr.get_center(), xr.size.x * 0.5, a)
 	if not pick_strip.is_empty():
 		_draw_strip(a, u)
@@ -302,7 +352,13 @@ func _draw_pick() -> void:
 	var sr := select_rect()
 	var fy := sr.get_center().y
 	var fx := r.position.x + 0.03 * u
-	_draw_details(Vector2(fx, fy), sr.position.x - 0.11 * u - fx, a, u)
+	var watch := pick_watch != ""
+	if watch:
+		var wl := "%s PICKS THE GUN FOR BOTH FIGHTERS" % pick_watch.to_upper()
+		HudDraw.text(self, wl, Vector2(fx, fy), _fit(wl, 0.024 * u, sr.position.x - 0.11 * u - fx, "semi"),
+			Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
+	else:
+		_draw_details(Vector2(fx, fy), sr.position.x - 0.11 * u - fx, a, u)
 	var cc := Vector2(sr.position.x - 0.06 * u, fy)
 	var cr := 0.03 * u
 	HudDraw.disk(self, cc, cr, Color(0, 0, 0, 0.5 * a))
@@ -312,9 +368,11 @@ func _draw_pick() -> void:
 	HudDraw.text(self, str(ceili(pick_left)), cc, int(0.034 * u), Color(HudDraw.RED if urgent else Color.WHITE, a), 1, 0, "number")
 	var pressed := _flash == "select" and _flash_t > 0.0
 	var bc := HudDraw.YELLOW.darkened(0.15) if pressed else HudDraw.YELLOW
+	if watch:
+		bc = Color(0.36, 0.37, 0.4)          # dimmed: the other side selects
 	draw_rect(sr, Color(bc, a))
-	HudDraw.vband(self, Rect2(sr.position, Vector2(sr.size.x, sr.size.y * 0.5)), Color(1, 1, 1, 0.25 * a), Color(1, 1, 1, 0.0))
-	HudDraw.text(self, "SELECT", sr.get_center(), int(0.036 * u), Color(0.1, 0.07, 0.02, a), 1, 0, "bold")
+	HudDraw.vband(self, Rect2(sr.position, Vector2(sr.size.x, sr.size.y * 0.5)), Color(1, 1, 1, (0.08 if watch else 0.25) * a), Color(1, 1, 1, 0.0))
+	HudDraw.text(self, "SELECT", sr.get_center(), int(0.036 * u), Color(0.62, 0.63, 0.66, a) if watch else Color(0.1, 0.07, 0.02, a), 1, 0, "bold")
 	draw_set_transform(Vector2.ZERO)
 
 
@@ -381,8 +439,8 @@ func _draw_strip(a: float, u: float) -> void:
 			HudDraw.ring(self, c, dr + 0.006 * u, Color(HudDraw.YELLOW, a), maxf(2.0, 0.004 * u))
 		HudDraw.text(self, str(rr), c, int(0.024 * u), Color(1, 1, 1, a), 1, 0, "number")
 	var nx := strip_disc(pick_strip.size()).x + 0.05 * u
-	HudDraw.text(self, "THE GUN YOU PICK RESTS FOR THE %d ROUNDS AFTER" % RoundRules.COOLDOWN_ROUNDS, Vector2(nx, cy),
-		_fit("THE GUN YOU PICK RESTS FOR THE 4 ROUNDS AFTER", 0.02 * u, pr.end.x - nx - 0.03 * u, "semi"),
+	var note := "THE GUN %s RESTS FOR THE %d ROUNDS AFTER" % ["PICKED" if pick_watch != "" else "YOU PICK", RoundRules.COOLDOWN_ROUNDS]
+	HudDraw.text(self, note, Vector2(nx, cy), _fit(note, 0.02 * u, pr.end.x - nx - 0.03 * u, "semi"),
 		Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
 
 

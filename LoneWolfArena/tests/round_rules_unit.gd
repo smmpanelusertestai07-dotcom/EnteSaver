@@ -3,10 +3,16 @@ extends RefCounted
 ## - the two-stage clock: stage 1 is 20 s, stage 2 90 s (SQUAD 120 s), each counted down on its own;
 ## - the zone over time: the whole hall and still through stage 1, closing evenly in stage 2 to
 ##   0.5 m exactly at its end, the centre sliding to the final spot; the circles are nested;
+## - the break between rounds: its steps in order (beat, result, score plates with the tick, the next
+##   round's band) and about 10.5 s, so a round without a pick starts about 15.5 s after the kill;
+##   the band's FINAL ROUND / MATCH POINT! line;
 ## - the 1 vs 1 weapon cooldown: a gun picked for a pair of rounds rests for the next 4 rounds
 ##   (4 ROUNDS, then 2), whoever picked it; both phones replace a pick that breaks it alike, and a
 ##   phone back from being away gets the same cooldowns from the "sync" text;
-## - the kit: 3 shield walls a round.
+## - the pick panel: its header names the pair of rounds the pick holds for; the side that does not
+##   pick sees it read-only (no choice, no tap, no callback, also when its ring runs out);
+## - the kit: 3 shield walls a round; before a pick round's pick only the fists (await_pick), the
+##   old gun cannot be drawn, and the pick ends it.
 
 const ArenaCode := preload("res://scripts/arena.gd")     # (the arena script has no class name)
 
@@ -18,7 +24,9 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._stage_clock()
 	me._zone_over_time()
+	me._break_steps()
 	me._cooldown()
+	me._pick_panel()
 	me._kit()
 
 
@@ -44,7 +52,7 @@ func _stage_clock() -> void:
 
 func _zone_over_time() -> void:
 	var s2 := RoundRules.STAGE2_S
-	var start := 27.6
+	var start := MapBuilder.ZONE_START_R
 	var from := Vector3(0, 0, 0)
 	var to := Vector3(14.0, 0, -9.0)
 	var still := true
@@ -67,8 +75,46 @@ func _zone_over_time() -> void:
 		var c1 := RoundRules.zone_center_at(e + 1.0, from, far, s2)
 		nested = nested and c0.distance_to(c1) <= RoundRules.zone_radius_at(e, start, s2) - RoundRules.zone_radius_at(e + 1.0, start, s2)
 	_check(nested, "each later circle lies inside the earlier ones")
+	# Stage 2 starts wide (a tuning from an estimate): about 1.1-1.15 x the hall's long side, so a
+	# fighter standing at its spawn end stays inside until roughly the last 35-45 s (the final spot
+	# in the middle; nearer or farther spots move that by some seconds).
+	var long_side := MapBuilder.HX * 2.0
+	_check(start >= 1.1 * long_side and start <= 1.15 * long_side, "stage 2 starts at %.1f m, %.2f x the hall's long side" % [start, start / long_side])
+	var spawn := Vector3(-MapBuilder.HX - 2.0, 0, 0)
+	var out_at := -1.0
+	for i in 1100:
+		var e := float(i) * 0.1
+		if out_at < 0.0 and spawn.distance_to(RoundRules.zone_center_at(e, from, from, s2)) > RoundRules.zone_radius_at(e, start, s2):
+			out_at = e
+	var left := RoundRules.fight_time(s2) - out_at
+	_check(out_at > 0.0 and left >= 35.0 and left <= 45.0, "the spawn end leaves the zone with %.0f s of stage 2 left" % left)
+	var r40 := RoundRules.zone_radius_at(RoundRules.STAGE1_S + 41.0, start, s2)
+	_check(r40 > 0.5 * long_side and r40 < 0.7 * long_side, "41 s into stage 2 the circle is still %.2f of the hall wide" % (r40 / long_side))
 	_check(is_equal_approx(RoundRules.zone_next(5.0, s2), 15.0) and is_equal_approx(RoundRules.zone_next(30.0, s2), 80.0),
 		"zone_next: to the closing in stage 1, to its end in stage 2")
+
+
+func _break_steps() -> void:
+	var order := []
+	var at := 0.0
+	while at < 12.0:
+		var st := RoundRules.break_step(at)
+		if order.is_empty() or order[-1] != st:
+			order.append(st)
+		at += 0.05
+	_check(order == ["beat", "result", "score", "band", "done"], "the break: a beat, the result, the score plates, the round band (%s)" % str(order))
+	_check(RoundRules.BREAK_RESULT_AT >= 1.0 and RoundRules.BREAK_RESULT_AT <= 3.0, "the result band comes after a short beat")
+	_check(RoundRules.BREAK_S >= 10.0 and RoundRules.BREAK_S <= 11.0 and ArenaCode.BREAK_TIME == RoundRules.BREAK_S,
+		"the break lasts 10-11 s, the arena's break too")
+	var to_go := RoundRules.BREAK_S + ArenaCode.PREP_SHORT
+	_check(to_go >= 15.0 and to_go <= 16.5, "a round without a pick starts about 16 s after the kill (%.1f s)" % to_go)
+	_check(RoundRules.break_step(RoundRules.BREAK_S - 0.01) == "band" and RoundRules.break_step(RoundRules.BREAK_BAND_AT - 0.01) == "score",
+		"the next round's band closes the break, before the prep")
+	_check(RoundRules.break_score(RoundRules.BREAK_SCORE_AT + 0.1, 2, 3) == 2 and RoundRules.break_score(RoundRules.BREAK_TICK_AT, 2, 3) == 3
+		and RoundRules.BREAK_TICK_AT > RoundRules.BREAK_SCORE_AT and RoundRules.BREAK_TICK_AT < RoundRules.BREAK_BAND_AT,
+		"the winner's number counts up on the plates, from the old score")
+	_check(RoundRules.round_sub(9, 9, 4, 4, 5) == "FINAL ROUND" and RoundRules.round_sub(6, 9, 4, 1, 5) == "MATCH POINT!"
+		and RoundRules.round_sub(3, 9, 1, 1, 5) == "" and RoundRules.round_sub(2, 1, 0, 0, 1) == "", "the band's FINAL ROUND / MATCH POINT! line")
 
 
 func _cooldown() -> void:
@@ -109,7 +155,46 @@ func _cooldown() -> void:
 	a.free()
 
 
+func _pick_panel() -> void:
+	_check(RoundRules.pick_span(1, 9) == "ROUNDS 1-2" and RoundRules.pick_span(4, 9) == "ROUNDS 3-4"
+		and RoundRules.pick_span(9, 9) == "ROUND 9" and RoundRules.pick_span(1, 1) == "ROUND 1", "the pick covers a pair of rounds (the last one alone)")
+	var words := func(parts: Array) -> String:
+		var out := ""
+		for p: Array in parts:
+			out += String(p[0])
+		return out
+	_check(words.call(HudPanels.pick_header(1, 9)) == "PICK FOR ROUNDS 1-2", "the picker's header names its rounds")
+	_check(words.call(HudPanels.pick_header(3, 9, "Rex")) == "WAITING FOR REX TO PICK FOR ROUNDS 3-4", "the waiting side's header")
+	_check(words.call(HudPanels.pick_header(2, 3, "", true)) == "PICK YOUR WEAPON FOR ROUND 2"
+		and words.call(HudPanels.pick_header(1, 0)) == "PICK YOUR WEAPON", "DUO / SQUAD and the target dummy headers")
+	var hp := HudPanels.new()
+	hp.size = Vector2(1560, 720)
+	var got := []
+	var cb := func(id: String) -> void: got.append(id)
+	hp.open_pick(Weapons.PICKABLE, "ar", 14.0, cb, 3, {"ar": 4}, RoundRules.picker_rows(9, true), "REX", 9)
+	_check(hp.watching() and hp.pick_choice == "", "the waiting side's panel is read-only with no choice marked")
+	hp.tap(hp.card_rect(1).get_center())
+	hp.tap(hp.select_rect().get_center())
+	_check(hp.pick_choice == "" and hp.pick_open and got.is_empty(), "a card or SELECT tap does nothing there")
+	hp.tick(20.0, 0.1)
+	_check(hp.pick_open and got.is_empty() and hp.pick_left == 0.0, "its ring runs out without a pick")
+	hp.tap(hp.pick_close_rect().get_center())
+	_check(not hp.pick_open and not hp.watching(), "its X closes it")
+	hp.open_pick(Weapons.PICKABLE, "ar", 14.0, cb, 1, {}, RoundRules.picker_rows(9, true), "", 9)
+	_check(not hp.watching() and hp.pick_choice == "ar", "the picker's panel keeps its choice")
+	hp.tick(20.0, 0.1)
+	_check(got == ["ar"] and not hp.pick_open, "the picker's timer still picks")
+	hp.free()
+
+
 func _kit() -> void:
 	var f := Fighter.new()
 	_check(Fighter.START_SHIELDS == 3 and f.shields == 3, "a round starts with 3 shield walls")
+	f.set_loadout("sniper")
+	f.await_pick()
+	_check(f.awaiting_pick and f.current == 1 and f.weapon().id == "fists", "before the pick only the fists are in hand")
+	f.switch_weapon(0)
+	_check(f.current == 1, "the last pair's gun cannot be drawn before the pick")
+	f.set_loadout("smg")
+	_check(not f.awaiting_pick and f.current == 0 and f.gun().id == "smg", "the pick equips its gun")
 	f.free()

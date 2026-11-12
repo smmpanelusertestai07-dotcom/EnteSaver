@@ -16,8 +16,9 @@ signal rematch_asked
 ## The prep of a round that opens a pick pair (the pick panel closes a second before it ends).
 const PREP_TIME := 15.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
-const BREAK_TIME := 3.5
-const SPECTATE_EXTRA := 1.5       # s more between rounds while the eliminated player watches the killer
+## Between two rounds (Phase.BREAK): RoundRules' timed break, the same length on both phones
+## (online the host's "round" ends it; the guest goes on alone 8 s later if that never comes).
+const BREAK_TIME := RoundRules.BREAK_S
 ## The 1 vs 1's fight: stage 1 (the zone holds over the whole hall) and stage 2 (it closes to
 ## ZONE_MIN); RoundRules has the clock, team_arena.gd a longer SQUAD stage 2 (stage2_time).
 const ROUND_TIME := 110.0          # RoundRules.STAGE1_S + RoundRules.STAGE2_S
@@ -894,13 +895,18 @@ func _start_prep() -> void:
 	_bot_pick_t = -1.0
 	if pick_round:
 		picked_weapon = ""
+		for f in fighters:
+			f.await_pick()               # (fists only until the pick: never the last pair's gun)
+		var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
 		if _i_pick():
-			var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
 			hud.open_weapon_pick(Weapons.PICKABLE, preselected_pick(), prep_left - 1.0, _on_weapon_picked, pick_cooldowns(), strip)
 		else:
+			# The same panel read-only, until the other side's pick lands (the HUD watches
+			# picked_weapon); the line under PREPARE says it too once the panel is closed.
 			pick_note = "%s IS PICKING THE WEAPON" % bot.display_name
+			hud.watch_weapon_pick(Weapons.PICKABLE, prep_left - 1.0, bot.display_name, pick_cooldowns(), strip)
 			if not online:
-				_bot_pick_t = _rng.randf_range(1.5, 3.5)
+				_bot_pick_t = _rng.randf_range(2.5, 5.0)      # (long enough to see the panel it watches)
 	else:
 		pick_note = "WEAPON: " + String(player.gun().def.name)
 	if round_index == 1 and int(Game.profile.matches) < 3:
@@ -971,6 +977,11 @@ func _start_fight() -> void:
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(preselected_pick())
+	for f in fighters:
+		if f.awaiting_pick:
+			# The other phone's pick has not come yet (it still counts when it does): meanwhile
+			# the gun this side would have taken, never a fight with the fists only.
+			f.set_loadout(preselected_pick())
 	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:
@@ -985,11 +996,16 @@ func _start_fight() -> void:
 		_place_dummy()
 		zone_radius = 999.0
 		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
-	else:
-		var point := rounds_to_win > 1 and maxi(int(score.player), int(score.bot)) == rounds_to_win - 1
-		var final := rounds_to_win > 1 and round_index >= last_round()
-		hud.show_round_banner(round_index, map_name, "FINAL ROUND" if final else ("MATCH POINT!" if point else ""))
+	elif round_index == 1:
+		# (Later rounds show their band at the end of the break, before the prep: nothing covers
+		# the fight's start then.)
+		hud.show_round_banner(round_index, map_name, round_sub(round_index))
 	Audio.play("countdown_go", 0.0)
+
+
+## The sub-line of round `r`'s band from the score now: FINAL ROUND, MATCH POINT! or "".
+func round_sub(r: int) -> String:
+	return RoundRules.round_sub(r, last_round(), int(score.player), int(score.bot), rounds_to_win)
 
 
 func _physics_process(delta: float) -> void:
@@ -1056,8 +1072,7 @@ func _physics_process(delta: float) -> void:
 			if _break_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
 			# Online the host starts the next round; the guest goes on alone if that never comes.
-			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
-			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 8.0:
+			if (_break_t >= BREAK_TIME and (not online or Game.session.is_host)) or _break_t >= BREAK_TIME + 8.0:
 				_next_round()
 
 
@@ -1179,7 +1194,7 @@ func _update_zone_mesh() -> void:
 ## obstacles), a new one every round. Online every phone gets the same (Cloud.match_seed: the room's
 ## key and the round); TRAINING draws it at random. (The start circle, from the map's centre, always
 ## holds the final one, and the circles of stage 2 are nested: the centre moves at most 18.9 m in
-## stage 2, less than the 27.1 m the radius shrinks.)
+## stage 2, less than the 46.5 m the radius shrinks.)
 func zone_final_for(r: int) -> Vector3:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = Game.session.match_seed("zone%d" % r) if online and Game.session != null else _rng.randi()
@@ -1375,7 +1390,8 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 		_break_t = 0.0
 		Game.mark("round over")
 	if not decided:
-		hud.show_round_result("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs)
+		hud.show_break("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs,
+			0 if winner == null else (1 if winner == player else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
 		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line)
 	elif winner != player and winner != null and not player.alive:

@@ -78,6 +78,7 @@ var hp: float:
 var alive := true
 var weapons: Array[WeaponState] = []
 var current := 0
+var awaiting_pick := false        # a pick round before its pick: fists only (await_pick)
 var stance := Stance.STAND
 var crouching: bool:
 	get:
@@ -186,10 +187,12 @@ func setup_fighter(bundle: String, weapon_id := Weapons.DEFAULT_PICK) -> void:
 		_exclude.append(hb.get_rid())
 
 
-## The round's gun in slot 0 and fists in slot 1 (Lone Wolf: both players get the same gun).
+## The round's gun in slot 0 and fists in slot 1 (Lone Wolf: both players get the same gun). It
+## ends await_pick.
 func set_loadout(weapon_id: String) -> void:
 	if not Weapons.DEFS.has(weapon_id):
 		weapon_id = Weapons.DEFAULT_PICK
+	awaiting_pick = false
 	weapons.clear()
 	weapons.append(WeaponState.new(weapon_id))
 	weapons.append(WeaponState.new("fists"))
@@ -308,6 +311,20 @@ func eye_position() -> Vector3:
 func aim_forward() -> Vector3:
 	var b := Basis(Vector3.UP, aim_yaw) * Basis(Vector3.RIGHT, aim_pitch)
 	return -b.z
+
+
+## A 1 vs 1 pick round before its pick lands (Arena._start_prep): the fists in hand, and the gun
+## still in slot 0 (the last pair's, or the last match's) neither held, holstered on the back nor
+## drawable, so neither phone shows a gun that is not this pair's; set_loadout (the pick) ends it.
+## The other phone's copy follows by the weapon index its state carries (1: the fists).
+func await_pick() -> void:
+	if weapons.size() > 1:
+		weapon().cancel_reload()
+		current = 1
+	awaiting_pick = true
+	if model:
+		model.empty_hands()
+	weapon_switched.emit()
 
 
 func weapon() -> WeaponState:
@@ -723,7 +740,7 @@ func _on_reload_done() -> void:
 
 
 func switch_weapon(index: int) -> void:
-	if index == current or index < 0 or index >= weapons.size() or not alive or knocked:
+	if index == current or index < 0 or index >= weapons.size() or not alive or knocked or (awaiting_pick and index == 0):
 		return
 	weapon().cancel_reload()
 	current = index
