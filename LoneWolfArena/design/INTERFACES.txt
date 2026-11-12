@@ -435,7 +435,14 @@ listed here. If a part needs something new from the core, add it in its own file
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
   `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
   `ModeFormat`: `Lobby.mode_format()`, "BOT: <level>  ·  FIRST TO n", "TARGET DUMMY" or "1 VS 1
-  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`); the
+  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`; each
+  card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
+  (scripts/mode_help.gd: `ModeHelp.PAGES`, `pages_of(m)`, `show_page(i)`, `turn(step)`, nodes
+  HelpPicture, HelpTitle, HelpText, HelpDots / HelpDot_<i>, HelpPrev, HelpNext; X and back return to
+  SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the team-size box
+  (`LobbyDialogs.open_size_box()`, `size_box`, nodes SizeBox / SizeBoxPanel / SizeTile_<1|2|4>,
+  `size_tile_text(m, n, members)`, `size_box_allowed(member, searching)`): a tile and SELECT MODE's
+  size chips both go through `LobbyDialogs.pick_size(m, n)`); the
   opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) are on the TRAINING GROUND card:
   a tap picks TRAINING GROUND with that opponent and closes SELECT MODE; DUMMY sets
   `Game.practice` (session only, an online match ignores it). START: TRAINING

@@ -120,7 +120,10 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   (WARDROBE | ONLINE 1 VS 1, glyph and caption each); bottom-right the mode card (TRAINING GROUND /
   CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
   ONLINE"; a tap opens SELECT MODE: the two mode cards, TRAINING GROUND's with the opponent chips
-  EASY, NORMAL, HARD, DUMMY) and the big yellow START (LONE WOLF: searches for a match). Searching
+  EASY, NORMAL, HARD, DUMMY, each card with a small "?" at the art's top right opening a 4-page
+  picture help with page dots, arrows and swipe; a figure in a dark disc at the card's right end
+  opens a compact box just above the card with the team-size tiles SOLO / DUO / SQUAD (DUEL in a
+  group of two), the current one framed yellow with the tick corner) and the big yellow START (LONE WOLF: searches for a match). Searching
   has no popup: a dark search tab with a yellow edge hangs from the top centre (about x 0.37-0.63,
   y 0-0.12): a small line "ESTIMATED 0:10" for the first 10 s, then "STILL SEARCHING...", a big m:ss
   count-up, "PLAYERS n/N" for DUO / SQUAD, a cancel X at its right end (none for a group member);
