@@ -870,6 +870,8 @@ func _start_prep() -> void:
 	_bot_pick_t = -1.0
 	if pick_round:
 		picked_weapon = ""
+		for f in fighters:
+			f.await_pick()               # (fists only until the pick: never the last pair's gun)
 		var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
 		if _i_pick():
 			hud.open_weapon_pick(Weapons.PICKABLE, preselected_pick(), prep_left - 1.0, _on_weapon_picked, pick_cooldowns(), strip)
@@ -950,6 +952,11 @@ func _start_fight() -> void:
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
 		_on_weapon_picked(preselected_pick())
+	for f in fighters:
+		if f.awaiting_pick:
+			# The other phone's pick has not come yet (it still counts when it does): meanwhile
+			# the gun this side would have taken, never a fight with the fists only.
+			f.set_loadout(preselected_pick())
 	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:

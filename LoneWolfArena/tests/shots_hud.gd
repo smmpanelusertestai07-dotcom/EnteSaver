@@ -1,8 +1,9 @@
 extends Node
 ## HUD screenshot tour:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_hud.gd
-## Prep with the weapon pick panel (pick + SELECT by touch; a later pick with guns on cooldown and
-## the ROUNDS strip), PREPARE countdown, round banner,
+## Prep with the weapon pick panel (pick + SELECT by touch, the fists only until then; a later pick
+## with guns on cooldown and the ROUNDS strip; the waiting side's read-only panel), PREPARE
+## countdown, round banner,
 ## the bot in view (red crosshair), firing (each shot its own damage number, hit marker),
 ## separate damage numbers in a row (never on top of each other), red-dot ADS, the RELOAD button
 ## (grey on a full magazine) and the reload ring, fists and back with SWITCH, the lever shotgun's
@@ -48,6 +49,9 @@ func run(at: Node) -> int:
 	await at.wait(0.5)
 	await at.shot("hud_01_pick")
 	_check(hud.panels.pick_open, "pick panel open in prep", at)
+	_check(p.awaiting_pick and b.awaiting_pick and p.weapon().id == "fists" and b.weapon().id == "fists",
+		"before the pick both fighters hold the fists only (not the last match's gun)", at)
+	_check(hud.weapon_picking() == hud.panels.pick_choice, "the weapon panel shows the chosen gun dimmed while picking", at)
 	_check(HudDraw.weapon_tex(Weapons.DEFS.lever) != HudDraw.weapon_tex(Weapons.DEFS.sg), "lever and pump shotguns have different silhouettes", at)
 	var main0 := HudLayout.weapon_main(hud.layout.weapons, vs)
 	_check(absf(main0.position.y / vs.y - 0.003) < 0.012 and absf(main0.end.y / vs.y - 0.155) < 0.012,
@@ -72,6 +76,23 @@ func run(at: Node) -> int:
 	_check(hud.panels.pick_choice == before, "a tap on a resting gun does not pick it", at)
 	_check(hud.panels.card_rect(0).position.y > hud.panels.strip_disc(1).y, "the ROUNDS strip sits above the cards", at)
 	hud.close_weapon_pick()
+	# The side that does not pick (here staged: rounds 3-4 are the bot's): the same panel read-only,
+	# the weapon panel PICKING... with the fists, until the pick lands.
+	arena.set("picked_weapon", "")
+	p.await_pick()
+	b.await_pick()
+	hud.watch_weapon_pick(Weapons.PICKABLE, 12.0, b.display_name, {"ar": 4, "sniper": 2}, RoundRules.picker_rows(9, true))
+	hud.panels.pick_round = 3
+	await at.wait(0.4)
+	await at.shot("hud_02c_pick_watch")
+	_check(hud.panels.watching() and hud.panels.pick_choice == "" and hud.weapon_picking() == "picking",
+		"the waiting side watches the pick read-only, its weapon panel PICKING", at)
+	await _tap(at, hud.panels.card_rect(2).get_center())
+	_check(hud.panels.pick_choice == "" and hud.panels.watching(), "a tap on the watched panel picks nothing", at)
+	arena.call("_apply_pick", "smg")
+	await at.wait(0.3)
+	_check(not hud.panels.pick_open and p.gun().id == "smg" and p.current == 0 and b.gun().id == "smg",
+		"the watched panel closes once the pick lands, which equips its gun", at)
 	arena.set("prep_left", 4.6)
 	await at.wait(0.7)
 	await at.shot("hud_03_prepare")

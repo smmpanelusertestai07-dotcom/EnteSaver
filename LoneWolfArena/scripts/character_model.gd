@@ -759,6 +759,13 @@ func head_up() -> Vector3:
 
 # ---------------------------------------------------------------- weapon
 
+## Nothing in the hands and nothing on the back (a pick round before its pick, Fighter.await_pick).
+func empty_hands() -> void:
+	_pending_equip = []
+	equip_weapon("")
+	_set_holster("")
+
+
 func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 	if weapon_node:
 		weapon_node.queue_free()

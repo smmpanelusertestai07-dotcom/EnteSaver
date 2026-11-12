@@ -1088,6 +1088,10 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	# Near-black slots at ~70 % (the reference), the main one with its top-right corner cut.
 	HudDraw.slot_rect(self, main, s * 0.2, Color(HudDraw.SLOT_BG, (0.86 if pressed else 0.76) * o))
 	HudDraw.vband(self, Rect2(main.position, Vector2(main.size.x - s * 0.2, main.size.y * 0.4)), Color(1, 1, 1, 0.05 * o), Color(1, 1, 1, 0.0))
+	var picking := weapon_picking()
+	if picking != "":
+		_draw_picking_slots(main, slots, s, o, picking)
+		return
 	# Ammo: big magazine number + small "/reserve".
 	var ax := main.position.x + s * 0.16
 	var ay := main.position.y + s * 0.38
@@ -1130,6 +1134,39 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 			# The target dummy: the empty slot changes the gun (the weapon pick opens again).
 			HudDraw.text(self, "CHANGE", r.get_center() + Vector2(0, -s * 0.12), int(s * 0.2), Color(1, 1, 1, 0.9 * o), 1, 2, "bold")
 			HudDraw.text(self, "GUN", r.get_center() + Vector2(0, s * 0.14), int(s * 0.2), Color(HudDraw.YELLOW, 0.95 * o), 1, 2, "bold")
+
+
+## The weapon panel while the round's gun is being picked (Fighter.awaiting_pick): "" when it is
+## not, "picking" while the other side picks (or nothing is chosen yet), else the gun id this
+## player's open pick panel has chosen (drawn dimmed until it is applied).
+func weapon_picking() -> String:
+	if player == null or editor_mode or not player.awaiting_pick:
+		return ""
+	if panels.pick_open and not panels.watching() and Weapons.DEFS.has(panels.pick_choice):
+		return panels.pick_choice
+	return "picking"
+
+
+## The main slot in its picking state: no ammo, "PICKING..." (the chosen gun's silhouette dimmed
+## for the picker), the gun's small slot empty, the fists held.
+func _draw_picking_slots(main: Rect2, slots: Array[Rect2], s: float, o: float, picking: String) -> void:
+	var ax := main.position.x + s * 0.16
+	HudDraw.text(self, "--", Vector2(ax, main.position.y + s * 0.38), int(s * 0.5), Color(1, 1, 1, 0.4 * o), 0, 2, "number")
+	var dots := ".".repeat(1 + int(_time * 2.0) % 3)
+	HudDraw.text(self, "PICKING" + dots, Vector2(ax, main.position.y + s * 0.76), int(s * 0.23), Color(HudDraw.YELLOW, 0.9 * o), 0, 2, "bold")
+	if picking != "picking":
+		HudDraw.icon(self, HudDraw.weapon_tex(Weapons.DEFS[picking]), Vector2(main.end.x - main.size.x * 0.3, main.position.y + s * 0.44),
+			Vector2(main.size.x * 0.5, s * 0.66), Color(1, 1, 1, 0.32 * o))
+	var ul := Rect2(main.position.x + s * 0.12, main.end.y - s * 0.09, main.size.x - s * 0.24, maxf(2.0, s * 0.035))
+	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
+	for i in 3:
+		var r := slots[i]
+		draw_rect(r, Color(HudDraw.SLOT_BG, 0.76 * o))
+		if i == 2:
+			HudDraw.vband(self, r, Color(HudDraw.GOLD, 0.7 * o), Color(HudDraw.GOLD.darkened(0.3), 0.62 * o))
+			draw_rect(Rect2(r.position.x, r.end.y - 2.0, r.size.x, 2.0), Color(1, 0.93, 0.6, o))
+			HudDraw.icon(self, HudDraw.tex("v_fist"), r.get_center() + Vector2(0, -s * 0.1), Vector2(r.size.y, r.size.y) * 0.5, Color(1, 1, 1, o))
+			_infinity(r.get_center() + Vector2(0, r.size.y * 0.3), s * 0.13, Color(1, 1, 1, 0.9 * o))
 
 
 ## TRAINING GROUND's target dummy lets the gun be changed during the fight (Arena.repick).

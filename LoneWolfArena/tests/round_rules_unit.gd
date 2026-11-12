@@ -8,7 +8,8 @@ extends RefCounted
 ##   phone back from being away gets the same cooldowns from the "sync" text;
 ## - the pick panel: its header names the pair of rounds the pick holds for; the side that does not
 ##   pick sees it read-only (no choice, no tap, no callback, also when its ring runs out);
-## - the kit: 3 shield walls a round.
+## - the kit: 3 shield walls a round; before a pick round's pick only the fists (await_pick), the
+##   old gun cannot be drawn, and the pick ends it.
 
 const ArenaCode := preload("res://scripts/arena.gd")     # (the arena script has no class name)
 
@@ -147,4 +148,11 @@ func _pick_panel() -> void:
 func _kit() -> void:
 	var f := Fighter.new()
 	_check(Fighter.START_SHIELDS == 3 and f.shields == 3, "a round starts with 3 shield walls")
+	f.set_loadout("sniper")
+	f.await_pick()
+	_check(f.awaiting_pick and f.current == 1 and f.weapon().id == "fists", "before the pick only the fists are in hand")
+	f.switch_weapon(0)
+	_check(f.current == 1, "the last pair's gun cannot be drawn before the pick")
+	f.set_loadout("smg")
+	_check(not f.awaiting_pick and f.current == 0 and f.gun().id == "smg", "the pick equips its gun")
 	f.free()
