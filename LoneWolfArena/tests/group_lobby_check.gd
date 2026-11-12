@@ -339,6 +339,9 @@ func _duel_plate(lobby: Lobby) -> void:
 	(cloud.group.members as Array).resize(2)                 # this player and ZORA
 	cloud.group_changed.emit()
 	await at.wait(0.5)
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	var plus_before := plus != null and plus.is_visible_in_tree()
+	at.log_line("the + plate before the DUEL: %s" % plus_before)
 	var zora := ids.ZORA as String
 	cloud.peers[zora] = {"name": "ZORA", "bundle": "neon", "pk": Crypto.new().generate_rsa(1024).save_to_string(true),
 		"seen": Time.get_ticks_msec() + 600000}
@@ -350,6 +353,8 @@ func _duel_plate(lobby: Lobby) -> void:
 	if cloud.waiting_for_id() != zora or matching == null or not matching.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree() \
 			or lobby.dialogs.modal != null:
 		_fail("the leader's DUEL start does not show MATCHING... while the member's phone answers (to %s)" % cloud.waiting_for())
+	if plus == null or plus.is_visible_in_tree():
+		_fail("the podium's + plate still shows while MATCHING... stands for the DUEL")
 	await at.shot("g09_duel_matching")
 	# The member's phone never takes it: START comes back, a notice says so.
 	cloud.cancel_invite(false)
@@ -359,6 +364,9 @@ func _duel_plate(lobby: Lobby) -> void:
 			or not _find_text(lobby.dialogs.modal, "ZORA did not take the duel"):
 		_fail("a DUEL never taken does not give START back with a notice")
 	lobby.dialogs.close_modal()
+	await at.wait(0.3)
+	if plus_before and not plus.is_visible_in_tree():
+		_fail("the podium's + plate does not come back with START after the DUEL")
 	cloud._connected = was_connected
 	cloud.peers.erase(zora)
 	cloud.leave_group()
