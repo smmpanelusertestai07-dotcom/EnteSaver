@@ -967,8 +967,12 @@ func _on_inbox(d: Dictionary) -> void:
 			_incoming = inv
 			if typeof(d.get("quick")) == TYPE_BOOL and bool(d.quick):
 				# QUICK MATCH: taken at once from a seeker this search saw (and may play), never
-				# shown; any other quick challenge is declined at once.
-				answer(seeking and seek_team == 0 and quick_seen.has(from) and _room == "" and challenge_allowed(from, d) and invite_proven(d, from))
+				# shown; any other quick challenge is declined at once, and so is every one while a
+				# GROUP INVITE waits for this player's answer (a friend's duel challenge waiting
+				# already declines it above).
+				inv.quick = true
+				answer(seeking and seek_team == 0 and quick_seen.has(from) and _room == "" and _ginv.is_empty()
+					and challenge_allowed(from, d) and invite_proven(d, from))
 				return
 			# The host of the custom room this phone asked to join starts the match: it knows the
 			# room's password, so it is accepted at once with the room's rules.
@@ -1244,9 +1248,14 @@ func _tagged(d: Dictionary, inv: Dictionary, what: String, sender: String) -> bo
 		_tag(inv, what, sender).to_utf8_buffer(), String(d.mac).to_utf8_buffer())
 
 
-## Challenges a listed player: its public key wraps a fresh room name and the room's keys.
+## Challenges a listed player: its public key wraps a fresh room name and the room's keys. A
+## QUICK MATCH challenge (extra "quick") never goes out while a challenge or a group invite waits
+## for this player's answer (answer_waiting): the popup's ACCEPT would enter the friend's room over
+## it and leave the stranger waiting alone.
 func invite(peer_id: String, extra := {}) -> bool:
 	if in_session or session_multi or not _outgoing.is_empty() or not peers.has(peer_id) or not _connected:
+		return false
+	if bool(extra.get("quick", false)) and answer_waiting():
 		return false
 	var pub := CryptoKey.new()
 	if pub.load_from_string(String(peers[peer_id].pk), true) != OK:
@@ -1318,6 +1327,12 @@ static func requests_allowed() -> bool:
 
 func has_invite() -> bool:
 	return not _incoming.is_empty()
+
+
+## True while a duel challenge, a TEAM INVITE or a GROUP INVITE waits for this player's answer (a
+## popup is up): QUICK MATCH neither challenges nor takes a quick challenge meanwhile (NetMatch).
+func answer_waiting() -> bool:
+	return not _incoming.is_empty() or not _ginv.is_empty()
 
 
 ## Who the challenge waiting for an answer here comes from: {"id", "name", "team"} ({} when none);
@@ -1431,6 +1446,8 @@ func answer(accept: bool, rules := {}) -> void:
 	if not accept:
 		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
+	if seeking and seek_team == 0 and not bool(inv.get("quick", false)):
+		seek_stop()                      # a friend's challenge taken ends the QUICK MATCH search (NetMatch sees it)
 	is_host = false
 	session_rules = rules
 	session_team = (inv.get("team", {}) as Dictionary).duplicate()

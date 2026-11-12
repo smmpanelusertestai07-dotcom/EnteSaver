@@ -8,7 +8,10 @@ extends Node
 ## from a seeker it heard (Cloud._on_inbox), and the duel goes on as any other (host = the
 ## challenger): the lobby loads the match on Cloud.session_started. Never this phone itself, never a
 ## blocked player, only who DUEL CHALLENGES FROM allows. The search never gives up by itself: it
-## runs until CANCEL.
+## runs until CANCEL. While a friend's DUEL CHALLENGE, TEAM INVITE or GROUP INVITE popup waits for
+## this player's answer (Cloud.answer_waiting) the search neither challenges nor takes a quick
+## challenge; ACCEPT ends the search (Cloud.answer / answer_group_invite stop seeking), DECLINE lets
+## it go on.
 ## No popup: the lobby's search tab (SearchTab, Lobby.search_tab) shows the time searched and
 ## status_line(), its X (and Android back with no window open) calls cancel(); the lobby stays
 ## usable meanwhile. Friends' direct duels (ONLINE 1 VS 1) are untouched.
@@ -120,8 +123,8 @@ func _saw(cloud: Cloud) -> Array:
 
 func _on_seeker(id: String, saw: Array) -> void:
 	var cloud := Game.cloud_service()
-	if not searching or cloud.in_session or not cloud.opponent.is_empty() or cloud.waiting_for() != "":
-		return
+	if not searching or cloud.in_session or not cloud.opponent.is_empty() or cloud.waiting_for() != "" or cloud.answer_waiting():
+		return                       # (a friend's challenge or group invite waits for this player's answer)
 	if not allowed(id, cloud.my_id) or Time.get_ticks_msec() - int(_snubbed.get(id, -SNUB_MS)) < SNUB_MS:
 		return
 	# Both see each other: the lower id challenges, the other one waits for it.

@@ -15,7 +15,9 @@ extends RefCounted
 ##   says so, a wrong code finds nobody, a blocked player is never answered, a leader the joiner
 ##   blocked is never joined, the switch off answers nobody, too many tries wait;
 ## - the DUEL in a group of two: START's route, SELECT MODE's chip, the member's phone taking the
-##   leader's tagged challenge at once (and nobody else's tag).
+##   leader's tagged challenge at once (and nobody else's tag);
+## - QUICK MATCH behind a waiting DUEL CHALLENGE / GROUP INVITE (two Clouds): no quick challenge goes
+##   out and none is taken while the popup waits; ACCEPT ends the search, DECLINE lets it go on.
 
 var t: Node
 
@@ -32,6 +34,7 @@ static func run(runner: Node) -> void:
 	me._room_cloud()
 	me._group_code()
 	me._duel()
+	me._quick_behind_popup()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -406,3 +409,70 @@ func _duel() -> void:
 	_check(mem.in_group() and lead.in_group(), "both stay in the group")
 	lead.free()
 	mem.free()
+
+
+## The challenge `from` sent `to` (from._outgoing), rebuilt as it went out (no relay), with `extra`.
+func _inv_msg(from: Cloud, to: Cloud, extra := {}) -> Dictionary:
+	var pub := CryptoKey.new()
+	pub.load_from_string(to._pk_pem, true)
+	var sec: PackedByteArray = String(from._outgoing.room).hex_decode()
+	sec.append_array(from._outgoing.aes as PackedByteArray)
+	sec.append_array(from._outgoing.mac as PackedByteArray)
+	var sec_text := Marshalls.raw_to_base64(Crypto.new().encrypt(pub, sec))
+	var msg := {"t": "inv", "from": from.my_id, "name": "P", "bundle": "default", "sec": sec_text, "pk": from._pk_pem,
+		"sig": from._sign(Cloud.invite_text(from.my_id, to.my_id, sec_text))}
+	msg.merge(extra)
+	return msg
+
+
+## QUICK MATCH and a popup waiting for this player's answer (design/GROUPS.txt 7): two seekers.
+func _quick_behind_popup() -> void:
+	var a := _peer(Cloud.new(), 2048)
+	var b := _peer(Cloud.new(), 2048)
+	for pair: Array in [[a, b], [b, a]]:
+		var x: Cloud = pair[0]
+		var y: Cloud = pair[1]
+		x.peers[y.my_id] = {"name": "Y", "bundle": "default", "pk": y._pk_pem, "seen": Time.get_ticks_msec()}
+		x.seek_start()
+		x.quick_seen[y.my_id] = Time.get_ticks_msec()
+	# A friend's challenge waits on a's phone: a's search sends no quick challenge.
+	a._incoming = {"id": "f".repeat(32), "name": "FRIEND", "room": "00".repeat(16), "aes": PackedByteArray(), "mac": PackedByteArray(), "t": Time.get_ticks_msec()}
+	_check(a.answer_waiting() and not a.invite(b.my_id, {"quick": true}) and a._outgoing.is_empty(),
+		"a waiting DUEL CHALLENGE: QUICK MATCH sends no quick challenge")
+	a._incoming = {}
+	a._ginv = {"id": "f".repeat(32), "name": "FRIEND", "gid": "00".repeat(16), "room": "00".repeat(16), "aes": PackedByteArray(),
+		"mac": Crypto.new().generate_random_bytes(32), "size": 2, "t": Time.get_ticks_msec()}
+	_check(a.answer_waiting() and not a.invite(b.my_id, {"quick": true}), "a waiting GROUP INVITE: QUICK MATCH sends no quick challenge")
+	# b's quick challenge reaches a while the GROUP INVITE waits: declined at once, nothing taken.
+	_check(b.invite(a.my_id, {"quick": true}), "the other seeker challenges")
+	var quick := _inv_msg(b, a, {"quick": true})
+	a._inbox_budget = 8.0
+	a._on_inbox(quick)
+	_check(a.opponent.is_empty() and a._incoming.is_empty() and not a._ginv.is_empty() and a.seeking,
+		"a quick challenge behind a GROUP INVITE is declined; the invite still waits, the search goes on")
+	# DECLINE: the search goes on, and a quick challenge is taken again.
+	a.answer_group_invite(false)
+	_check(a.seeking and not a.answer_waiting(), "DECLINE of the popup lets the search go on")
+	a._inbox_budget = 8.0
+	a._on_inbox(quick)
+	_check(String(a.opponent.get("id", "")) == b.my_id and a.seeking, "with no popup waiting, the quick challenge is taken (the match follows)")
+	a.free()
+	b.free()
+	# ACCEPT of a friend's challenge ends the search (NetMatch stops when Cloud is no longer seeking).
+	var c := _peer(Cloud.new(), 2048)
+	var f := _peer(Cloud.new(), 2048)
+	c.seek_start()
+	f.peers[c.my_id] = {"name": "C", "bundle": "default", "pk": c._pk_pem, "seen": Time.get_ticks_msec()}
+	_check(f.invite(c.my_id), "a friend challenges a searching player")
+	c._inbox_budget = 8.0
+	c._incoming = {}
+	var who_may: Variant = Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE)
+	Game.settings.challenges_from = Game.CHALLENGES_EVERYONE
+	c.invited.connect(func(_n: String) -> void: pass)
+	c._on_inbox(_inv_msg(f, c))
+	Game.settings.challenges_from = who_may
+	_check(c.has_invite() and c.seeking, "the friend's challenge waits for an answer; the search still runs")
+	c.answer(true)
+	_check(not c.seeking and String(c.opponent.get("id", "")) == f.my_id, "ACCEPT ends the QUICK MATCH search and enters the friend's room")
+	c.free()
+	f.free()
