@@ -129,7 +129,9 @@ listed here. If a part needs something new from the core, add it in its own file
   kill, which the other phone reports as its death)
 - the target dummy (`arena.practice`): the weapon panel's middle slot reads CHANGE GUN and calls
   `arena.repick()`, which opens the weapon pick during the fight
-- `reveal(f: Fighter, seconds)` (enemy shows on the minimap), `match_over: bool`, `tips_time: float`
+- `reveal(f: Fighter, seconds)` (an enemy heard), `shot_heard(f)` (an enemy's shot out of sight: a
+  fading minimap mark where it fired, `shots_heard`, HUD.SHOT_SHOW s; in sight the minimap draws it
+  as an arrowhead, HudMinimap.enemy_marks), `feed_lines` (kill feed lines: 1 in the 1 vs 1, 3 in teams), `match_over: bool`, `tips_time: float`
 - `editor_mode`, `selected_id`, `layout` (used by the HUD editor)
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
   ({Fighter: bool} line of sight, refreshed 10x per second)

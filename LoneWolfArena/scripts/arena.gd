@@ -1560,6 +1560,7 @@ func on_gunshot(shooter: Fighter) -> void:
 			(f as Bot).hear(shooter.global_position, 1.0)
 	if shooter != player and hud:
 		hud.reveal(shooter, 2.5)
+		hud.shot_heard(shooter)          # (the minimap: a fading mark where it fired, out of sight)
 
 
 func on_footstep(f: Fighter) -> void:

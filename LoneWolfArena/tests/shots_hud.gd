@@ -4,20 +4,22 @@ extends Node
 ## Prep with the weapon pick panel (pick + SELECT by touch, the fists only until then; a later pick
 ## with guns on cooldown and the ROUNDS strip; the waiting side's read-only panel), PREPARE
 ## countdown, round banner,
-## the bot in view (red crosshair), firing (each shot its own damage number, hit marker),
+## the bot in view (red crosshair; on the minimap its arrowhead, and the fading marks of shots fired
+## out of sight), firing (each shot its own damage number, hit marker),
 ## separate damage numbers in a row (never on top of each other), red-dot ADS, the RELOAD button
 ## (grey on a full magazine) and the reload ring, fists and back with SWITCH, the lever shotgun's
 ## own silhouette, sniper scope, sprint (stick past the ring and the
-## button), the settings gear (over the weapon panel's corner), scoreboard (tap on the score bar,
+## button), the settings gear (over the weapon panel's corner; QUIT MATCH's question as online, back
+## closing it), scoreboard (tap on the score bar,
 ## clear of the weapon panel), healing, low HP with
-## damage arcs, the elimination (red X, badge, kill feed), the ELIMINATED BY card (by the bot, by
+## damage arcs, the elimination (red X, badge, the 1 vs 1's one kill feed line with the gun), the ELIMINATED BY card (by the bot, by
 ## the zone), the break between rounds step by step (result band, score plates before and after
 ## the tick, the next round's band, then round 2's prep and fight with nothing over them) and the
 ## HUD editor (select + drag).
 ## Then DUO / SQUAD in TRAINING GROUND (team_tour, alone with LW_TOUR=team): the BLUE vs ORANGE prep
 ## line, the teammates panel and ally tags, a knocked teammate (marker on them and pinned to the
 ## edge), REVIVE (a real tap) and reviving, the player knocked (BLEEDING OUT, BEING REVIVED),
-## spectating a teammate with NEXT, the scoreboard by team, the host's QUIT warning and the team
+## spectating a teammate with NEXT, the scoreboard by team, the host's QUIT question and the team
 ## results of a SQUAD and a DUO; every team widget clear of the 1 vs 1 buttons, touch targets
 ## >= 56 px.
 ## Returns 0, or 1 if a check failed.
@@ -114,6 +116,30 @@ func run(at: Node) -> int:
 		await at.wait(0.1)
 	await at.shot("hud_05_on_target")
 	_check(p.crosshair_on_target, "crosshair turns red on the bot", at)
+	# MINIMAP: the bot in sight is a red arrowhead pointing where it faces; shots fired out of sight
+	# leave fading red marks where they were (never its live position).
+	var mm_k := hud.minimap.size.x / HudMinimap.VIEW_M
+	var marks := HudMinimap.enemy_marks(arena.get("fighters"), p, null, hud.seen, Vector2.ZERO, mm_k)
+	_check(marks.size() == 1 and (marks[0].dir as Vector2).is_equal_approx(Vector2(-sin(b.aim_yaw), -cos(b.aim_yaw))),
+		"the minimap draws the bot in sight as an arrowhead facing its way", at)
+	_check(HudMinimap.enemy_marks(arena.get("fighters"), p, null, {b: false}, Vector2.ZERO, mm_k).is_empty(),
+		"out of sight the minimap shows no live position", at)
+	hud.shot_heard(b)
+	_check(hud.shots_heard.is_empty(), "a shot fired in sight leaves no mark (its arrowhead shows)", at)
+	var seen_was := bool(hud.seen.get(b, false))
+	hud.seen[b] = false
+	var b_home := b.global_position
+	for off: Vector3 in [Vector3(-3.5, 0, 2.0), Vector3(-2.0, 0, 4.0), Vector3(1.5, 0, 5.0)]:
+		b.global_position = p.global_position + off
+		hud.shot_heard(b)
+	b.global_position = b_home
+	hud.seen[b] = seen_was
+	_check(hud.shots_heard.size() == 3 and is_equal_approx(float(hud.shots_heard[0].t), HUD.SHOT_SHOW),
+		"shots fired out of sight leave marks for %.1f s" % HUD.SHOT_SHOW, at)
+	await at.wait(0.5)
+	await at.shot("hud_05b_minimap_marks")
+	await _until(at, func() -> bool: return hud.shots_heard.is_empty(), 10.0)     # (game time: the capture box runs slowly)
+	_check(hud.shots_heard.is_empty(), "the shot marks fade out after about 2 s", at)
 	# Fire with the right fire button (drag-aim keeps it on the bot).
 	var fire_c := HudLayout.center(hud.layout.fire_r, vs)
 	var hits0 := int(p.stats.hits)
@@ -247,6 +273,30 @@ func run(at: Node) -> int:
 	await at.wait(0.3)
 	var menu := (arena.get("pause_layer") as Node).find_child("PauseMenu", false, false)
 	_check(at.get_tree().paused and menu != null and menu.get("settings") is SettingsPanel, "the gear opens the in-match settings", at)
+	# QUIT MATCH as in a counted online match: a question of our own (CANCEL / QUIT); back closes it.
+	arena.set("online", true)
+	arena.set("_counted", true)
+	var quit_b := menu.find_child("Quit", true, false) as Button if menu else null
+	if quit_b:
+		await _tap(at, quit_b.get_global_rect().get_center())
+		await at.wait(0.3)
+	var ask := menu.find_child("Confirm", true, false) as Control if menu else null
+	var ask_ok := ask.find_child("ConfirmOk", true, false) as Button if ask else null
+	var ask_txt := ""
+	for l in (ask.find_children("*", "Label", true, false) if ask else []):
+		ask_txt += (l as Label).text + " "
+	_check(ask != null and ask_ok != null and ask_ok.text == "QUIT" and ask.find_child("ConfirmCancel", true, false) != null
+		and ask_txt.contains("defeat") and ask_txt.contains("LEFT in HISTORY") and ask.find_child("QuitWarning", true, false) == null
+		and arena == at.get_tree().current_scene, "QUIT MATCH online asks first: a defeat, LEFT in HISTORY, CANCEL / QUIT (%s)" % ask_txt, at)
+	await at.shot("hud_11b_quit_confirm")
+	var sp := menu.get("settings") as Node if menu else null
+	if sp:
+		sp.propagate_notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+		await at.wait(0.2)
+	_check(menu.find_child("Confirm", true, false) == null and is_instance_valid(menu) and menu.get("settings") is SettingsPanel,
+		"back closes the question first, the settings stay", at)
+	arena.set("online", false)
+	arena.set("_counted", false)
 	for n in (arena.get("pause_layer") as Node).get_children():
 		n.queue_free()
 	at.get_tree().paused = false
@@ -285,6 +335,12 @@ func run(at: Node) -> int:
 	await at.wait(0.35)
 	await at.shot("hud_15_kill")
 	_check(not b.alive, "the bot is eliminated", at)
+	_check(hud.feed_lines == 1 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
+		"the 1 vs 1 kill feed is one line with the gun's silhouette", at)
+	hud.add_kill_feed("ZONE", "BOT", "", "", false, false)
+	_check(hud._kill_feed.size() == 1 and String(hud._kill_feed[0].killer) == "ZONE", "a new kill feed line replaces the old one", at)
+	hud._kill_feed.pop_front()
+	hud.add_kill_feed(p.display_name, b.display_name, String(p.weapon().def.name), String(p.weapon().def.icon), true, true)
 	_check(int(arena.get("phase")) == 3 and hud.break_step() != "", "the round's end starts the break between rounds", at)
 	arena.set("_break_t", -1000.0)          # (the break is held while its steps are looked at)
 	await at.wait(1.0)
@@ -578,7 +634,9 @@ func team_tour(at: Node) -> void:
 		quit.pressed.emit()
 		await at.wait(0.2)
 	var warn: Label = menu.find_child("QuitWarning", true, false) as Label if menu else null
-	_check(warn != null and warn.is_visible_in_tree(), "the host's first QUIT tap warns it ends the match for the teammate", at)
+	_check(warn != null and warn.is_visible_in_tree() and warn.text == PauseMenu.HOST_WARNING and menu.find_child("Confirm", true, false) != null
+		and arena == at.get_tree().current_scene, "the host's QUIT MATCH asks first, the warning that it ends the match for the teammate in it", at)
+	_check(hud._kill_feed.size() <= 3 and hud.feed_lines == 3, "DUO / SQUAD keep three kill feed lines", at)
 	await at.shot("team_11_host_quit")
 	Game.team_match["online"] = false
 	Game.team_match["coop"] = false

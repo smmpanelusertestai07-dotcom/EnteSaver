@@ -2,11 +2,13 @@ class_name HudMinimap
 extends Control
 ## The HUD's square minimap, north up: a window of the arena's top-down render
 ## (arena.minimap_texture over arena.map_rect) that follows the player, the player arrow with its
-## view cone, the enemy as a red dot while revealed (shots / footsteps) or in sight, the red
-## footprints of their running steps, and the white safe-zone circle. It clips its drawing to its own rect; until the render exists (first frames)
+## view cone, the enemy as a red arrowhead at its place, pointing where it faces, only while in
+## sight; out of sight its shots leave small red marks where they were fired that fade over
+## HUD.SHOT_SHOW s (never its live position), its running steps red footprints; and the white
+## safe-zone circle. It clips its drawing to its own rect; until the render exists (first frames)
 ## a dark floor plan from arena.obstacles stands in. The HUD places it from its layout. DUO / SQUAD
 ## (the HUD's HudTeam): teammates always, as blue dots with their number (a knocked one in a red
-## ring, one out of the round not at all); enemies as in the 1 vs 1 (ally_marks).
+## ring, one out of the round not at all); every enemy as in the 1 vs 1 (ally_marks, enemy_marks).
 
 const VIEW_M := 28.0                       # metres shown edge to edge
 const ARROW := Color(0.16, 0.8, 0.88)      # player arrow (cyan, like the reference)
@@ -92,20 +94,22 @@ func _draw() -> void:
 		draw_circle(ap, 7.5, Color(0, 0, 0, 0.6 * o), true, -1.0, true)
 		draw_circle(ap, 6.2, Color(HudDraw.BLUE, o), true, -1.0, true)
 		HudDraw.text(self, str(int(m.n)), ap + Vector2(0, 0.5), 10, Color(1, 1, 1, o), 1, 0, "number")
-	# Enemy: red dot while revealed or in sight.
-	var reveal: Dictionary = hud._reveal
-	var seen: Dictionary = hud.seen
-	for f: Fighter in arena.get("fighters"):
-		if f == player or not f.alive:
-			continue
-		if team != null and f.team == team.my_team():
-			continue                       # (drawn above)
-		if not (reveal.has(f) or seen.get(f, false)):
-			continue
-		var ep := (Vector2(f.global_position.x, f.global_position.z) - origin) * k
-		var pulse := 1.0 + 0.25 * sin(Time.get_ticks_msec() / 90.0) if reveal.has(f) else 1.0
-		draw_circle(ep, 6.0 * pulse, Color(0, 0, 0, 0.55 * o), true, -1.0, true)
-		draw_circle(ep, 4.6 * pulse, Color(1.0, 0.22, 0.2, o), true, -1.0, true)
+	# Enemy shots fired out of sight: small red marks where they were, fading.
+	for sh: Dictionary in hud.shots_heard:
+		var sp := (Vector2(sh.p) - origin) * k
+		var fade := clampf(float(sh.t) / float(HUD.SHOT_SHOW), 0.0, 1.0)
+		draw_circle(sp, 4.2, Color(0, 0, 0, 0.45 * o * fade), true, -1.0, true)
+		draw_circle(sp, 3.0, Color(1.0, 0.24, 0.2, 0.95 * o * fade), true, -1.0, true)
+	# Enemies in sight: a red arrowhead pointing where each one faces.
+	for m: Dictionary in enemy_marks(arena.get("fighters"), player, team, hud.seen, origin, k):
+		var ep: Vector2 = m.pos
+		var ed: Vector2 = m.dir
+		var es := ed.orthogonal()
+		var e := 6.5
+		var head := PackedVector2Array([ep + ed * e * 1.35, ep - ed * e * 0.8 + es * e * 0.95, ep - ed * e * 0.3, ep - ed * e * 0.8 - es * e * 0.95])
+		draw_colored_polygon(head, Color(1.0, 0.22, 0.2, o))
+		head.append(head[0])
+		draw_polyline(head, Color(0, 0, 0, 0.7 * o), 1.4, true)
 	# Player: view cone + arrow.
 	var p := (pp - origin) * k
 	var dir := Vector2(-sin(player.aim_yaw), -cos(player.aim_yaw))
@@ -136,6 +140,20 @@ static func ally_marks(team: HudTeam, origin: Vector2, k: float) -> Array:
 		if f == me or st == "out" or st == "left":
 			continue
 		out.append({"pos": (Vector2(f.global_position.x, f.global_position.z) - origin) * k, "n": n, "knocked": st == "knocked"})
+	return out
+
+
+## The enemies drawn live: [{"pos" (in the minimap), "dir" (where it faces, north up)}] for every
+## enemy alive and in sight (`seen`: HUD.seen); teammates (`team`'s side) and the player never.
+static func enemy_marks(fighters: Array, me: Fighter, team: HudTeam, seen: Dictionary, origin: Vector2, k: float) -> Array:
+	var out := []
+	for f: Fighter in fighters:
+		if f == me or not f.alive or not bool(seen.get(f, false)):
+			continue
+		if team != null and f.team == team.my_team():
+			continue
+		out.append({"pos": (Vector2(f.global_position.x, f.global_position.z) - origin) * k,
+			"dir": Vector2(-sin(f.aim_yaw), -cos(f.aim_yaw))})
 	return out
 
 
