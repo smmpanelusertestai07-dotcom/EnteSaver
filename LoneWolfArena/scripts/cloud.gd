@@ -3288,12 +3288,12 @@ func join_group_code(code: String) -> String:
 	code = code.replace(" ", "").replace("-", "").strip_edges()
 	if not is_group_code(code):
 		return "A GROUP CODE HAS %d DIGITS" % CODE_LEN
-	if code_state == "in" and bool(_grp.get("joining", false)) and not in_room() and code == String(group.get("code", "")):
-		_group_close(true)               # the same code again while its join waits to be let in: asked afresh
-		code_state = ""
-	if code == group_code():
+	# The same code again while its join waits to be let in: asked afresh, the waiting join dropped
+	# only once every check below lets the new ask go out (a refused one keeps it as it was).
+	var again := code_state == "in" and bool(_grp.get("joining", false)) and not in_room() and code == String(group.get("code", ""))
+	if code == (my_code if again else group_code()):
 		return "THIS IS YOUR OWN GROUP CODE"
-	if in_group() or in_room() or (not group.is_empty() and String(group.leader) != my_id):
+	if not again and (in_group() or in_room() or (not group.is_empty() and String(group.leader) != my_id)):
 		return "EXIT YOUR GROUP FIRST"
 	if in_session or session_multi:
 		return "A MATCH IS ALREADY STARTING"
@@ -3307,6 +3307,9 @@ func join_group_code(code: String) -> String:
 	_code_tries = _code_tries.filter(func(t: int) -> bool: return now - t < 60000)
 	if _code_tries.size() >= CODE_TRIES_MAX:
 		return "TOO MANY TRIES: WAIT A MINUTE"
+	if again:
+		_group_close(true)
+		code_state = ""
 	_code_tries.append(now)
 	_cjoin = {"code": code, "key": _code_key(code), "t": now, "ask_t": 0.0}
 	code_state = "asking"

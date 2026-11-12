@@ -529,6 +529,19 @@ func _code_leftovers() -> void:
 	# JOIN again while a join waits to be let in: the waiting one is dropped and the ask goes out.
 	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
 	_check(guest.code_state == "in" and not guest.group.is_empty(), "let in again")
+	# The same code again, refused by a check (too many tries, offline): the waiting join stays as it was.
+	var tries: Array = guest._code_tries.duplicate()
+	for i in Cloud.CODE_TRIES_MAX:
+		guest._code_tries.append(Time.get_ticks_msec())
+	var waiting_leader := String(guest.group.get("leader", ""))
+	_check(guest.join_group_code("6612345678") == "TOO MANY TRIES: WAIT A MINUTE" and guest.code_state == "in"
+		and String(guest.group.get("leader", "")) == waiting_leader and bool(guest._grp.get("joining", false)),
+		"the same code again, refused (too many tries): the waiting join is kept, no stale leader")
+	guest._code_tries = tries
+	guest._connected = false
+	_check(guest.join_group_code("6612345678").begins_with("OFFLINE") and guest.code_state == "in" and not guest.group.is_empty(),
+		"the same code again, offline: the waiting join is kept")
+	guest._connected = true
 	_check(guest.join_group_code("6612345678") == "" and guest.code_state == "asking" and guest.group.is_empty(),
 		"JOIN while still waiting to be let in asks afresh (no EXIT YOUR GROUP FIRST)")
 	# An answer this phone cannot take (wrapped for another phone's key): failed, not stuck.
