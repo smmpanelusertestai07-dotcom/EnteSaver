@@ -780,8 +780,21 @@ func _apply_room_rules() -> void:
 				w.reserve = 999
 
 
+## The zone as a round starts: over the whole hall and still. The prep resets it too, so the strip
+## and the map never show the round before's closing zone; the fight's start then draws the spot
+## it closes on (zone_final).
+func _reset_zone() -> void:
+	elapsed = 0.0
+	zone_radius = zone_start_radius
+	zone_state = "stationary"
+	zone_center = map.zone_center
+	zone_warning = ""
+	_update_zone_mesh()
+
+
 func _start_prep() -> void:
 	eliminated_by = {}
+	_reset_zone()
 	_round_deaths.clear()
 	_down_cause.clear()
 	_settle_t = -1.0
@@ -881,13 +894,9 @@ func _start_fight() -> void:
 		f.hold_fire = false
 		f.frozen = false
 	time_left = round_time()
-	elapsed = 0.0
-	zone_radius = zone_start_radius
-	zone_state = "stationary"
-	zone_center = map.zone_center
-	zone_final = zone_final_for(round_index)
 	_zone_mesh.visible = not practice
-	_update_zone_mesh()
+	_reset_zone()
+	zone_final = zone_final_for(round_index)
 	Game.mark("match started")
 	if practice:
 		_place_dummy()

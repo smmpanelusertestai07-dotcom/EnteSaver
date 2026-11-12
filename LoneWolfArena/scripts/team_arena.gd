@@ -384,6 +384,7 @@ func _yaw_for(t: int) -> float:
 
 
 func _start_prep() -> void:
+	_reset_zone()
 	_round_deaths.clear()
 	_down_cause.clear()
 	_settle_t = -1.0
@@ -451,13 +452,9 @@ func _start_fight() -> void:
 		f.hold_fire = false
 		f.frozen = false
 	time_left = round_time()
-	elapsed = 0.0
-	zone_radius = zone_start_radius
-	zone_state = "stationary"
-	zone_center = map.zone_center
-	zone_final = zone_final_for(round_index)
 	_zone_mesh.visible = true
-	_update_zone_mesh()
+	_reset_zone()
+	zone_final = zone_final_for(round_index)
 	Game.mark("match started")
 	var point := rounds_to_win > 1 and maxi(int(team_score[0]), int(team_score[1])) == rounds_to_win - 1
 	var final := rounds_to_win > 1 and round_index >= last_round()
