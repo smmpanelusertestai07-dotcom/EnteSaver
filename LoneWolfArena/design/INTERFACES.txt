@@ -25,7 +25,11 @@ listed here. If a part needs something new from the core, add it in its own file
   `zone_final`, a new spot every round from `zone_final_for(round)`, alike on both phones)
 - 1 vs 1 weapon cooldown: `picks` (pick round -> gun), `pick_cooldowns()` (gun -> rounds left,
   `RoundRules.cooldowns`), `preselected_pick()`, `legal_pick(id)` (a gun that rests is replaced by
-  the first free one: the picker's phone, the other phone on its "pick", and the bot alike)
+  the first free one: the picker's phone, the other phone on its "pick", and the bot alike); the
+  online "sync" carries them as its 13th field (`RoundRules.picks_text`), which the guest adopts
+- `eliminated_by` ({} until the 1 vs 1 player goes down in a round, then {"cause", "name", "gun",
+  "gun_id", "damage"}: the HUD's ELIMINATED BY card at the bottom left while it spectates; the
+  damage is `Fighter.round_taken[killer]`, what that fighter dealt the player this round)
 - `fighters` (Array[Fighter]), `player`, `bot`, `map_name` ("CARGO CAGE"), `map_rect` (Rect2,
   world X/Z area of the minimap), `minimap_texture` (Texture2D rendered once from above, may be
   null for the first frames), `obstacles` (Array[Rect2] footprints, X/Z)

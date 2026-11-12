@@ -188,6 +188,12 @@ func _think(delta: float) -> void:
 	reaction -= delta
 	if see_target:
 		track_time += delta
+	if _throwing:
+		# The throw's wind-up (Fighter.THROW_RELEASE): stand still and keep facing, so the frag
+		# leaves the hand from where the bot solved its arc (not from a step into cover).
+		move_dir = Vector2.ZERO
+		sprinting = false
+		return
 	_decide(delta)
 	if _zone_pressure(delta):
 		# Get inside the safe zone first; keep shooting on the way if the enemy is in sight.
