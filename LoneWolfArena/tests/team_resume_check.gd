@@ -4,8 +4,8 @@ extends Node
 ## the check needs). The host opens a CUSTOM ROOM (DUO) with a fixed code and password, the three
 ## others join it by code, the host starts the match.
 ## 1. In the fight the HOST goes away (its process stalls AWAY_MS long, nothing sent or heard): on
-##    every member its fighter stands frozen ("<NAME> RECONNECTING...") and the stand-in (the present
-##    member with the lowest id) decides it: the zone knocks it, then finishes it, and every member
+##    every member its fighter stands frozen ("<NAME> RECONNECTING...") and the stand-in (the host's
+##    own teammate, UP: never a member of the other team) decides it: the zone knocks it, then finishes it, and every member
 ##    sees it out. Back, the host adopts that word: its player is out too.
 ## 2. Then the member with the highest id (never the host, never the stand-in) is KILLED
 ##    (LW_RESUME_PART=1: the process exits, nothing says goodbye) and started again (LW_RESUME_PART=2,
@@ -63,13 +63,18 @@ func run(autotest: Node) -> int:
 		return _done("the fight never began")
 	var ids := _ids(arena)
 	var host_id := String(arena.get("host_id"))
-	var others: Array = ids.keys().filter(func(id: String) -> bool: return id != host_id)
-	others.sort()
-	var stand_in := String(others[0])
-	var killed := String(others[others.size() - 1])
 	var hslot := int(ids[host_id])
 	var hf := arena.call("slot_fighter", hslot) as Fighter
 	var mate := _mate_of(arena, hslot)
+	var stand_in := ""
+	for id: String in ids:
+		if int(ids[id]) == mate:
+			stand_in = id                # (the host's teammate: a DUO's only one, UP)
+	var others: Array = ids.keys().filter(func(id: String) -> bool: return id != host_id and id != stand_in)
+	others.sort()
+	var killed := String(others[others.size() - 1])
+	if String(arena.call("stand_in_id")) != stand_in:
+		_fail("the stand-in is not the host's own teammate (%s)" % String(arena.call("stand_in_id")))
 	var me := String(cloud.my_id)
 	at.log_line("%s: slot %d, host slot %d, stand-in %s, to be killed %s, host's teammate slot %d" % [role, int(ids[me]), hslot,
 		"me" if me == stand_in else "other", "me" if me == killed else "other", mate])

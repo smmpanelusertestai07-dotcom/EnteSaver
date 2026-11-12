@@ -67,7 +67,8 @@ listed here. If a part needs something new from the core, add it in its own file
   LW_AWAY_GRACE_MS, read only outside a release build); this phone away `self_grace_ms()` (1.5 s
   less) has dropped out ("connection lost"). A "ka" keep-alive (or a direct-link "dh" / "dc") does
   not end AWAY, in the message nor in the frame check (`Cloud.LOAD_KINDS`: a phone back after a
-  restart says them while its arena loads; its fighter stays frozen and hittable meanwhile).
+  restart says them while its arena loads; its fighter stays frozen and hittable meanwhile), in a
+  1 vs 1 and in an all-human match alike (there per member: `_multi.live`).
 - Rejoining after the app was closed (a 1 vs 1 or an all-human DUO / SQUAD over the relay; never
   PLAY WITHOUT INTERNET or a two-phone TEAM INVITE match): Cloud keeps the live session in `Cloud.resume_path()` (sealed
   AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
@@ -85,7 +86,8 @@ listed here. If a part needs something new from the core, add it in its own file
   LEAVE MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once;
   the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it).
   An all-human match's file adds "multi" (`Cloud.multi_from_file`: the roster as
-  `NetGroup.pack_roster`, the host's id, the size, every member's counter) and its note
+  `NetGroup.pack_roster`, the host's id, the size, every member's counter, the ids of members who
+  already left, rewritten when one leaves) and its note
   `note_match(..., mode_id)` ("duo" / "squad", TeamArenaNet._note at each fight and round end);
   `try_resume` puts session_multi, session_roster, session_host_id and session_team back and the
   session is on at once (no "join"); the lobby loads it as `TeamArena.link_roster` (REJOINING
@@ -747,19 +749,26 @@ listed here. If a part needs something new from the core, add it in its own file
   decided here (`decided_here`: the host, for a member's or the guest's fighter), it takes hits and
   the zone as a fighter's own and, knocked, bleeds out (knock_finished, "bleed") as one run here.
   All-human, the HOST away: its fighter is decided by the STAND-IN (`TeamArenaNet.stand_in_id()`:
-  the present member with the lowest id but the host): hits (from "hit", bounded as the host
+  the present member of the host's own team whose fighter is UP, the lowest id of those; none, and
+  nobody decides it meanwhile; never a member of the other team): hits (from "hit", bounded as the host
   bounds them) and the zone take it there, it bleeds out there, and the stand-in sends "ko" (a
   teammate still UP) or "el" for it; every member takes those two from the stand-in only for that
   fighter while the host is away (`_stand_in_word`). The host back says "back" [slot] once a second
   while it rejoins; the stand-in answers "sync" for the host's fighter (also at once when it hears
-  the host again) and the host adopts it while `Cloud.rejoining()` (HP only down; knocked / out
-  through referee_down). A "ko" on a fighter already knocked is ignored (no double credit).
+  the host again; with no stand-in the present teammate, else member, with the lowest id:
+  `_sync_giver_id`), flags | 4 when it stood in (the host away, or back less than STOOD_IN_MS ago).
+  The host takes it only from a teammate (from another member, after a restart, only the round,
+  phase, clock and score), while `Cloud.rejoining()` or, with flag 4, also when it never noticed
+  its own absence; HP only down, knocked / out through referee_down only with flag 4. A "ko" on a
+  fighter already knocked is ignored (no double credit).
   Back after a restart (Cloud.resumed): a member's arena takes the host's "sync" (round, phase,
   clock, score, its HP / knock / out, place; a BREAK waits for the host's "round") and "all"
   [round, "slot:flags:gun;..."] (flags 1 knocked, 2 out, 4 left; set without kill feed). A resumed
   host enters from its stand-in's "sync" and takes every member's "rep" [slot, round, HP, flags,
   gun] for RESUME_REP_S, rebuilding its referee from what they said (a team left with nobody UP is
-  wiped, "el").
+  wiped, "el"); until RESUME_REP_S is over it decides nothing on the round (no wipe, settle or
+  time-out: `TeamArena._referee_waits`), then rebuilds the referee once more. Members who left
+  before the restart stay LEFT (the file's "left", `Cloud.left_members()`), out with no kill feed.
 - The end: once phase END (not called off) each phone sends "fin" for every fighter it runs;
   final_stats[slot] fills from the other phone's, and the results wait for all of them
   (FINAL_WAIT_S at most). The session ending (_on_net_ended): "connection lost" or before the first

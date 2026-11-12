@@ -485,7 +485,7 @@ func _physics_process(delta: float) -> void:
 			time_left -= delta
 			_update_zone(delta)
 			_update_revives(delta)
-			if is_referee():
+			if is_referee() and not _referee_waits():
 				if _settle_t >= 0.0:
 					_settle_t -= delta
 					if _settle_t <= 0.0:
@@ -861,6 +861,12 @@ func on_footstep(f: Fighter) -> void:
 ## Whether this phone decides knocks, eliminations, revives and rounds (offline: yes; online: the host).
 func is_referee() -> bool:
 	return true
+
+
+## Whether the referee holds its word on the round for now (no wipe, settle or time-out checks):
+## offline never; online a host back after a restart until the members said where they stand.
+func _referee_waits() -> bool:
+	return false
 
 
 ## Whether `f` is simulated on this phone (offline: every fighter; online: the player, and on the host

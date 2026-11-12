@@ -85,14 +85,18 @@ var _setup_t := 0.0                  # all-human, host: s since this arena began
 ## host is back (they were lost meanwhile: _dn_log).
 ##
 ## AN AWAY HOST (all-human): the host referees, so while it is away nobody would decide for its own
-## frozen fighter. The STAND-IN does instead: the present member with the lowest id (stand_in_id,
-## the same on every phone that hears the same members). For the away host's fighter only, and only
+## frozen fighter. The STAND-IN does instead: the present member of the host's own team whose fighter
+## is UP, the lowest id of those (stand_in_id, the same on every phone that hears the same members;
+## none, nobody decides it meanwhile). For the away host's fighter only, and only
 ## while the host is away, the stand-in decides its HP (hits from every member reach it, held to the
 ## guns' rates and bullets as the host holds them, and the zone takes it there), knocks it ("ko") when
 ## a teammate of it is still UP, else eliminates it ("el"), and bleeds it out; the others take those
 ## two words from the stand-in for that fighter alone. The host back (its "back" [slot], once a second
-## while it rejoins, or heard again), the stand-in sends it "sync" for its fighter as the host would,
-## and the host adopts it (never more HP than it has; a knock or an elimination through its referee).
+## while it rejoins, or heard again), the stand-in sends it "sync" for its fighter as the host would
+## (with no stand-in, the present teammate, else member, with the lowest id: _sync_giver_id), with
+## flag 4 when it stood in. The host takes it from a teammate (from another member only the round,
+## phase, clock and score after a restart): never more HP than it has, and a knock or an elimination
+## through its referee only with flag 4; with flag 4 also when it never noticed it was away itself.
 ## Rounds and every other fighter still wait for the host.
 ##
 ## BACK AFTER A RESTART (Cloud.resumed, the sealed session file): a member's fresh arena holds still
@@ -100,13 +104,17 @@ var _setup_t := 0.0                  # all-human, host: s since this arena began
 ## clock, and the host's "all" [round, "<slot>:<flags>:<gun>;..."] (flags 1 knocked, 2 out, 4 left)
 ## puts every fighter as it stands. A host's fresh arena asks with "back" too: its stand-in's "sync"
 ## brings the round, phase, clock, score and its own fighter, and every member's "rep" [slot, round,
-## HP, flags, gun] its own fighter (RESUME_REP_S long); its referee is rebuilt from what they said.
+## HP, flags, gun] its own fighter (RESUME_REP_S long); its referee is rebuilt from what they said,
+## and until then it decides nothing on the round (_referee_waits). Members who had left before the
+## restart stay LEFT (Cloud.left_members, from the session file).
 var _dn_log: Array = []              # guest / member: this round's "dn" sent ([round, data])
 const RESUME_REP_S := 4.0            # a resumed host takes the members' "rep" this long after its stand-in's "sync"
 var _rep_t := -1.0                   # resumed host: s left to take "rep" (and to keep asking with "back")
 var _all_wait := false               # resumed member: the host's "all" not taken yet
 var _ko_by_stand_in := {}            # slot -> the round the stand-in knocked it in (the host's word on it later is not applied again)
 var _stand_in_ko_t := 0              # (inside _apply_stand_in)
+var _host_back_ms := -100000         # member: when the host was last heard again after being AWAY
+const STOOD_IN_MS := 8000            # a stand-in's "sync" says it stood in (flag 4) this long after the host is back
 
 
 func _ready() -> void:
@@ -137,18 +145,57 @@ func runs_here(f: Fighter) -> bool:
 	return f != null and (runs_slot(f.slot) or (f is RemoteFighter and (f as RemoteFighter).decided_here and (am_host or _decides_for(f))))
 
 
-## All-human: the stand-in referee for an away host (see the notes above): the present member with
-## the lowest id but the host, as this phone hears them ("" outside an all-human match).
+## All-human: the stand-in referee for an away host (see the notes above): the present member of
+## the host's own team whose fighter is UP, the lowest id of those as this phone hears them; "" when
+## there is none (nobody decides the host's fighter then) and outside an all-human match. Never a
+## member of the other team: its word could end the host's fighter with no hit at all.
 func stand_in_id() -> String:
 	if not multi or Game.session == null:
 		return ""
+	var hf := _slot(int(_slot_of.get(host_id, -1)))
+	if hf == null:
+		return ""
 	var best := ""
 	for id: String in _slot_of:
-		if id == host_id or _gone.has(int(_slot_of[id])) or (id != Game.session.my_id and Game.session.peer_is_away(id)):
+		var f := _slot(int(_slot_of[id]))
+		if id == host_id or f == null or f.team != hf.team or not f.alive or f.knocked or _gone.has(f.slot) \
+				or (id != Game.session.my_id and Game.session.peer_is_away(id)):
 			continue
 		if best == "" or id < best:
 			best = id
 	return best
+
+
+## All-human: the member that answers a host back with "sync" for its fighter: its stand-in; with
+## none, the present teammate of the host with the lowest id; with none of those, the present member
+## with the lowest id (then only the round, its phase, the clock and the score count on the host).
+func _sync_giver_id() -> String:
+	var s := stand_in_id()
+	if s != "" or not multi or Game.session == null:
+		return s
+	var hf := _slot(int(_slot_of.get(host_id, -1)))
+	var mate := ""
+	var any := ""
+	for id: String in _slot_of:
+		var f := _slot(int(_slot_of[id]))
+		if id == host_id or f == null or _gone.has(f.slot) or (id != Game.session.my_id and Game.session.peer_is_away(id)):
+			continue
+		if any == "" or id < any:
+			any = id
+		if hf != null and f.team == hf.team and (mate == "" or id < mate):
+			mate = id
+	return mate if mate != "" else any
+
+
+## The host: whether a "sync" on its fighter from `from` is taken at all: from a teammate still in the
+## match, or, with no teammate here, from the one member _sync_giver_id names.
+func _stand_in_sync_from_ok(from: String) -> bool:
+	if from == host_id or not _slot_of.has(from):
+		return false
+	var f := _slot(int(_slot_of[from]))
+	if f == null or _gone.has(f.slot):
+		return false
+	return f.team == player.team or _sync_giver_id() == from
 
 
 ## This phone stands in for the away host and decides `f` meanwhile: `f` is the host's fighter.
@@ -204,6 +251,8 @@ func _net_tick(delta: float) -> void:
 	_net_t = 0.0
 	if _rep_t > 0.0:
 		_rep_t -= dt
+		if _rep_t <= 0.0:
+			_referee_from_fighters()         # (every "rep" in: the round may be decided from here)
 	if Game.session.rejoining() or _rep_t > 0.0:
 		if not am_host or (multi and (_resuming or _rep_t > 0.0)):
 			# Back from being away: the host's word first ("sync"; a resumed host's: its stand-in's,
@@ -361,6 +410,10 @@ func _net_setup() -> void:
 		var theirs := maxi(int(Game.session.resume_note.get("theirs", 0)), 0)
 		team_score = [mine, theirs] if my_team == 0 else [theirs, mine]
 		_sync_score()
+		for id: String in Game.session.left_members():
+			if _slot_of.has(id):              # (left before the restart: LEFT still, quietly)
+				_gone[int(_slot_of[id])] = true
+				referee.left[int(_slot_of[id])] = true
 		Game.mark("online match rejoined after a restart")
 	Game.session.send_event("ready")
 	for q: Array in queued:
@@ -540,7 +593,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 				if multi:
 					_send_all()
 			elif multi and not am_host and _from == host_id and data.size() == 1 and f != null and _net_rate_ok("back", 2.0, 3.0):
-				if stand_in_id() == Game.session.my_id:
+				if _sync_giver_id() == Game.session.my_id:
 					_send_team_sync(f)
 				_send_rep()
 				for d: Array in _dn_log:        # (a host back after a restart never heard them)
@@ -549,8 +602,8 @@ func _on_net_event(kind: String, data: Array) -> void:
 		"sync":
 			if not am_host and (not multi or _from == host_id) and data.size() == 13 and _slot_at(data, 0) == player:
 				_on_team_sync(data)
-			elif am_host and multi and _from != host_id and _from == stand_in_id() and data.size() == 13 and _slot_at(data, 0) == player \
-					and (Game.session.rejoining() or _resuming):
+			elif am_host and multi and data.size() == 13 and _slot_at(data, 0) == player and _stand_in_sync_from_ok(_from) and _num_ok(data[7]) \
+					and (Game.session.rejoining() or _resuming or (int(data[7]) & 4 and _slot(int(_slot_of[_from])).team == player.team)):
 				_on_stand_in_sync(data)
 		"all":
 			if not am_host and multi and _all_wait and data.size() == 2 and _num_ok(data[0]) and int(data[0]) == round_index \
@@ -581,8 +634,10 @@ func _on_peer_away(id: String, away: bool) -> void:
 		hf.set_away(true, _decides_for(hf))        # (the stand-in may have changed: anyone away or back)
 	if away or not _sending():
 		return
-	if multi and not am_host and id == host_id and hf != null and stand_in_id() == Game.session.my_id:
-		_send_team_sync(hf)                       # the host is back: the stand-in's word on its fighter
+	if multi and not am_host and id == host_id and hf != null:
+		_host_back_ms = Time.get_ticks_msec()
+		if _sync_giver_id() == Game.session.my_id:
+			_send_team_sync(hf)                   # the host is back: the stand-in's word on its fighter
 	if am_host:
 		for f in back:
 			_send_team_sync(f)
@@ -601,8 +656,11 @@ func _send_team_sync(f: Fighter) -> void:
 		return
 	var at := f.global_position
 	var by: Fighter = f.knocked_by if f.knocked else f.last_attacker
+	# (flag 4, a member's word on the host's fighter: it saw the host away and stood in for it)
+	var stood := not am_host and f is RemoteFighter and stand_in_id() == Game.session.my_id \
+		and ((f as RemoteFighter).away or Time.get_ticks_msec() - _host_back_ms < STOOD_IN_MS)
 	Game.session.send_event("sync", [f.slot, round_index, int(phase), prep_left if phase == Phase.PREP else elapsed,
-		int(team_score[0]), int(team_score[1]), snappedf(f.hp, 0.1), (1 if f.knocked else 0) | (0 if f.alive else 2),
+		int(team_score[0]), int(team_score[1]), snappedf(f.hp, 0.1), (1 if f.knocked else 0) | (0 if f.alive else 2) | (4 if stood else 0),
 		snappedf(at.x, 0.01), snappedf(at.y, 0.01), snappedf(at.z, 0.01),
 		by.slot if by != null and is_instance_valid(by) and by.team != f.team else -1, String(_down_cause.get(f, ""))])
 	if am_host and _last_rend.size() == 5 and int(_last_rend[0]) == round_index and (phase == Phase.BREAK or phase == Phase.END):
@@ -629,6 +687,7 @@ func _on_team_sync(data: Array) -> void:
 		if not _net_begun:
 			_net_begun = true
 			_start_prep()
+		_put_gone_down()
 		Game.mark("rejoined: round %d, phase %d" % [r, ph])
 	if r != round_index:
 		round_index = r - 1
@@ -688,6 +747,7 @@ func _on_stand_in_sync(data: Array) -> void:
 		if not _net_begun:
 			_net_begun = true
 			_start_prep()
+		_put_gone_down()
 		Game.mark("rejoined: round %d, phase %d" % [r, ph])
 		if r != round_index:
 			round_index = r - 1
@@ -712,8 +772,13 @@ func _on_stand_in_sync(data: Array) -> void:
 		player.global_position = pos
 		player.velocity = Vector3.ZERO
 	var flags := int(data[7])
+	var mate := _slot(int(_slot_of.get(_from, -1)))
+	if mate == null or mate.team != player.team:
+		return                           # (no teammate here: the round and the clock only, never this fighter)
 	var cause := String(data[12]) if String(data[12]) in CAUSES else "zone"
 	var by := int(data[11]) if _slot(int(data[11])) != null and _slot(int(data[11])).team != player.team else -1
+	if not flags & 4:
+		flags &= ~3                      # (nobody stood in for it: no knock or end of it to take)
 	if flags & 3:
 		_rebuild_referee()
 		if not player.knocked:
@@ -773,6 +838,18 @@ func _set_down_quietly(f: Fighter, flags: int) -> void:
 	_applying -= 1
 
 
+## After a restart: the fighters of members who had left (the session file's, _net_setup) out,
+## with no kill feed, in any phase; the rounds after keep them out (TeamReferee.left).
+func _put_gone_down() -> void:
+	for s: int in _gone:
+		var f := _slot(s)
+		if f != null and f.alive:
+			_applying += 1
+			f.last_hit_cause = "left"
+			f.die(null, false)
+			_applying -= 1
+
+
 ## A member's word on its own fighter for its host back after a restart (_rep_t).
 func _send_rep() -> void:
 	if _sending() and phase != Phase.END:
@@ -785,6 +862,13 @@ func _apply_rep(f: Fighter, flags: int, gun: String) -> void:
 	if Weapons.PICKABLE.has(gun) and (phase == Phase.PREP or phase == Phase.FIGHT):
 		_set_pick(f, gun)
 	_set_down_quietly(f, flags)
+	_referee_from_fighters()
+
+
+## The resumed host's referee rebuilt from its fighters, and a team left with nobody UP wiped ("el").
+func _referee_from_fighters() -> void:
+	if phase != Phase.FIGHT:
+		return
 	_rebuild_referee()
 	for t: int in [0, 1]:
 		if referee.up_count(t) == 0:
@@ -792,6 +876,13 @@ func _apply_rep(f: Fighter, flags: int, gun: String) -> void:
 				var w := [int(d[1]), int(d[2]), bool(d[3]), String(d[4])]
 				_announce("el", w)
 				_apply_decision("el", w)
+
+
+## A resumed host decides nothing on the round (no wipe, settle or time-out) until its stand-in's
+## "sync" is in and the members' "rep" had RESUME_REP_S to come: its fresh referee knows nothing of
+## their knocks and ends yet.
+func _referee_waits() -> bool:
+	return _resuming or _rep_t > 0.0
 
 
 ## A resumed host's referee from its fighters as they stand (UP, KNOCKED, OUT; those who left).

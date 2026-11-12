@@ -108,10 +108,11 @@ send_event / send_state / session_started(host) / session_ended(reason) keep the
   (a sender may only speak for its own slot).
 - A member who leaves (member_left) is LEFT for the rest of the match (TeamReferee.leave).
 - A member AWAY (no link, the app in the background or closed) stands frozen, the host deciding its
-  fighter; the HOST away, the present member with the lowest id stands in for the host's fighter
-  only (TeamArenaNet.stand_in_id: its hits, the zone, its knock or elimination), and the host adopts
-  that word when it is back. A closed app comes back into the match from the sealed session file
-  (Cloud.try_resume: roster, host, size, counters) inside the grace; past it, LEFT as above.
+  fighter; the HOST away, its own teammate that is UP and present (the lowest id of those) stands in
+  for the host's fighter only (TeamArenaNet.stand_in_id: its hits, the zone, its knock or
+  elimination; never a member of the other team), and the host adopts that word when it is back.
+  A closed app comes back into the match from the sealed session file (Cloud.try_resume: roster,
+  host, size, counters, who already left) inside the grace; past it, LEFT as above.
 - Results: an all-human match records like a team match (HISTORY "DUO · WITH <teammate>").
 - Direct UDP is off in all-human matches (relay only) for now; LAN is 1 vs 1 only.
 
