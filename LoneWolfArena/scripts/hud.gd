@@ -182,11 +182,14 @@ func show_break(title: String, mine: int, theirs: int, won: int, next_round: int
 	_round_banner.t = 0.0
 
 
-## The step of the break on screen ("" outside one): "beat", "result", "score", "band", "done".
+## The step of the break on screen ("" outside one): "beat", "result", "score", "band". The band
+## stays for as long as the arena is in its break: online the guest's break ends with the host's
+## word, which can come a moment after the sequence's own length.
 func break_step() -> String:
 	if _break.is_empty() or arena == null or int(arena.get("phase")) != 3:
 		return ""
-	return RoundRules.break_step(float(_break.age))
+	var step := RoundRules.break_step(float(_break.age))
+	return "band" if step == "done" else step
 
 
 ## A score plate's number now: the old score until the break's tick, then the new one
@@ -1600,7 +1603,7 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		if phase == 0:
 			t = float(arena.get("prep_left"))
 		elif break_step() != "":
-			t = RoundRules.BREAK_S - float(_break.age)      # the break counts down, red
+			t = maxf(RoundRules.BREAK_S - float(_break.age), 0.0)      # the break counts down, red
 			phase = 0
 		elif bool(arena.get("practice")):
 			t = float(arena.get("time_left"))

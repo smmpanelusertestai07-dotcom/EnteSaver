@@ -980,8 +980,9 @@ func _start_fight() -> void:
 	for f in fighters:
 		if f.awaiting_pick:
 			# The other phone's pick has not come yet (it still counts when it does): meanwhile
-			# the gun this side would have taken, never a fight with the fists only.
-			f.set_loadout(preselected_pick())
+			# the gun the hit checks assume (_round_gun), the same on both phones, never a fight
+			# with the fists only and never a gun from this phone's own settings.
+			f.set_loadout(_round_gun())
 	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:
