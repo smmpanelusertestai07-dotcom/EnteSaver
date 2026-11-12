@@ -29,8 +29,9 @@ var _smooth := NetSmoother.new()
 ## Its player is AWAY (Cloud.peer_away_changed: no link, the app in the background): it stands
 ## where its last state left it, moves and shoots no more. `decided_here`: this phone decides its HP
 ## meanwhile (1 vs 1: the phone still there; DUO / SQUAD: the host): hits and the zone take it here
-## as a fighter's own (Fighter.take_damage), so it can go down. Back, its reports may not heal what
-## it lost meanwhile: hp_cap holds them down until its phone took the word ("sync").
+## as a fighter's own (Fighter.take_damage), so it can go down, and knocked it bleeds out here.
+## Back, its reports may not heal what it lost meanwhile: hp_cap holds them down until its phone
+## took the word ("sync").
 var away := false
 var decided_here := false
 var hp_cap := -1.0
@@ -124,6 +125,13 @@ func _physics_process(delta: float) -> void:
 	if away:
 		velocity = Vector3.ZERO          # frozen where it was (its phone sends nothing)
 		model.update_locomotion(Vector2.ZERO, stance, _net_floor, delta)
+		if decided_here and knocked and revived_by == null and knock_hp > 0.0:
+			# Knocked and away, decided here: it bleeds out as a fighter run here does (the referee
+			# hears knock_finished, "bleed"); its phone, back, takes that word.
+			knock_hp = maxf(knock_hp - KNOCK_HP / BLEED_S * delta, 0.0)
+			if knock_hp <= 0.0:
+				last_hit_cause = "bleed"
+				knock_finished.emit(self, null, false)
 		return
 	if _net_pos == Vector3.INF:
 		_net_pos = global_position

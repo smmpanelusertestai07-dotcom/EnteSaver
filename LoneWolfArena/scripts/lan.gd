@@ -608,6 +608,11 @@ func grace_ms() -> int:
 	return SILENCE_MS
 
 
+## PLAY WITHOUT INTERNET keeps no session file: a closed app cannot come back to its match.
+func resume_allowed() -> bool:
+	return false
+
+
 func self_grace_ms() -> int:
 	return AWAY_MS
 

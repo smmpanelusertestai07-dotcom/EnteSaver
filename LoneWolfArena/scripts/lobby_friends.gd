@@ -78,9 +78,38 @@ func on_lobby_ready() -> void:
 	# Online presence starts with the lobby, so friends and other players see this phone online
 	# as soon as the game is open.
 	Game.cloud_service().start_lobby()
+	if Game.cloud_service().try_resume():
+		_show_rejoin()
 	if Game.match_notice.size() == 2:
 		lobby.dialogs.notice.call_deferred(String(Game.match_notice[0]), String(Game.match_notice[1]))
 	Game.match_notice = []
+
+
+## The app was closed in an online match and opened again in time (Cloud.try_resume): REJOINING
+## MATCH... until the relay is up and the arena loads (_on_net_session), with LEAVE MATCH (the
+## match then counts as LEFT, as QUIT MATCH does; the other player wins). Lost meanwhile (the
+## grace ran out), the popup says so.
+func _show_rejoin() -> void:
+	var cloud := Game.cloud_service()
+	var v := lobby.dialogs.open_modal("REJOINING MATCH...", 680.0)
+	lobby.dialogs.modal.name = "RejoinModal"
+	var t := UI.label("Your match against %s is still on. Taking you back to it." % String(cloud.opponent.get("name", "PLAYER")),
+		21, UI.TEXT, "semi")
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(600, 0)
+	v.add_child(t)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	v.add_child(row)
+	var leave := UI.button("LEAVE MATCH", 22, "danger", Vector2(240, 56))
+	leave.name = "LeaveMatch"
+	row.add_child(leave)
+	var quit := func() -> void:
+		if cloud.in_session and not _match_loading:
+			cloud.end_session("left")
+		lobby.dialogs.close_modal()
+	leave.pressed.connect(quit)
+	lobby.dialogs.modal.set_meta("on_back", quit)
 
 
 ## The lobby is leaving the tree.
@@ -1193,6 +1222,11 @@ static func session_team_match(cloud: Cloud) -> Dictionary:
 func _on_net_ended(reason: String) -> void:
 	_net_note = "THE OTHER PLAYER LEFT" if reason == "left" else "CONNECTION LOST"
 	_net_sig = "-"
+	var m: Variant = lobby.dialogs.modal
+	if m is Node and is_instance_valid(m) and (m as Node).name == "RejoinModal" and not _match_loading:
+		lobby.dialogs.close_modal()
+		if reason != "left":
+			lobby.dialogs.notice.call_deferred("CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat).")
 	if not (Game.online and lobby.start_btn.disabled):
 		Game.online = false
 

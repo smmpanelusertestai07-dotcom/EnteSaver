@@ -126,6 +126,8 @@ static func privacy_sections() -> Array:
 		["Stored only on this phone", "Your player name, profile picture, name card and outfit, your settings and "
 			+ "control layout, your match stats, match history and level, your friends list, friend requests and "
 			+ ("blocked players, your last %d chat messages with each friend, and the random key pair behind your player ID. ") % NetChat.HISTORY_MAX
+			+ "While an online match runs, its encrypted connection details are kept too, so a closed app can rejoin "
+			+ "it; they are deleted when the match ends. "
 			+ "They stay in the game's private storage on this phone and are left "
 			+ "out of phone backups. To spot edited saves, the game signs them with a key made from this phone's "
 			+ "device ID; that ID never leaves the phone."],

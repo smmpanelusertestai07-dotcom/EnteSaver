@@ -29,7 +29,9 @@ extends Node
 ## keys derived from the room's) and the state goes over it while it works both ways (direct_up),
 ## through the relay again after NetDirect.TIMEOUT_MS of silence; everything else stays here.
 ## Anyone can publish to a public broker, so invites are rate limited and the list is capped. The
-## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere.
+## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere but on
+## the phone (a live 1 vs 1's sealed session file, so a closed app can rejoin it: see "the session
+## file" below).
 ## Each player decides who reaches them (the ONLINE settings): DUEL CHALLENGES FROM everyone,
 ## friends only or nobody (challenge_allowed: the others are declined at once, unseen) and FRIEND
 ## REQUESTS on or off (requests_allowed: off, they are ignored).
@@ -214,6 +216,18 @@ var _rejoin := false           # back from an absence: the arena waits for the o
 var _away_ids := {}            # match players taken for AWAY now (id -> true)
 var _back_ms := 0              # when this phone, absent, heard the match again (the "sync" is waited for a while)
 const REJOIN_WAIT_MS := 6000   # back in a match, states wait this long at most for the other phone's "sync"
+var _grace_override := 0       # LW_AWAY_GRACE_MS (checks only, never in a release build): grace_ms()
+## Rejoining after the app was closed (see "the session file" below).
+const RESUME_V := 1
+const SEQ_RESERVE := 2000      # the counter the file keeps runs this far ahead of the one in use
+const RESUME_SAVE_MS := 3000   # the file's "last in the match" time is this fresh at worst
+var resumed := false           # this session was entered again from the file after a restart
+var resume_note := {}          # the arena's note on the match: {"counted", "mine", "theirs", "mode"} (note_match)
+var _seq_kept := 0             # the counter the file holds: this phone's counter stays below it
+var _resume_save_ms := -100000 # when the file was last written (the tick clock)
+var _in_match_unix := 0.0      # the wall-clock time this phone was last in its match (present)
+var _resume_emit := false      # a session entered from the file: session_started once the relay is up
+var _resume_wait := false      # ... and its arena waits for the other phone's "sync" however long it takes (the grace ends it)
 var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
 var _session_ms := 0           # when the session started
 var _listen_ms := -1           # when this session's arena began listening (-1: loading, or none)
@@ -289,6 +303,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if not OS.has_feature("template") and OS.get_environment("LW_MQTT_URL") != "":
 		_brokers = [OS.get_environment("LW_MQTT_URL")]      # tests: a local broker
+	if not OS.has_feature("template") and OS.get_environment("LW_AWAY_GRACE_MS").is_valid_int():
+		_grace_override = maxi(int(OS.get_environment("LW_AWAY_GRACE_MS")), AWAY_AFTER_MS + 2000)    # tests only
 
 
 func configured() -> bool:
@@ -434,12 +450,14 @@ func _check_away(now: int) -> void:
 
 ## How long the other phone waits for a silent one in a match (Lan: SILENCE_MS, its socket closes),
 ## and how long this phone may be away from one before it has dropped out.
+## Checks can shorten that grace (LW_AWAY_GRACE_MS, read only outside a release build) so that an
+## absence past it takes seconds; this phone's own grace stays 1.5 s shorter than the other's.
 func grace_ms() -> int:
-	return AWAY_GRACE_MS
+	return _grace_override if _grace_override > 0 else AWAY_GRACE_MS
 
 
 func self_grace_ms() -> int:
-	return SELF_GRACE_MS
+	return grace_ms() - (AWAY_GRACE_MS - SELF_GRACE_MS)
 
 
 ## This phone is away from its match since `since` (tick clock): paused, or its link dropped. Back,
@@ -454,7 +472,7 @@ func _note_absent(since: int) -> void:
 
 ## Whether this phone is back from an absence and waits for the other phone's word ("sync").
 func rejoining() -> bool:
-	return in_session and _rejoin and (_absent or Time.get_ticks_msec() - _back_ms < REJOIN_WAIT_MS)
+	return in_session and _rejoin and (_absent or _resume_wait or Time.get_ticks_msec() - _back_ms < REJOIN_WAIT_MS)
 
 
 ## This phone hears its match again (the other phone, or an all-human match's host).
@@ -466,6 +484,7 @@ func _present(now: int) -> void:
 
 func rejoined() -> void:
 	_rejoin = false
+	_resume_wait = false
 
 
 ## Whether that match player is AWAY now (peer_away_changed).
@@ -524,6 +543,10 @@ func _notification(what: int) -> void:
 
 func _process(delta: float) -> void:
 	_check_away(Time.get_ticks_msec())       # before anything in the buffer is read
+	if in_session and not _absent and _seq_kept > 0:
+		_in_match_unix = Time.get_unix_time_from_system()
+		if Time.get_ticks_msec() - _resume_save_ms > RESUME_SAVE_MS:
+			_save_resume()
 	if direct != null:
 		_tick_direct(delta)
 	if _keygen != -1 and not _keygen_out.is_empty():
@@ -843,6 +866,9 @@ func _parse() -> void:
 						_subscribe(_seek_topic())
 					if _room != "":
 						_subscribe(ROOT + "/r/" + _room)
+					if _resume_emit:
+						_resume_emit = false
+						session_started.emit.call_deferred(is_host)     # (the lobby loads the arena)
 					if not _grp.is_empty():
 						_subscribe(ROOT + "/g/" + String(_grp.gid))
 					if not _mm.is_empty():
@@ -1443,6 +1469,188 @@ func _leave_room() -> void:
 	_aes = PackedByteArray()
 	_mac = PackedByteArray()
 	opponent = {}
+
+
+# ---------------------------------------------------------------- the session file (rejoining)
+# A 1 vs 1 over the relay survives the app being closed (swiped away, killed by the system): its
+# session lives in one file (resume_path) from its start to its end, whatever ends it. It holds
+# what entering the room again needs: the relay, the room and its two keys, the opponent, who
+# hosts, the custom room's rules, this phone's counter (SEQ_RESERVE ahead of the one in use, so a
+# restart never repeats one without a write per message), the other's counter (replays stay
+# dropped), the arena's note (counted, score, mode: note_match) and the wall-clock time this phone
+# was last in the match (written every RESUME_SAVE_MS). At rest it is sealed as the room packets
+# are (AES-256-CBC + HMAC-SHA256) with keys derived from this install's private identity key and
+# this player's id; a file that fails its check, or holds another id, is deleted and ignored.
+# Opened again (try_resume, from the lobby) less than self_grace_ms after that time, the session is
+# entered as it was, this phone away from it: the lobby shows REJOINING MATCH... and loads the
+# arena once the relay is up (session_started), the arena asks for the match ("back") and enters it
+# where the other phone's "sync" says it stands. Too late, the match counts as LEFT (once: it was
+# counted when its first fight began). DUO / SQUAD and all-human matches, and PLAY WITHOUT
+# INTERNET (resume_allowed), keep no file.
+
+## The file (each test role keeps its own, as with the identity key).
+static func resume_path() -> String:
+	var role := OS.get_environment("LW_NET_ROLE") if not OS.has_feature("template") else ""
+	return "user://match_resume%s.bin" % ("_" + role if role != "" else "")
+
+
+## Whether the app is in the background now (paused, not yet resumed). Android closes a paused app
+## by tearing its scene down: the match's arena then leaves the tree with the app, and must not end
+## the session (no "bye", the file kept), so that it can be rejoined.
+func app_paused() -> bool:
+	return _paused_unix > 0.0
+
+
+## Whether this service's sessions can be entered again after a restart (Lan: no).
+func resume_allowed() -> bool:
+	return true
+
+
+## The file's two keys [aes, mac]: HMAC-SHA256 of this install's private key with a label and the id.
+func _resume_keys() -> Array:
+	var base := _key.save_to_string(false).to_utf8_buffer()
+	return [_crypto.hmac_digest(HashingContext.HASH_SHA256, base, ("match-file-aes/" + my_id).to_utf8_buffer()),
+		_crypto.hmac_digest(HashingContext.HASH_SHA256, base, ("match-file-mac/" + my_id).to_utf8_buffer())]
+
+
+## Writes the live session to the file (a 1 vs 1 over the relay only), atomically.
+func _save_resume() -> void:
+	if not in_session or session_multi or not session_team.is_empty() or not resume_allowed() or _key == null or _room == "":
+		return
+	_resume_save_ms = Time.get_ticks_msec()
+	_seq_kept = _seq + SEQ_RESERVE
+	var d := {"v": RESUME_V, "me": my_id, "relay": String(_brokers[_broker_i]), "room": _room,
+		"aes": Marshalls.raw_to_base64(_aes), "mac": Marshalls.raw_to_base64(_mac), "opp": opponent.duplicate(),
+		"host": is_host, "rules": session_rules.duplicate(), "seq": _seq_kept, "their": _their_seq,
+		"t": _in_match_unix, "note": resume_note.duplicate()}
+	var k := _resume_keys()
+	var tmp := resume_path() + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_buffer(_seal(d, my_id, 0, k[0], k[1]))
+	f.close()
+	DirAccess.rename_absolute(tmp, resume_path())
+
+
+## The session is over (or never to be entered again): the file goes.
+func clear_resume() -> void:
+	_seq_kept = 0
+	if FileAccess.file_exists(resume_path()):
+		DirAccess.remove_absolute(resume_path())
+
+
+## The arena's note on its match, kept in the file: whether it was counted, the score (this
+## phone's rounds, the other's) and the mode's name (a LEFT recorded without the arena needs them).
+func note_match(counted: bool, mine: int, theirs: int, mode: String) -> void:
+	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode}
+	_save_resume()
+
+
+## The file, opened and checked: what it holds, or {} (none; one that fails its check is deleted).
+func load_resume() -> Dictionary:
+	if _key == null or not resume_allowed() or not FileAccess.file_exists(resume_path()):
+		return {}
+	var k := _resume_keys()
+	var d := _unseal(FileAccess.get_file_as_bytes(resume_path()), k[0], k[1])
+	var ok := not d.is_empty() and String(d.get("f", "")) == my_id and String(d.get("me", "")) == my_id \
+		and int(d.get("v", 0)) == RESUME_V and typeof(d.get("room")) == TYPE_STRING and String(d.room).length() == 32 \
+		and String(d.room).is_valid_hex_number() and typeof(d.get("aes")) == TYPE_STRING and typeof(d.get("mac")) == TYPE_STRING \
+		and typeof(d.get("relay")) == TYPE_STRING and d.get("opp") is Dictionary and typeof((d.opp as Dictionary).get("id")) == TYPE_STRING \
+		and (d.get("seq") is float or d.get("seq") is int) and (d.get("their") is float or d.get("their") is int) \
+		and (d.get("t") is float or d.get("t") is int) and d.get("host") is bool and d.get("note") is Dictionary
+	if ok:
+		ok = Marshalls.base64_to_raw(String(d.aes)).size() == 32 and Marshalls.base64_to_raw(String(d.mac)).size() == 32
+	if not ok:
+		clear_resume()
+		return {}
+	return d
+
+
+## How long this phone may still take to come back to the match the file holds (ms; <= 0: too late).
+func resume_left_ms(d: Dictionary) -> int:
+	return self_grace_ms() - int((Time.get_unix_time_from_system() - float(d.get("t", 0.0))) * 1000.0)
+
+
+## At start, once the game can go online (the lobby): a session in the file is entered again
+## (true: the lobby shows REJOINING MATCH... and session_started follows once the relay is up). Too
+## late for it, the match counts as LEFT if it was counted, and the file goes.
+func try_resume() -> bool:
+	if in_session or _room != "":
+		return false
+	var d := load_resume()
+	if d.is_empty():
+		return false
+	resume_note = (d.note as Dictionary).duplicate()
+	opponent = d.opp
+	var left := resume_left_ms(d)
+	if left <= 0:
+		_record_resume_left()
+		opponent = {}
+		resume_note = {}
+		clear_resume()
+		return false
+	var i := _brokers.find(String(d.relay))
+	if i >= 0 and i != _broker_i:
+		_broker_i = i                # the relay the other phone is on
+		if _ws != null:
+			_ws.close()
+			_ws = null
+			_connected = false
+			_retry_t = 0.0
+	var now := Time.get_ticks_msec()
+	var o: Dictionary = d.opp
+	opponent = {"id": String(o.id), "name": String(o.get("name", "PLAYER")), "bundle": String(o.get("bundle", "default"))}
+	_room = String(d.room)
+	_aes = Marshalls.base64_to_raw(String(d.aes))
+	_mac = Marshalls.base64_to_raw(String(d.mac))
+	_seq = int(d.seq)
+	_seq_kept = _seq
+	_their_seq = int(d.their)
+	is_host = bool(d.host)
+	var rr: Variant = d.get("rules")
+	session_rules = rules_from(rr) if rr is Dictionary and not (rr as Dictionary).is_empty() else {}
+	session_team = {}
+	_outgoing = {}
+	in_session = true
+	resumed = true
+	_reset_away()
+	_absent = true                   # away from the match since the file's time, back once heard
+	_absent_ms = now - (self_grace_ms() - left)
+	_rejoin = true
+	_resume_wait = true
+	_in_match_unix = float(d.t)
+	_accept_ms = 0
+	_session_ms = now
+	_keep_t = 0.0
+	peer_rtt = -1
+	_peer_ping_t = 0.0
+	_peer_pings.clear()
+	_last_state = []
+	_chat_in = [2.0, now]
+	_chat_out_ms = 0
+	_last_heard = now
+	queue.clear()
+	_direct_begin()
+	if _connected:
+		_subscribe(ROOT + "/r/" + _room)
+		session_started.emit.call_deferred(is_host)
+	else:
+		_resume_emit = true
+	return true
+
+
+## A match entered from the file that ends before its arena is up (too late, LEAVE MATCH, lost
+## again): counted when its first fight began, it goes into the profile as QUIT MATCH puts it.
+func _record_resume_left() -> void:
+	if not bool(resume_note.get("counted", false)):
+		return
+	resume_note.counted = false
+	Game.record_match({"won": false, "draw": false, "left": true, "invalid": false, "kills": 0, "damage": 0, "headshots": 0,
+		"accuracy": 0.0, "time": 0.0, "xp": 0, "enemy": String(opponent.get("name", "PLAYER")), "mode": String(resume_note.get("mode", "")),
+		"mode_id": "lonewolf", "map": "", "weapon": "", "score_player": int(resume_note.get("mine", 0)),
+		"score_bot": int(resume_note.get("theirs", 0)), "hp_left": 0, "difficulty": "ONLINE", "taken": 0, "shots": 0, "hits": 0,
+		"deaths": 0, "enemy_id": String(opponent.get("id", "")), "local": false, "opponent_left": false})
 
 
 # ---------------------------------------------------------------- friends
@@ -2134,6 +2342,8 @@ func _room_send(d: Dictionary) -> void:
 ## id and the next counter), then the HMAC-SHA256 over all of that.
 func _room_packet(d: Dictionary) -> PackedByteArray:
 	_seq += 1
+	if _seq_kept > 0 and _seq >= _seq_kept - 100:
+		_save_resume()               # (the file's counter keeps ahead of the one in use)
 	return _seal(d, my_id, _seq, _aes, _mac)
 
 
@@ -2195,9 +2405,11 @@ func _on_room(msg: PackedByteArray) -> void:
 	_their_seq = int(n)
 	_last_heard = Time.get_ticks_msec()
 	_present(_last_heard)            # (this phone is back in the match: it hears the other one)
-	if in_session:
-		_set_away(String(opponent.get("id", "")), false)
 	var kind := String((d as Dictionary).get("k", ""))
+	if in_session and kind != "ka":
+		# (a phone that comes back after a restart says "ka" while its arena loads: its fighter
+		# stays frozen here, and can be hit, until the arena is up)
+		_set_away(String(opponent.get("id", "")), false)
 	match kind:
 		"join", "joined":
 			# Each side says "join" every second until the other answers (a message sent before
@@ -2222,6 +2434,10 @@ func _on_room(msg: PackedByteArray) -> void:
 				_chat_out_ms = 0
 				queue.clear()
 				_direct_begin()
+				resumed = false
+				resume_note = {}
+				_in_match_unix = Time.get_unix_time_from_system()
+				_save_resume()
 				session_started.emit(is_host)
 		"st":
 			if _on_state_msg(d as Dictionary):
@@ -2300,7 +2516,12 @@ func end_session(reason := "left") -> void:
 	if in_session:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
+		if resumed and not _arena_listens():
+			_record_resume_left()        # (entered from the file, ended before its arena was up)
 	in_session = false
+	_resume_emit = false
+	_resume_wait = false
+	clear_resume()
 	_reset_away()
 	session_team = {}
 	if session_multi:
@@ -3294,6 +3515,7 @@ func _on_gstart(d: Dictionary) -> void:
 func _multi_enter(room: String, aes: PackedByteArray, mac: PackedByteArray, size: int, roster: Array, host_id: String) -> void:
 	if in_session:
 		end_session("left")
+	clear_resume()
 	if seeking:
 		seek_stop()
 	if _room != "":
