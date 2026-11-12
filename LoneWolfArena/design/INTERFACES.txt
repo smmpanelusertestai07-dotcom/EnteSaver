@@ -72,15 +72,18 @@ listed here. If a part needs something new from the core, add it in its own file
   DUO / SQUAD or all-human matches): Cloud keeps the live session in `Cloud.resume_path()` (sealed
   AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
   this phone's counter `SEQ_RESERVE` ahead; the "last in the match" time every `RESUME_SAVE_MS`;
-  the arena's `note_match(counted, mine, theirs, mode)`), deleted whenever the session ends and
+  the arena's `note_match(counted, mine, theirs, mode, round_on, picks)`), deleted whenever the session ends and
   once the match's result is in the profile (`match_recorded()`: the results screen, QUIT MATCH's
   LEFT; no file is written for that session again, so a close on the results adds nothing). The
   lobby calls `try_resume()` when it opens: in time, REJOINING MATCH... (LEAVE MATCH) until the
   relay is up, then `session_started` loads the arena as a challenge does; `Cloud.resumed` tells
   the arena it is fresh: it does not count the match again, holds its prep and, on the other
   phone's "sync", enters the match where it stands (`Arena._resume_into`: round, phase, clock,
-  score, gun, cooldowns; HP never above the other's word), the host included. Too late (or LEAVE
-  MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once.
+  score, gun, cooldowns; HP never above the other's word), the host included. A resuming arena
+  sends no "sync" of its own blanks; both apps closed, the resumed host takes the guest's "back"
+  as its cue and enters its note's round from the prep (`Arena._resume_from_note`). Too late (or
+  LEAVE MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once;
+  the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it).
 
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`

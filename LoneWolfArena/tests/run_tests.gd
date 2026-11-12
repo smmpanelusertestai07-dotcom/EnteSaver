@@ -2115,7 +2115,10 @@ func _test_session_file() -> void:
 	# The result is in (the results screen, QUIT MATCH): the file goes and stays gone for the
 	# session, so a close on the results screen adds no LEFT later and a reopen never rejoins.
 	start.call(cl)
-	cl.note_match(true, 2, 1, "LONE WOLF")
+	cl.note_match(true, 2, 1, "LONE WOLF", 4, "1:x,3:y")
+	var noted: Dictionary = cl.load_resume().get("note", {})
+	_check(int(noted.get("round", 0)) == 4 and String(noted.get("picks", "")) == "1:x,3:y",
+		"the note keeps the round to play on and the picks (both apps closed: the host's note decides)")
 	cl.match_recorded()
 	cl.note_match(true, 2, 1, "LONE WOLF")
 	var done := Cloud.new()

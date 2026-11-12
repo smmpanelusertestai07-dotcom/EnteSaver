@@ -1592,9 +1592,11 @@ func match_recorded() -> void:
 
 
 ## The arena's note on its match, kept in the file: whether it was counted, the score (this
-## phone's rounds, the other's) and the mode's name (a LEFT recorded without the arena needs them).
-func note_match(counted: bool, mine: int, theirs: int, mode: String) -> void:
-	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode}
+## phone's rounds, the other's) and the mode's name (a LEFT recorded without the arena needs them),
+## the round to play on (0: unknown) and the picks (RoundRules.picks_text): both apps closed, the
+## resumed host's note is all that is left of the match.
+func note_match(counted: bool, mine: int, theirs: int, mode: String, round_on := 0, picks := "") -> void:
+	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode, "round": round_on, "picks": picks}
 	_save_resume()
 
 
