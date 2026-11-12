@@ -495,6 +495,12 @@ func rejoined() -> void:
 	_resume_wait = false
 
 
+## All-human: the members who left this match (LEFT for the rest of it; after a restart, from the
+## session file).
+func left_members() -> Array:
+	return (_multi.get("left", {}) as Dictionary).keys() if session_multi else []
+
+
 ## Whether that match player is AWAY now (peer_away_changed).
 func peer_is_away(id: String) -> bool:
 	return _away_ids.has(id)
@@ -1575,7 +1581,7 @@ func _save_resume() -> void:
 	if session_multi:
 		d.opp = {"id": session_host_id}
 		d.multi = {"roster": NetGroup.pack_roster(session_roster), "host": session_host_id, "size": int(session_team.get("size", 2)),
-			"seqs": (_multi.get("seq", {}) as Dictionary).duplicate()}
+			"seqs": (_multi.get("seq", {}) as Dictionary).duplicate(), "left": (_multi.get("left", {}) as Dictionary).keys()}
 	var k := _resume_keys()
 	var tmp := resume_path() + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
@@ -1632,8 +1638,10 @@ func load_resume() -> Dictionary:
 	return d
 
 
-## A file's "multi" part checked: {"roster", "host", "size", "seqs"} with a roster that holds this
-## phone and the host (NetGroup.roster_from) and whole counters for its members only; {} otherwise.
+## A file's "multi" part checked: {"roster", "host", "size", "seqs", "left"} with a roster that holds
+## this phone and the host (NetGroup.roster_from), whole counters for its members only and the ids
+## of members who already left the match (never this phone or the host; none in an older file); {}
+## otherwise.
 static func multi_from_file(v: Variant, me: String) -> Dictionary:
 	if not v is Dictionary:
 		return {}
@@ -1653,7 +1661,15 @@ static func multi_from_file(v: Variant, me: String) -> Dictionary:
 		if typeof(id) != TYPE_STRING or not ids.has(String(id)) or not (n is float or n is int):
 			return {}
 		seqs[String(id)] = int(n)
-	return {"roster": roster, "host": String(m.host), "size": int(size), "seqs": seqs}
+	var left: Array = []
+	var lv: Variant = m.get("left", [])
+	if not lv is Array:
+		return {}
+	for id: Variant in lv:
+		if typeof(id) != TYPE_STRING or not ids.has(String(id)) or String(id) == me or String(id) == String(m.host) or left.has(String(id)):
+			return {}
+		left.append(String(id))
+	return {"roster": roster, "host": String(m.host), "size": int(size), "seqs": seqs, "left": left}
 
 
 ## How long this phone may still take to come back to the match the file holds (ms; <= 0: too late).
@@ -1694,19 +1710,23 @@ func try_resume() -> bool:
 	opponent = {"id": String(o.id), "name": String(o.get("name", "PLAYER")), "bundle": String(o.get("bundle", "default"))}
 	var multi := multi_from_file(d.get("multi"), my_id) if d.has("multi") else {}
 	if not multi.is_empty():
-		# An all-human match: its roster and host again, every member heard now (AWAY until it speaks).
+		# An all-human match: its roster and host again, every member heard now (AWAY until it speaks)
+		# but those who had left it (LEFT still: left_members, which the arena takes when it listens).
 		opponent = {}
 		session_multi = true
 		session_roster = (multi.roster as Array).duplicate(true)
 		session_host_id = String(multi.host)
 		var ids := {}
 		var heard := {}
+		var gone := {}
+		for id: String in multi.left:
+			gone[id] = true
 		for e: Dictionary in session_roster:
 			ids[String(e.id)] = int(e.slot)
-			if String(e.id) != my_id:
+			if String(e.id) != my_id and not gone.has(String(e.id)):
 				heard[String(e.id)] = now
-		_multi = {"ids": ids, "seq": (multi.seqs as Dictionary).duplicate(), "heard": heard, "ka": {}, "joined": {}, "left": {},
-			"state_t": {}, "t0": now}
+		_multi = {"ids": ids, "seq": (multi.seqs as Dictionary).duplicate(), "heard": heard, "live": heard.duplicate(), "ka": {},
+			"joined": {}, "left": gone, "state_t": {}, "t0": now}
 	_room = String(d.room)
 	_aes = Marshalls.base64_to_raw(String(d.aes))
 	_mac = Marshalls.base64_to_raw(String(d.mac))
@@ -3966,7 +3986,7 @@ func _multi_enter(room: String, aes: PackedByteArray, mac: PackedByteArray, size
 	for e: Dictionary in roster:
 		ids[String(e.id)] = int(e.slot)
 	var now := Time.get_ticks_msec()
-	_multi = {"ids": ids, "seq": {}, "heard": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": now}
+	_multi = {"ids": ids, "seq": {}, "heard": {}, "live": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": now}
 	opponent = {}
 	_room = room
 	_aes = aes
@@ -4002,6 +4022,7 @@ func _multi_start() -> void:
 	for id: String in _multi.ids:
 		if id != my_id:
 			_multi.heard[id] = now
+			_multi.live[id] = now
 	if is_host:
 		for id: String in _multi.ids:
 			if id != my_id and not (_multi.joined as Dictionary).has(id):
@@ -4054,9 +4075,11 @@ func _on_multi(d: Dictionary) -> void:
 	if is_host or f == session_host_id:
 		_last_heard = now            # (a member waits on the host; the host on anyone)
 		_present(now)
-	if in_session:
-		_set_away(f, false)
 	var kind := String(d.get("k", ""))
+	if not kind in LOAD_KINDS:
+		_multi.live[f] = now         # (an AWAY member's "ka" while its resumed arena loads keeps it AWAY)
+		if in_session:
+			_set_away(f, false)
 	match kind:
 		"join":
 			if is_host:
@@ -4145,6 +4168,7 @@ func _multi_member_left(f: String) -> void:
 	if f == session_host_id:
 		end_session("left")
 		return
+	_save_resume()                   # (a restart keeps it LEFT: the file's "left")
 	if in_session:
 		member_left.emit(f)
 	if is_host and (_multi.left as Dictionary).size() >= (_multi.ids as Dictionary).size() - 1:
@@ -4152,13 +4176,15 @@ func _multi_member_left(f: String) -> void:
 
 
 ## Every frame in an all-human match: a member silent AWAY_AFTER_MS is AWAY, silent as long as a
-## 1 vs 1 opponent may be it has left.
+## 1 vs 1 opponent may be it has left. An AWAY member stays so while it only says it is loading
+## (LOAD_KINDS: its "live" time is what counts then, as the 1 vs 1's _last_live).
 func _check_members(now: int) -> void:
 	for id: String in (_multi.ids as Dictionary).keys():
 		if id == my_id or (_multi.left as Dictionary).has(id):
 			continue
 		var heard := int((_multi.heard as Dictionary).get(id, now))
-		_set_away(id, now - heard > AWAY_AFTER_MS)
+		var live := int((_multi.live as Dictionary).get(id, heard))
+		_set_away(id, now - (live if _away_ids.has(id) else heard) > AWAY_AFTER_MS)
 		if id == session_host_id:
 			continue
 		var ka := int((_multi.ka as Dictionary).get(id, -100000))

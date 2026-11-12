@@ -2142,7 +2142,7 @@ func _test_session_file() -> void:
 	cl.session_host_id = ids[1]
 	cl.session_team = {"size": 2, "coop": false}
 	cl._resume_off = false               # (the recorded match above kept the file off)
-	cl._multi = {"ids": {}, "seq": {ids[1]: 90, ids[2]: 7}, "heard": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	cl._multi = {"ids": {}, "seq": {ids[1]: 90, ids[2]: 7}, "heard": {}, "ka": {}, "joined": {}, "left": {ids[3]: true}, "state_t": {}, "t0": 0}
 	cl.note_match(true, 1, 0, "DUO", 2, "", "duo")
 	var mf := Cloud.new()
 	mf._use_key(key)
@@ -2150,6 +2150,8 @@ func _test_session_file() -> void:
 		and mf.session_roster.size() == 4 and int((mf._multi.seq as Dictionary).get(ids[1], 0)) == 90
 		and int(mf.session_team.get("size", 0)) == 2 and mf._seq > cl._seq and mf.rejoining(),
 		"an all-human match's file holds its roster, host, size and the members' counters, and is entered again")
+	_check(mf.left_members() == [ids[3]] and not (mf._multi.heard as Dictionary).has(ids[3]) and (mf._multi.heard as Dictionary).has(ids[2]),
+		"a member who had left stays LEFT after the restart (the file's \"left\"), the others are heard again")
 	var tm := LobbyFriends.session_team_match(mf)
 	_check(int(tm.get("my_slot", -1)) == 1 and bool(tm.get("multi", false)) and String(tm.get("host_id", "")) == ids[1],
 		"the rejoined all-human match loads the same team match (this phone's slot, the host)")
@@ -2162,6 +2164,29 @@ func _test_session_file() -> void:
 		"member-x".sha256_text().left(32)).is_empty() and not Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1],
 		"size": 2, "seqs": {ids[2]: 4}}, ids[0]).is_empty(),
 		"a file's roster must hold this phone and the host, and counters only for its members")
+	for bad_left: Variant in [[ids[1]], [ids[0]], ["member-x".sha256_text().left(32)], [ids[2], ids[2]], ids[2], [3]]:
+		_check(Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {}, "left": bad_left}, ids[0]).is_empty(),
+			"a file's \"left\" names only other members, never the host or this phone, once each (%s)" % str(bad_left))
+	_check(Array(Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {}, "left": [ids[3]]},
+		ids[0]).get("left", [])) == [ids[3]], "a file's \"left\" is kept")
+	# A member AWAY that only says it is loading ("ka" while its resumed arena loads) stays AWAY.
+	var mm := Cloud.new()
+	mm.in_session = true
+	mm.session_multi = true
+	mm.session_host_id = ids[1]
+	mm.is_host = true
+	mm.my_id = ids[1]
+	var t0 := Time.get_ticks_msec()
+	mm._multi = {"ids": {ids[1]: 0, ids[2]: 2}, "seq": {}, "heard": {ids[2]: t0 - 60000}, "live": {ids[2]: t0 - 60000}, "ka": {},
+		"joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	mm._away_ids[ids[2]] = true
+	mm._on_multi({"f": ids[2], "n": 1, "k": "ka"})
+	mm._check_members(Time.get_ticks_msec())
+	var loading_away := mm.peer_is_away(ids[2])
+	mm._on_multi({"f": ids[2], "n": 2, "k": "ev", "e": "back", "d": [2]})
+	_check(loading_away and not mm.peer_is_away(ids[2]),
+		"an AWAY member's keep-alive while it loads keeps it AWAY (message and frame check); its first word from its arena brings it back")
+	mm.free()
 	for c: Node in [cl, again, quitter, other, stranger, late, done, lan, mf]:
 		c.free()
 	Game.profile = saved_profile
