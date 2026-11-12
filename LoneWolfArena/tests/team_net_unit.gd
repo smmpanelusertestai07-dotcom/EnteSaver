@@ -36,6 +36,7 @@ static func run(runner: Node) -> void:
 	me._team_seek()
 	me._privacy()
 	me._arena_net()
+	me._away_host()
 	Game.profile = saved_profile
 	Game.settings = saved_settings
 	Game.autotest = saved_at
@@ -453,6 +454,86 @@ func _stand_in(holder: Node3D, as_host: bool) -> TeamArenaNet:
 		f.global_position = Vector3(float(s), 1.0, 0.0)
 		list.append(f)
 		teams[s] = f.team
+	a.slots = list
+	a.fighters = list.duplicate()
+	a.referee.setup(teams)
+	return a
+
+
+## An all-human DUO with an AWAY host (slot 0 "h", its teammate "m1" in slot 1, the other team "a1"
+## and "a2", both lower ids): only the host's own UP teammate stands in for its fighter, and the
+## host takes a knock or an end of it only from a teammate that says it stood in (flag 4).
+func _away_host() -> void:
+	var holder := Node3D.new()
+	t.add_child(holder)
+	var saved := Game.session
+	var cl := Cloud.new()
+	cl.my_id = "a2"
+	Game.session = cl
+	var m := _human_duo(holder, "a2")
+	var hf := m.slots[0] as RemoteFighter
+	hf.set_away(true, false)
+	_check(m.stand_in_id() == "m1", "the stand-in is the host's own teammate, never a lower id of the other team (%s)" % m.stand_in_id())
+	m._on_event_from("el", [0, 2, false, "gun"], "a1")
+	_check(hf.alive and not hf.knocked, "an enemy's \"el\" on the away host's fighter is refused")
+	m._on_event_from("ko", [0, 2, false, "gun"], "m1")
+	_check(hf.alive and hf.knocked, "the host's teammate standing in knocks the away host's fighter everywhere")
+	(m.slots[1] as Fighter).knock(null, false)
+	_check(m.stand_in_id() == "" and m._sync_giver_id() == "m1", "with the teammate knocked nobody stands in; the teammate still gives the round")
+	cl.my_id = "h"
+	var h := _human_duo(holder, "h")
+	h.am_host = true
+	var me := h.player
+	var sync := func(flags: int) -> Array:
+		return [0, 1, 1, 30.0, 0, 0, 50.0, flags, me.global_position.x, me.global_position.y, me.global_position.z, 2, "gun"]
+	h._on_event_from("sync", sync.call(2 | 4), "a1")
+	_check(me.alive and not me.knocked and me.hp == Fighter.MAX_HP, "the host takes no word on its fighter from the other team")
+	h._on_event_from("sync", sync.call(2), "m1")
+	_check(me.alive and not me.knocked, "a teammate's end of the host's fighter that did not stand in for it is not taken")
+	h._on_event_from("sync", sync.call(2 | 4), "m1")
+	_check(not me.alive, "the host takes the end its teammate decided standing in for it, though it never noticed it was away")
+	h._rep_t = 2.0
+	_check(h._referee_waits(), "a resumed host decides nothing on the round while the members' \"rep\" may come")
+	h._rep_t = -1.0
+	_check(not h._referee_waits(), "then it decides again")
+	for a: TeamArenaNet in [m, h]:
+		a.free()
+	Game.session = saved
+	cl.free()
+	holder.queue_free()
+
+
+## An all-human DUO TeamArenaNet in the fight as the phone of `me` sees it (not in the tree):
+## slot 0 the host "h", 1 "m1" (team 0), 2 "a1", 3 "a2" (team 1); this phone's slot a Player.
+func _human_duo(holder: Node3D, me: String) -> TeamArenaNet:
+	var a := TeamArenaNet.new()
+	a.multi = true
+	a.host_id = "h"
+	a.round_index = 1
+	a.phase = TeamArenaNet.Phase.FIGHT
+	var ids := ["h", "m1", "a1", "a2"]
+	var teams := {}
+	var list: Array[Fighter] = []
+	for s in 4:
+		a.roster.append({"slot": s, "team": 0 if s < 2 else 1, "bot": false, "name": "F%d" % s, "id": ids[s]})
+		a._owner[s] = ids[s]
+		a._slot_of[ids[s]] = s
+		var f: Fighter = RemoteFighter.new()
+		if ids[s] == me:
+			f.free()
+			f = Player.new()
+		f.slot = s
+		f.team = 0 if s < 2 else 1
+		f.set_loadout("ar")
+		f.process_mode = Node.PROCESS_MODE_DISABLED
+		holder.add_child(f)
+		f.global_position = Vector3(float(s), 1.0, 0.0)
+		list.append(f)
+		teams[s] = f.team
+		if ids[s] == me:
+			a.player = f as Player
+			a.my_slot = s
+			a.my_team = f.team
 	a.slots = list
 	a.fighters = list.duplicate()
 	a.referee.setup(teams)

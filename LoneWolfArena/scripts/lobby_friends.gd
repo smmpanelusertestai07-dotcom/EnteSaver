@@ -78,16 +78,17 @@ func on_lobby_ready() -> void:
 	Game.match_notice = []
 
 
-## The app was closed in an online match and opened again in time (Cloud.try_resume): REJOINING
-## MATCH... until the relay is up and the arena loads (_on_net_session), with LEAVE MATCH (the
-## match then counts as LEFT, as QUIT MATCH does; the other player wins). Lost meanwhile (the
-## grace ran out), the popup says so.
+## The app was closed in an online match (a 1 vs 1, or an all-human DUO / SQUAD) and opened again
+## in time (Cloud.try_resume): REJOINING MATCH... until the relay is up and the arena loads
+## (_on_net_session), with LEAVE MATCH (the match then counts as LEFT, as QUIT MATCH does; the other
+## player wins). Lost meanwhile (the grace ran out), the popup says so.
 func _show_rejoin() -> void:
 	var cloud := Game.cloud_service()
 	var v := lobby.dialogs.open_modal("REJOINING MATCH...", 680.0)
 	lobby.dialogs.modal.name = "RejoinModal"
-	var t := UI.label("Your match against %s is still on. Taking you back to it." % String(cloud.opponent.get("name", "PLAYER")),
-		21, UI.TEXT, "semi")
+	var line := "Your team match is still on. Taking you back to it." if cloud.session_multi \
+		else "Your match against %s is still on. Taking you back to it." % String(cloud.opponent.get("name", "PLAYER"))
+	var t := UI.label(line, 21, UI.TEXT, "semi")
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	t.custom_minimum_size = Vector2(600, 0)
 	v.add_child(t)

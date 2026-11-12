@@ -67,9 +67,10 @@ listed here. If a part needs something new from the core, add it in its own file
   LW_AWAY_GRACE_MS, read only outside a release build); this phone away `self_grace_ms()` (1.5 s
   less) has dropped out ("connection lost"). A "ka" keep-alive (or a direct-link "dh" / "dc") does
   not end AWAY, in the message nor in the frame check (`Cloud.LOAD_KINDS`: a phone back after a
-  restart says them while its arena loads; its fighter stays frozen and hittable meanwhile).
-- Rejoining after the app was closed (1 vs 1 over the relay only; never PLAY WITHOUT INTERNET,
-  DUO / SQUAD or all-human matches): Cloud keeps the live session in `Cloud.resume_path()` (sealed
+  restart says them while its arena loads; its fighter stays frozen and hittable meanwhile), in a
+  1 vs 1 and in an all-human match alike (there per member: `_multi.live`).
+- Rejoining after the app was closed (a 1 vs 1 or an all-human DUO / SQUAD over the relay; never
+  PLAY WITHOUT INTERNET or a two-phone TEAM INVITE match): Cloud keeps the live session in `Cloud.resume_path()` (sealed
   AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
   this phone's counter `SEQ_RESERVE` ahead; the "last in the match" time every `RESUME_SAVE_MS`;
   the arena's `note_match(counted, mine, theirs, mode, round_on, picks)`), deleted whenever the session ends and
@@ -84,6 +85,15 @@ listed here. If a part needs something new from the core, add it in its own file
   as its cue and enters its note's round from the prep (`Arena._resume_from_note`). Too late (or
   LEAVE MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once;
   the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it).
+  An all-human match's file adds "multi" (`Cloud.multi_from_file`: the roster as
+  `NetGroup.pack_roster`, the host's id, the size, every member's counter, the ids of members who
+  already left, rewritten when one leaves) and its note
+  `note_match(..., mode_id)` ("duo" / "squad", TeamArenaNet._note at each fight and round end);
+  `try_resume` puts session_multi, session_roster, session_host_id and session_team back and the
+  session is on at once (no "join"); the lobby loads it as `TeamArena.link_roster` (REJOINING
+  MATCH... says "Your team match"). TeamArenaNet then enters the match: a member from the host's
+  "sync" for its slot and "all"; the host from its stand-in's "sync" and the members' "rep" (see
+  the team match section).
 
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
@@ -738,16 +748,36 @@ listed here. If a part needs something new from the core, add it in its own file
   (the reviving motion is the healing one). 1 vs 1 packets and behaviour are unchanged. AWAY and
   decided here (`decided_here`: the host, for a member's or the guest's fighter), it takes hits and
   the zone as a fighter's own and, knocked, bleeds out (knock_finished, "bleed") as one run here.
-  The host's own fighter while the HOST is away is not decided anywhere (no stand-in referee).
+  All-human, the HOST away: its fighter is decided by the STAND-IN (`TeamArenaNet.stand_in_id()`:
+  the present member of the host's own team whose fighter is UP, the lowest id of those; none, and
+  nobody decides it meanwhile; never a member of the other team): hits (from "hit", bounded as the host
+  bounds them) and the zone take it there, it bleeds out there, and the stand-in sends "ko" (a
+  teammate still UP) or "el" for it; every member takes those two from the stand-in only for that
+  fighter while the host is away (`_stand_in_word`). The host back says "back" [slot] once a second
+  while it rejoins; the stand-in answers "sync" for the host's fighter (also at once when it hears
+  the host again; with no stand-in the present teammate, else member, with the lowest id:
+  `_sync_giver_id`), flags | 4 when it stood in (the host away, or back less than STOOD_IN_MS ago).
+  The host takes it only from a teammate (from another member, after a restart, only the round,
+  phase, clock and score), while `Cloud.rejoining()` or, with flag 4, also when it never noticed
+  its own absence; HP only down, knocked / out through referee_down only with flag 4. A "ko" on a
+  fighter already knocked is ignored (no double credit).
+  Back after a restart (Cloud.resumed): a member's arena takes the host's "sync" (round, phase,
+  clock, score, its HP / knock / out, place; a BREAK waits for the host's "round") and "all"
+  [round, "slot:flags:gun;..."] (flags 1 knocked, 2 out, 4 left; set without kill feed). A resumed
+  host enters from its stand-in's "sync" and takes every member's "rep" [slot, round, HP, flags,
+  gun] for RESUME_REP_S, rebuilding its referee from what they said (a team left with nobody UP is
+  wiped, "el"); until RESUME_REP_S is over it decides nothing on the round (no wipe, settle or
+  time-out: `TeamArena._referee_waits`), then rebuilds the referee once more. Members who left
+  before the restart stay LEFT (the file's "left", `Cloud.left_members()`), out with no kill feed.
 - The end: once phase END (not called off) each phone sends "fin" for every fighter it runs;
   final_stats[slot] fills from the other phone's, and the results wait for all of them
   (FINAL_WAIT_S at most). The session ending (_on_net_ended): "connection lost" or before the first
   fight: as the 1 vs 1 (the notice names the other player); against the other player: a forfeit
   win; coop, on the host: referee_leave(guest_slot), "<NAME> LEFT", the bots play on; coop, on the
   guest: back to the lobby, "THE HOST LEFT - THE MATCH ENDED", recorded with result["ended"].
-- Not done tonight: PLAY AGAIN TOGETHER ("rm" is ignored in team matches), 3-4 phones, rejoin
-  after an app restart (only the 1 vs 1 keeps a session file; a team match's phone that comes
-  back from an absence inside the grace still rejoins with "back" / "sync").
+- Not done: PLAY AGAIN TOGETHER ("rm" is ignored in team matches); rejoin after an app restart of a
+  two-phone TEAM INVITE match (only the 1 vs 1 and all-human matches keep a session file; such a
+  phone back from an absence inside the grace still rejoins with "back" / "sync").
 - Checks: tests/team_net_unit.gd (invites, searches, the notice, stand-in arenas for hits / dn /
   decisions / tk / fin); tests/team_online_check.gd (step team_online, mock port 47820: coop invite
   vs bots with a knock and a revive across the phones, a random DUO with the guest's pause menu and

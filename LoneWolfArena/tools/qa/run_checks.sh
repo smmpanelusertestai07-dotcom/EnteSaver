@@ -46,6 +46,9 @@
 #   tests/resume_check.gd  an online 1 vs 1 whose guest app is killed in a fight: started again in time it
 #                          rejoins the same match with no tap and both end alike; started after the
 #                          grace it opens in the lobby with the match LEFT, counted once
+#   tests/team_resume_check.gd  an all-human DUO with four copies: the host away (its fighter decided by the
+#                          stand-in, adopted when it is back), a member and then the host killed and
+#                          started again into the same match; all four end alike
 #   tests/sync_check.gd    online rounds decided once, by the host, under a 600 ms round trip: both
 #                          dying in the zone together, no kill credit for the zone, the match
 #                          clock running under the online pause menu; both copies end alike
@@ -158,6 +161,27 @@ if [ "${1:-}" != "quick" ]; then
     [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest" && [ -n "$ho" ] && [ "$ho" = "$gi" ] && [ "$go" = "$hi" ]' "$LOGS/team_online_host.txt"
 
   # --- DUO / SQUAD: the integration's steps (team_invite_e2e, mock port 47822) go right below this line ---
+
+  # tests/team_resume_check.gd: an all-human DUO with four copies (host, m1, m2, m3) joined by a custom room's code.
+  # The host goes away (a stand-in decides its fighter, the host adopts it); then the member with the highest id,
+  # and after it the host, is killed and started again into the same match; all four end alike. Mock port 47826; each copy keeps its own
+  # data folder, and the one whose part 1 ends with the kill is started again with LW_RESUME_PART=2.
+  step team_resume bash -c 'timeout 330 godot --headless -s res://tests/mqtt_mock.gd -- 47826 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47826 LW_ROUNDS_TO_WIN=1 LW_AWAY_GRACE_MS=40000; d="$XDG_DATA_HOME"; o="$0"
+    copy() {
+      XDG_DATA_HOME="$d/$1" LW_NET_ROLE=$1 LW_RESUME_PART=1 timeout 240 godot --headless --path . -- --autotest=script:res://tests/team_resume_check.gd > "$o.$1" 2>&1
+      local c=$?
+      if grep -q "TEAM RESUME PART 1 DONE bad=0" "$o.$1"; then
+        sleep 3                      # (the player opens the app again)
+        XDG_DATA_HOME="$d/$1" LW_NET_ROLE=$1 LW_RESUME_PART=2 timeout 150 godot --headless --path . -- --autotest=script:res://tests/team_resume_check.gd > "$o.$1.again" 2>&1
+        c=$?
+      fi
+      return $c
+    }
+    copy host & a=$!; sleep 1; copy m1 & b=$!; copy m2 & c=$!; copy m3; e=$?
+    wait $a; ra=$?; wait $b; rb=$?; wait $c; rc=$?; kill $m 2>/dev/null
+    for r in host m1 m2 m3; do echo "--- $r:"; cat "$o.$r"; if [ -f "$o.$r.again" ]; then echo "--- $r after its restart:"; cat "$o.$r.again"; fi; done
+    [ $ra -eq 0 ] && [ $rb -eq 0 ] && [ $rc -eq 0 ] && [ $e -eq 0 ] && [ "$(ls "$o".*.again 2>/dev/null | wc -l)" -eq 2 ]' "$LOGS/team_resume.txt"
 fi
 # A script error anywhere fails the run even when the check itself exited 0.
 if grep -l "SCRIPT ERROR" "$LOGS"/*.log >/dev/null 2>&1; then
