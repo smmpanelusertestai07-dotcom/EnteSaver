@@ -159,7 +159,8 @@ out of the room (gkick, gend, the host silent) gets Cloud.room_notice, shown onc
   every run (nobody listens then); the leader's (or solo's) ON, or COPY of the code, turns it on.
   The roster carries the code and the switch ("cj"): a member sees the code and COPY only while
   the switch is on (Cloud.code_open), else THE LEADER SHARES THE GROUP CODE. A joiner the leader
-  never lets in within JOIN_TIMEOUT_MS (it entered a match, the group filled) or whose "gin" cannot
+  never lets in within JOIN_TIMEOUT_MS of the join's start (it entered a match, the group filled;
+  its rosters without the joiner do not extend the wait; the same for an invite or a room) or whose "gin" cannot
   be taken reads COULD NOT JOIN: TRY AGAIN (code_state "failed") and may JOIN again.
   Never answered: a player DUEL CHALLENGES FROM keeps out (NetMatch.allowed: blocked, NOBODY, a
   stranger with FRIENDS), a player the leader REMOVEd this run (Cloud._code_kicked; an invite from

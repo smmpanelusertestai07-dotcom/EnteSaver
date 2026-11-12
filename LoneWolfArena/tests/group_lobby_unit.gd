@@ -498,8 +498,13 @@ func _code_leftovers() -> void:
 	guest.join_group_code("6612345678")
 	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
 	_check(guest.code_state == "in", "a valid answer: JOINING THE GROUP...")
-	# The leader never lets the joiner in (it entered a match, the group filled): the join fails.
-	guest._grp.leader_ms = Time.get_ticks_msec() - Cloud.JOIN_TIMEOUT_MS - 10
+	# The leader never lets the joiner in (it entered a match, the group filled): the join fails,
+	# timed from the join's start even while the leader's rosters without this phone keep coming.
+	guest._on_groster({"size": 2, "members": [{"id": host.my_id, "name": "HOST", "bundle": "default", "team": 0, "slot": 0}]})
+	guest._grp.leader_ms = Time.get_ticks_msec()
+	guest._tick_group(0.0, Time.get_ticks_msec())
+	_check(guest.code_state == "in" and bool(guest._grp.joining), "a roster without this phone: still JOINING THE GROUP...")
+	guest._grp.join_ms = Time.get_ticks_msec() - Cloud.JOIN_TIMEOUT_MS - 10
 	guest._tick_group(0.0, Time.get_ticks_msec())
 	_check(guest.code_state == "failed" and guest.group.is_empty() and LobbyTeam.code_state_text("failed") == "COULD NOT JOIN: TRY AGAIN",
 		"never let in: COULD NOT JOIN: TRY AGAIN, out of the half-joined group (%s)" % guest.code_state)
