@@ -467,8 +467,25 @@ func _quick_behind_popup() -> void:
 	a._inbox_budget = 8.0
 	a._on_inbox(quick)
 	_check(String(a.opponent.get("id", "")) == b.my_id and a.seeking, "with no popup waiting, the quick challenge is taken (the match follows)")
+	# The room handshake runs (no "join" yet): a friend's duel challenge is declined at once, never shown.
+	var g := _peer(Cloud.new(), 2048)
+	g.peers[a.my_id] = {"name": "A", "bundle": "default", "pk": a._pk_pem, "seen": Time.get_ticks_msec()}
+	_check(g.invite(a.my_id), "a friend challenges during the handshake")
+	var shown := [0]
+	a.invited.connect(func(_n: String) -> void: shown[0] += 1)
+	a._inbox_budget = 8.0
+	a._on_inbox(_inv_msg(g, a))
+	_check(not a.in_session and a.busy_for_challenge() and a._incoming.is_empty() and shown[0] == 0
+		and String(a.opponent.get("id", "")) == b.my_id, "a challenge during a QUICK MATCH handshake is declined at once (never shown)")
+	# A group invite that came in meanwhile is declined when the session starts.
+	a._ginv = {"id": g.my_id, "name": "FRIEND", "gid": "00".repeat(16), "room": "00".repeat(16), "aes": PackedByteArray(),
+		"mac": Crypto.new().generate_random_bytes(32), "size": 2, "t": Time.get_ticks_msec()}
+	a._on_room(b._room_packet({"k": "join"}))
+	_check(a.in_session and a._ginv.is_empty() and a._incoming.is_empty(), "the session starts and a waiting group invite is declined at once")
+	a.clear_resume()
 	a.free()
 	b.free()
+	g.free()
 	# ACCEPT of a friend's challenge ends the search (NetMatch stops when Cloud is no longer seeking).
 	var c := _peer(Cloud.new(), 2048)
 	var f := _peer(Cloud.new(), 2048)

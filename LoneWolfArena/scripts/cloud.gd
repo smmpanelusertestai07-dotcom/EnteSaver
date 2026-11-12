@@ -1001,7 +1001,7 @@ func _on_inbox(d: Dictionary) -> void:
 			if sec.size() != 80:
 				return
 			var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80)}
-			if in_session or session_multi or not _outgoing.is_empty() or not _incoming.is_empty():
+			if busy_for_challenge():
 				_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 				return
 			var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
@@ -1161,7 +1161,8 @@ func team_invite_proven(d: Dictionary, from: String) -> bool:
 
 
 ## A "tinv" in this phone's inbox. Unsigned, from a blocked player or naming no team: ignored. Busy
-## (in a match, a challenge going out or waiting here): declined at once, as a duel. A quick one is
+## (busy_for_challenge: in a match, a challenge going out or waiting here, a room handshake under
+## way): declined at once, as a duel. A quick one is
 ## taken at once, never shown, only while this phone searches that size (seek_team) and heard that
 ## seeker, as NetMatch.allowed lets it; any other quick one is declined. Any other one is shown
 ## (invited, invite_from().team) only when it comes from a friend, or is the play-again this phone's
@@ -1179,7 +1180,7 @@ func _on_team_invite(from: String, d: Dictionary) -> void:
 		return
 	var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80),
 		"team": {"size": int(team.size), "coop": bool(team.coop)}}
-	if in_session or session_multi or not _outgoing.is_empty() or not _incoming.is_empty():
+	if busy_for_challenge():
 		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
@@ -1480,6 +1481,29 @@ func forget_me() -> bool:
 	relay_rtt = -1
 	status = "offline"
 	return told
+
+
+## Whether a duel challenge or team invite coming in now is declined at once: in a match, a
+## challenge going out or waiting here, or a room handshake under way (a challenge accepted here,
+## a QUICK MATCH one included, before the first "join" starts the session).
+func busy_for_challenge() -> bool:
+	return in_session or session_multi or _room != "" or _accept_ms != 0 or not _outgoing.is_empty() or not _incoming.is_empty()
+
+
+## A session starts: a challenge and a group invite still waiting here are declined now, so their
+## senders hear it at once instead of after INVITE_TIMEOUT_MS (the popup closes: invite_cancelled,
+## group_changed).
+func _decline_waiting() -> void:
+	if not _incoming.is_empty():
+		var inv := _incoming
+		_incoming = {}
+		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
+		invite_cancelled.emit()
+	if not _ginv.is_empty():
+		var g := _ginv
+		_ginv = {}
+		_publish_json(ROOT + "/u/" + String(g.id), {"t": "dec", "from": my_id, "mac": _tag(g, "dec", my_id)})
+		group_changed.emit()
 
 
 func answer(accept: bool, rules := {}) -> void:
@@ -2569,6 +2593,7 @@ func _on_room(msg: PackedByteArray) -> void:
 				_resume_off = false
 				_in_match_unix = Time.get_unix_time_from_system()
 				_save_resume()
+				_decline_waiting()
 				session_started.emit(is_host)
 		"st":
 			if _on_state_msg(d as Dictionary):
@@ -4037,6 +4062,7 @@ func _multi_start() -> void:
 	resume_note = {}
 	_in_match_unix = Time.get_unix_time_from_system()
 	_save_resume()                   # (a closed app can come back into it: the session file)
+	_decline_waiting()
 	session_started.emit(is_host)
 	if is_host:
 		for id: String in (_multi.left as Dictionary).keys():
