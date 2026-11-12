@@ -35,6 +35,9 @@ const FINAL_WAIT_S := 3.0
 ## The results open this long (real seconds) after the match's last round ends: the cheer, the
 ## round's plates and a look at the arena first.
 const RESULTS_DELAY_S := 5.5
+## A match voided by the integrity check has no last kill to watch: its results come after the
+## INTEGRITY CHECK FAILED line instead.
+const RESULTS_DELAY_VOID_S := 3.2
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
 const DUMMY_NAME := "TARGET DUMMY"
 
@@ -1095,7 +1098,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > RESULTS_DELAY_S and not _results_open and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
+			elif _end_t > results_delay() and not _results_open and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -1569,6 +1572,11 @@ func hosted() -> bool:
 func session_up() -> bool:
 	return online and not _net_left and Game.session != null and Game.session.in_session
 
+
+
+## Seconds from the match's end (phase END) to its results.
+func results_delay() -> float:
+	return RESULTS_DELAY_VOID_S if _invalid else RESULTS_DELAY_S
 
 
 func _on_tampered(reason: String) -> void:

@@ -308,7 +308,7 @@ listed here. If a part needs something new from the core, add it in its own file
   `Head` (mode, map) and PLAY AGAIN / `Rematch` / `PlayAgainTogether` with `RematchStatus` show on
   both pages. Buttons: PLAY AGAIN (match overlay, then `Game.goto_arena`), CONTINUE (page 2), LOBBY
   (`Game.goto_lobby`); Android back on page 2 = page 1, on page 1 = LOBBY (ignored while PLAY AGAIN
-  loads). The arena opens the results `Arena.RESULTS_DELAY_S` (5.5 s) after the last round ends; the
+  loads). The arena opens the results `Arena.RESULTS_DELAY_S` (5.5 s) after the last round ends (`RESULTS_DELAY_VOID_S`, 3.2 s, for a match the integrity check voided; `results_delay()`); the
   app sent to the background or closed in that wait records the decided match at once
   (`_record_decided`: Game.record_match, online `session.match_recorded`), the screen still opens once. `ResultsScreen.honour(result)` (static) picks the honour tag. An internet LONE
   WOLF match (enemy_id, not local) has `Rematch` in PLAY AGAIN's place, `AddFriend` on the head of
