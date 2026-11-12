@@ -4,7 +4,7 @@ extends RefCounted
 ## GROUP_MAX (4) players: the first invite makes this player the LEADER. The bar lists the members
 ## (leader first, then in join order: GroupMember_<n>, a LEADER tag on the leader, YOU on this
 ## player), the leader's REMOVE on each other member (GroupRemove_<n>), "+ INVITE" (GroupInvite:
-## the leader's, or a solo's, while the group is not full; greyed otherwise), TEAMS (GroupTeams: the
+## the leader's, or a solo's; greyed for a member; no row at all in a full group), TEAMS (GroupTeams: the
 ## BLUE / ORANGE slot panel, the leader moves members, the others see it), and EXIT GROUP
 ## (GroupExit, a member) or DISBAND GROUP (GroupDisband, the leader). INVITE opens the list of online
 ## friends (GroupInviteList: Cloud.peers ∩ friends, never blocked ones; GroupAsk_<code> ->
@@ -209,7 +209,8 @@ func refresh() -> void:
 		bar.add_child(_code_note())
 	for i in list.size():
 		bar.add_child(_member_tile(i + 1, list[i], bool(acts.remove)))
-	bar.add_child(_invite_tile(list.size() + 1 if grouped else 2, bool(acts.invite_on)))
+	if not grouped or list.size() < group_max():
+		bar.add_child(_invite_tile(list.size() + 1 if grouped else 2, bool(acts.invite_on)))   # (none in a full group)
 	if not grouped:
 		bar.add_child(_action_button("JOIN BY CODE", "GroupJoinCode", "dark", open_join_code))
 	if acts.teams:
@@ -315,8 +316,7 @@ func _invite_tile(n: int, on: bool) -> Button:
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(h)
 	h.add_child(_badge(mini(n, group_max())))
-	var full := members().size() >= group_max()
-	var sub := "A FRIEND ONLINE JOINS" if on else ("THE GROUP IS FULL" if full else "THE LEADER INVITES")
+	var sub := "A FRIEND ONLINE JOINS" if on else "THE LEADER INVITES"
 	h.add_child(_tile_text("+ INVITE", UI.ACCENT if on else UI.TEXT_DIM, sub))
 	if not on:
 		h.modulate = Color(1, 1, 1, 0.55)

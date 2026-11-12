@@ -7,10 +7,12 @@ extends Node
 ## - a solo in LONE WOLF: the GROUP bar with + INVITE; the invite list (GroupAsk_<code> only on an
 ##   online friend); an invite that cannot go out (no relay) says so;
 ## - the leader of 4: three member models on the podium besides the hero, with name plates; REMOVE
-##   on each other member (asked first) drops them, DISBAND GROUP, INVITE greyed (full);
+##   on each other member (asked first) drops them, DISBAND GROUP, no + INVITE row (full); the bar,
+##   with its 10-digit code, COPY and the switch unclipped, ends above the bottom bar;
 ## - START (leader, DUO): a group of 3 is told why it cannot start offline; a group of 2 searches:
 ##   the search tab with PLAYERS n/N and its X (no popup); TEAMS: the slot panel moves a member (Cloud.set_group_team);
-## - a member: WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
+## - a member: the GROUP CODE with COPY only while the leader's JOIN BY CODE is on (else THE LEADER
+##   SHARES THE GROUP CODE); WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
 ##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
 ## - CUSTOM ROOM with slots: CREATE with SQUAD shows 8 places with the HOST tag; in a DUO room a
@@ -121,9 +123,25 @@ func _leader(lobby: Lobby) -> void:
 		_fail("the leader does not see DISBAND GROUP (alone)")
 	if _find_label(bar.find_child("GroupMember_1", true, false), "LEADER") == null:
 		_fail("the leader's row has no LEADER tag")
-	var invite := bar.find_child("GroupInvite", true, false) as Button
-	if invite == null or not invite.disabled:
-		_fail("+ INVITE is not greyed in a full group")
+	if bar.find_child("GroupInvite", true, false) != null:
+		_fail("a full group still shows the + INVITE row (its badge would repeat the last member's number)")
+	var bottom := lobby.find_child("BottomBar", true, false) as Control
+	var bar_end := 0.0
+	for c: Node in bar.get_children():
+		if c is Control and (c as Control).visible and not c.is_queued_for_deletion():
+			bar_end = maxf(bar_end, (c as Control).get_global_rect().end.y)
+	if bottom == null or bar_end > bottom.get_global_rect().position.y:
+		_fail("the GROUP bar of 4 runs into the bottom bar (ends at %.0f)" % bar_end)
+	var code_row := bar.find_child("GroupCodeRow", true, false) as Control
+	if code_row == null or _text(code_row, "GroupCode").length() != 12:
+		_fail("the leader's GROUP bar has no 10-digit code (%s)" % (_text(code_row, "GroupCode") if code_row else "none"))
+	else:
+		for part: String in ["GroupCode", "GroupCodeCopy", "GroupCodeSwitch"]:
+			var c := code_row.find_child(part, true, false) as Control
+			if c == null or not c.is_visible_in_tree() or not code_row.get_global_rect().grow(0.5).encloses(c.get_global_rect()):
+				_fail("%s is missing or clipped out of the code row" % part)
+		_no_overlap([code_row.find_child("GroupCode", true, false), code_row.find_child("GroupCodeCopy", true, false),
+			code_row.find_child("GroupCodeSwitch", true, false)])
 	_touch_ok(bar)
 	await at.shot("g02_leader_of_four")
 	await _tap(bar.find_child("GroupRemove_3", true, false) as Control)
@@ -217,6 +235,23 @@ func _member(lobby: Lobby) -> void:
 	if bar.find_child("GroupExit", true, false) == null or bar.find_child("GroupDisband", true, false) != null \
 			or bar.find_child("GroupRemove_2", true, false) != null:
 		_fail("a member does not see EXIT GROUP alone")
+	# The leader's JOIN BY CODE off: no code, no COPY, the line that the leader shares it; on: the
+	# code with COPY (no switch: it is the leader's).
+	cloud.group.code = "4213579086"
+	cloud.group.code_join = false
+	cloud.group_changed.emit()
+	await at.wait(0.3)
+	if bar.find_child("GroupCodeRow", true, false) != null or bar.find_child("GroupCodeNote", true, false) == null \
+			or not _find_text(bar, LobbyTeam.CODE_NOTE):
+		_fail("a member sees the GROUP CODE while the leader's JOIN BY CODE is off")
+	cloud.group.code_join = true
+	cloud.group_changed.emit()
+	await at.wait(0.3)
+	var m_row := bar.find_child("GroupCodeRow", true, false) as Control
+	if m_row == null or _text(m_row, "GroupCode") != "42 1357 9086" or m_row.find_child("GroupCodeCopy", true, false) == null \
+			or m_row.find_child("GroupCodeSwitch", true, false) != null or bar.find_child("GroupCodeNote", true, false) != null:
+		_fail("a member does not see the code with COPY (and no switch) while the leader's JOIN BY CODE is on")
+	await at.shot("g05a_member_code_on")
 	var before := JSON.stringify(cloud.group)
 	await _tap(wait)
 	await _tap(lobby.find_child("ModeCard", true, false) as Control)
