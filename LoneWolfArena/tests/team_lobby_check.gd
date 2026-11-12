@@ -5,6 +5,8 @@ extends Node
 ## - a team match left over is cleared when the lobby opens;
 ## - SELECT MODE has the size chips Size_1 / 2 / 4 on both mode cards; DUO updates the mode card;
 ##   the DUMMY is SOLO only; LONE WOLF's card says DUO plays real players;
+## - the mode card's team-size box (the figure at its right end): above the card, tiles that give
+##   what SELECT MODE's chips give, closed by a tile, a tap outside and back; hidden in a search;
 ## - the mode card's line in LONE WOLF SQUAD and TRAINING SOLO (the GROUP bar that replaced the
 ##   TEAM bar in 1.5 has its own check: tests/group_lobby_check.gd);
 ## - a stand-in TEAM INVITE (Cloud._incoming with a team) shows TEAM INVITE; DECLINE closes it;
@@ -41,6 +43,7 @@ func run(autotest: Node) -> int:
 		_fail("a lobby that opens keeps an old team match")
 	await at.wait(0.5)
 	await _select_mode(lobby)
+	await _size_box(lobby)
 	await _mode_lines(lobby)
 	await _team_invite(lobby)
 	await _quick_clears(lobby)
@@ -91,6 +94,99 @@ func _select_mode(lobby: Lobby) -> void:
 	await at.shot("t02_select_mode_duo")
 	lobby.dialogs.back()
 	await at.wait(0.3)
+
+
+## The mode card's team-size box: the figure at the card's right end opens it just above the card
+## (right edges together, the current size lit); a tile gives exactly what SELECT MODE's chip of
+## that size gives (mode, size, the dummy dropped for a team, the card's line) and closes the box;
+## a tap outside and Android back close it and change nothing; LONE WOLF's tiles are SOLO / DUO /
+## SQUAD. Tiles and the figure are at least 56 px.
+func _size_box(lobby: Lobby) -> void:
+	var card := lobby.mode_card
+	var fig := card.find_child("SizeBoxButton", true, false) as Control
+	if fig == null or not fig.is_visible_in_tree() or fig.size.x < UI.TOUCH_MIN or fig.size.y < UI.TOUCH_MIN:
+		_fail("the mode card has no 56 px team-size figure")
+		return
+	# What SELECT MODE's chips give, size by size (from TRAINING SOLO against the DUMMY).
+	var by_chip := {}
+	for n in [4, 2]:
+		await _pick_dummy(lobby)
+		await _pick_size(lobby, "training", n)
+		by_chip[n] = _state(lobby)
+	for n in [4, 2]:
+		await _pick_dummy(lobby)
+		await _tap(fig)
+		await at.wait(0.4)
+		var box := lobby.dialogs.size_box
+		var panel := box.find_child("SizeBoxPanel", true, false) as Control if box else null
+		if panel == null:
+			_fail("the figure does not open the team-size box")
+			return
+		var pr := panel.get_global_rect()
+		var cr := card.get_global_rect()
+		if pr.end.y > cr.position.y + 0.5 or absf(pr.end.x - cr.end.x) > 1.0 or pr.end.y < cr.position.y - 20.0:
+			_fail("the team-size box is not just above the mode card (%s over %s)" % [str(pr), str(cr)])
+		for k in [1, 2, 4]:
+			var t := box.find_child("SizeTile_%d" % k, true, false) as Control
+			if t == null or t.size.y < UI.TOUCH_MIN or t.size.x < UI.TOUCH_MIN:
+				_fail("the team-size box has no 56 px SizeTile_%d" % k)
+		if lobby.dialogs.modal != null:
+			_fail("the figure opened SELECT MODE as well")
+		if n == 4:
+			await at.shot("t02b_size_box")
+		await _tap(box.find_child("SizeTile_%d" % n, true, false) as Control)
+		await at.wait(0.4)
+		if lobby.dialogs.size_box != null or lobby.dialogs.modal != null:
+			_fail("a tile does not close the team-size box")
+		if _state(lobby) != by_chip[n]:
+			_fail("the box's %d gives %s, SELECT MODE's chip %s" % [n, str(_state(lobby)), str(by_chip[n])])
+	# A tap outside it closes it, changing nothing; so does Android back.
+	var before := _state(lobby)
+	await _tap(fig)
+	await at.wait(0.3)
+	var w: Vector2 = get_tree().root.get_final_transform() * Vector2(lobby.ui.get_viewport().get_visible_rect().size.x * 0.5, 60.0)
+	at.touch(0, w, true)
+	await at.wait(0.08)
+	at.touch(0, w, false)
+	await at.wait(0.3)
+	if lobby.dialogs.size_box != null or lobby.dialogs.modal != null or _state(lobby) != before:
+		_fail("a tap outside the team-size box does not just close it")
+	await _tap(fig)
+	await at.wait(0.3)
+	lobby.notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+	await at.wait(0.3)
+	if lobby.dialogs.size_box != null or lobby.dialogs.modal != null or _state(lobby) != before:
+		_fail("Android back does not just close the team-size box")
+	# LONE WOLF's tiles.
+	await _pick_size(lobby, "lonewolf", 1)
+	await _tap(fig)
+	await at.wait(0.3)
+	var words := []
+	for k in [1, 2, 4]:
+		words.append(LobbyDialogs.size_tile_text("lonewolf", k, LobbyTeam.members())[0])
+	if lobby.dialogs.size_box == null or words != ["SOLO", "DUO", "SQUAD"]:
+		_fail("LONE WOLF's team-size box is not SOLO / DUO / SQUAD (%s)" % str(words))
+	await at.shot("t02c_size_box_lone_wolf")
+	lobby.dialogs.close_size_box()
+	await at.wait(0.2)
+	await _pick_size(lobby, "training", 2)
+
+
+## TRAINING GROUND SOLO against the target dummy, through SELECT MODE.
+func _pick_dummy(lobby: Lobby) -> void:
+	await _pick_size(lobby, "training", 1)      # (the DUMMY is greyed in DUO / SQUAD)
+	await _tap(lobby.mode_card)
+	await at.wait(0.5)
+	var popup := lobby.dialogs.modal
+	await _tap(popup.find_child("Diff_DUMMY", true, false) as Control if popup else null)
+	await at.wait(0.4)
+	if not Game.practice or Game.team_size != 1:
+		_fail("could not pick the DUMMY")
+
+
+## What a size pick leaves behind: mode, size, dummy, the mode card's line and the saved mode.
+func _state(lobby: Lobby) -> Array:
+	return [Game.mode, Game.team_size, Game.practice, _text(lobby, "ModeFormat"), String(Game.settings.mode)]
 
 
 ## The mode card's line: LONE WOLF SQUAD online, TRAINING SOLO unchanged.
@@ -174,6 +270,9 @@ func _team_search(lobby: Lobby) -> void:
 	if _text(tab, "SearchLine") != ("ESTIMATED 0:10" if cloud.status == "online" else "CONNECTING..."):     # (no relay here)
 		_fail("the search tab's first line is not the estimate (%s)" % _text(tab, "SearchLine"))
 	_touch_ok(tab)
+	var fig := lobby.mode_card.find_child("SizeBoxButton", true, false) as Control
+	if fig == null or fig.is_visible_in_tree():
+		_fail("the mode card's team-size figure shows during a search")
 	await at.shot("t08_team_search")
 	# The lobby stays usable: the mode card answers CANCEL THE SEARCH FIRST, WARDROBE opens.
 	await _tap(lobby.mode_card)

@@ -4,8 +4,9 @@ extends Node
 ## Boot/loading screen, the first-start name prompt (top of the screen, RANDOM, OK), lobby (the
 ## reference's layout: the bottom bar's captions bright, FRIENDS and the gear top-right, no left
 ## menu, stats chips, name plate or version; drag to turn the character, START position report),
-## the modes (mode card, SELECT MODE with the opponent chips, the DUMMY chip, LONE WOLF's START opens
-## the QUICK MATCH search, CANCEL; the size chips: DUO shows the TEAM bar, SOLO hides it), name edit (pencil tap, long name ends in "..."), the player card (opens
+## the modes (mode card, SELECT MODE with the opponent chips, the "?" picture help of each mode
+## card (every page; arrow, swipe, dot; X and back), the DUMMY chip, LONE WOLF's START opens
+## the QUICK MATCH search, CANCEL; the size chips and the mode card's team-size box), name edit (pencil tap, long name ends in "..."), the player card (opens
 ## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
 ## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
 ## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
@@ -447,6 +448,9 @@ func _tour_modes(lobby: Node) -> void:
 	_check(chips != null and chips.get_child_count() == Game.DIFFICULTY_NAMES.size() + 1 and chips.find_child("Diff_DUMMY", false, false) != null
 		and (chips.find_child("Diff_NORMAL", false, false) as Button).button_pressed, "TRAINING GROUND's card offers EASY, NORMAL, HARD and the DUMMY")
 	await _at.shot("m02b_select_mode")
+	await _tour_mode_help(lobby)
+	popup = lobby.get("_modal") as Control
+	chips = popup.find_child("Difficulty", true, false) if popup else null
 	# The DUMMY chip: the target dummy instead of a bot (the card says so); it closes SELECT MODE.
 	await _tap(chips.find_child("Diff_DUMMY", false, false) as Control if chips else null)
 	await _settle(0.4)
@@ -510,17 +514,89 @@ func _tour_modes(lobby: Node) -> void:
 	var duo := popup.find_child("Mode_training", true, false).find_child("Size_2", true, false) as Control if popup else null
 	await _tap(duo)
 	await _settle(0.5)
-	var team_bar := lobby.find_child("TeamBar", true, false) as Control
-	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and team_bar != null
-		and team_bar.is_visible_in_tree() and team_bar.find_child("TeamInvite", true, false) != null, "DUO: the mode card says so, the TEAM bar shows + INVITE")
-	await _at.shot("m02f_lobby_duo_team_bar")
+	# (The TEAM bar became LONE WOLF's GROUP bar in 1.5: TRAINING GROUND's DUO plays with bots and
+	# shows no group bar; tests/group_lobby_check.gd checks the bar.)
+	var group_bar := lobby.find_child("GroupBar", true, false) as Control
+	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and group_bar != null
+		and not group_bar.is_visible_in_tree(), "TRAINING DUO: the mode card says so, no GROUP bar (bot teammates)")
+	await _at.shot("m02f_lobby_duo")
+	# The team-size box from the figure at the card's right end: DUO lit; SOLO there picks SOLO.
+	await _tap(card.find_child("SizeBoxButton", true, false) as Control)
+	await _settle(0.4)
+	var box := lobby.get("dialogs").size_box as Control
+	_check(box != null and box.find_child("SizeTile_2", true, false) != null and lobby.get("_modal") == null,
+		"the mode card's figure opens the team-size box (not SELECT MODE)")
+	await _at.shot("m02g_size_box")
+	await _tap(box.find_child("SizeTile_1", true, false) as Control if box else null)
+	await _settle(0.4)
+	_check(Game.team_size == 1 and lobby.get("dialogs").size_box == null and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
+		"SOLO in the box picks SOLO and closes it")
+	await _tap(card)
+	await _settle(0.5)
+	popup = lobby.get("_modal") as Control
+	await _tap(popup.find_child("Mode_training", true, false).find_child("Size_2", true, false) as Control if popup else null)
+	await _settle(0.5)
 	await _tap(card)
 	await _settle(0.5)
 	popup = lobby.get("_modal") as Control
 	await _tap(popup.find_child("Mode_training", true, false).find_child("Size_1", true, false) as Control if popup else null)
 	await _settle(0.5)
-	_check(Game.team_size == 1 and not team_bar.is_visible_in_tree() and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
-		"SOLO again: no TEAM bar")
+	_check(Game.team_size == 1 and group_bar != null and not group_bar.is_visible_in_tree() and _label_text(card, "ModeFormat").begins_with("BOT: NORMAL"),
+		"SOLO again")
+
+
+## The "?" on each SELECT MODE card: its picture help (ModeHelp) with a page per shot, turned by
+## the arrow, a swipe and a dot; the mode is not picked by it; X (LONE WOLF) and Android back
+## (TRAINING GROUND) go back to SELECT MODE.
+func _tour_mode_help(lobby: Node) -> void:
+	for m: String in ["lonewolf", "training"]:
+		var popup := lobby.get("_modal") as Control
+		var mode_was := Game.mode
+		var q := popup.find_child("Help_" + m, true, false) as Control if popup else null
+		_check(q != null and q.size.x >= UI.TOUCH_MIN and q.size.y >= UI.TOUCH_MIN, "the %s card has a ? with a 56 px touch area" % m)
+		await _tap(q)
+		await _settle(0.5)
+		popup = lobby.get("_modal") as Control
+		var help := popup.find_child("ModeHelp", true, false) as ModeHelp if popup else null
+		var n := ModeHelp.pages_of(m).size()
+		_check(help != null and help.mode == m and help.page == 0 and n >= 3 and n <= 4 and Game.mode == mode_was
+			and popup.find_child("Mode_" + m, true, false) == null, "the ? opens %s's picture help on page 1 of %d (the mode is not picked)" % [m, n])
+		if help == null:
+			continue
+		_check(help.find_child("HelpDots", true, false).get_child_count() == n and (help.find_child("HelpPrev", true, false) as Button).disabled,
+			"%d page dots; no page before the first" % n)
+		await _at.shot("m02h_help_%s_1" % m)
+		for i in range(1, n):
+			if i == 1:
+				# A swipe to the left across the picture turns to the next page.
+				var pic := help.find_child("HelpPicture", true, false) as Control
+				var r := pic.get_global_rect()
+				var w0: Vector2 = get_tree().root.get_final_transform() * (r.get_center() + Vector2(r.size.x * 0.25, 0))
+				var w1: Vector2 = get_tree().root.get_final_transform() * (r.get_center() - Vector2(r.size.x * 0.25, 0))
+				_at.touch(0, w0, true)
+				await _at.wait(0.05)
+				_at.drag(0, w1, w1 - w0)
+				await _at.wait(0.05)
+				_at.touch(0, w1, false)
+			elif i == 2:
+				await _tap(help.find_child("HelpDot_2", true, false) as Control)
+			else:
+				await _tap(help.find_child("HelpNext", true, false) as Control)
+			await _settle(0.3)
+			_check(help.page == i, "%s help: page %d by %s" % [m, i + 1, ["", "a swipe", "its dot", "the arrow"][mini(i, 3)]])
+			await _at.shot("m02h_help_%s_%d" % [m, i + 1])
+		_check((help.find_child("HelpNext", true, false) as Button).disabled, "no page after the last")
+		await _tap(help.find_child("HelpPrev", true, false) as Control)
+		await _settle(0.2)
+		_check(help.page == n - 2, "the back arrow turns back a page")
+		if m == "lonewolf":
+			await _tap(popup.find_child("Close", true, false) as Control)
+		else:
+			_back()
+		await _settle(0.4)
+		popup = lobby.get("_modal") as Control
+		_check(popup != null and popup.find_child("ModeHelp", true, false) == null and popup.find_child("Mode_" + m, true, false) != null
+			and Game.mode == mode_was, "%s closes the help, back to SELECT MODE" % ("X" if m == "lonewolf" else "Android back"))
 
 
 ## A real tap on a SELECT MODE card's art (its upper part: the mode, never a chip).

@@ -542,6 +542,12 @@ func zone_hurts(f: Fighter) -> bool:
 	return f.alive and runs_here(f)
 
 
+## DUO / SQUAD announce the stage change (the band in stage 1's last 10 s, ZONE SHRINKING, the
+## beep), unlike the 1 vs 1 (arena.gd).
+func quiet_stage_change() -> bool:
+	return false
+
+
 ## Revives in progress by fighters that run here: cancelled, or done after Fighter.REVIVE_S.
 func _update_revives(delta: float) -> void:
 	for f in fighters:

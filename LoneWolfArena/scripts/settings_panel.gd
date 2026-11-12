@@ -9,7 +9,8 @@ extends Control
 ## offers, in its groups and order, plus what the owner asked for:
 ##  - DISPLAY: graphics AUTO / LOW .. EXTREME (AUTO marks the level it picked for this phone and
 ##    picks again after a frame-rate change; EXTREME asks first, it can heat the phone), frame rate
-##    (30 and 60; 90 and 120 where the screen refreshes that fast), visual effects;
+##    (30 and 60; 90 and 120 where the screen refreshes that fast), visual effects; MINIMAP
+##    (TURNS WITH VIEW, the default, or NORTH UP: setting minimap_turns, HudMinimap);
 ##  - CONTROLS: SHOOTING (aim precision, the left fire button OFF / ALWAYS / WHEN AIMING, hold
 ##    fire to scope), QUICK BUTTONS (weapon switch, reload, the reload ring, free look), MOVEMENT
 ##    (joystick DYNAMIC / FIXED, run mode), VIBRATION (enemy footsteps, taking damage, shooting:
@@ -37,7 +38,7 @@ const TABS := ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT
 const ORDER := [0, 2, 1, 3, 4, 5]
 ## The settings each tab shows, and its RESET puts back (ACCOUNT has none: no RESET there).
 const TAB_KEYS := [
-	["graphics_auto", "graphics", "fps", "visual_effects"],
+	["graphics_auto", "graphics", "fps", "visual_effects", "minimap_turns"],
 	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook"],
 	["aim_precision", "left_fire", "hold_fire_scope", "switch_button", "reload_button", "reload_on_crosshair",
 		"freelook_button", "dynamic_joystick", "run_mode", "vibrate_footsteps", "vibrate_damage", "vibrate_shooting"],
@@ -51,6 +52,12 @@ const SCENE_KEYS := ["visual_effects"]
 ## the pick) or the game's own bookkeeping.
 const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size"]
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
+## The minimap (setting minimap_turns: TURNS WITH VIEW true, NORTH UP false) and what each does.
+const MINIMAP_NAMES := ["TURNS WITH VIEW", "NORTH UP"]
+const MINIMAP_NOTES := [
+	"The map turns as you look around: what is ahead of you is always up",
+	"North stays up and your arrow turns on the map",
+]
 ## The joystick (setting dynamic_joystick: DYNAMIC true, FIXED false) and what each does.
 const JOYSTICK_NAMES := ["DYNAMIC", "FIXED"]
 const JOYSTICK_NOTES := [
@@ -110,6 +117,7 @@ var _graphics_note: Label
 var _aim_note: Label
 var _run_note: Label
 var _joy_note: Label
+var _minimap_note: Label
 var _cache_note: Label
 var _ask_layer: Control
 var _ask_col: VBoxContainer     # the open question's column (ask)
@@ -352,6 +360,14 @@ func _build_display() -> void:
 	fps_seg.name = "FpsChoice"
 	_body.add_child(UI.plate_row("Frame rate", fps_seg, _fps_note(fps_opts)))
 	_body.add_child(UI.plate_row("Visual effects", _toggle("visual_effects"), "Lights on shots and blasts, full sparks; off helps weak phones"))
+	_body.add_child(UI.spacer(4))
+	_body.add_child(UI.section("MINIMAP"))
+	var turns := bool(Game.settings.minimap_turns)
+	var mm_seg := UI.segmented(MINIMAP_NAMES, 0 if turns else 1, _set_minimap, 16, 196.0)
+	mm_seg.name = "Toggle_minimap_turns"
+	var mm_row := UI.plate_row("Minimap", mm_seg, String(MINIMAP_NOTES[0 if turns else 1]))
+	_minimap_note = _note_of(mm_row)
+	_body.add_child(mm_row)
 	_hint.text = "Changes apply at once. In a match the 3D view draws a little smaller while frames run slow; the HUD stays sharp."
 
 
@@ -597,6 +613,13 @@ func _set_run_mode(v: int) -> void:
 	_apply("run_mode", v)
 	if _run_note and is_instance_valid(_run_note):
 		_run_note.text = String(RUN_MODE_NOTES[v])
+
+
+## The minimap choice: 0 TURNS WITH VIEW, 1 NORTH UP (read live by the HUD's minimap).
+func _set_minimap(v: int) -> void:
+	_apply("minimap_turns", v == 0)
+	if _minimap_note and is_instance_valid(_minimap_note):
+		_minimap_note.text = String(MINIMAP_NOTES[v])
 
 
 ## The joystick choice: 0 DYNAMIC, 1 FIXED.

@@ -2,7 +2,8 @@ class_name LobbyDialogs
 extends RefCounted
 ## The lobby's popups: the popup frame they share (open_modal / close_modal, one at a time, in
 ## `modal`; back() is the header X and Android back: a popup's own way back, else close), SELECT
-## MODE (with TRAINING GROUND's opponent chips), the player name editor with the first-start name
+## MODE (with TRAINING GROUND's opponent chips; the "?" on each card opens that mode's picture
+## help, mode_help: scripts/mode_help.gd), the player name editor with the first-start name
 ## prompt, a confirmation (confirm()), a message with one OK (notice()) and the "Quit the game?"
 ## dialog. The lobby makes it (Lobby.dialogs) and its parts open popups through it; everything is
 ## built under the lobby's UI layer. (HOW TO PLAY is in SETTINGS: scripts/how_to_play.gd.)
@@ -10,7 +11,8 @@ extends RefCounted
 ## Size_<1|2|4> (SOLO, DUO, SQUAD: on both mode cards; LONE WOLF's SOLO in a group of two reads
 ## DUEL · YOU VS <NAME>: size_chip_text), Difficulty with
 ## Diff_<EASY|NORMAL|HARD|DUMMY>, ModeStats, NameEdit, NameRandom, NamePreview, NameOk,
-## ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt"
+## Help_<training|lonewolf> (the "?" on a card) opening ModeHelp, SizeBox (the mode card's
+## team-size box: SizeBoxPanel with SizeTile_<1|2|4>), ConfirmCancel, ConfirmOk, NoticeText, NoticeOk, QuitCancel, QuitConfirm. Markers: "name prompt"
 ## and "ui name_ok" (the emulator test taps OK there).
 
 ## SELECT MODE: what each mode's card says under its name ({rounds}: Game.ROUNDS_TO_WIN).
@@ -210,6 +212,7 @@ func _mode_choice(m: String) -> Button:
 			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.14), false, 1.0))
 	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
 		card.connect(sig, card.queue_redraw)
+	card.add_child(_help_button(m))
 	var tag := PanelContainer.new()
 	tag.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 6, 0, Color.TRANSPARENT, 8.0, ["br"]))
 	tag.add_child(UI.label(String(info.tag), 16, UI.INK, "heavy"))
@@ -257,6 +260,43 @@ func _mode_choice(m: String) -> Button:
 	return card
 
 
+## The "?" at the top right of a mode card's art (node Help_<m>): a small dark disc with a
+## yellow "?" on a 56 px touch area; a tap opens the mode's picture help instead of picking it.
+func _help_button(m: String) -> Button:
+	var b := Button.new()
+	b.name = "Help_" + m
+	b.focus_mode = Control.FOCUS_NONE
+	b.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	b.offset_left = -UI.TOUCH_MIN - 4.0
+	b.offset_right = -4.0
+	b.offset_top = 4.0
+	b.offset_bottom = UI.TOUCH_MIN + 4.0
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var c := b.size * 0.5
+		var hot := b.is_hovered() or b.is_pressed()
+		b.draw_circle(c, 18.0, Color(0, 0, 0, 0.72), true, -1.0, true)
+		b.draw_circle(c, 18.0, UI.ACCENT if hot else Color(1, 1, 1, 0.55), false, 2.0, true)
+		HudDraw.text(b, "?", c + Vector2(0, 1), 24, UI.ACCENT, 1, 0, "heavy"))
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		b.connect(sig, b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		mode_help(m))
+	return b
+
+
+## A mode's picture help (ModeHelp: its pages with dots, arrows and swipe) in a popup; its X and
+## Android back go back to SELECT MODE.
+func mode_help(m: String) -> ModeHelp:
+	var v := open_modal("%s · HOW IT PLAYS" % Game.mode_name(m), 980.0)
+	var help := ModeHelp.new(m)
+	v.add_child(help)
+	modal.set_meta("on_back", select_mode)
+	return help
+
+
 ## A mode card's team sizes (row Sizes: Size_1 SOLO, Size_2 DUO, Size_4 SQUAD); the current one
 ## (Game.team_size) is lit. A tap picks the size with the card's mode and closes SELECT MODE; a team
 ## is never against the target dummy, so DUO and SQUAD pick the bot again.
@@ -273,12 +313,22 @@ func _size_chips(m: String) -> HBoxContainer:
 			b.add_theme_font_size_override("font_size", 14)
 		b.pressed.connect(func() -> void:
 			Audio.play("ui_select", -6.0)
-			Game.team_size = n
-			if n > 1:
-				Game.practice = false
-			_pick(m))
+			pick_size(m, n))
 		row.add_child(b)
 	return row
+
+
+## A team size picked with a mode, from SELECT MODE's chips and the mode card's team-size box
+## alike: the size (a team is never against the target dummy, so DUO and SQUAD pick the bot
+## again), then the mode as a tap on its card (_pick: kept, the popup closes, the lobby's card and
+## a group follow).
+func pick_size(m: String, n: int) -> void:
+	if not (n in Game.TEAM_SIZES):
+		return
+	Game.team_size = n
+	if n > 1:
+		Game.practice = false
+	_pick(m)
 
 
 ## A size chip's word: SOLO / DUO / SQUAD; in LONE WOLF with a group of exactly two, SOLO is the
@@ -367,6 +417,119 @@ func _pick(m: String) -> void:
 	lobby._refresh_mode()
 	if LobbyTeam.in_group():
 		Game.cloud_service().set_group_mode(Game.mode, Game.team_size)   # the members' cards follow
+
+
+# ---------------------------------------------------------------- the team-size box
+
+## The mode card's team-size box (node SizeBox, open while not null): the figure on the card's
+## right end (Lobby: SizeBoxButton) opens it just above the card, compact, with a tile per team
+## size of the card's mode (SOLO / DUO / SQUAD; in LONE WOLF with a group of exactly two SOLO reads
+## DUEL with YOU VS <NAME> under it, as SELECT MODE's chip: size_tile_text). A tile picks that size
+## as SELECT MODE's chip does (pick_size) and closes the box; a tap anywhere outside it, or Android
+## back, closes it. Never for a group member (the leader picks) or during a search (the lobby
+## hides the figure then and closes an open box: size_box_allowed).
+var size_box: Control
+
+
+## Whether the team-size box may be used now: not by a group member, not while searching.
+static func size_box_allowed(member: bool, searching: bool) -> bool:
+	return not member and not searching
+
+
+## A tile's words in the team-size box: [the big word, the small line under it]. SOLO in LONE WOLF
+## with a group of two is the DUEL between the two (Lobby.start_duel plays it).
+static func size_tile_text(m: String, n: int, members: Array) -> Array:
+	var chip := size_chip_text(m, n, members)
+	if chip.begins_with("DUEL · "):
+		return ["DUEL", chip.trim_prefix("DUEL · ")]
+	match n:
+		2:
+			return ["DUO", "2 VS 2"]
+		4:
+			return ["SQUAD", "4 VS 4"]
+	return ["SOLO", "1 VS 1"]
+
+
+func open_size_box() -> void:
+	close_size_box()
+	if not size_box_allowed(LobbyTeam.is_member(), lobby.search_kind() != ""):
+		return
+	var card := lobby.mode_card
+	size_box = Control.new()
+	size_box.name = "SizeBox"
+	UI.full_rect(size_box)
+	size_box.mouse_filter = Control.MOUSE_FILTER_STOP
+	size_box.gui_input.connect(func(e: InputEvent) -> void:
+		if (e is InputEventMouseButton and (e as InputEventMouseButton).pressed) \
+				or (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed):
+			close_size_box())
+	lobby.ui.add_child(size_box)
+	var panel := PanelContainer.new()
+	panel.name = "SizeBoxPanel"
+	panel.add_theme_stylebox_override("panel", UI.chamfer(Color(0.06, 0.055, 0.05, 0.96), 12, 1, Color(UI.ACCENT, 0.5), 12.0, ["tl"]))
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	size_box.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	panel.add_child(v)
+	v.add_child(UI.label("TEAM SIZE  ·  %s" % Game.mode_name(), 16, UI.TEXT_DIM, "bold"))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	v.add_child(row)
+	var m := Game.mode
+	for n: int in Game.TEAM_SIZES:
+		row.add_child(_size_tile(m, n))
+	# Just above the mode card, its right edge on the card's.
+	var r := card.get_global_rect()
+	var w := r.size.x
+	panel.size = Vector2(w, 0)
+	panel.reset_size()
+	panel.custom_minimum_size.x = w
+	var h := panel.get_combined_minimum_size().y
+	panel.position = Vector2(r.end.x - w, r.position.y - 8.0 - h)
+	panel.modulate.a = 0.0
+	panel.create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
+
+
+func close_size_box() -> void:
+	if size_box:
+		size_box.queue_free()
+		size_box = null
+
+
+## One tile of the team-size box (SizeTile_<n>): the word big, the line small; the current size
+## framed yellow with the tick corner.
+func _size_tile(m: String, n: int) -> Button:
+	var words := size_tile_text(m, n, LobbyTeam.members())
+	var b := Button.new()
+	b.name = "SizeTile_%d" % n
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 76)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var lit := n == Game.team_size
+	b.draw.connect(func() -> void:
+		var sz := b.size
+		b.draw_rect(Rect2(Vector2.ZERO, sz), Color(1, 1, 1, 0.1) if b.is_pressed() else Color(0, 0, 0, 0.5))
+		HudDraw.text(b, String(words[0]), Vector2(sz.x * 0.5, sz.y * 0.4), 22, UI.ACCENT if lit else UI.TEXT, 1, 0, "heavy")
+		var sub := String(words[1])
+		var fs := 13
+		while fs > 9 and HudDraw.text_width(sub, fs, "bold") > sz.x - 10.0:
+			fs -= 1
+		HudDraw.text(b, sub, Vector2(sz.x * 0.5, sz.y * 0.74), fs, UI.TEXT_DIM, 1, 0, "bold")
+		if lit:
+			b.draw_rect(Rect2(Vector2(1.5, 1.5), sz - Vector2(3, 3)), UI.ACCENT, false, 3.0)
+			UI.draw_tick_corner(b, sz, 26.0)
+		else:
+			b.draw_rect(Rect2(Vector2(0.5, 0.5), sz - Vector2(1, 1)), Color(1, 1, 1, 0.18), false, 1.0))
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		b.connect(sig, b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_select", -6.0)
+		close_size_box()
+		pick_size(m, n))
+	return b
 
 
 # ---------------------------------------------------------------- player name

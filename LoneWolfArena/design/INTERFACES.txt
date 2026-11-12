@@ -20,7 +20,8 @@ listed here. If a part needs something new from the core, add it in its own file
   (each stage counted down on its own); `time_left` / `elapsed` stay the whole fight's.
 - zone: `zone_state` ("stationary" stage 1 | "shrinking" stage 2 | "closed"), `zone_next()` (s
   until it changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text
-  or ""), `zone_at(t)` ([centre, radius] t s into the fight: the whole hall through stage 1, then
+  or ""; always "" in the 1 vs 1: `quiet_stage_change()` true there, so its stage change shows no
+  band, no ZONE SHRINKING line and plays no beep; TeamArena returns false and keeps them), `zone_at(t)` ([centre, radius] t s into the fight: the whole hall through stage 1, then
   closing evenly to `RoundRules.ZONE_FINAL_R` 0.5 m at the end of stage 2, the centre sliding to
   `zone_final`, a new spot every round from `zone_final_for(round)`, alike on both phones)
 - 1 vs 1 weapon cooldown: `picks` (pick round -> gun), `pick_cooldowns()` (gun -> rounds left,
@@ -145,7 +146,10 @@ listed here. If a part needs something new from the core, add it in its own file
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
   ({Fighter: bool} line of sight, refreshed 10x per second)
 - helpers live in their own files: `hud_draw.gd` (HudDraw: icons, buttons, text, shapes shared
-  with the editor), `hud_minimap.gd` (HudMinimap), `hud_panels.gd` (HudPanels)
+  with the editor), `hud_minimap.gd` (HudMinimap: `view_xform(pp, yaw, side, map_rect, turn)` maps
+  world X/Z to minimap pixels, turned with the view while the setting `minimap_turns` is on (the
+  default; `HudMinimap.turns()`), north up otherwise; `ally_marks` / `enemy_marks` take that
+  transform), `hud_panels.gd` (HudPanels)
 - online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
   round trip to the other phone under the gear (NetPing), CHAT / MUTE (NetChat) and TALK / SOUND
   (NetVoice) right of the minimap, the chat feed under the score bar (`feed`, `add_line`, `send`),
@@ -452,7 +456,14 @@ listed here. If a part needs something new from the core, add it in its own file
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
   `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
   `ModeFormat`: `Lobby.mode_format()`, "BOT: <level>  ·  FIRST TO n", "TARGET DUMMY" or "1 VS 1
-  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`); the
+  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`; each
+  card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
+  (scripts/mode_help.gd: `ModeHelp.PAGES`, `pages_of(m)`, `show_page(i)`, `turn(step)`, nodes
+  HelpPicture, HelpTitle, HelpText, HelpDots / HelpDot_<i>, HelpPrev, HelpNext; X and back return to
+  SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the team-size box
+  (`LobbyDialogs.open_size_box()`, `size_box`, nodes SizeBox / SizeBoxPanel / SizeTile_<1|2|4>,
+  `size_tile_text(m, n, members)`, `size_box_allowed(member, searching)`): a tile and SELECT MODE's
+  size chips both go through `LobbyDialogs.pick_size(m, n)`); the
   opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) are on the TRAINING GROUND card:
   a tap picks TRAINING GROUND with that opponent and closes SELECT MODE; DUMMY sets
   `Game.practice` (session only, an online match ignores it). START: TRAINING
@@ -465,7 +476,8 @@ listed here. If a part needs something new from the core, add it in its own file
   full phone). Their keys: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
   files are migrated by settings_version: version 6 dropped the FPS counter, crosshair colour and
   size, fire-button drag and master volume, made show_fps / sens_fire `FIXED_SETTINGS` and gave
-  the reference's defaults: joystick DYNAMIC, free look button off), the profile keys
+  the reference's defaults: joystick DYNAMIC, free look button off; version 7 added
+  `minimap_turns`, true (TURNS WITH VIEW) for every older file), the profile keys
   `Game.DEFAULT_PROFILE` (signed as a whole; older profiles are migrated by profile_version).
   Crosshair (fixed): `Game.crosshair_color()` (white), `Game.crosshair_scale()`. Vibration:
   `Game.vibrate(ms, kind)` / `Game.vibration_on(kind)`, kind a key of `Game.VIBRATE_KEYS`:

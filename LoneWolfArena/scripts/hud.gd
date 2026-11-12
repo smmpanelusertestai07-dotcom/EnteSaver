@@ -964,7 +964,8 @@ func _draw() -> void:
 	_draw_hp_block(vs, u)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
-	_draw_zone_strip(vs)
+	if team != null:
+		_draw_zone_strip(vs)       # (DUO / SQUAD only: the 1 vs 1's minimap has no zone strip)
 	_draw_zone_banner(vs, u)
 	_draw_prep(vs, u)
 	_draw_break(vs, u)
@@ -1726,6 +1727,9 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 	HudDraw.text_parts(self, [["OBJECTIVE: ", Color(1, 1, 1, 0.95)], [str(goal), HudDraw.YELLOW]], Vector2(cx, ph * 0.8), int(0.025 * u), 1, 2, "bold")
 
 
+## The zone strip under the minimap (SAFE ZONE STATIONARY / SHRINKING m:ss / CLOSED): drawn in a
+## DUO / SQUAD and in the HUD editor's preview; the 1 vs 1 shows none (its space stays reserved,
+## the FPS line sits under it).
 func _draw_zone_strip(vs: Vector2) -> void:
 	var w: Dictionary = layout.minimap
 	var o := float(w.o)

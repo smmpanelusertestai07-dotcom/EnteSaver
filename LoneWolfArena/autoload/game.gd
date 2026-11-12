@@ -31,7 +31,7 @@ const TEAMS_ONLINE := true
 ## room sets its own (see rounds_to_win()).
 const ROUNDS_TO_WIN := 5
 
-const SETTINGS_VERSION := 6
+const SETTINGS_VERSION := 7
 const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"mode": DEFAULT_MODE,
@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS := {
 	"freelook_button": false,     # the free look (eye) button: off, as the reference ships it
 	"run_mode": 2,                # sprint: 0 TAP (the sprint button), 1 DRAG (push the stick past its ring), 2 MIXED (both)
 	"visual_effects": true,       # muzzle / explosion lights and full particle bursts (Effects.configure)
+	"minimap_turns": true,        # the minimap turns with the view (the player's arrow up) or stays north up (HudMinimap)
 	"vol_sfx": 90,
 	"vol_music": 45,
 	"vol_voice": 80,              # the other player's push-to-talk voice (NetVoice, bus "Voice")
@@ -107,7 +108,7 @@ const SETTING_RANGES := {
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "dynamic_joystick", "vibrate_footsteps", "vibrate_damage",
 	"vibrate_shooting", "vibration", "visual_effects", "reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope",
-	"freelook_button", "chat", "friend_chat", "show_career", "voice_chat", "friend_requests", "direct_connect"]
+	"freelook_button", "chat", "friend_chat", "show_career", "voice_chat", "friend_requests", "direct_connect", "minimap_turns"]
 ## What each kind of buzz (vibrate()) needs on: the reference's vibration rows (CONTROLS) and,
 ## out of a match, the lobby's (ONLINE).
 const VIBRATE_KEYS := {"footsteps": "vibrate_footsteps", "damage": "vibrate_damage", "shooting": "vibrate_shooting",
@@ -367,6 +368,11 @@ func _migrate_settings(saved: Dictionary) -> void:
 		saved.erase("freelook_button")
 		if saved.get("vibration") is bool and not bool(saved.vibration):
 			saved["vibrate_footsteps"] = false
+	if int(version) < 7:
+		# v7: the minimap turns with the view, as the reference's does by default. Before it was
+		# always north up and never a choice, so every older file starts on the new default
+		# (SETTINGS > DISPLAY > MINIMAP sets NORTH UP back).
+		saved.erase("minimap_turns")
 
 
 ## Every setting as on a new install (DELETE MY DATA): the defaults, the fixed behaviour, AUTO

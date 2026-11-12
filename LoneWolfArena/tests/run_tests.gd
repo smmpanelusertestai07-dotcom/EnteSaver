@@ -65,6 +65,7 @@ func _ready() -> void:
 	_test_signer_digests()
 	_test_settings_sanitize()
 	_test_settings_v6()
+	_test_minimap()
 	_test_fps_options()
 	_test_sensitivity_per_sight()
 	_test_controls_settings()
@@ -630,6 +631,100 @@ func _test_settings_sanitize() -> void:
 	Game.settings = saved
 
 
+## The minimap (HudMinimap.view_xform): turned with the view, a point ahead of the player is drawn
+## above it and one to its right to its right, whatever way it faces, and the player sits in the
+## middle; north up keeps north up and stops at the map's edge. The setting minimap_turns: TURNS
+## WITH VIEW on a new install and for every file from before version 7, NORTH UP kept once chosen,
+## a wrong value back to the default; DISPLAY's row sets it.
+func _test_minimap() -> void:
+	var side := 280.0
+	var mr := Rect2(-21, -15, 42, 30)
+	var c := Vector2(side, side) * 0.5
+	var ok_ahead := true
+	var ok_right := true
+	var ok_mid := true
+	var ok_len := true
+	for i in 12:
+		var yaw := -PI + TAU * i / 12.0 + 0.1
+		var pp := Vector2(3.0 - i, 2.0 + 0.5 * i)
+		var fwd := Vector2(-sin(yaw), -cos(yaw))
+		var right := Vector2(cos(yaw), -sin(yaw))         # (the camera's right in X/Z)
+		var xf := HudMinimap.view_xform(pp, yaw, side, mr, true)
+		var me := xf * pp
+		var ahead := xf * (pp + fwd * 5.0)
+		var to_right := xf * (pp + right * 5.0)
+		ok_mid = ok_mid and me.distance_to(c) < 0.01
+		ok_ahead = ok_ahead and ahead.y < me.y - 40.0 and absf(ahead.x - me.x) < 0.01
+		ok_right = ok_right and to_right.x > me.x + 40.0 and absf(to_right.y - me.y) < 0.01
+		ok_len = ok_len and is_equal_approx((ahead - me).length(), 5.0 * side / HudMinimap.VIEW_M)
+		ok_ahead = ok_ahead and HudMinimap.view_dir(xf, fwd).is_equal_approx(Vector2(0, -1))
+	_check(ok_mid, "a turned minimap keeps the player in its middle")
+	_check(ok_ahead, "turned with the view: a point ahead of the player is drawn straight above it, its arrow points up")
+	_check(ok_right, "turned with the view: a point to the player's right is drawn to its right")
+	_check(ok_len, "turning keeps the scale (VIEW_M metres edge to edge)")
+	# North up: north (-Z) is up whatever way the player faces; the window stops at the map's edge.
+	var n_yaw := 1.2
+	var n_pp := Vector2(-20, 0)
+	var n_xf := HudMinimap.view_xform(n_pp, n_yaw, side, mr, false)
+	_check(HudMinimap.view_dir(n_xf, Vector2(0, -1)).is_equal_approx(Vector2(0, -1))
+		and (n_xf * Vector2(n_pp.x + 1, n_pp.y)).x > (n_xf * n_pp).x, "north up: north is up and east is right")
+	_check((n_xf * mr.position).x > -0.01 and (n_xf * mr.position).x < 0.01 and (n_xf * n_pp).x < c.x,
+		"north up: near the map's west edge the window stops there and the player is drawn left of the middle")
+	var n_dir := HudMinimap.view_dir(n_xf, Vector2(-sin(n_yaw), -cos(n_yaw)))
+	_check(n_dir.is_equal_approx(Vector2(-sin(n_yaw), -cos(n_yaw))), "north up: the player's arrow turns instead")
+	var wr := HudMinimap.view_world_rect(HudMinimap.view_xform(Vector2.ZERO, PI / 4.0, side, mr, true), side)
+	_near(wr.size.x, HudMinimap.VIEW_M * sqrt(2.0), "a turned map at 45 degrees shows the window's diagonal", 0.01)
+	# Marks go through the same transform: an enemy ahead is drawn above, facing as drawn.
+	var foe := Fighter.new()
+	var me_f := Fighter.new()
+	add_child(foe)
+	add_child(me_f)
+	foe.alive = true
+	me_f.position = Vector3(2, 0, 3)
+	me_f.aim_yaw = 0.7
+	foe.aim_yaw = 0.7
+	foe.position = me_f.position + Vector3(-sin(0.7), 0, -cos(0.7)) * 6.0
+	var xf2 := HudMinimap.view_xform(Vector2(2, 3), 0.7, side, mr, true)
+	var marks := HudMinimap.enemy_marks([foe, me_f], me_f, null, {foe: true}, xf2)
+	_check(marks.size() == 1 and (marks[0].pos as Vector2).y < c.y - 40.0 and absf((marks[0].pos as Vector2).x - c.x) < 0.01
+		and (marks[0].dir as Vector2).is_equal_approx(Vector2(0, -1)), "an enemy ahead, facing the same way, is drawn above the player pointing up")
+	foe.free()
+	me_f.free()
+	# The setting.
+	var saved := Game.settings.duplicate(true)
+	var d: Dictionary = Game.DEFAULT_SETTINGS
+	_check(d.minimap_turns == true and "minimap_turns" in Game.BOOL_SETTINGS, "a new install's minimap turns with the view")
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings(JSON.parse_string(JSON.stringify({"settings_version": 6, "vol_sfx": 40})))
+	_check(Game.settings.minimap_turns == true and Game.settings.vol_sfx == 40 and HudMinimap.turns(), "a version 6 file gets the turning minimap")
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings({"settings_version": 6, "minimap_turns": false})
+	_check(Game.settings.minimap_turns == true, "before version 7 the minimap was never a choice: a stray value there gives way to the default")
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings(JSON.parse_string(JSON.stringify({"settings_version": 7, "minimap_turns": false})))
+	_check(Game.settings.minimap_turns == false and not HudMinimap.turns(), "NORTH UP chosen is kept")
+	Game.settings = d.duplicate(true)
+	Game._apply_saved_settings({"settings_version": 7, "minimap_turns": "north"})
+	_check(Game.settings.minimap_turns == true, "a minimap value that is not true or false falls back to the default")
+	_check(SettingsPanel.MINIMAP_NAMES == ["TURNS WITH VIEW", "NORTH UP"] and SettingsPanel.MINIMAP_NOTES.size() == 2,
+		"DISPLAY's MINIMAP row: TURNS WITH VIEW, NORTH UP")
+	var at := Game.autotest
+	Game.autotest = "unit"
+	Game.settings = d.duplicate(true)
+	Game.settings.merge(Game.FIXED_SETTINGS, true)
+	var panel := SettingsPanel.new()
+	add_child(panel)
+	panel._show_tab(0)
+	var seg := panel.find_child("Toggle_minimap_turns", true, false) as Control
+	_check(seg != null and (seg.get_child(0) as Button).button_pressed, "DISPLAY shows the MINIMAP row, TURNS WITH VIEW lit")
+	if seg:
+		(seg.get_child(1) as Button).pressed.emit()
+	_check(Game.settings.minimap_turns == false, "NORTH UP in DISPLAY sets the minimap north up")
+	panel.free()
+	Game.autotest = at
+	Game.settings = saved
+
+
 ## The settings of version 6, the reference's set: what is gone (FPS counter, crosshair colour and
 ## size, fire-button drag, master volume), the vibration rows, the reference's defaults (joystick
 ## DYNAMIC, free look button off) beside the owner's (LEFT FIRE always, RELOAD and SWITCH on),
@@ -637,7 +732,7 @@ func _test_settings_sanitize() -> void:
 func _test_settings_v6() -> void:
 	var saved := Game.settings.duplicate(true)
 	var d: Dictionary = Game.DEFAULT_SETTINGS
-	_check(Game.SETTINGS_VERSION == 6 and d.settings_version == 6, "settings version 6")
+	_check(Game.SETTINGS_VERSION == 7 and d.settings_version == 7, "settings version 7 (version 7 added the minimap's turning, _test_minimap)")
 	_check(d.mode == "training" and d.graphics_auto == true and d.graphics == 1 and d.fps == 60 and d.sens_general == 100
 		and d.sens_reddot == 100 and d.sens_2x == 100 and d.sens_sniper == 71 and d.sens_freelook == 100 and d.difficulty == 1
 		and d.vol_sfx == 90 and d.vol_music == 45 and d.vol_voice == 80 and d.last_pick == "ar", "the settings kept keep their defaults")
@@ -885,7 +980,8 @@ func _test_settings_panel() -> void:
 		"the tabs and the not-shown list name real settings")
 	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT"] and SettingsPanel.ORDER == [0, 2, 1, 3, 4, 5],
 		"the tabs: DISPLAY, CONTROLS, SENSITIVITY, SOUND, ONLINE, ACCOUNT")
-	_check(SettingsPanel.TAB_KEYS[0] == ["graphics_auto", "graphics", "fps", "visual_effects"], "DISPLAY: graphics (AUTO), frame rate, visual effects")
+	_check(SettingsPanel.TAB_KEYS[0] == ["graphics_auto", "graphics", "fps", "visual_effects", "minimap_turns"],
+		"DISPLAY: graphics (AUTO), frame rate, visual effects, the minimap's turning")
 	_check(["dynamic_joystick", "aim_precision", "left_fire", "freelook_button", "vibrate_footsteps", "vibrate_damage", "vibrate_shooting"].all(
 		func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]), "CONTROLS: joystick, aim precision, left fire, free look and the vibration rows")
 	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and "vibration" in SettingsPanel.TAB_KEYS[4]
