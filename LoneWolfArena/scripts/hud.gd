@@ -29,7 +29,7 @@ const GLYPH_SCALE := {
 	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56, "reload": 0.4, "swap": 0.5,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
-	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
+	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sidearm", "weapon_sniper", "v_skull"]
 const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
 const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming, 2 off
 const DMG_LIFE := 0.95
@@ -502,9 +502,11 @@ func _widget_at(pos: Vector2, vs: Vector2) -> String:
 	if HudLayout.weapon_main(panel, vs).grow(4).has_point(pos):
 		return "weapons:main"
 	var slots := HudLayout.weapon_slots(panel, vs)
-	for i in ([0, 1, 2] if _can_repick() else [0, 2]):
+	for i in 3:
 		if slots[i].grow(4).has_point(pos):
 			return "weapons:%d" % i
+	if _can_repick() and HudLayout.weapon_repick(panel, vs).grow(4).has_point(pos):
+		return "weapons:repick"
 	return ""
 
 
@@ -570,25 +572,24 @@ func _press(id: String, index: int) -> void:
 			_touches[index] = {"kind": "free", "id": id}
 			player.start_free_look()
 		"reload":
-			if player.current == 0:         # grey with the fists out: nothing to reload
+			if not Weapons.is_melee(player.weapon().def):         # grey with the fists out: nothing to reload
 				player.do_reload()
 		"swap":
-			player.select_weapon(1 - player.current)
+			player.select_weapon(player.next_weapon())      # gun -> sidearm -> fists -> gun
 		"settings":
 			release_all()
 			pause_pressed.emit()
 		"weapons:main":
-			if player.current == 0:
+			if not Weapons.is_melee(player.weapon().def):
 				player.do_reload()
 			else:
-				player.select_weapon(0)
-		"weapons:0":
-			player.select_weapon(0)
-		"weapons:1":
+				player.select_weapon(Weapons.GUN)
+		"weapons:0", "weapons:1", "weapons:2":
+			# The small slots in SWITCH's order: the gun, the sidearm, the fists.
+			player.select_weapon(Weapons.CYCLE[int(id.substr(8))])
+		"weapons:repick":
 			release_all()
 			arena.call("repick")
-		"weapons:2":
-			player.select_weapon(1)
 
 
 func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
@@ -994,9 +995,9 @@ func _draw_button(id: String, vs: Vector2) -> void:
 				en = player.grenades > 0
 				act = player.ready_item == "grenade"
 			"reload":
-				var g: WeaponState = player.weapons[0]
+				var g := _panel_weapon()
 				act = g.reloading
-				en = player.current == 0 and (g.reloading or g.can_reload())    # grey: full, no reserve, fists out
+				en = g == player.weapon() and (g.reloading or g.can_reload())    # grey: full, no reserve, fists out
 	elif editor_mode:
 		match id:
 			"medkit", "wall":
@@ -1015,8 +1016,8 @@ func _draw_button(id: String, vs: Vector2) -> void:
 		elif player != null and Weapons.is_melee(player.weapon().def):
 			glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
 	var gscale := float(GLYPH_SCALE.get(id, 0.6))
-	if id == "swap" and player != null and not editor_mode and player.current == 1:
-		glyph = HudDraw.weapon_tex(player.weapons[0].def)      # the other slot: fists out, it shows the gun
+	if id == "swap" and player != null and not editor_mode and player.next_weapon() != Weapons.FISTS:
+		glyph = HudDraw.weapon_tex(player.weapons[player.next_weapon()].def)      # what it draws next (a fist: the fists)
 		gscale = 0.62
 	if id == "fire_r":
 		_draw_fire_halo(c, r, o, pressed)
@@ -1026,7 +1027,7 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	if id == "medkit" and act and player != null:
 		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.GOLD, 0.95 * o), 3.0, player.heal_progress())
 	if id == "reload" and act and player != null:
-		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.YELLOW, 0.95 * o), 3.0, player.weapons[0].reload_progress())
+		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.YELLOW, 0.95 * o), 3.0, _panel_weapon().reload_progress())
 	if id == "swap" or (id == "reload" and not act):
 		# SWITCH: two arrows chasing each other (it trades the hand's slot); RELOAD: one round the
 		# magazine (while it reloads, the gold progress ring takes its place)
@@ -1106,15 +1107,17 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	var reserve := int(def.reserve)
 	var reloading := false
 	var progress := 0.0
-	var gun_sel := true
+	var gun_sel := true                 # a gun (the round's or the sidearm) in hand: the main slot lit
+	var held := Weapons.GUN
 	if player != null and not editor_mode:
-		var g: WeaponState = player.weapons[0]
+		var g := _panel_weapon()
 		def = g.def
 		ammo = g.ammo
 		reserve = g.reserve
 		reloading = g.reloading
 		progress = g.reload_progress()
-		gun_sel = player.current == 0
+		held = player.current
+		gun_sel = g == player.weapon()
 	var dim := 1.0 if gun_sel else 0.55
 	var pressed := _pressed.has("weapons:main")
 	# Near-black slots at ~70 % (the reference), the main one with its top-right corner cut.
@@ -1145,27 +1148,45 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
 	draw_rect(Rect2(ul.position, Vector2(ul.size.x * (progress if reloading else 1.0), ul.size.y)),
 		Color(HudDraw.YELLOW, o) if reloading else Color(1, 1, 1, 0.92 * dim * o))
-	# Small slots: the gun, an empty slot, fists.
+	# Small slots in SWITCH's order (Weapons.CYCLE): the gun, the sidearm (each with its rounds
+	# left, magazine and reserve), the fists; the one in hand lit gold.
 	for i in 3:
 		var r := slots[i]
-		var sel := (i == 0 and gun_sel) or (i == 2 and not gun_sel)
+		var wi: int = Weapons.CYCLE[i]
+		var sel := wi == held
 		var sp := _pressed.has("weapons:%d" % i)
 		draw_rect(r, Color(HudDraw.SLOT_BG, (0.86 if sp else 0.76) * o))
 		if sel:
 			HudDraw.vband(self, r, Color(HudDraw.GOLD, 0.7 * o), Color(HudDraw.GOLD.darkened(0.3), 0.62 * o))
 			draw_rect(Rect2(r.position.x, r.end.y - 2.0, r.size.x, 2.0), Color(1, 0.93, 0.6, o))
-		if i == 0:
-			HudDraw.icon(self, HudDraw.weapon_tex(def), r.get_center() + Vector2(0, -s * 0.08), Vector2(r.size.x * 0.8, r.size.y * 0.5),
-				Color(1, 1, 1, (1.0 if sel else 0.75) * o))
-			HudDraw.text(self, str(ammo + reserve), Vector2(r.position.x + s * 0.08, r.end.y - s * 0.17), int(s * 0.25), Color(1, 1, 1, 0.92 * o), 0, 2, "number")
-		elif i == 2:
+		if wi == Weapons.FISTS:
 			HudDraw.icon(self, HudDraw.tex("v_fist"), r.get_center() + Vector2(0, -s * 0.1), Vector2(r.size.y, r.size.y) * 0.5,
 				Color(1, 1, 1, (1.0 if sel else 0.8) * o))
 			_infinity(r.get_center() + Vector2(0, r.size.y * 0.3), s * 0.13, Color(1, 1, 1, 0.9 * o))
-		elif _can_repick():
-			# The target dummy: the empty slot changes the gun (the weapon pick opens again).
-			HudDraw.text(self, "CHANGE", r.get_center() + Vector2(0, -s * 0.12), int(s * 0.2), Color(1, 1, 1, 0.9 * o), 1, 2, "bold")
-			HudDraw.text(self, "GUN", r.get_center() + Vector2(0, s * 0.14), int(s * 0.2), Color(HudDraw.YELLOW, 0.95 * o), 1, 2, "bold")
+			continue
+		var sd: Dictionary = Weapons.DEFS[Weapons.SIDEARM] if wi == Weapons.SIDE else Weapons.DEFS[Weapons.DEFAULT_PICK]
+		var left := int(sd.mag) + int(sd.reserve)
+		if player != null and not editor_mode and player.weapons.size() > wi:
+			var ws: WeaponState = player.weapons[wi]
+			sd = ws.def
+			left = ws.ammo + ws.reserve
+		HudDraw.icon(self, HudDraw.weapon_tex(sd), r.get_center() + Vector2(0, -s * 0.08), Vector2(r.size.x * (0.8 if wi == Weapons.GUN else 0.62), r.size.y * 0.5),
+			Color(1, 1, 1, (1.0 if sel else 0.75) * o))
+		HudDraw.text(self, str(left), Vector2(r.position.x + s * 0.08, r.end.y - s * 0.17), int(s * 0.25),
+			Color(1, 1, 1, 0.92 * o) if left > 0 else Color(1.0, 0.36, 0.3, o), 0, 2, "number")
+	if _can_repick():
+		# The target dummy: CHANGE GUN beside the small slots opens the weapon pick again.
+		var rp := HudLayout.weapon_repick(w, vs)
+		draw_rect(rp, Color(HudDraw.SLOT_BG, (0.86 if _pressed.has("weapons:repick") else 0.76) * o))
+		draw_rect(Rect2(rp.position.x, rp.end.y - 2.0, rp.size.x, 2.0), Color(HudDraw.YELLOW, 0.9 * o))
+		HudDraw.text(self, "CHANGE GUN", rp.get_center(), int(s * 0.19), Color(1, 1, 1, 0.92 * o), 1, 2, "bold")
+
+
+## The weapon the panel's main slot (and RELOAD) is about: the gun or the sidearm in hand, else
+## (the fists out) the round's gun.
+func _panel_weapon() -> WeaponState:
+	var w := player.weapon()
+	return player.gun() if Weapons.is_melee(w.def) else w
 
 
 ## The weapon panel while the round's gun is being picked (Fighter.awaiting_pick): "" when it is
@@ -1180,7 +1201,8 @@ func weapon_picking() -> String:
 
 
 ## The main slot in its picking state: no ammo, "PICKING..." (the chosen gun's silhouette dimmed
-## for the picker), the gun's small slot empty, the fists held.
+## for the picker), the gun's and the sidearm's small slots empty (the sidearm comes with the
+## gun), the fists held.
 func _draw_picking_slots(main: Rect2, slots: Array[Rect2], s: float, o: float, picking: String) -> void:
 	var ax := main.position.x + s * 0.16
 	HudDraw.text(self, "--", Vector2(ax, main.position.y + s * 0.38), int(s * 0.5), Color(1, 1, 1, 0.4 * o), 0, 2, "number")
@@ -1194,7 +1216,7 @@ func _draw_picking_slots(main: Rect2, slots: Array[Rect2], s: float, o: float, p
 	for i in 3:
 		var r := slots[i]
 		draw_rect(r, Color(HudDraw.SLOT_BG, 0.76 * o))
-		if i == 2:
+		if Weapons.CYCLE[i] == Weapons.FISTS:
 			HudDraw.vband(self, r, Color(HudDraw.GOLD, 0.7 * o), Color(HudDraw.GOLD.darkened(0.3), 0.62 * o))
 			draw_rect(Rect2(r.position.x, r.end.y - 2.0, r.size.x, 2.0), Color(1, 0.93, 0.6, o))
 			HudDraw.icon(self, HudDraw.tex("v_fist"), r.get_center() + Vector2(0, -s * 0.1), Vector2(r.size.y, r.size.y) * 0.5, Color(1, 1, 1, o))

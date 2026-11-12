@@ -100,7 +100,12 @@ var _fwd_sign := 1.0                    # -1: crouch-walk / crawl play backwards
 var _air_time := 0.0
 var _land_left := 0.0
 var _land_peak := 0.0
-var _holster: Node3D           # the gun on the back while the fists are out
+var _holster: Node3D           # the gun on the back while the fists (or the sidearm) are out
+var _holster_model := ""
+## The round's gun's model (Fighter.set_loadout): on the back whenever another weapon (the sidearm,
+## the fists) is in hand. "" (a model with no kit: the lobby, the results): the gun last in hand
+## goes on the back while the hands are empty.
+var back_model := ""
 var _healing := false
 var _aim_dir := Vector3.FORWARD
 var _kick := 0.0
@@ -558,6 +563,9 @@ func _stride_phase() -> float:
 ## The gun of the round on the back while the fists are out (the reference look), diagonal
 ## across it with the muzzle up over the left shoulder.
 func _set_holster(model_name: String) -> void:
+	if _holster != null and model_name == _holster_model:
+		return
+	_holster_model = model_name
 	if _holster:
 		_holster.queue_free()
 		_holster = null
@@ -579,7 +587,7 @@ func _set_holster(model_name: String) -> void:
 func _place_holster() -> void:
 	if _holster == null or skeleton == null:
 		return
-	_holster.visible = not _dead and weapon_id == "" and show_weapon
+	_holster.visible = not _dead and weapon_id != _holster_model and show_weapon
 	var fwd := -global_basis.z
 	var right := fwd.cross(Vector3.UP).normalized()
 	var z := -(Vector3.UP * 0.75 - right * 0.66).normalized()     # gun models point their muzzle along -z
@@ -770,7 +778,10 @@ func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 	if weapon_node:
 		weapon_node.queue_free()
 		weapon_node = null
-	_set_holster(weapon_id if model_name == "" else "")
+	if back_model != "":
+		_set_holster(back_model if model_name != back_model else "")
+	else:
+		_set_holster(weapon_id if model_name == "" else "")
 	weapon_id = model_name
 	# _hand_to_gun stays valid: every gun model's origin is its grip point.
 	if model_name == "":

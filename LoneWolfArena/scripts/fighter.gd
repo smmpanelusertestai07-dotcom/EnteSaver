@@ -187,8 +187,9 @@ func setup_fighter(bundle: String, weapon_id := Weapons.DEFAULT_PICK) -> void:
 		_exclude.append(hb.get_rid())
 
 
-## The round's gun in slot 0 and fists in slot 1 (Lone Wolf: both players get the same gun). It
-## ends await_pick.
+## The kit, the same in every mode: the round's gun at Weapons.GUN (0), the fists at FISTS (1) and
+## the sidearm at SIDE (2), all full, the gun in hand (Lone Wolf: both players get the same gun).
+## It ends await_pick. The gun's model goes on the back while another weapon is in hand.
 func set_loadout(weapon_id: String) -> void:
 	if not Weapons.DEFS.has(weapon_id):
 		weapon_id = Weapons.DEFAULT_PICK
@@ -196,8 +197,10 @@ func set_loadout(weapon_id: String) -> void:
 	weapons.clear()
 	weapons.append(WeaponState.new(weapon_id))
 	weapons.append(WeaponState.new("fists"))
-	current = 0
+	weapons.append(WeaponState.new(Weapons.SIDEARM))
+	current = Weapons.GUN
 	if model:
+		model.back_model = String(weapons[0].def.model)
 		model.equip_weapon(String(weapons[0].def.model), weapons[0].def.get("tint", Color.WHITE))
 	weapon_switched.emit()
 
@@ -316,11 +319,12 @@ func aim_forward() -> Vector3:
 ## A 1 vs 1 pick round before its pick lands (Arena._start_prep): the fists in hand, and the gun
 ## still in slot 0 (the last pair's, or the last match's) neither held, holstered on the back nor
 ## drawable, so neither phone shows a gun that is not this pair's; set_loadout (the pick) ends it.
-## The other phone's copy follows by the weapon index its state carries (1: the fists).
+## The other phone's copy follows by the weapon index its state carries (1: the fists). The
+## sidearm comes with the gun: until the pick only the fists can be in hand.
 func await_pick() -> void:
-	if weapons.size() > 1:
+	if weapons.size() > Weapons.FISTS:
 		weapon().cancel_reload()
-		current = 1
+		current = Weapons.FISTS
 	awaiting_pick = true
 	if model:
 		model.empty_hands()
@@ -333,6 +337,28 @@ func weapon() -> WeaponState:
 
 func gun() -> WeaponState:
 	return weapons[0]
+
+
+## The kit's sidearm (Weapons.SIDE); null on a fighter that has no kit yet.
+func sidearm() -> WeaponState:
+	return weapons[Weapons.SIDE] if weapons.size() > Weapons.SIDE else null
+
+
+## The weapon SWITCH draws next (Weapons.CYCLE): gun -> sidearm -> fists -> gun, past what cannot
+## be drawn now (the gun and the sidearm before the pick: then it stays on the fists).
+func next_weapon() -> int:
+	var at := Weapons.CYCLE.find(current)
+	for k in range(1, Weapons.CYCLE.size() + 1):
+		var i: int = Weapons.CYCLE[(at + k) % Weapons.CYCLE.size()]
+		if can_draw(i):
+			return i
+	return current
+
+
+## Whether weapon `index` of the kit may be taken in hand: before the pick (awaiting_pick) only
+## the fists.
+func can_draw(index: int) -> bool:
+	return index >= 0 and index < weapons.size() and (not awaiting_pick or index == Weapons.FISTS)
 
 
 # ---------------------------------------------------------------- damage
@@ -740,7 +766,7 @@ func _on_reload_done() -> void:
 
 
 func switch_weapon(index: int) -> void:
-	if index == current or index < 0 or index >= weapons.size() or not alive or knocked or (awaiting_pick and index == 0):
+	if index == current or not can_draw(index) or not alive or knocked:
 		return
 	weapon().cancel_reload()
 	current = index

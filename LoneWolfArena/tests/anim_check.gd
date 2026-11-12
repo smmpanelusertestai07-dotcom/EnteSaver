@@ -284,8 +284,8 @@ func _check_frag_feed(arena: Node, p: Fighter) -> void:
 	_expect(not b.alive and not feed.is_empty() and String(feed[0].weapon) == "FRAG", "a frag kill reads FRAG in the kill feed (%s)" % [str(feed[0]) if not feed.is_empty() else "empty"])
 
 
-## TARGET DUMMY: the weapon panel's middle slot (CHANGE GUN) opens the weapon pick in the fight,
-## and the pick gives both fighters the new gun.
+## TARGET DUMMY: CHANGE GUN (the plate left of the weapon panel's small slots; the middle slot is
+## the sidearm's) opens the weapon pick in the fight, and the pick gives both fighters the new gun.
 func _check_dummy_gun_change() -> void:
 	Game.practice = true
 	Game.goto_arena()
@@ -294,15 +294,17 @@ func _check_dummy_gun_change() -> void:
 	await at.wait_for_phase(arena, 1, 40.0)
 	var hud: HUD = arena.get("hud")
 	var p: Fighter = arena.get("player")
-	var slot: Rect2 = HudLayout.weapon_slots(hud.layout.weapons, hud.size)[1]
-	var tapped := hud._widget_at(slot.get_center(), hud.size)
+	var plate := HudLayout.weapon_repick(hud.layout.weapons, hud.size)
+	var tapped := hud._widget_at(plate.get_center(), hud.size)
+	var middle := hud._widget_at(HudLayout.weapon_slots(hud.layout.weapons, hud.size)[1].get_center(), hud.size)
 	arena.call("repick")
 	var opened := hud.panels.pick_open
 	hud.panels.select("sg")
 	hud.panels.finish_pick()
 	var b: Fighter = arena.get("bot")
-	_expect(tapped == "weapons:1" and opened and p.gun().id == "sg" and b.gun().id == "sg",
-		"the dummy's CHANGE GUN slot reopens the pick in the fight (%s, %s, %s)" % [tapped, opened, p.gun().id])
+	_expect(tapped == "weapons:repick" and middle == "weapons:1" and opened and p.gun().id == "sg" and b.gun().id == "sg"
+			and p.sidearm() != null and p.sidearm().id == Weapons.SIDEARM,
+		"the dummy's CHANGE GUN plate reopens the pick in the fight, the sidearm kept (%s, %s, %s, %s)" % [tapped, middle, opened, p.gun().id])
 	Game.practice = false
 
 

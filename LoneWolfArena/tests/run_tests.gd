@@ -148,7 +148,7 @@ func _test_damage() -> void:
 func _test_damage_shown() -> void:
 	var zones := ["body", "head", "limb", "body", "body"]
 	for armored: bool in [true, false]:
-		for id: String in Weapons.PICKABLE + ["fists"]:
+		for id: String in Weapons.PICKABLE + ["fists", Weapons.SIDEARM]:
 			var d: Dictionary = Weapons.DEFS[id]
 			var shooter := Bot.new()
 			var target: Bot = Bot.new() if armored else Unarmored.new()
@@ -343,7 +343,7 @@ func _test_hud_touch_areas() -> void:
 					areas[id] = [Vector3(c.x, c.y, HudLayout.touch_radius(w, vs) * 1.15)]
 				"panel":
 					var slots := HudLayout.weapon_slots(w, vs)
-					areas[id] = [HudLayout.weapon_main(w, vs).grow(4), slots[0].grow(4), slots[2].grow(4)]
+					areas[id] = [HudLayout.weapon_main(w, vs).grow(4), slots[0].grow(4), slots[1].grow(4), slots[2].grow(4)]
 				"square":
 					areas[id] = [HudLayout.minimap_rect(w, vs)]
 		var score := Rect2(Vector2(vs.x * 0.5 - 0.33 * u, 0.0), Vector2(0.66 * u, 0.09 * u))
@@ -2296,9 +2296,9 @@ func _test_move_speeds() -> void:
 	for f: Fighter in [Player.new(), Bot.new()]:
 		var who := "player" if f is Player else "bot"
 		var speeds := {}             # weapon id -> [walk, run, sprint, crouch]
-		for id: String in Weapons.PICKABLE + ["fists"]:
-			f.set_loadout("ar" if id == "fists" else id)
-			f.current = 1 if id == "fists" else 0
+		for id: String in Weapons.PICKABLE + ["fists", Weapons.SIDEARM]:
+			f.set_loadout("ar" if id in ["fists", Weapons.SIDEARM] else id)
+			f.current = Weapons.FISTS if id == "fists" else (Weapons.SIDE if id == Weapons.SIDEARM else Weapons.GUN)
 			var row: Array[float] = []
 			for gait: String in ["walk", "run", "sprint", "crouch"]:
 				f.stance = Fighter.Stance.CROUCH if gait == "crouch" else Fighter.Stance.STAND
@@ -2317,7 +2317,8 @@ func _test_move_speeds() -> void:
 		_near(speeds.ar[1], 4.6, "%s: with the rifle it runs as fast as before" % who)
 		_check(speeds.smg[1] > speeds.ar[1] and speeds.ar[1] == speeds.pistol[1] and speeds.pistol[1] > speeds.lever[1]
 			and speeds.lever[1] > speeds.sks[1] and speeds.sks[1] > speeds.sniper[1] and speeds.ak[1] == speeds.ar[1]
-			and speeds.bizon[1] == speeds.smg[1], "%s: SMG > rifle = pistol > shotgun > marksman > sniper, the same within a class" % who)
+			and speeds.bizon[1] == speeds.smg[1] and speeds[Weapons.SIDEARM][1] == speeds.pistol[1],
+			"%s: SMG > rifle = pistol (the sidearm too) > shotgun > marksman > sniper, the same within a class" % who)
 		f.free()
 
 

@@ -1117,7 +1117,7 @@ func _place_dummy() -> void:
 	bot.aim_yaw = atan2(-d.x, -d.z)
 
 
-## Against the target dummy the gun never runs dry (the magazine still needs reloading).
+## Against the target dummy the gun and the sidearm never run dry (the magazine still needs reloading).
 func _refill_practice_ammo() -> void:
 	var w := player.weapon()
 	if not w.infinite() and w.reserve < int(w.def.mag):
