@@ -2100,9 +2100,20 @@ func _test_session_file() -> void:
 	_check(not late.try_resume() and not late.in_session and not FileAccess.file_exists(Cloud.resume_path())
 		and (Game.profile.history as Array).size() == before + 1 and int(Game.profile.matches) == 0,
 		"opened after the grace: no rejoin, the file goes, the match is LEFT once (counted nowhere twice)")
+	# The result is in (the results screen, QUIT MATCH): the file goes and stays gone for the
+	# session, so a close on the results screen adds no LEFT later and a reopen never rejoins.
+	start.call(cl)
+	cl.note_match(true, 2, 1, "LONE WOLF")
+	cl.match_recorded()
+	cl.note_match(true, 2, 1, "LONE WOLF")
+	var done := Cloud.new()
+	done._use_key(key)
+	before = (Game.profile.history as Array).size()
+	_check(not FileAccess.file_exists(Cloud.resume_path()) and not done.try_resume()
+		and (Game.profile.history as Array).size() == before, "a recorded match keeps no session file: nothing to rejoin or record")
 	var lan := Lan.new()
 	_check(not lan.resume_allowed(), "PLAY WITHOUT INTERNET keeps no session file")
-	for c: Node in [cl, again, other, stranger, late, lan]:
+	for c: Node in [cl, again, other, stranger, late, done, lan]:
 		c.free()
 	Game.profile = saved_profile
 	Game.autotest = at

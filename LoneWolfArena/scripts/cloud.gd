@@ -228,6 +228,7 @@ var _resume_save_ms := -100000 # when the file was last written (the tick clock)
 var _in_match_unix := 0.0      # the wall-clock time this phone was last in its match (present)
 var _resume_emit := false      # a session entered from the file: session_started once the relay is up
 var _resume_wait := false      # ... and its arena waits for the other phone's "sync" however long it takes (the grace ends it)
+var _resume_off := false       # this session's result is in the profile: no file for it any more (match_recorded)
 var _accept_ms := 0            # when this phone accepted a challenge whose room handshake is pending
 var _session_ms := 0           # when the session started
 var _listen_ms := -1           # when this session's arena began listening (-1: loading, or none)
@@ -1548,7 +1549,7 @@ func _resume_keys() -> Array:
 
 ## Writes the live session to the file (a 1 vs 1 over the relay only), atomically.
 func _save_resume() -> void:
-	if not in_session or session_multi or not session_team.is_empty() or not resume_allowed() or _key == null or _room == "":
+	if _resume_off or not in_session or session_multi or not session_team.is_empty() or not resume_allowed() or _key == null or _room == "":
 		return
 	_resume_save_ms = Time.get_ticks_msec()
 	_seq_kept = _seq + SEQ_RESERVE
@@ -1571,6 +1572,14 @@ func clear_resume() -> void:
 	_seq_kept = 0
 	if FileAccess.file_exists(resume_path()):
 		DirAccess.remove_absolute(resume_path())
+
+
+## The match's result is in the profile (its results, or QUIT MATCH's LEFT): the file goes and is
+## not written again for this session, so closing the app on the results screen records nothing
+## more later (no LEFT on top of the result), and opening it again never rejoins a match that is over.
+func match_recorded() -> void:
+	_resume_off = true
+	clear_resume()
 
 
 ## The arena's note on its match, kept in the file: whether it was counted, the score (this
@@ -1615,6 +1624,7 @@ func try_resume() -> bool:
 	if d.is_empty():
 		return false
 	resume_note = (d.note as Dictionary).duplicate()
+	_resume_off = false
 	opponent = d.opp
 	var left := resume_left_ms(d)
 	if left <= 0:
@@ -2469,6 +2479,7 @@ func _on_room(msg: PackedByteArray) -> void:
 				_direct_begin()
 				resumed = false
 				resume_note = {}
+				_resume_off = false
 				_in_match_unix = Time.get_unix_time_from_system()
 				_save_resume()
 				session_started.emit(is_host)

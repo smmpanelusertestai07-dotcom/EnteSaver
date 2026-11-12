@@ -1555,6 +1555,8 @@ func _show_results() -> void:
 	result = _final_result()
 	if not _invalid and _counted:          # (a match is counted when its first fight begins)
 		Game.record_match(result)
+	if online and Game.session != null:
+		Game.session.match_recorded()      # (the session file goes: nothing to rejoin or record later)
 	var screen := ResultsScreen.new()
 	pause_layer.add_child(screen)
 	screen.setup(result)
@@ -1605,6 +1607,8 @@ func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
 func record_left() -> void:
 	if not _counted or _result_shown or _invalid:
 		return
+	if online and Game.session != null:
+		Game.session.match_recorded()      # (the session file goes with the result recorded here)
 	if phase == Phase.END:
 		result = _final_result()
 		if not _invalid:

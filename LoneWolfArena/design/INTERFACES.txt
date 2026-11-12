@@ -71,7 +71,9 @@ listed here. If a part needs something new from the core, add it in its own file
   DUO / SQUAD or all-human matches): Cloud keeps the live session in `Cloud.resume_path()` (sealed
   AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
   this phone's counter `SEQ_RESERVE` ahead; the "last in the match" time every `RESUME_SAVE_MS`;
-  the arena's `note_match(counted, mine, theirs, mode)`), deleted whenever the session ends. The
+  the arena's `note_match(counted, mine, theirs, mode)`), deleted whenever the session ends and
+  once the match's result is in the profile (`match_recorded()`: the results screen, QUIT MATCH's
+  LEFT; no file is written for that session again, so a close on the results adds nothing). The
   lobby calls `try_resume()` when it opens: in time, REJOINING MATCH... (LEAVE MATCH) until the
   relay is up, then `session_started` loads the arena as a challenge does; `Cloud.resumed` tells
   the arena it is fresh: it does not count the match again, holds its prep and, on the other
