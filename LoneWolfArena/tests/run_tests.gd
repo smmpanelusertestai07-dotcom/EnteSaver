@@ -79,6 +79,7 @@ func _ready() -> void:
 	_test_history()
 	_test_honour()
 	_test_results_pages()
+	_test_spectating_card()
 	_test_signed_cards()
 	_test_card_v2()
 	_test_blocking()
@@ -1774,6 +1775,53 @@ func _test_results_pages() -> void:
 	_check(rs.page == 1 and p1.visible and not p2.visible, "Android back on page 2 goes back to page 1")
 	rs.free()
 	Game.online = keep_online
+
+
+## The SPECTATING card: the kit the player carried when eliminated, ADD FRIEND's states for the
+## player watched (a stub arena names their id), and the ELIMINATED tag over a body.
+func _test_spectating_card() -> void:
+	var p := Player.new()
+	add_child(p)
+	p.process_mode = Node.PROCESS_MODE_DISABLED
+	p.set_loadout("smg")
+	p.shields = 1
+	p.grenades = 0
+	p.medkits = 2
+	_check(p.kit_at_death.is_empty(), "nothing on the card while alive")
+	p.die(null)
+	_check(p.kit_at_death == {"walls": 1, "frags": 0, "medkits": 2}, "the card keeps what the player carried when eliminated")
+	var tags := 0
+	for c in get_tree().root.find_children("EliminatedTag*", "Label3D", true, false):
+		if (c as Label3D).text == "ELIMINATED" and not c.is_queued_for_deletion():
+			tags += 1
+			c.free()
+	_check(tags == 1, "an ELIMINATED tag floats over the body")
+	p.free()
+	var id := "ef".repeat(16)
+	var stub := GDScript.new()
+	stub.source_code = "extends Node\nvar id := \"\"\nfunc watched_player_id(_f: Variant) -> String:\n\treturn id\n"
+	stub.reload()
+	var arena := Node.new()
+	arena.set_script(stub)
+	var hud := HUD.new()
+	hud.arena = arena
+	var who := Bot.new()
+	var keep_friends: Dictionary = (Game.profile.friends as Dictionary).duplicate()
+	var keep_out: Dictionary = (Game.profile.friend_out as Dictionary).duplicate()
+	Game.profile.friends.erase(id)
+	Game.profile.friend_out.erase(id)
+	_check(hud.spectate_friend_state(who) == "", "no ADD FRIEND for a bot or a match without internet")
+	arena.set("id", id)
+	_check(hud.spectate_friend_state(who) == "add", "ADD FRIEND for the player watched online")
+	Game.profile.friend_out[id] = {"name": "ACE"}
+	_check(hud.spectate_friend_state(who) == "sent", "greyed REQUEST SENT once the request went out")
+	Game.profile.friends[id] = {"name": "ACE"}
+	_check(hud.spectate_friend_state(who) == "friends", "greyed FRIENDS when they already are")
+	Game.profile.friends = keep_friends
+	Game.profile.friend_out = keep_out
+	who.free()
+	hud.free()
+	arena.free()
 
 
 ## Player cards and waiting friend requests are signed with the phone's own key: a good signature

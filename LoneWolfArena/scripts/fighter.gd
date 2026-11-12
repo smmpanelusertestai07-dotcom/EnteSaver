@@ -534,6 +534,8 @@ func die(killer: Fighter, headshot := false) -> void:
 	revived_by = null
 	if model:
 		model.play_death()
+	if is_inside_tree():
+		Effects.eliminated(self, global_position)
 	died.emit(self, killer, headshot)
 
 
