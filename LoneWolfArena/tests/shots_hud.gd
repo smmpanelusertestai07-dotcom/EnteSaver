@@ -194,7 +194,10 @@ func run(at: Node) -> int:
 	_check(p.sidearm().reloading, "RELOAD reloads the sidearm in hand", at)
 	await at.wait(0.3)
 	await at.shot("hud_08c_sidearm_reload")
-	await at.wait(1.5)
+	var rt := 0.0
+	while p.sidearm().reloading and rt < 12.0:      # (the capture box runs the game slower than the clock)
+		await at.wait(0.25)
+		rt += 0.25
 	_check(p.sidearm().ammo == 12 and p.sidearm().reserve == int(Weapons.DEFS[Weapons.SIDEARM].reserve) - 7,
 		"the sidearm's reload takes from its spare rounds (%d / %d)" % [p.sidearm().ammo, p.sidearm().reserve], at)
 	await at.shot("hud_08d_sidearm_held")

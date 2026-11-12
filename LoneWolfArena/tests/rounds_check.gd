@@ -1,7 +1,7 @@
 extends Node
 ## A match over several rounds against the bot (run with LW_ROUNDS_TO_WIN=2): each round ends
-## with an elimination; the next one puts both back at their spawns with full HP, items and
-## collisions; the gun is picked every two rounds by alternating sides (round 3 is the bot's
+## with an elimination; the next one puts both back at their spawns with full HP, items,
+## collisions and the full kit (the gun in hand, the sidearm spent in round 1 refilled); the gun is picked every two rounds by alternating sides (round 3 is the bot's
 ## pick, and both hold that gun, never the one of rounds 1-2, which rests on its cooldown); each
 ## fight starts in stage 1 of the two-stage clock (00:20); the player's elimination in round 2 fills
 ## the ELIMINATED BY card (the bot, its gun, the 200 damage it dealt); the match ends at 2 wins with the right result, which the
@@ -40,6 +40,10 @@ func run(autotest: Node) -> int:
 				_fail("round %d: not back at the spawns" % r)
 			if b.collision_layer != Fighter.LAYER_BODY or b.hitboxes[0].collision_layer != Fighter.LAYER_HITBOX:
 				_fail("round %d: collisions not back on" % r)
+			for f: Fighter in [p, b]:
+				if f.weapons.size() != 3 or f.current != Weapons.GUN or f.sidearm() == null or f.sidearm().id != Weapons.SIDEARM \
+						or f.sidearm().ammo != 12 or f.sidearm().reserve != int(Weapons.DEFS[Weapons.SIDEARM].reserve):
+					_fail("round %d: %s's kit was not given back full (%d weapons, holding %d)" % [r, f.display_name, f.weapons.size(), f.current])
 		if gun_p != gun_b:
 			_fail("round %d: the fighters hold different guns" % r)
 		if r == 3 and String(arena.get("picked_weapon")) == "":
@@ -50,6 +54,10 @@ func run(autotest: Node) -> int:
 			_fail("round 3: the bot picked %s, which rests after rounds 1-2" % gun_p)
 		if int(arena.call("stage")) != 1 or HudDraw.time_text(float(arena.call("stage_left"))) not in ["00:20", "00:19"]:
 			_fail("round %d: the fight did not start in stage 1 (stage %d, %.1f s)" % [r, arena.call("stage"), arena.call("stage_left")])
+		if r == 1:
+			p.switch_weapon(Weapons.SIDE)        # the sidearm partly spent: the next round refills it
+			p.sidearm().ammo = 3
+			b.switch_weapon(Weapons.FISTS)
 		await at.wait(0.6)
 		var victim := p if r == 2 else b
 		var killer := b if r == 2 else p
