@@ -682,6 +682,7 @@ func _on_team_sync(data: Array) -> void:
 	Game.session.rejoined()
 	if phase == Phase.END:
 		return
+	var fresh := _resuming
 	if _resuming:
 		_resuming = false                # a fresh arena after a restart: into the match from here
 		if not _net_begun:
@@ -706,6 +707,8 @@ func _on_team_sync(data: Array) -> void:
 		_freeze_all()                    # (the round is over there: the next one comes with the host's "round")
 		phase = Phase.BREAK
 		_break_t = 0.0
+	if fresh and phase != Phase.BREAK:
+		_rejoined_quietly()              # (a round already running: no band, no ZONE SHRINKING)
 	if ph != int(phase) or not player.alive or phase != Phase.FIGHT:
 		return
 	var pos := Vector3(float(data[8]), float(data[9]), float(data[10]))
@@ -765,6 +768,8 @@ func _on_stand_in_sync(data: Array) -> void:
 			_freeze_all()
 			phase = Phase.BREAK
 			_break_t = 0.0
+		if phase != Phase.BREAK:
+			_rejoined_quietly()          # (a round already running: no band, no ZONE SHRINKING)
 	if r != round_index or phase != Phase.FIGHT or ph != int(Phase.FIGHT) or not player.alive:
 		return
 	var pos := Vector3(float(data[8]), float(data[9]), float(data[10]))

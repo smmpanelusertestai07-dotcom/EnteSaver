@@ -168,6 +168,11 @@ func show_round_banner(round_index: int, area: String, sub := "") -> void:
 	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area, "sub": sub}
 
 
+## A rejoin into a round already running: its ROUND / AREA band is not shown (the next round's is).
+func skip_round_banner() -> void:
+	_round_banner.t = 0.0
+
+
 ## End of a round that does not end the match: the break's timed sequence (RoundRules.break_step,
 ## on the HUD's own clock from this call, which the arena makes as its break timer starts):
 ## a beat, then `title` (VICTORY / DEFEAT / DRAW) on a band near the top; then the screen dims

@@ -498,8 +498,9 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 ## stands: that round in that phase with the score, the gun and the clock (the host says "begin"
 ## again: a guest still waiting for the first one, lost with the restart, starts too). In a break the host
 ## starts the next round on both (its "round"), the guest waits for it; a match over on the other
-## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync").
-func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String) -> void:
+## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync"). Back in a
+## running round (`quiet`), neither its ROUND / AREA band nor ZONE SHRINKING shows (_rejoined_quietly).
+func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String, quiet := true) -> void:
 	score.bot = maxi(their_score, 0)
 	score.player = maxi(my_score, 0)
 	Game.mark("rejoined: round %d, phase %d" % [r, ph])
@@ -529,8 +530,19 @@ func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int
 		_start_fight()
 		elapsed = clampf(clock, 0.0, round_time())
 		time_left = round_time() - elapsed
+	if quiet:
+		_rejoined_quietly()
 	if _net_host:
 		Game.session.send_event("begin")     # (a guest whose first "begin" was lost with this app's start)
+
+
+## A fighter back in a round that is already running (its prep or its fight): the round's ROUND /
+## AREA band is not shown, and a zone that already shrinks there does so without the ZONE
+## SHRINKING line (both were news to the others long ago); the next round's band shows as usual.
+func _rejoined_quietly() -> void:
+	hud.skip_round_banner()
+	if phase == Phase.FIGHT and elapsed >= RoundRules.STAGE1_S and zone_state == "stationary":
+		zone_state = "shrinking"
 
 
 ## Both apps were closed and opened again (the other phone, resuming too, asks for the match with
@@ -542,7 +554,7 @@ func _resume_from_note() -> void:
 	Game.session.rejoined()
 	var r := mini(_resume_round, last_round())
 	var gun := String(picks.get(RoundRules.pick_round_of(r), ""))
-	_resume_into(r, int(Phase.PREP), PREP_TIME, int(score.bot), int(score.player), gun)
+	_resume_into(r, int(Phase.PREP), PREP_TIME, int(score.bot), int(score.player), gun, false)     # (the round starts afresh)
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
