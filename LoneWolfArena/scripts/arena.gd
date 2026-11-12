@@ -279,7 +279,8 @@ func _on_net_event(kind: String, data: Array) -> void:
 			if Game.session.is_host:
 				_net_begin()
 		"begin":
-			if not Game.session.is_host:
+			# (a resumed host sends it again: a guest that never heard the first one starts its prep)
+			if not Game.session.is_host and not _net_begun:
 				_net_begin()
 				_follow_host_clock()
 		"pick":
@@ -485,7 +486,8 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 
 
 ## A fresh arena after a restart (_resuming) enters the match where the other phone's word says it
-## stands: that round in that phase with the score, the gun and the clock. In a break the host
+## stands: that round in that phase with the score, the gun and the clock (the host says "begin"
+## again: a guest still waiting for the first one, lost with the restart, starts too). In a break the host
 ## starts the next round on both (its "round"), the guest waits for it; a match over on the other
 ## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync").
 func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String) -> void:
@@ -518,6 +520,8 @@ func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int
 		_start_fight()
 		elapsed = clampf(clock, 0.0, round_time())
 		time_left = round_time() - elapsed
+	if _net_host:
+		Game.session.send_event("begin")     # (a guest whose first "begin" was lost with this app's start)
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
