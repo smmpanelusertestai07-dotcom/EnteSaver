@@ -90,8 +90,13 @@ func run(autotest: Node) -> int:
 		if footprints == 0:
 			_fail("the other phone's player ran without a step heard or seen")
 	else:
-		# Online the tree is not paused: Android back still closes the pause menu, and switching
-		# apps with it open does not stack a second one.
+		# Online the tree is not paused: leaving the app opens no menu (a returning player sees the
+		# match, which ran on), Android back still closes the pause menu, and switching apps with
+		# it open does not stack a second one.
+		arena.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+		await at.wait(0.1)
+		if _pause_menus(arena) != 0:
+			_fail("online, leaving the app opened the pause menu over the running match")
 		arena.call("open_pause")
 		await at.wait(0.1)
 		arena.notification(Node.NOTIFICATION_APPLICATION_PAUSED)

@@ -1490,4 +1490,7 @@ func _notification(what: int) -> void:
 			open_pause()
 	elif what == NOTIFICATION_APPLICATION_PAUSED:
 		if phase == Phase.FIGHT and not get_tree().paused:
-			open_pause()
+			if online:
+				hud.release_all()       # the match runs on: a returning player sees it, not a menu
+			else:
+				open_pause()

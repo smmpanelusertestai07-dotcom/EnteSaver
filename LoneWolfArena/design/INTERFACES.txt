@@ -230,7 +230,9 @@ listed here. If a part needs something new from the core, add it in its own file
   that opened it to it as well). `Arena.open_pause()` opens one at most and pauses a TRAINING
   GROUND match while it is open; online the tree is not paused (an open menu is what blocks a
   second one): the match runs on, and the end of a round or of the match closes it
-  (`Arena.close_pause()`, also before the results).
+  (`Arena.close_pause()`, also before the results). Leaving the app in a fight opens the menu in
+  a TRAINING GROUND match only: online the held controls are released and no menu opens, so a
+  returning player sees the running match at once.
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
