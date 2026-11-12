@@ -1622,7 +1622,8 @@ func _draw_feed_line(parts: Array, tw: float, icon_name: String, y: float, fs: i
 			PackedColorArray([mid, edge, edge, mid]))
 	draw_rect(Rect2(cx - (half - fs * 3.0), top, (half - fs * 3.0) * 2.0, bot - top), mid)
 	draw_line(Vector2(cx - half * 0.8, top), Vector2(cx + half * 0.8, top), Color(1, 1, 1, 0.12 * a), 1.0)
-	if t != null:
+	if t != null:     # (a dark shadow under the white silhouette: readable over the white shirt too)
+		HudDraw.icon(self, t, Vector2(x0 + isz.x * 0.5 + 1.5, y + 1.5), isz, Color(0, 0, 0, 0.7 * a))
 		HudDraw.icon(self, t, Vector2(x0 + isz.x * 0.5, y), isz, Color(1, 1, 1, 0.92 * a))
 	HudDraw.text_parts(self, parts, Vector2(x0 + iw + tw * 0.5, y), fs, 1, 3, "bold", a)
 
