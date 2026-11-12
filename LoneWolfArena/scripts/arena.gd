@@ -78,6 +78,7 @@ var _outside := {}                  # fighter -> seconds outside the zone (never
 var _last_count := 99
 var _end_t := 0.0
 var _result_shown := false
+var _results_open := false          # the ResultsScreen is up (the result can be in before: _record_decided)
 var _winner: Fighter
 var _draw := false
 var _invalid := false
@@ -1094,7 +1095,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > RESULTS_DELAY_S and not _result_shown and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
+			elif _end_t > RESULTS_DELAY_S and not _results_open and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
@@ -1631,15 +1632,26 @@ func scoreboard_rows() -> Array:
 func _show_results() -> void:
 	close_pause()
 	Engine.time_scale = 1.0
-	result = _final_result()
-	if not _invalid and _counted:          # (a match is counted when its first fight begins)
-		Game.record_match(result)
-	if online and Game.session != null:
-		Game.session.match_recorded()      # (the session file goes: nothing to rejoin or record later)
+	_results_open = true
+	_record_decided()
 	var screen := ResultsScreen.new()
 	pause_layer.add_child(screen)
 	screen.setup(result)
 	Game.mark("results shown")
+
+
+## The decided match goes into the profile once (Game.record_match; online the session file goes
+## with it: nothing left to rejoin or record later): when the results open, or sooner when the app
+## is sent to the background or closed during the wait before them (RESULTS_DELAY_S), so a match
+## decided there is never lost, nor recorded as LEFT on the next launch. The screen still opens.
+func _record_decided() -> void:
+	if _result_shown:
+		return
+	result = _final_result()
+	if not _invalid and _counted:          # (a match is counted when its first fight begins)
+		Game.record_match(result)
+	if online and Game.session != null:
+		Game.session.match_recorded()
 
 
 ## The decided match's result (phase END); from here on it counts as shown (_result_shown).
@@ -1731,6 +1743,9 @@ func close_pause() -> void:
 
 
 func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_CLOSE_REQUEST] and phase == Phase.END and not _called_off \
+			and not _left_scene and is_instance_valid(player):
+		_record_decided()                  # (the app may never come back to open the results)
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if phase != Phase.END:
 			open_pause()

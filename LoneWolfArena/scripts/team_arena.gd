@@ -501,7 +501,7 @@ func _physics_process(delta: float) -> void:
 				if _end_t > 2.6 and not _left_scene:
 					_left_scene = true
 					Game.goto_lobby()
-			elif _end_t > RESULTS_DELAY_S and not _result_shown and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
+			elif _end_t > RESULTS_DELAY_S and not _results_open and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
