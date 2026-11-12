@@ -1170,7 +1170,7 @@ func _update_zone_mesh() -> void:
 ## obstacles), a new one every round. Online every phone gets the same (Cloud.match_seed: the room's
 ## key and the round); TRAINING draws it at random. (The start circle, from the map's centre, always
 ## holds the final one, and the circles of stage 2 are nested: the centre moves at most 18.9 m in
-## stage 2, less than the 27.1 m the radius shrinks.)
+## stage 2, less than the 46.5 m the radius shrinks.)
 func zone_final_for(r: int) -> Vector3:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = Game.session.match_seed("zone%d" % r) if online and Game.session != null else _rng.randi()

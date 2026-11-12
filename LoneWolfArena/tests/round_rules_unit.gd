@@ -52,7 +52,7 @@ func _stage_clock() -> void:
 
 func _zone_over_time() -> void:
 	var s2 := RoundRules.STAGE2_S
-	var start := 27.6
+	var start := MapBuilder.ZONE_START_R
 	var from := Vector3(0, 0, 0)
 	var to := Vector3(14.0, 0, -9.0)
 	var still := true
@@ -75,6 +75,21 @@ func _zone_over_time() -> void:
 		var c1 := RoundRules.zone_center_at(e + 1.0, from, far, s2)
 		nested = nested and c0.distance_to(c1) <= RoundRules.zone_radius_at(e, start, s2) - RoundRules.zone_radius_at(e + 1.0, start, s2)
 	_check(nested, "each later circle lies inside the earlier ones")
+	# Stage 2 starts wide (a tuning from an estimate): about 1.1-1.15 x the hall's long side, so a
+	# fighter standing at its spawn end stays inside until roughly the last 35-45 s (the final spot
+	# in the middle; nearer or farther spots move that by some seconds).
+	var long_side := MapBuilder.HX * 2.0
+	_check(start >= 1.1 * long_side and start <= 1.15 * long_side, "stage 2 starts at %.1f m, %.2f x the hall's long side" % [start, start / long_side])
+	var spawn := Vector3(-MapBuilder.HX - 2.0, 0, 0)
+	var out_at := -1.0
+	for i in 1100:
+		var e := float(i) * 0.1
+		if out_at < 0.0 and spawn.distance_to(RoundRules.zone_center_at(e, from, from, s2)) > RoundRules.zone_radius_at(e, start, s2):
+			out_at = e
+	var left := RoundRules.fight_time(s2) - out_at
+	_check(out_at > 0.0 and left >= 35.0 and left <= 45.0, "the spawn end leaves the zone with %.0f s of stage 2 left" % left)
+	var r40 := RoundRules.zone_radius_at(RoundRules.STAGE1_S + 41.0, start, s2)
+	_check(r40 > 0.5 * long_side and r40 < 0.7 * long_side, "41 s into stage 2 the circle is still %.2f of the hall wide" % (r40 / long_side))
 	_check(is_equal_approx(RoundRules.zone_next(5.0, s2), 15.0) and is_equal_approx(RoundRules.zone_next(30.0, s2), 80.0),
 		"zone_next: to the closing in stage 1, to its end in stage 2")
 
