@@ -221,8 +221,10 @@ var _away_ids := {}            # match players taken for AWAY now (id -> true)
 var _back_ms := 0              # when this phone, absent, heard the match again (the "sync" is waited for a while)
 const REJOIN_WAIT_MS := 6000   # back in a match, states wait this long at most for the other phone's "sync"
 var _grace_override := 0       # LW_AWAY_GRACE_MS (checks only, never in a release build): grace_ms()
-## Rejoining after the app was closed (see "the session file" below).
-const RESUME_V := 1
+## Rejoining after the app was closed (see "the session file" below). A file of another version
+## is deleted unread: version 1 (game 1.6.2) kept the file on the results screen, so it could hold
+## a match that was already decided and recorded.
+const RESUME_V := 2
 const SEQ_RESERVE := 2000      # the counter the file keeps runs this far ahead of the one in use
 const RESUME_SAVE_MS := 3000   # the file's "last in the match" time is this fresh at worst
 var resumed := false           # this session was entered again from the file after a restart
