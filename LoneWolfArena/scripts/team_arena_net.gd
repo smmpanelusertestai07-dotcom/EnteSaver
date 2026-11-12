@@ -105,6 +105,8 @@ var _dn_log: Array = []              # guest / member: this round's "dn" sent ([
 const RESUME_REP_S := 4.0            # a resumed host takes the members' "rep" this long after its stand-in's "sync"
 var _rep_t := -1.0                   # resumed host: s left to take "rep" (and to keep asking with "back")
 var _all_wait := false               # resumed member: the host's "all" not taken yet
+var _ko_by_stand_in := {}            # slot -> the round the stand-in knocked it in (the host's word on it later is not applied again)
+var _stand_in_ko_t := 0              # (inside _apply_stand_in)
 
 
 func _ready() -> void:
@@ -259,7 +261,7 @@ func _report_down(f: Fighter, killer: Fighter, headshot: bool, cause: String, fi
 		var data := [f.slot, by, headshot, cause]
 		var kind := "ko" if up and not finished else "el"
 		Game.session.send_event(kind, data)
-		_apply_decision(kind, data)
+		_apply_stand_in(kind, data)
 	elif f == player and _sending():
 		var data := [f.slot, round_index, killer.slot if killer != null and is_instance_valid(killer) else -1, headshot, cause, finished]
 		if not _dn_log.is_empty() and int((_dn_log[0] as Array)[1]) != round_index:
@@ -275,14 +277,26 @@ func _report_revive(reviver: Fighter, target: Fighter) -> void:
 		Game.session.send_event("rvd", [reviver.slot, target.slot, round_index])
 
 
-## A knock is applied once: the same word again (the host adopting its stand-in's, a "sync" that
-## crossed it) changes nothing and credits nobody twice.
+## A knock the stand-in decided is applied once: the host's own word on it later (it adopted the
+## stand-in's) changes nothing and credits nobody twice; a revive in between forgets it.
 func _apply_decision(kind: String, data: Array) -> void:
-	if kind == "ko" and not data.is_empty():
-		var f := slot_fighter(int(data[0]))
-		if f != null and f.knocked:
+	if kind in ["ko", "rv"] and not data.is_empty() and _num_ok(data[0]) and _ko_by_stand_in.has(int(data[0])) and _stand_in_ko_t <= 0:
+		var known := int(_ko_by_stand_in[int(data[0])]) == round_index
+		_ko_by_stand_in.erase(int(data[0]))
+		if kind == "ko" and known:
 			return
 	super(kind, data)
+
+
+## The stand-in's knock or elimination of the away host's fighter, here (sender or receiver).
+func _apply_stand_in(kind: String, data: Array) -> void:
+	if kind == "ko":
+		_stand_in_ko_t = 1
+		_apply_decision(kind, data)
+		_stand_in_ko_t = 0
+		_ko_by_stand_in[int(data[0])] = round_index
+	else:
+		_apply_decision(kind, data)
 
 
 ## The host's decisions and picks go to the guest; from the guest only what its own player does
@@ -380,7 +394,7 @@ func _on_event_from(kind: String, data: Array, from: String) -> void:
 			if from == host_id:
 				_on_net_event(kind, data)
 			elif kind in ["ko", "el"] and _stand_in_word(data, from):
-				_apply_decision(kind, data)
+				_apply_stand_in(kind, data)
 		"rm":
 			pass                         # (no PLAY AGAIN TOGETHER after an all-human match: the group stays together)
 		_:
