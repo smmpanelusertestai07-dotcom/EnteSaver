@@ -320,8 +320,10 @@ func _invite_tile(n: int, on: bool) -> Button:
 	return b
 
 
-## The GROUP CODE (GroupCodeRow): the code (GroupCode), COPY (GroupCodeCopy) and, for the leader
-## (or a solo), the switch JOIN BY CODE: ON / OFF (GroupCodeSwitch: Cloud.set_code_join).
+## The GROUP CODE (GroupCodeRow): the code (GroupCode, grouped "12 3456 7890"), COPY (GroupCodeCopy:
+## the bare digits; for the leader or a solo it also turns JOIN BY CODE on, since copying means
+## sharing) and, for the leader (or a solo), the switch JOIN BY CODE: ON / OFF (GroupCodeSwitch:
+## Cloud.set_code_join, OFF at the start of every run).
 func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.name = "GroupCodeRow"
@@ -336,7 +338,7 @@ func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(UI.label("GROUP CODE", 11, UI.TEXT_DIM, "bold"))
-	var l := UI.label(code, 22, UI.ACCENT, "heavy")
+	var l := UI.label(Cloud.code_display(code), 18, UI.ACCENT, "heavy")
 	l.name = "GroupCode"
 	v.add_child(l)
 	h.add_child(v)
@@ -344,7 +346,9 @@ func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
 	copy.name = "GroupCodeCopy"
 	copy.pressed.connect(func() -> void:
 		DisplayServer.clipboard_set(code)
-		LobbyNet.toast(lobby, "GROUP CODE COPIED", code, Callable()))
+		if leader:
+			Game.cloud_service().set_code_join(true)
+		LobbyNet.toast(lobby, "GROUP CODE COPIED", "JOIN BY CODE IS ON" if leader else Cloud.code_display(code), Callable()))
 	h.add_child(copy)
 	if leader:
 		var sw := UI.button("JOIN BY CODE\n%s" % ("ON" if on else "OFF"), 11, "ghost" if not on else "dark", Vector2(96, UI.TOUCH_MIN))
@@ -371,21 +375,22 @@ static func code_state_text(state: String) -> String:
 	return ""
 
 
-## JOIN BY CODE (a solo's GROUP bar): the 6-digit code (JoinGroupCode) and JOIN (JoinGroupGo):
+## JOIN BY CODE (a solo's GROUP bar): the Cloud.CODE_LEN-digit code (JoinGroupCode, spaces allowed) and JOIN (JoinGroupGo):
 ## Cloud.join_group_code; the line under it (JoinGroupState) follows Cloud.code_state, and the popup
 ## closes once this player is in the group (no invite needed).
 func open_join_code() -> void:
 	var v := lobby.dialogs.open_modal("JOIN BY CODE", 640.0, true)
 	v.name = "JoinCodePopup"
 	_code_asked = false
-	var t := UI.label("Enter a friend's GROUP CODE to join their group at once.", 18, UI.TEXT_DIM, "semi")
+	var t := UI.label("Enter a friend's %d-digit GROUP CODE to join their group at once (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN,
+		18, UI.TEXT_DIM, "semi")
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	t.custom_minimum_size = Vector2(560, 0)
 	v.add_child(t)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	v.add_child(row)
-	_code_field = lobby.friends._text_field("GROUP CODE", 6, true)
+	_code_field = lobby.friends._text_field("GROUP CODE", Cloud.CODE_LEN + 2, true)
 	_code_field.name = "JoinGroupCode"
 	row.add_child(_code_field)
 	var go := UI.button("JOIN", 22, "primary", Vector2(170, UI.TOUCH_MIN))

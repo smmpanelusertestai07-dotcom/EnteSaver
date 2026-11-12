@@ -706,17 +706,21 @@ listed here. If a part needs something new from the core, add it in its own file
   quit, a plain duel after them; both tables must match and every relay state must arrive).
 
 ## GROUPS in the lobby: GROUP CODE and the DUEL in a group of two (1.6)
-- GROUP CODE (`Cloud.group_code()`: 6 digits, a solo's own `Cloud.my_code`, a member's the leader's
+- GROUP CODE (`Cloud.group_code()`: `Cloud.CODE_LEN` = 10 digits, 2 bucket + 8 secret, shown by
+  `Cloud.code_display` as "12 3456 7890", checked by `Cloud.is_group_code`; a solo's own `Cloud.my_code`, a member's the leader's
   from "groster"'s "code"; none in a CUSTOM ROOM): the GROUP bar's `GroupCodeRow` (`GroupCode`,
   `GroupCodeCopy`, and for the leader or a solo `GroupCodeSwitch` "JOIN BY CODE: ON / OFF" =
-  `Cloud.set_code_join`, `Cloud.code_join` ON by default). A solo's bar has `GroupJoinCode`: the popup
+  `Cloud.set_code_join`, `Cloud.code_join` OFF at the start of every run; `GroupCodeCopy` turns it on). A solo's bar has `GroupJoinCode`: the popup
   `JoinCodePopup` (`JoinGroupCode`, `JoinGroupGo`, `JoinGroupState`) calls
-  `Cloud.join_group_code(code)` ("" = asking, else the notice: 6 digits, own code, EXIT YOUR GROUP
-  FIRST, offline, TOO MANY TRIES: WAIT A MINUTE after `Cloud.CODE_TRIES_MAX` a minute) and follows
+  `Cloud.join_group_code(code)` (spaces allowed; "" = asking, else the notice: 10 digits, own code,
+  EXIT YOUR GROUP FIRST, CANCEL THE SEARCH FIRST in QUICK MATCH or a DUO / SQUAD search, offline, TOO MANY TRIES: WAIT A MINUTE after `Cloud.CODE_TRIES_MAX` a minute) and follows
   `Cloud.code_state` ("asking", "in", "full" THE GROUP IS FULL, "none" NO GROUP WITH THIS CODE after
   `Cloud.CODE_WAIT_MS`, "blocked"): `LobbyTeam.code_state_text`. Wire: see Cloud's GROUP CODE
-  comment and design/GROUPS.txt 7 ("gask" on ROOT/gc/<2 hex of the code's hash>, "gin" / "gno" in
-  the inbox, tagged with the code's stretched key; the group's keys RSA-wrapped for the joiner).
+  comment and design/GROUPS.txt 7 ("gask" on ROOT/gc/<the code's 2 bucket digits>, "gin" / "gno" in
+  the inbox, tagged with the code's stretched key; the group's keys RSA-wrapped for the joiner;
+  answered only for players `NetMatch.allowed` lets in and not REMOVEd this run). A group made or
+  joined ends a QUICK MATCH search (`Cloud.seek_stop`, NetMatch stops when `Cloud.seeking` is false);
+  leaving the lobby ends a leader's or solo's DUO / SQUAD search (`LobbyFriends.on_lobby_exit`).
 - DUEL: in a group of exactly 2, SELECT MODE's `Size_1` reads "DUEL · YOU VS <NAME>"
   (`LobbyDialogs.size_chip_text`), `Lobby.start_route(m, size, teams_online, group_n)` gives "duel"
   and the leader's START calls `Lobby.start_duel()` -> `Cloud.group_duel()`: a plain duel challenge
