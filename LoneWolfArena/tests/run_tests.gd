@@ -2229,6 +2229,12 @@ func _test_release_fixes() -> void:
 	_check(not FileAccess.get_file_as_string("res://scripts/lobby.gd").contains("application/config/version"),
 		"the lobby shows no version (as the reference: only before the lobby)")
 	_check(PauseMenu.quit_question(false, true).is_empty(), "TRAINING GROUND's QUIT MATCH quits at one tap")
+	_check(not PauseMenu.asks_before_quit("training", false), "TRAINING GROUND (solo or DUO / SQUAD) does not ask")
+	_check(PauseMenu.asks_before_quit("duo", false) and PauseMenu.asks_before_quit("squad", false),
+		"a DUO / SQUAD against bots (the search found nobody; counted) asks before QUIT MATCH")
+	_check(PauseMenu.asks_before_quit("lonewolf", true), "an online match asks before QUIT MATCH")
+	_check(not PauseMenu.quit_question(PauseMenu.asks_before_quit("squad", false), true).is_empty(),
+		"a counted SQUAD against bots is not quit (and recorded as a defeat) at one tap")
 	var q := PauseMenu.quit_question(true, true)
 	_check(q.size() == 2 and String(q[0]).contains("defeat") and String(q[0]).contains("LEFT in HISTORY") and String(q[1]) == "",
 		"QUIT MATCH in a counted online match asks first: a defeat, LEFT in HISTORY (%s)" % str(q))

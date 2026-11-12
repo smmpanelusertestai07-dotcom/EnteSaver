@@ -287,7 +287,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
   Android back, signal `closed`. It is the settings at once (`settings`, a `SettingsPanel` with
   `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH: TRAINING
-  GROUND quits at one tap; online it asks first, `PauseMenu.quit_question`, in the panel's own
+  GROUND quits at one tap; any other match, online or a DUO / SQUAD against bots, asks first,
+  `PauseMenu.asks_before_quit` / `PauseMenu.quit_question`, in the panel's own
   question `Confirm` (`SettingsPanel.ask`) with ConfirmCancel / ConfirmOk "QUIT": a counted match
   is a defeat, LEFT in HISTORY; back closes the question first) at the foot of
   their tab column, and `edit_hud` set: EDIT CUSTOM HUD opens `HudEditor` (scripts/

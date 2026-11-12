@@ -2,7 +2,7 @@ class_name PauseMenu
 extends Control
 ## The in-match menu behind the HUD's gear (and Android back), the reference's way: the settings
 ## open straight away (`SettingsPanel`, in_match) with QUIT MATCH at the foot of their tab column
-## (online it asks first: quit_question) and EDIT CUSTOM HUD in CONTROLS opening the editor over the match
+## (outside TRAINING GROUND it asks first: quit_question) and EDIT CUSTOM HUD in CONTROLS opening the editor over the match
 ## (scripts/hud_editor_overlay.gd: SAVE applies it to this match). The settings' X (or back) closes
 ## the menu and the match goes on. A TRAINING GROUND match is paused while it is open (the arena
 ## pauses the tree); online the match runs on underneath (the other phone plays on): the fighter
@@ -15,8 +15,8 @@ extends Control
 ## frame, and the menu ignores a back request in the frame it was opened; the next back goes to
 ## the settings (a question or the editor over them first), whose closing closes the menu.
 ##
-## QUIT MATCH in an online match opens a small question over the settings (the panel's own:
-## "Confirm", with CANCEL and QUIT): a counted match counts as a defeat and shows as LEFT in
+## QUIT MATCH outside TRAINING GROUND (online, or DUO / SQUAD against bots) opens a small question
+## over the settings (the panel's own: "Confirm", with CANCEL and QUIT): a counted match counts as a defeat and shows as LEFT in
 ## HISTORY; the host of an online team match (host_of_team: a TEAM INVITE match whose bots run here,
 ## or an all-human match it referees) is told that its quitting ends the match for the others (label
 ## QuitWarning in the question). Back closes the question first. TRAINING GROUND quits at one tap.
@@ -90,11 +90,17 @@ static func host_of_team() -> bool:
 		and tm.get("host", false) == true
 
 
+## Whether QUIT MATCH asks first: every match but TRAINING GROUND (solo or DUO / SQUAD), so also
+## a DUO / SQUAD against bots after a search found nobody (offline, counted in its CAREER).
+static func asks_before_quit(mode_id: String, online: bool) -> bool:
+	return online or mode_id != "training"
+
+
 ## What QUIT MATCH asks first: "" (TRAINING GROUND: it quits at once), else [the question's text,
-## the host's warning or ""]. `online`: a match against other phones; `counted`: its first fight
-## began; `host_warning`: HOST_WARNING / HOST_WARNING_ALL for the host of a team match, else "".
-static func quit_question(online: bool, counted: bool, host_warning := "") -> Array:
-	if not online:
+## the host's warning or ""]. `asks`: asks_before_quit; `counted`: its first fight began;
+## `host_warning`: HOST_WARNING / HOST_WARNING_ALL for the host of a team match, else "".
+static func quit_question(asks: bool, counted: bool, host_warning := "") -> Array:
+	if not asks:
 		return []
 	return [("Quit this match? It counts as a defeat and shows as LEFT in HISTORY." if counted
 		else "Quit this match? It has not begun yet: nothing is counted."), host_warning]
@@ -133,7 +139,8 @@ func _on_quit() -> void:
 	var warning := ""
 	if host_of_team():
 		warning = HOST_WARNING_ALL if Game.team_match.get("multi", false) == true else HOST_WARNING
-	var q := quit_question(warning != "" or (arena != null and arena.get("online") == true), arena != null and arena.get("_counted") == true, warning)
+	var asks := warning != "" or (arena != null and asks_before_quit(String(arena.get("mode")), arena.get("online") == true))
+	var q := quit_question(asks, arena != null and arena.get("_counted") == true, warning)
 	if q.is_empty() or settings == null or not is_instance_valid(settings):
 		_quit_now()
 		return
