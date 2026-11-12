@@ -1528,8 +1528,13 @@ func _leave_room() -> void:
 # entered as it was, this phone away from it: the lobby shows REJOINING MATCH... and loads the
 # arena once the relay is up (session_started), the arena asks for the match ("back") and enters it
 # where the other phone's "sync" says it stands. Too late, the match counts as LEFT (once: it was
-# counted when its first fight began). DUO / SQUAD and all-human matches, and PLAY WITHOUT
-# INTERNET (resume_allowed), keep no file.
+# counted when its first fight began). An all-human match (session_multi: a group's, matchmaking's,
+# a custom room's DUO / SQUAD) keeps one too: "multi" adds its roster (slots, ids, names, outfits,
+# teams), who hosts, the size and every member's counter; entered again, it is in session at once
+# (no "join": the others never stopped) and TeamArenaNet enters the match from the host's "sync"
+# (or, this phone the host, from its stand-in's "sync" and every member's "rep"). A DUO / SQUAD
+# between two phones (a TEAM INVITE: session_team without session_multi) and PLAY WITHOUT INTERNET
+# (resume_allowed) keep no file.
 
 ## The file (each test role keeps its own, as with the identity key).
 static func resume_path() -> String:
@@ -1556,9 +1561,10 @@ func _resume_keys() -> Array:
 		_crypto.hmac_digest(HashingContext.HASH_SHA256, base, ("match-file-mac/" + my_id).to_utf8_buffer())]
 
 
-## Writes the live session to the file (a 1 vs 1 over the relay only), atomically.
+## Writes the live session to the file (a 1 vs 1 or an all-human match over the relay), atomically.
 func _save_resume() -> void:
-	if _resume_off or not in_session or session_multi or not session_team.is_empty() or not resume_allowed() or _key == null or _room == "":
+	if _resume_off or not in_session or (not session_team.is_empty() and not session_multi) or not resume_allowed() or _key == null \
+			or _room == "":
 		return
 	_resume_save_ms = Time.get_ticks_msec()
 	_seq_kept = _seq + SEQ_RESERVE
@@ -1566,6 +1572,10 @@ func _save_resume() -> void:
 		"aes": Marshalls.raw_to_base64(_aes), "mac": Marshalls.raw_to_base64(_mac), "opp": opponent.duplicate(),
 		"host": is_host, "rules": session_rules.duplicate(), "seq": _seq_kept, "their": _their_seq,
 		"t": _in_match_unix, "note": resume_note.duplicate()}
+	if session_multi:
+		d.opp = {"id": session_host_id}
+		d.multi = {"roster": NetGroup.pack_roster(session_roster), "host": session_host_id, "size": int(session_team.get("size", 2)),
+			"seqs": (_multi.get("seq", {}) as Dictionary).duplicate()}
 	var k := _resume_keys()
 	var tmp := resume_path() + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
@@ -1595,8 +1605,8 @@ func match_recorded() -> void:
 ## phone's rounds, the other's) and the mode's name (a LEFT recorded without the arena needs them),
 ## the round to play on (0: unknown) and the picks (RoundRules.picks_text): both apps closed, the
 ## resumed host's note is all that is left of the match.
-func note_match(counted: bool, mine: int, theirs: int, mode: String, round_on := 0, picks := "") -> void:
-	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode, "round": round_on, "picks": picks}
+func note_match(counted: bool, mine: int, theirs: int, mode: String, round_on := 0, picks := "", mode_id := "lonewolf") -> void:
+	resume_note = {"counted": counted, "mine": mine, "theirs": theirs, "mode": mode, "round": round_on, "picks": picks, "mode_id": mode_id}
 	_save_resume()
 
 
@@ -1614,10 +1624,36 @@ func load_resume() -> Dictionary:
 		and (d.get("t") is float or d.get("t") is int) and d.get("host") is bool and d.get("note") is Dictionary
 	if ok:
 		ok = Marshalls.base64_to_raw(String(d.aes)).size() == 32 and Marshalls.base64_to_raw(String(d.mac)).size() == 32
+	if ok and d.has("multi"):
+		ok = not multi_from_file(d.get("multi"), my_id).is_empty()
 	if not ok:
 		clear_resume()
 		return {}
 	return d
+
+
+## A file's "multi" part checked: {"roster", "host", "size", "seqs"} with a roster that holds this
+## phone and the host (NetGroup.roster_from) and whole counters for its members only; {} otherwise.
+static func multi_from_file(v: Variant, me: String) -> Dictionary:
+	if not v is Dictionary:
+		return {}
+	var m := v as Dictionary
+	var size: Variant = m.get("size")
+	if not (size is float or size is int) or typeof(m.get("host")) != TYPE_STRING or not m.get("seqs") is Dictionary:
+		return {}
+	var roster := NetGroup.roster_from(m.get("roster"), int(size))
+	var ids := {}
+	for e: Dictionary in roster:
+		ids[String(e.id)] = true
+	if roster.is_empty() or not ids.has(me) or not ids.has(String(m.host)):
+		return {}
+	var seqs := {}
+	for id: Variant in m.seqs:
+		var n: Variant = (m.seqs as Dictionary)[id]
+		if typeof(id) != TYPE_STRING or not ids.has(String(id)) or not (n is float or n is int):
+			return {}
+		seqs[String(id)] = int(n)
+	return {"roster": roster, "host": String(m.host), "size": int(size), "seqs": seqs}
 
 
 ## How long this phone may still take to come back to the match the file holds (ms; <= 0: too late).
@@ -1656,6 +1692,21 @@ func try_resume() -> bool:
 	var now := Time.get_ticks_msec()
 	var o: Dictionary = d.opp
 	opponent = {"id": String(o.id), "name": String(o.get("name", "PLAYER")), "bundle": String(o.get("bundle", "default"))}
+	var multi := multi_from_file(d.get("multi"), my_id) if d.has("multi") else {}
+	if not multi.is_empty():
+		# An all-human match: its roster and host again, every member heard now (AWAY until it speaks).
+		opponent = {}
+		session_multi = true
+		session_roster = (multi.roster as Array).duplicate(true)
+		session_host_id = String(multi.host)
+		var ids := {}
+		var heard := {}
+		for e: Dictionary in session_roster:
+			ids[String(e.id)] = int(e.slot)
+			if String(e.id) != my_id:
+				heard[String(e.id)] = now
+		_multi = {"ids": ids, "seq": (multi.seqs as Dictionary).duplicate(), "heard": heard, "ka": {}, "joined": {}, "left": {},
+			"state_t": {}, "t0": now}
 	_room = String(d.room)
 	_aes = Marshalls.base64_to_raw(String(d.aes))
 	_mac = Marshalls.base64_to_raw(String(d.mac))
@@ -1665,7 +1716,7 @@ func try_resume() -> bool:
 	is_host = bool(d.host)
 	var rr: Variant = d.get("rules")
 	session_rules = rules_from(rr) if rr is Dictionary and not (rr as Dictionary).is_empty() else {}
-	session_team = {}
+	session_team = {} if multi.is_empty() else {"size": int(multi.size), "coop": false}
 	_outgoing = {}
 	in_session = true
 	resumed = true
@@ -1686,7 +1737,8 @@ func try_resume() -> bool:
 	_chat_out_ms = 0
 	_last_heard = now
 	queue.clear()
-	_direct_begin()
+	if multi.is_empty():
+		_direct_begin()
 	if _connected:
 		_subscribe(ROOT + "/r/" + _room)
 		session_started.emit.call_deferred(is_host)
@@ -1703,7 +1755,7 @@ func _record_resume_left() -> void:
 	resume_note.counted = false
 	Game.record_match({"won": false, "draw": false, "left": true, "invalid": false, "kills": 0, "damage": 0, "headshots": 0,
 		"accuracy": 0.0, "time": 0.0, "xp": 0, "enemy": String(opponent.get("name", "PLAYER")), "mode": String(resume_note.get("mode", "")),
-		"mode_id": "lonewolf", "map": "", "weapon": "", "score_player": int(resume_note.get("mine", 0)),
+		"mode_id": String(resume_note.get("mode_id", "lonewolf")), "map": "", "weapon": "", "score_player": int(resume_note.get("mine", 0)),
 		"score_bot": int(resume_note.get("theirs", 0)), "hp_left": 0, "difficulty": "ONLINE", "taken": 0, "shots": 0, "hits": 0,
 		"deaths": 0, "enemy_id": String(opponent.get("id", "")), "local": false, "opponent_left": false})
 
@@ -3955,6 +4007,11 @@ func _multi_start() -> void:
 			if id != my_id and not (_multi.joined as Dictionary).has(id):
 				_multi.left[id] = true       # never came: LEFT from the start (the arena hears it)
 		_room_send({"k": "joined"})
+	_resume_off = false
+	resumed = false
+	resume_note = {}
+	_in_match_unix = Time.get_unix_time_from_system()
+	_save_resume()                   # (a closed app can come back into it: the session file)
 	session_started.emit(is_host)
 	if is_host:
 		for id: String in (_multi.left as Dictionary).keys():

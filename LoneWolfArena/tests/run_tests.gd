@@ -2128,7 +2128,41 @@ func _test_session_file() -> void:
 		and (Game.profile.history as Array).size() == before, "a recorded match keeps no session file: nothing to rejoin or record")
 	var lan := Lan.new()
 	_check(not lan.resume_allowed(), "PLAY WITHOUT INTERNET keeps no session file")
-	for c: Node in [cl, again, quitter, other, stranger, late, done, lan]:
+	# An all-human DUO (session_multi): the roster, the host, the size and every member's counter.
+	var ids: Array[String] = [cl.my_id, "member-b".sha256_text().left(32), "member-c".sha256_text().left(32), "member-d".sha256_text().left(32)]
+	var squad := [{"slot": 0, "id": ids[1], "name": "BEA", "bundle": "default", "team": 0},
+		{"slot": 1, "id": ids[0], "name": "ME", "bundle": "default", "team": 0},
+		{"slot": 2, "id": ids[2], "name": "CAL", "bundle": "default", "team": 1},
+		{"slot": 3, "id": ids[3], "name": "DEV", "bundle": "default", "team": 1}]
+	start.call(cl)
+	cl.opponent = {}
+	cl.is_host = false
+	cl.session_multi = true
+	cl.session_roster = squad
+	cl.session_host_id = ids[1]
+	cl.session_team = {"size": 2, "coop": false}
+	cl._resume_off = false               # (the recorded match above kept the file off)
+	cl._multi = {"ids": {}, "seq": {ids[1]: 90, ids[2]: 7}, "heard": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	cl.note_match(true, 1, 0, "DUO", 2, "", "duo")
+	var mf := Cloud.new()
+	mf._use_key(key)
+	_check(mf.try_resume() and mf.in_session and mf.session_multi and mf.resumed and mf.session_host_id == ids[1] and not mf.is_host
+		and mf.session_roster.size() == 4 and int((mf._multi.seq as Dictionary).get(ids[1], 0)) == 90
+		and int(mf.session_team.get("size", 0)) == 2 and mf._seq > cl._seq and mf.rejoining(),
+		"an all-human match's file holds its roster, host, size and the members' counters, and is entered again")
+	var tm := LobbyFriends.session_team_match(mf)
+	_check(int(tm.get("my_slot", -1)) == 1 and bool(tm.get("multi", false)) and String(tm.get("host_id", "")) == ids[1],
+		"the rejoined all-human match loads the same team match (this phone's slot, the host)")
+	mf.end_session("connection lost")
+	_check((Game.profile.history as Array).size() > 0 and String((Game.profile.history as Array)[0].get("mode", "")) == "duo",
+		"an all-human match lost before its arena was up is LEFT as that mode")
+	_check(Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {"nobody": 3}}, ids[0]).is_empty()
+		and Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": "member-x".sha256_text().left(32), "size": 2, "seqs": {}},
+		ids[0]).is_empty() and Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {}},
+		"member-x".sha256_text().left(32)).is_empty() and not Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1],
+		"size": 2, "seqs": {ids[2]: 4}}, ids[0]).is_empty(),
+		"a file's roster must hold this phone and the host, and counters only for its members")
+	for c: Node in [cl, again, quitter, other, stranger, late, done, lan, mf]:
 		c.free()
 	Game.profile = saved_profile
 	Game.autotest = at
