@@ -576,7 +576,7 @@ func _refresh_friends() -> void:
 			my.text = "YOUR ID:  %s" % Cloud.friend_code(cloud.my_id)     # the key may be made after the tab opened
 	var sig := waiting + "|" + _net_kind + "|" + _friend_query + "|" + cloud.status
 	for id in peers:
-		sig += "|%s:%s" % [id, peers[id].name]
+		sig += "|%s:%s%s" % [id, peers[id].name, ":m" if cloud.peer_in_match(String(id)) else ""]
 	sig += "|f%d|r%s|o%d|d%d|b%s" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys())),
 		(Game.profile.friend_out as Dictionary).size(), cloud.directory.size(), ",".join(PackedStringArray(blocked.keys()))]
 	for id in peers:
@@ -658,10 +658,13 @@ static func _ago(ts: int) -> String:
 ## One player in a list: the name and code (a tap opens the player card), ADD FRIEND (not a friend
 ## yet) and DUEL 1 VS 1 (online now). Only the row of the player the challenge waits for reads
 ## CANCEL; the others keep DUEL 1 VS 1, which calls that challenge off and challenges this player.
+## A player whose lobby announce says it plays a match (Cloud.peer_in_match) reads IN A MATCH, its
+## DUEL 1 VS 1 greyed until it is back in the lobby.
 func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
-	row.add_child(_who_button(id, "%s  #%s%s" % [who, Cloud.friend_code(id), online_tag]))
+	var playing := cloud.peer_in_match(id)
+	row.add_child(_who_button(id, "%s  #%s%s" % [who, Cloud.friend_code(id), presence_tag(online_tag, playing)]))
 	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
 		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 56))
@@ -673,6 +676,7 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 		var theirs := waiting != "" and String(cloud.opponent.get("id", "")) == id
 		var b := UI.button("CANCEL" if theirs else "DUEL 1 VS 1", 19, "light" if theirs else "primary", Vector2(210, 56))
 		b.name = "Cancel_" + Cloud.friend_code(id) if theirs else "Duel_" + Cloud.friend_code(id)
+		b.disabled = playing and not theirs
 		b.pressed.connect(func() -> void:
 			var sv := Game.cloud_service()
 			if sv.waiting_for() != "" and String(sv.opponent.get("id", "")) != id:
@@ -680,6 +684,11 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 			challenge(id))
 		row.add_child(b)
 	return row
+
+
+## A list row's tag after the name: "  ·  ONLINE" reads "  ·  IN A MATCH" while the player plays.
+static func presence_tag(online_tag: String, playing: bool) -> String:
+	return "  ·  IN A MATCH" if playing and online_tag == "  ·  ONLINE" else online_tag
 
 
 ## A list row's name (LobbyProfile.player_button): a tap opens the player's card, which goes back

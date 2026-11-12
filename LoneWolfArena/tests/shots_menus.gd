@@ -337,11 +337,7 @@ func run(at: Node) -> int:
 		_check(quit != null and quit.text == "QUIT MATCH" and quit.get_global_rect().end.x <= SettingsPanel.MENU_W + 1.0
 			and quit.size.y >= UI.TOUCH_MIN, "QUIT MATCH sits in the settings' tab column")
 		await at.shot("m14_pause")
-		if quit:
-			await _tap(quit)                 # asks once more, still inside the column
-			await _settle(0.2)
-			_check(quit.text == "TAP AGAIN TO QUIT" and quit.get_global_rect().end.x <= SettingsPanel.MENU_W + 1.0
-				and arena.find_child("PauseMenu", true, false) != null, "QUIT MATCH asks once more (its caption fits)")
+		# (TRAINING GROUND quits at one tap; the online question is in the HUD tour, tests/shots_hud.gd)
 		if psp:
 			await _tap(_find_text(psp, "CONTROLS"))
 			await _settle(0.4)

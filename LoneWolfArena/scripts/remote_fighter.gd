@@ -37,9 +37,11 @@ var decided_here := false
 var hp_cap := -1.0
 ## The kit index each of its states reported, with when (this phone's clock, ms): the hit checks
 ## allow what a weapon it held within HELD_GRACE_MS can do, since a hit and the state that says the
-## hand changed may arrive in either order. An older build's index 2 does not exist (it has no
-## sidearm); this build's index 2 reads as the sidearm on an older build's phone as its fists.
-const HELD_GRACE_MS := 750
+## hand changed may arrive in either order, and late: states may take the direct path while hits
+## always take the relay, which can lag by a second or more. An older build's index 2 does not
+## exist (it has no sidearm); this build's index 2 reads as the sidearm on an older build's phone
+## as its fists.
+const HELD_GRACE_MS := 3000
 var _held_ms := {}
 
 

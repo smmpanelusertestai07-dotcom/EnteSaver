@@ -19,7 +19,9 @@ extends RefCounted
 ## - QUICK MATCH behind a waiting DUEL CHALLENGE / GROUP INVITE (two Clouds): no quick challenge goes
 ##   out and none is taken while the popup waits; ACCEPT ends the search, DECLINE lets it go on;
 ## - JOIN BY CODE that never gets in (COULD NOT JOIN: TRY AGAIN, then JOIN again) and the leader's
-##   switch carried in the roster (a member shows the code only while it is on).
+##   switch carried in the roster (a member shows the code only while it is on);
+## - IN A MATCH: the lobby announce's flag (only while in a match, never the room), read from a
+##   "hi" (an older build's, without it, reads as in the lobby), the rows' words and greyed buttons.
 
 var t: Node
 
@@ -38,6 +40,7 @@ static func run(runner: Node) -> void:
 	me._duel()
 	me._quick_behind_popup()
 	me._code_leftovers()
+	me._presence()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -467,8 +470,25 @@ func _quick_behind_popup() -> void:
 	a._inbox_budget = 8.0
 	a._on_inbox(quick)
 	_check(String(a.opponent.get("id", "")) == b.my_id and a.seeking, "with no popup waiting, the quick challenge is taken (the match follows)")
+	# The room handshake runs (no "join" yet): a friend's duel challenge is declined at once, never shown.
+	var g := _peer(Cloud.new(), 2048)
+	g.peers[a.my_id] = {"name": "A", "bundle": "default", "pk": a._pk_pem, "seen": Time.get_ticks_msec()}
+	_check(g.invite(a.my_id), "a friend challenges during the handshake")
+	var shown := [0]
+	a.invited.connect(func(_n: String) -> void: shown[0] += 1)
+	a._inbox_budget = 8.0
+	a._on_inbox(_inv_msg(g, a))
+	_check(not a.in_session and a.busy_for_challenge() and a._incoming.is_empty() and shown[0] == 0
+		and String(a.opponent.get("id", "")) == b.my_id, "a challenge during a QUICK MATCH handshake is declined at once (never shown)")
+	# A group invite that came in meanwhile is declined when the session starts.
+	a._ginv = {"id": g.my_id, "name": "FRIEND", "gid": "00".repeat(16), "room": "00".repeat(16), "aes": PackedByteArray(),
+		"mac": Crypto.new().generate_random_bytes(32), "size": 2, "t": Time.get_ticks_msec()}
+	a._on_room(b._room_packet({"k": "join"}))
+	_check(a.in_session and a._ginv.is_empty() and a._incoming.is_empty(), "the session starts and a waiting group invite is declined at once")
+	a.clear_resume()
 	a.free()
 	b.free()
+	g.free()
 	# ACCEPT of a friend's challenge ends the search (NetMatch stops when Cloud is no longer seeking).
 	var c := _peer(Cloud.new(), 2048)
 	var f := _peer(Cloud.new(), 2048)
@@ -512,6 +532,19 @@ func _code_leftovers() -> void:
 	# JOIN again while a join waits to be let in: the waiting one is dropped and the ask goes out.
 	guest._on_code_answer(host.my_id, host._on_code_ask(guest._code_ask_msg()))
 	_check(guest.code_state == "in" and not guest.group.is_empty(), "let in again")
+	# The same code again, refused by a check (too many tries, offline): the waiting join stays as it was.
+	var tries: Array = guest._code_tries.duplicate()
+	for i in Cloud.CODE_TRIES_MAX:
+		guest._code_tries.append(Time.get_ticks_msec())
+	var waiting_leader := String(guest.group.get("leader", ""))
+	_check(guest.join_group_code("6612345678") == "TOO MANY TRIES: WAIT A MINUTE" and guest.code_state == "in"
+		and String(guest.group.get("leader", "")) == waiting_leader and bool(guest._grp.get("joining", false)),
+		"the same code again, refused (too many tries): the waiting join is kept, no stale leader")
+	guest._code_tries = tries
+	guest._connected = false
+	_check(guest.join_group_code("6612345678").begins_with("OFFLINE") and guest.code_state == "in" and not guest.group.is_empty(),
+		"the same code again, offline: the waiting join is kept")
+	guest._connected = true
 	_check(guest.join_group_code("6612345678") == "" and guest.code_state == "asking" and guest.group.is_empty(),
 		"JOIN while still waiting to be let in asks afresh (no EXIT YOUR GROUP FIRST)")
 	# An answer this phone cannot take (wrapped for another phone's key): failed, not stuck.
@@ -539,3 +572,40 @@ func _code_leftovers() -> void:
 	_check(not guest.code_open(), "a roster without the switch reads as off")
 	for c: Cloud in [host, guest, other]:
 		c.free()
+
+
+## IN A MATCH in the FRIENDS / ONLINE lists and the group's INVITE list: the lobby announce's "im".
+func _presence() -> void:
+	var me := _peer(Cloud.new())
+	var other := _peer(Cloud.new())
+	var hi := other.hello_msg()
+	_check(not hi.has("im") and String(hi.get("t", "")) == "hi", "in the lobby the announce carries no IN A MATCH flag")
+	other.in_session = true
+	hi = other.hello_msg()
+	_check(bool(hi.get("im", false)) and hi.keys().size() == 6,
+		"in a match the announce says so (\"im\"), and nothing of the session")
+	other.in_session = false
+	var changed := [0]
+	me.peers_changed.connect(func() -> void: changed[0] += 1)
+	me._on_lobby(other.hello_msg())
+	_check(me.peers.has(other.my_id) and not me.peer_in_match(other.my_id) and changed[0] == 1, "a player in the lobby reads ONLINE")
+	other.session_multi = true
+	me._on_lobby(other.hello_msg())
+	_check(me.peer_in_match(other.my_id) and changed[0] == 2, "their announce from a match: IN A MATCH, the lists redraw")
+	var old_build := other.hello_msg()
+	old_build.erase("im")
+	me._on_lobby(old_build)
+	_check(not me.peer_in_match(other.my_id) and changed[0] == 3, "back in the lobby (or an older build, no flag): ONLINE again")
+	var odd := other.hello_msg()
+	odd["im"] = "yes"
+	me._on_lobby(odd)
+	_check(not me.peer_in_match(other.my_id), "a flag that is not a plain true reads as in the lobby")
+	_check(LobbyFriends.presence_tag("  ·  ONLINE", true) == "  ·  IN A MATCH" and LobbyFriends.presence_tag("  ·  ONLINE", false) == "  ·  ONLINE"
+		and LobbyFriends.presence_tag("  ·  OFFLINE", true) == "  ·  OFFLINE", "a row reads IN A MATCH only for an online player in a match")
+	var a := "pa".sha256_text().left(32)
+	var b := "pb".sha256_text().left(32)
+	var rows := LobbyTeam.invite_rows({a: {"name": "ACE"}, b: {"name": "BEA"}}, {a: {"im": true}, b: {}})
+	_check(rows.size() == 2 and bool(rows[0].in_match) and not bool(rows[1].in_match) and rows[0].online and rows[1].online,
+		"the INVITE list marks a friend in a match (%s)" % str(rows))
+	me.free()
+	other.free()

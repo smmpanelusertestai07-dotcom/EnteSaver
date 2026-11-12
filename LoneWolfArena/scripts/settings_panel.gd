@@ -112,6 +112,7 @@ var _run_note: Label
 var _joy_note: Label
 var _cache_note: Label
 var _ask_layer: Control
+var _ask_col: VBoxContainer     # the open question's column (ask)
 var _sheet: Control
 var _hint: Label
 var _reset_btn: Button
@@ -635,8 +636,14 @@ func _ask_reset() -> void:
 	_ask("RESET " + tab, "Put every %s setting back to its default?" % tab, "RESET", _reset_tab)
 
 
-## A question over the panel: ok_text runs on_ok, CANCEL (or back) only closes it; `danger` makes
-## the OK button red (a step that cannot be undone).
+## A question over the panel (the in-match QUIT MATCH asks with it too): ok_text runs on_ok,
+## CANCEL (or back) only closes it; `danger` makes the OK button red (a step that cannot be undone).
+## Returns the question's column (title, text, then the buttons' row) for a caller's extra line.
+func ask(title: String, text: String, ok_text: String, on_ok: Callable, danger := false) -> VBoxContainer:
+	_ask(title, text, ok_text, on_ok, danger)
+	return _ask_col
+
+
 func _ask(title: String, text: String, ok_text: String, on_ok: Callable, danger := false) -> void:
 	_close_ask()
 	var layer := Control.new()
@@ -676,6 +683,7 @@ func _ask(title: String, text: String, ok_text: String, on_ok: Callable, danger 
 	v.add_child(row)
 	add_child(layer)
 	_ask_layer = layer
+	_ask_col = v
 
 
 func _close_ask() -> void:

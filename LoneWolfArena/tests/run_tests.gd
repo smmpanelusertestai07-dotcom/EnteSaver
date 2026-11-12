@@ -2326,6 +2326,30 @@ func _test_session_file() -> void:
 	mf.end_session("connection lost")
 	_check((Game.profile.history as Array).size() > 0 and String((Game.profile.history as Array)[0].get("mode", "")) == "duo",
 		"an all-human match lost before its arena was up is LEFT as that mode")
+	_check(not mf.resumed and mf.resume_note.is_empty(), "a session's end clears resumed and its note (a later session never counts it)")
+	# The host quits (its "bye", or it falls silent) while this member rejoins: the host's doing, ENDED, no LEFT here.
+	start.call(cl)
+	cl.opponent = {}
+	cl.is_host = false
+	cl.session_multi = true
+	cl.session_roster = squad
+	cl.session_host_id = ids[1]
+	cl.session_team = {"size": 2, "coop": false}
+	cl._resume_off = false
+	cl._multi = {"ids": {}, "seq": {ids[1]: 95}, "heard": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	cl.note_match(true, 1, 1, "DUO", 2, "", "duo")
+	var hq := Cloud.new()
+	hq._use_key(key)
+	var rows := (Game.profile.history as Array).size()
+	_check(hq.try_resume() and hq.session_multi and hq.resumed, "the member rejoins the all-human match")
+	hq._multi_member_left(ids[1])
+	_check(not hq.in_session and (Game.profile.history as Array).size() == rows + 1
+		and String((Game.profile.history as Array)[0].get("result", "")) == "ended" and hq.rejoin_notice.size() == 2
+		and String(hq.rejoin_notice[0]) == "THE HOST LEFT" and String(hq.rejoin_notice[1]).contains("BEA")
+		and String(hq.rejoin_notice[1]).contains("ENDED"),
+		"the host gone during a member's rejoin ends it as the host's doing: ENDED (no LEFT here), the notice names the host (%s)" % str(hq.rejoin_notice))
+	_check(not hq.resumed and hq.resume_note.is_empty(), "and resumed and its note are cleared")
+	hq.free()
 	_check(Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {"nobody": 3}}, ids[0]).is_empty()
 		and Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": "member-x".sha256_text().left(32), "size": 2, "seqs": {}},
 		ids[0]).is_empty() and Cloud.multi_from_file({"roster": NetGroup.pack_roster(squad), "host": ids[1], "size": 2, "seqs": {}},
@@ -2367,12 +2391,24 @@ func _test_release_fixes() -> void:
 	var clear: Color = ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color")
 	_check(clear.get_luminance() < 0.05, "scene changes never flash a light clear colour (%s)" % str(clear))
 	var ver := String(ProjectSettings.get_setting("application/config/version", ""))
-	_check(ver == "1.6.4", "the version shown (loading, login) is the project's 1.6.4 (%s)" % ver)
+	_check(ver == "1.6.5", "the version shown (loading, login) is the project's 1.6.5 (%s)" % ver)
 	for path: String in ["res://scripts/loading.gd", "res://scripts/login.gd"]:
 		_check(FileAccess.get_file_as_string(path).contains("application/config/version"), "%s shows the project's version" % path)
 	_check(not FileAccess.get_file_as_string("res://scripts/lobby.gd").contains("application/config/version"),
 		"the lobby shows no version (as the reference: only before the lobby)")
-	_check(PauseMenu.QUIT_CONFIRM_S >= 5.0, "QUIT MATCH's second tap may come a while later")
+	_check(PauseMenu.quit_question(false, true).is_empty(), "TRAINING GROUND's QUIT MATCH quits at one tap")
+	_check(not PauseMenu.asks_before_quit("training", false), "TRAINING GROUND (solo or DUO / SQUAD) does not ask")
+	_check(PauseMenu.asks_before_quit("duo", false) and PauseMenu.asks_before_quit("squad", false),
+		"a DUO / SQUAD against bots (the search found nobody; counted) asks before QUIT MATCH")
+	_check(PauseMenu.asks_before_quit("lonewolf", true), "an online match asks before QUIT MATCH")
+	_check(not PauseMenu.quit_question(PauseMenu.asks_before_quit("squad", false), true).is_empty(),
+		"a counted SQUAD against bots is not quit (and recorded as a defeat) at one tap")
+	var q := PauseMenu.quit_question(true, true)
+	_check(q.size() == 2 and String(q[0]).contains("defeat") and String(q[0]).contains("LEFT in HISTORY") and String(q[1]) == "",
+		"QUIT MATCH in a counted online match asks first: a defeat, LEFT in HISTORY (%s)" % str(q))
+	q = PauseMenu.quit_question(true, false, PauseMenu.HOST_WARNING)
+	_check(q.size() == 2 and String(q[0]).contains("nothing is counted") and String(q[1]) == PauseMenu.HOST_WARNING,
+		"before the first fight it says nothing counts; the host's warning goes into the same question")
 	var arena_script: GDScript = load("res://scripts/arena.gd")
 	var v := Bot.new()
 	var k := Bot.new()

@@ -1170,8 +1170,8 @@ func update_start_gate() -> void:
 ## The "+" plate on the podium (PodiumInvite, GROUPS.txt 1): while the group has room and this
 ## player may invite (the leader, or a solo in LONE WOLF), a small plate in the lobby's chamfered
 ## style floats at chest height over the first free member spot right of the hero (INVITE_SPOTS);
-## a tap opens the same INVITE list as the GROUP bar's + INVITE. Hidden during a search, in a
-## CUSTOM ROOM, with the wardrobe open, and when both right spots are taken.
+## a tap opens the same INVITE list as the GROUP bar's + INVITE. Hidden during a search and while
+## the leader's DUEL waits (both show MATCHING...), in a CUSTOM ROOM, with the wardrobe open, and when both right spots are taken.
 const INVITE_SPOTS := [1, 2]
 const INVITE_PLATE := Vector2(64, 64)
 const INVITE_LIFT := 1.05
@@ -1228,7 +1228,7 @@ func _follow_podium_invite() -> void:
 	var spot := podium_invite_spot(_member_slot)
 	var on := wardrobe == null and _cam_t >= 1.0 and spot >= 0 and not start_btn.disabled and not cloud.in_room() \
 		and podium_invite_shown(LobbyTeam.bar_shown(Game.mode, grouped), LobbyTeam.is_leader(),
-			LobbyTeam.members().size() if grouped else 1, LobbyTeam.group_max(), search_kind() != "")
+			LobbyTeam.members().size() if grouped else 1, LobbyTeam.group_max(), search_kind() != "" or _duel_with != "")
 	if on:
 		var p: Vector3 = MEMBER_SPOTS[spot] + Vector3(0, INVITE_LIFT, 0)
 		on = not camera.is_position_behind(p)

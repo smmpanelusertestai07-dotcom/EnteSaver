@@ -2,7 +2,7 @@ class_name PauseMenu
 extends Control
 ## The in-match menu behind the HUD's gear (and Android back), the reference's way: the settings
 ## open straight away (`SettingsPanel`, in_match) with QUIT MATCH at the foot of their tab column
-## (it asks once more) and EDIT CUSTOM HUD in CONTROLS opening the editor over the match
+## (outside TRAINING GROUND it asks first: quit_question) and EDIT CUSTOM HUD in CONTROLS opening the editor over the match
 ## (scripts/hud_editor_overlay.gd: SAVE applies it to this match). The settings' X (or back) closes
 ## the menu and the match goes on. A TRAINING GROUND match is paused while it is open (the arena
 ## pauses the tree); online the match runs on underneath (the other phone plays on): the fighter
@@ -15,20 +15,20 @@ extends Control
 ## frame, and the menu ignores a back request in the frame it was opened; the next back goes to
 ## the settings (a question or the editor over them first), whose closing closes the menu.
 ##
-## DUO / SQUAD: the host of an online TEAM INVITE match (Game.team_match online, coop, host) runs the
-## bots, so its quitting ends the match for the teammate: the first tap on QUIT MATCH also shows
-## HOST_WARNING (label QuitWarning on a dark plate right of the button) while it waits for the second.
+## QUIT MATCH outside TRAINING GROUND (online, or DUO / SQUAD against bots) opens a small question
+## over the settings (the panel's own: "Confirm", with CANCEL and QUIT): a counted match counts as a defeat and shows as LEFT in
+## HISTORY; the host of an online team match (host_of_team: a TEAM INVITE match whose bots run here,
+## or an all-human match it referees) is told that its quitting ends the match for the others (label
+## QuitWarning in the question). Back closes the question first. TRAINING GROUND quits at one tap.
 
 signal closed
 
-const QUIT_CONFIRM_S := 6.0     # real seconds the second tap may take (a slow phone, a slow touch)
 const HudEditorOverlay := preload("res://scripts/hud_editor_overlay.gd")
 const HOST_WARNING := "YOU ARE THE HOST: QUITTING ENDS THE MATCH FOR YOUR TEAMMATE"
+const HOST_WARNING_ALL := "YOU ARE THE HOST: QUITTING ENDS THE MATCH FOR EVERYONE"
 
 var settings: SettingsPanel     # the settings shown (null once they closed)
 var _quit: Button
-var _warning: Control           # HOST_WARNING's plate (the host of an online co-op team match), while QUIT is armed
-var _quit_armed := 0.0
 var _was_over := false          # online: the round was already over when last looked at
 var _opened_frame := -1
 var _hud: CanvasItem
@@ -80,30 +80,30 @@ func _open_settings() -> void:
 	_quit.pressed.connect(_on_quit)
 	settings.add_child(_quit)
 	_quit_text("QUIT MATCH")
-	if host_of_team():
-		var plate := PanelContainer.new()
-		plate.name = "QuitWarningPlate"
-		plate.add_theme_stylebox_override("panel", UI.box(Color(0.07, 0.05, 0.04, 0.94), 6, 1, Color(1.0, 0.55, 0.5, 0.6), 10.0))
-		plate.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-		plate.offset_left = SettingsPanel.MENU_W + 8.0
-		plate.offset_right = SettingsPanel.MENU_W + 8.0 + 400.0
-		plate.offset_top = -146.0 - UI.TOUCH_MIN
-		plate.offset_bottom = -146.0
-		plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var l := UI.label(HOST_WARNING, 16, Color(1.0, 0.8, 0.45), "bold")
-		l.name = "QuitWarning"
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		plate.add_child(l)
-		plate.visible = false
-		_warning = plate
-		settings.add_child(plate)
 
 
-## This phone hosts an online co-op team match (its bots run here: quitting ends it for the teammate).
+## This phone hosts an online team match whose end its quitting is for the others too: a TEAM
+## INVITE match (its bots run here) or an all-human one (it referees).
 static func host_of_team() -> bool:
 	var tm: Dictionary = Game.team_match
-	return tm.get("online", false) == true and tm.get("coop", false) == true and tm.get("host", false) == true
+	return tm.get("online", false) == true and (tm.get("coop", false) == true or tm.get("multi", false) == true) \
+		and tm.get("host", false) == true
+
+
+## Whether QUIT MATCH asks first: every match but TRAINING GROUND (solo or DUO / SQUAD), so also
+## a DUO / SQUAD against bots after a search found nobody (offline, counted in its CAREER).
+static func asks_before_quit(mode_id: String, online: bool) -> bool:
+	return online or mode_id != "training"
+
+
+## What QUIT MATCH asks first: "" (TRAINING GROUND: it quits at once), else [the question's text,
+## the host's warning or ""]. `asks`: asks_before_quit; `counted`: its first fight began;
+## `host_warning`: HOST_WARNING / HOST_WARNING_ALL for the host of a team match, else "".
+static func quit_question(asks: bool, counted: bool, host_warning := "") -> Array:
+	if not asks:
+		return []
+	return [("Quit this match? It counts as a defeat and shows as LEFT in HISTORY." if counted
+		else "Quit this match? It has not begun yet: nothing is counted."), host_warning]
 
 
 ## EDIT CUSTOM HUD in a match: the editor over it (back or BACK closes it again, to the settings).
@@ -135,20 +135,36 @@ func _restore_match_hud() -> void:
 
 
 func _on_quit() -> void:
-	if _quit_armed > 0.0:
-		var arena := get_tree().current_scene
-		if arena and arena.has_method("record_left"):
-			arena.call("record_left")        # a counted match goes into HISTORY as LEFT, a defeat
-		if settings != null:
-			Game.save_settings()             # (the panel saves only when it closes itself)
-		get_tree().paused = false
-		Game.goto_lobby()
+	var arena := get_tree().current_scene
+	var warning := ""
+	if host_of_team():
+		warning = HOST_WARNING_ALL if Game.team_match.get("multi", false) == true else HOST_WARNING
+	var asks := warning != "" or (arena != null and asks_before_quit(String(arena.get("mode")), arena.get("online") == true))
+	var q := quit_question(asks, arena != null and arena.get("_counted") == true, warning)
+	if q.is_empty() or settings == null or not is_instance_valid(settings):
+		_quit_now()
 		return
-	_quit_armed = Time.get_ticks_msec() + QUIT_CONFIRM_S * 1000.0
-	if _quit:
-		_quit_text("TAP AGAIN TO QUIT")
-	if _warning:
-		_warning.visible = true
+	var v := settings.ask("QUIT MATCH", String(q[0]), "QUIT", _quit_now, true)
+	if String(q[1]) != "" and v:
+		var l := UI.label(String(q[1]), 17, Color(1.0, 0.8, 0.45), "bold")
+		l.name = "QuitWarning"
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(540, 0)
+		v.add_child(l)
+		v.move_child(l, 2)                   # (under the question, above CANCEL / QUIT)
+
+
+## Leaves the match: a counted one goes into HISTORY as LEFT (a defeat), then the lobby.
+func _quit_now() -> void:
+	if _closing:
+		return
+	var arena := get_tree().current_scene
+	if arena and arena.has_method("record_left"):
+		arena.call("record_left")
+	if settings != null:
+		Game.save_settings()                 # (the panel saves only when it closes itself)
+	get_tree().paused = false
+	Game.goto_lobby()
 
 
 ## QUIT MATCH's caption, its font made smaller until it fits the tab column.
@@ -163,12 +179,6 @@ func _quit_text(text: String) -> void:
 
 
 func _process(_delta: float) -> void:
-	if _quit_armed > 0.0 and Time.get_ticks_msec() >= _quit_armed:     # (real time: not the slow motion)
-		_quit_armed = 0.0
-		if _quit:
-			_quit_text("QUIT MATCH")
-		if _warning:
-			_warning.visible = false
 	var arena := get_tree().current_scene
 	if arena == null or arena.get("online") != true or _closing:
 		return

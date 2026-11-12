@@ -5,7 +5,8 @@ extends Node
 ## `group` and keys, as a roster or an invite brings them) and emits group_changed as Cloud does.
 ## Real taps where a player taps:
 ## - a solo in LONE WOLF: the GROUP bar with + INVITE; the invite list (GroupAsk_<code> only on an
-##   online friend); an invite that cannot go out (no relay) says so;
+##   online friend); an invite that cannot go out (no relay) says so; a friend in a match (the
+##   announce's "im") reads IN A MATCH there and in FRIENDS, INVITE and DUEL 1 VS 1 greyed;
 ## - the leader of 4: three member models on the podium besides the hero, with name plates; REMOVE
 ##   on each other member (asked first) drops them, DISBAND GROUP, no + INVITE row (full); the bar,
 ##   with its 10-digit code, COPY and the switch unclipped, ends above the bottom bar;
@@ -15,8 +16,8 @@ extends Node
 ##   SHARES THE GROUP CODE); WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
 ##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
-## - the DUEL in a group of two: the leader's START shows MATCHING... until the member's phone takes
-##   it; one never taken gives START back with a notice;
+## - the DUEL in a group of two: the leader's START shows MATCHING... (the podium's + plate hidden)
+##   until the member's phone takes it; one never taken gives START back with a notice;
 ## - the podium's "+" plate: a solo's, right of the hero and clear of the mode card and START, opens
 ##   the INVITE list; none in a full group or for a member;
 ## - CUSTOM ROOM with slots: CREATE with SQUAD shows 8 places with the HOST tag; in a DUO room a
@@ -111,6 +112,32 @@ func _solo(lobby: Lobby) -> void:
 		_fail("an invite that cannot go out (no relay here) does not say so")
 	lobby.dialogs.close_modal()
 	cloud.peers.erase(ids.ZORA)
+	# A friend whose lobby announce says it plays a match: IN A MATCH, INVITE and DUEL 1 VS 1 greyed.
+	var friends_was: Dictionary = Game.profile.friends.duplicate(true)
+	Game.profile.friends[ids.KITE] = {"name": "KITE"}
+	cloud.peers[ids.KITE] = {"name": "KITE", "bundle": "default", "pk": "", "seen": Time.get_ticks_msec() + 600000, "im": true}
+	await _tap(invite)
+	await at.wait(0.8)
+	list = lobby.dialogs.modal.find_child("GroupInviteList", true, false) if lobby.dialogs.modal else null
+	var ask_busy := list.find_child("GroupAsk_" + Cloud.friend_code(ids.KITE), true, false) as Button if list else null
+	if ask_busy == null or not ask_busy.disabled or not _find_text(list, "IN A MATCH"):
+		_fail("a friend in a match is not IN A MATCH with INVITE greyed in the INVITE list")
+	lobby.dialogs.close_modal()
+	lobby.friends.open("friends")
+	await at.wait(0.8)
+	var duel := lobby.dialogs.modal.find_child("Duel_" + Cloud.friend_code(ids.KITE), true, false) as Button if lobby.dialogs.modal else null
+	if duel == null or not duel.disabled or not _shows(lobby.dialogs.modal, "IN A MATCH"):
+		_fail("a friend in a match is not IN A MATCH with DUEL 1 VS 1 greyed in FRIENDS")
+	await at.shot("g01b_friend_in_match")
+	cloud.peers[ids.KITE].erase("im")                     # back in the lobby (or an older build: no flag)
+	cloud.peers_changed.emit()
+	await at.wait(0.8)
+	duel = lobby.dialogs.modal.find_child("Duel_" + Cloud.friend_code(ids.KITE), true, false) as Button if lobby.dialogs.modal else null
+	if duel == null or duel.disabled or _shows(lobby.dialogs.modal, "IN A MATCH"):
+		_fail("a friend back in the lobby does not read ONLINE with DUEL 1 VS 1 on again")
+	lobby.dialogs.close_modal()
+	cloud.peers.erase(ids.KITE)
+	Game.profile.friends = friends_was
 
 
 ## The leader of 4: three models besides the hero with name plates; REMOVE, DISBAND, INVITE greyed.
@@ -339,6 +366,9 @@ func _duel_plate(lobby: Lobby) -> void:
 	(cloud.group.members as Array).resize(2)                 # this player and ZORA
 	cloud.group_changed.emit()
 	await at.wait(0.5)
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	var plus_before := plus != null and plus.is_visible_in_tree()
+	at.log_line("the + plate before the DUEL: %s" % plus_before)
 	var zora := ids.ZORA as String
 	cloud.peers[zora] = {"name": "ZORA", "bundle": "neon", "pk": Crypto.new().generate_rsa(1024).save_to_string(true),
 		"seen": Time.get_ticks_msec() + 600000}
@@ -350,6 +380,8 @@ func _duel_plate(lobby: Lobby) -> void:
 	if cloud.waiting_for_id() != zora or matching == null or not matching.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree() \
 			or lobby.dialogs.modal != null:
 		_fail("the leader's DUEL start does not show MATCHING... while the member's phone answers (to %s)" % cloud.waiting_for())
+	if plus == null or plus.is_visible_in_tree():
+		_fail("the podium's + plate still shows while MATCHING... stands for the DUEL")
 	await at.shot("g09_duel_matching")
 	# The member's phone never takes it: START comes back, a notice says so.
 	cloud.cancel_invite(false)
@@ -359,6 +391,9 @@ func _duel_plate(lobby: Lobby) -> void:
 			or not _find_text(lobby.dialogs.modal, "ZORA did not take the duel"):
 		_fail("a DUEL never taken does not give START back with a notice")
 	lobby.dialogs.close_modal()
+	await at.wait(0.3)
+	if plus_before and not plus.is_visible_in_tree():
+		_fail("the podium's + plate does not come back with START after the DUEL")
 	cloud._connected = was_connected
 	cloud.peers.erase(zora)
 	cloud.leave_group()
@@ -533,6 +568,14 @@ func _find_label(root: Node, text: String) -> Label:
 		if (l as Label).text == text:
 			return l as Label
 	return null
+
+
+## A label's or a button's text under `root` holds `part`.
+func _shows(root: Node, part: String) -> bool:
+	for c in root.find_children("*", "", true, false):
+		if (c is Label and (c as Label).text.contains(part)) or (c is Button and (c as Button).text.contains(part)):
+			return true
+	return false
 
 
 func _find_text(root: Node, part: String) -> bool:

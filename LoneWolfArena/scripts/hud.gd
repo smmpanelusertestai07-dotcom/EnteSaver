@@ -79,6 +79,9 @@ var _kill_x_pos := Vector3.ZERO
 var _dmg_numbers: Array = []
 var _dmg_dirs: Array = []
 var _kill_feed: Array = []
+## Lines the kill feed keeps: three in DUO / SQUAD (and a HUD never bound), ONE in the 1 vs 1 (bind:
+## a new line replaces the old, centred, with the gun's silhouette on a soft highlight before it).
+var feed_lines := 3
 var _flash := 0.0
 var _zone_hurt := 0.0
 var _hurt_sound_t := 0.0
@@ -89,6 +92,8 @@ var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
 var steps: Array[Dictionary] = []     # enemy footprints for the minimap: {p (x, z), dir, side, t}
 const STEP_SHOW := 2.2                # s a footprint stays on the minimap
+var shots_heard: Array[Dictionary] = []   # an enemy's shots fired out of sight, for the minimap: {p (x, z), t}
+const SHOT_SHOW := 2.0                # s a shot's mark fades over on the minimap
 const STEP_BUZZ_M := 20.0             # an enemy's step this close buzzes (Game.vibrate "footsteps")
 var _vis_t := 0.0
 var _hp_lag := Fighter.MAX_HP
@@ -151,6 +156,7 @@ func bind(p: Player, a: Node) -> void:
 	# DUO / SQUAD: teammates, ally tags, knocked markers, REVIVE, spectating (scripts/hud_team.gd).
 	if HudTeam.wanted(a):
 		team = HudTeam.attach(self, a)
+	feed_lines = 3 if team != null else 1
 
 
 # ---------------------------------------------------------------- arena -> HUD API
@@ -166,6 +172,11 @@ func show_center(text: String, seconds: float, color := Color.WHITE, fsize := 96
 ## sub replaces the AREA line (the reference shows "Match Point!" there).
 func show_round_banner(round_index: int, area: String, sub := "") -> void:
 	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area, "sub": sub}
+
+
+## A rejoin into a round already running: its ROUND / AREA band is not shown (the next round's is).
+func skip_round_banner() -> void:
+	_round_banner.t = 0.0
 
 
 ## End of a round that does not end the match: the break's timed sequence (RoundRules.break_step,
@@ -232,7 +243,7 @@ func close_weapon_pick() -> void:
 func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
 	_kill_feed.push_front({"killer": killer, "victim": victim, "weapon": weapon_name, "icon": weapon_icon,
 		"head": headshot, "mine": mine, "t": FEED_LIFE, "verb": verb})
-	if _kill_feed.size() > 3:
+	while _kill_feed.size() > feed_lines:
 		_kill_feed.pop_back()
 
 
@@ -292,6 +303,17 @@ func banner_kind() -> String:
 
 func reveal(f: Fighter, seconds := 2.5) -> void:
 	_reveal[f] = maxf(float(_reveal.get(f, 0.0)), seconds)
+
+
+## An enemy fired (the arena's on_gunshot): out of sight, a red mark stays on the minimap where the
+## shot was fired and fades over SHOT_SHOW s (never its live position); in sight its arrowhead
+## shows anyway.
+func shot_heard(f: Fighter) -> void:
+	if seen.get(f, false):
+		return
+	shots_heard.append({"p": Vector2(f.global_position.x, f.global_position.z), "t": SHOT_SHOW})
+	if shots_heard.size() > 12:
+		shots_heard.pop_front()
 
 
 ## Someone ran: a footprint where the step landed (left and right in turn), shown on the
@@ -770,6 +792,9 @@ func _process(delta: float) -> void:
 	for st in steps:
 		st.t = float(st.t) - delta
 	steps = steps.filter(func(st: Dictionary) -> bool: return float(st.t) > 0.0)
+	for sh in shots_heard:
+		sh.t = float(sh.t) - delta
+	shots_heard = shots_heard.filter(func(sh: Dictionary) -> bool: return float(sh.t) > 0.0)
 	_vis_t -= real
 	if _vis_t <= 0.0:
 		_vis_t = 0.1
@@ -1589,11 +1614,40 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 			[String(k.victim), k.get("vc", Color(1, 1, 1))]]
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
-		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
 		var tw := HudDraw.parts_width(parts, fs)
 		var y := vs.y * float(FEED_Y[i])
+		if feed_lines == 1:
+			_draw_feed_line(parts, tw, String(k.get("icon", "")), y, fs, a)
+			continue
+		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
 		draw_rect(Rect2(vs.x * 0.5 - tw * 0.5 - fs * 0.6, y - fs * 0.72, tw + fs * 1.2, fs * 1.44), Color(0.03, 0.03, 0.04, 0.5 * a))
 		HudDraw.text_parts(self, parts, Vector2(vs.x * 0.5, y), fs, 1, 3, "bold", a)
+
+
+## The 1 vs 1's single kill feed line, centred: the gun's (or the frag's) silhouette, then the text,
+## on a soft highlight that fades out to both sides (darkest under the line, none at its ends).
+func _draw_feed_line(parts: Array, tw: float, icon_name: String, y: float, fs: int, a: float) -> void:
+	var t := HudDraw.tex(icon_name) if icon_name != "" else null
+	var isz := Vector2(fs * 2.4, fs * 1.05)
+	var iw := isz.x + fs * 0.55 if t != null else 0.0
+	var cx := size.x * 0.5
+	var x0 := cx - (tw + iw) * 0.5
+	var half := (tw + iw) * 0.5 + fs * 3.0
+	var top := y - fs * 0.85
+	var bot := y + fs * 0.85
+	var mid := Color(0.02, 0.02, 0.03, 0.58 * a)
+	var edge := Color(mid, 0.0)
+	for side: float in [-1.0, 1.0]:
+		var outer := cx + side * half
+		var inner := cx + side * (half - fs * 3.0)
+		draw_polygon(PackedVector2Array([Vector2(inner, top), Vector2(outer, top), Vector2(outer, bot), Vector2(inner, bot)]),
+			PackedColorArray([mid, edge, edge, mid]))
+	draw_rect(Rect2(cx - (half - fs * 3.0), top, (half - fs * 3.0) * 2.0, bot - top), mid)
+	draw_line(Vector2(cx - half * 0.8, top), Vector2(cx + half * 0.8, top), Color(1, 1, 1, 0.12 * a), 1.0)
+	if t != null:     # (a dark shadow under the white silhouette: readable over the white shirt too)
+		HudDraw.icon(self, t, Vector2(x0 + isz.x * 0.5 + 1.5, y + 1.5), isz, Color(0, 0, 0, 0.7 * a))
+		HudDraw.icon(self, t, Vector2(x0 + isz.x * 0.5, y), isz, Color(1, 1, 1, 0.92 * a))
+	HudDraw.text_parts(self, parts, Vector2(x0 + iw + tw * 0.5, y), fs, 1, 3, "bold", a)
 
 
 # ---------------------------------------------------------------- top: score bar, zone, prep

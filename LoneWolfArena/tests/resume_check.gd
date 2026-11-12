@@ -142,6 +142,13 @@ func _guest_again() -> int:
 		_fail("the rejoined arena is not in round 2 at 0 - 1")
 	if int(Game.profile.matches) != 0:
 		_fail("the rejoined match was counted again (%d)" % int(Game.profile.matches))
+	# Back in a round already running: neither its ROUND / AREA band nor a ZONE SHRINKING line.
+	var hud_n := arena.get("hud") as Node
+	var band: Dictionary = hud_n.get("_round_banner") if hud_n else {}
+	var centre: Dictionary = hud_n.get("_center") if hud_n else {}
+	if float(band.get("t", 0.0)) > 0.0 or String(centre.get("text", "")) == "ZONE SHRINKING":
+		_fail("the rejoin into a running round shows its round band or ZONE SHRINKING (band %.1f s, centre %s)"
+			% [float(band.get("t", 0.0)), String(centre.get("text", ""))])
 	await at.wait(2.0)
 	_go_down(arena)
 	if not await _until(func() -> bool: return is_instance_valid(arena) and bool(arena.get("_result_shown")), 30.0):

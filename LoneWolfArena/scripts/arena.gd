@@ -91,6 +91,7 @@ var _forfeit := false            # the other phone left: the match is ours
 var _deaths := 0                 # times this phone's player went down (the result's "deaths")
 var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
 var _counted := false            # Game.count_match counted this match (its first fight began)
+var _quiet_round := 0            # a rejoin landed in this round (its prep or fight): its band never shows
 var _called_off := false         # online: the session ended with no result to show (_on_net_ended)
 var _left_scene := false
 var _graphics_on := []           # [graphics, visual effects] apply_graphics last set up
@@ -167,7 +168,7 @@ func _ready() -> void:
 		var lost := Game.session != null and Game.session.last_end_reason != "left"
 		Game.match_notice = ["CONNECTION LOST" if lost else "OPPONENT LEFT", ("The connection was lost" if lost
 			else "The other player left") + " before the match began. Nothing was counted."]
-		if Game.session != null and Game.session.resumed and Game.session.rejoin_notice.size() == 2:
+		if Game.session != null and Game.session.rejoin_notice.size() == 2:
 			Game.match_notice = Game.session.rejoin_notice.duplicate()     # (what ended the rejoin, and what it counted)
 		Game.goto_lobby.call_deferred()
 		return
@@ -498,8 +499,9 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 ## stands: that round in that phase with the score, the gun and the clock (the host says "begin"
 ## again: a guest still waiting for the first one, lost with the restart, starts too). In a break the host
 ## starts the next round on both (its "round"), the guest waits for it; a match over on the other
-## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync").
-func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String) -> void:
+## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync"). Back in a
+## running round (`quiet`), neither its ROUND / AREA band nor ZONE SHRINKING shows (_rejoined_quietly).
+func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String, quiet := true) -> void:
 	score.bot = maxi(their_score, 0)
 	score.player = maxi(my_score, 0)
 	Game.mark("rejoined: round %d, phase %d" % [r, ph])
@@ -529,8 +531,20 @@ func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int
 		_start_fight()
 		elapsed = clampf(clock, 0.0, round_time())
 		time_left = round_time() - elapsed
+	if quiet:
+		_rejoined_quietly()
 	if _net_host:
 		Game.session.send_event("begin")     # (a guest whose first "begin" was lost with this app's start)
+
+
+## A fighter back in a round that is already running (its prep or its fight): the round's ROUND /
+## AREA band is not shown, and a zone that already shrinks there does so without the ZONE
+## SHRINKING line (both were news to the others long ago); the next round's band shows as usual.
+func _rejoined_quietly() -> void:
+	_quiet_round = round_index           # (round 1's band, due at its fight's start, stays off too)
+	hud.skip_round_banner()
+	if phase == Phase.FIGHT and elapsed >= RoundRules.STAGE1_S and zone_state == "stationary":
+		zone_state = "shrinking"
 
 
 ## Both apps were closed and opened again (the other phone, resuming too, asks for the match with
@@ -542,7 +556,7 @@ func _resume_from_note() -> void:
 	Game.session.rejoined()
 	var r := mini(_resume_round, last_round())
 	var gun := String(picks.get(RoundRules.pick_round_of(r), ""))
-	_resume_into(r, int(Phase.PREP), PREP_TIME, int(score.bot), int(score.player), gun)
+	_resume_into(r, int(Phase.PREP), PREP_TIME, int(score.bot), int(score.player), gun, false)     # (the round starts afresh)
 
 
 ## The session ended before the match did. "left": the other phone said bye, or went silent while
@@ -598,7 +612,8 @@ func _round_gun() -> String:
 ## The weapons whose numbers bound the other phone's reports (a hit does not say which weapon made
 ## it): this round's gun (the same on both phones, not that fighter's own) and the fists always,
 ## and the sidearm while that phone's states have it in hand or had it within
-## RemoteFighter.HELD_GRACE_MS. So the gun's cap is never loosened while the gun is held.
+## RemoteFighter.HELD_GRACE_MS. While honest states say the gun is held, the gun's cap is as before;
+## a phone that claims the sidearm gets at most the sidearm's own numbers on top.
 func _remote_arms() -> Array:
 	var out: Array = [Weapons.DEFS[_round_gun()], Weapons.DEFS.fists]
 	var remote := bot as RemoteFighter
@@ -1006,9 +1021,9 @@ func _start_fight() -> void:
 		_place_dummy()
 		zone_radius = 999.0
 		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
-	elif round_index == 1:
+	elif round_index == 1 and _quiet_round != round_index:
 		# (Later rounds show their band at the end of the break, before the prep: nothing covers
-		# the fight's start then.)
+		# the fight's start then. A rejoin into round 1's prep shows none.)
 		hud.show_round_banner(round_index, map_name, round_sub(round_index))
 	Audio.play("countdown_go", 0.0)
 
@@ -1557,6 +1572,7 @@ func on_gunshot(shooter: Fighter) -> void:
 			(f as Bot).hear(shooter.global_position, 1.0)
 	if shooter != player and hud:
 		hud.reveal(shooter, 2.5)
+		hud.shot_heard(shooter)          # (the minimap: a fading mark where it fired, out of sight)
 
 
 func on_footstep(f: Fighter) -> void:

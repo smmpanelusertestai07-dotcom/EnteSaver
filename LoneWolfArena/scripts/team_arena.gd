@@ -456,7 +456,7 @@ func _start_fight() -> void:
 	_reset_zone()
 	zone_final = zone_final_for(round_index)
 	Game.mark("match started")
-	if round_index == 1:
+	if round_index == 1 and _quiet_round != round_index:     # (a rejoin into its prep: none)
 		hud.show_round_banner(round_index, map_name, round_sub(round_index))      # (later: at the break's end)
 	Audio.play("countdown_go", 0.0)
 
@@ -832,6 +832,7 @@ func on_gunshot(shooter: Fighter) -> void:
 			(f as Bot).hear(shooter.global_position, 1.0)
 	if not ally(shooter) and hud:
 		hud.reveal(shooter, 2.5)
+		hud.shot_heard(shooter)          # (the minimap: a fading mark where it fired, out of sight)
 
 
 func on_footstep(f: Fighter) -> void:

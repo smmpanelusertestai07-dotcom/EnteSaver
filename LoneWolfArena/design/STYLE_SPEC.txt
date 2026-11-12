@@ -53,11 +53,11 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 - a camera cutout on a short side moves the edge-anchored widgets in by its width.
 | Element | Position (x, y) | Size | Style |
 |---|---|---|---|
-| Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above, player arrow, enemy red dot when revealed; safe-zone strip under it |
+| Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above (north up, never rotated), player arrow, each enemy in sight a red arrowhead pointing where it faces, out of sight its shots leave small red marks that fade over 2 s (no live position), red footprints of its running steps; safe-zone strip under it |
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
 | Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
 | Eliminated by | bottom left, 0.56 u wide | 0.13 u high | 1 vs 1, while the eliminated player spectates: dark plate with a red left edge, "ELIMINATED BY <NAME>" (the name red; THE ZONE / A FALL / YOUR OWN FRAG), a thin rule, then the killer's name, the gun's silhouette and name, and "DMG n" (what that player dealt this round) in yellow at the right |
-| Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
+| Kill feed | bottom centre, y 0.85 (1 vs 1: one line, a new one replaces it); DUO / SQUAD y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange; the 1 vs 1 line has the gun's silhouette before the text, on a soft highlight fading to both sides |
 | Weapon panel | top-right 0.861, 0.158, anchor r (main slot y 0.003 .. 0.155, three slots under it) | slot 0.152 h | main slot (the gun or the sidearm in hand, the gun dimmed with TAP TO SWITCH while the fists are out: big mag + small /reserve, RELOAD / RELOADING, silhouette, underline bar, top-right corner cut; tap = reload) over three square slots in SWITCH's order: gun | sidearm | fists, the one in hand lit gold, the gun's and the sidearm's rounds left (red at 0) under their silhouettes; a tap on a slot draws it; against the target dummy a CHANGE GUN plate sits left of the small slots |
 | HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
 | Joystick | 0.18, 0.71, anchor l | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |

@@ -197,6 +197,7 @@ var _mac := PackedByteArray()
 var _seq := 0
 var _their_seq := -1
 var _join_t := 0.0
+var _announced_im := false     # the "im" (in a match) flag of this phone's last lobby announce
 var _outgoing := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _incoming := {}            # {"id", "name", "bundle", "room", "aes", "mac", "t"}
 var _last_heard := 0
@@ -652,10 +653,12 @@ func _process(delta: float) -> void:
 		_check_card(_dir_queue.pop_front())
 	if _want_lobby:
 		_announce_t -= delta
+		if in_match_now() != _announced_im:
+			_announce_t = minf(_announce_t, 0.0)     # (a match began or ended: friends see it at once)
 		if _announce_t <= 0.0:
 			_announce_t = ANNOUNCE_S
-			_publish_json(ROOT + "/lobby", {"t": "hi", "id": my_id, "name": String(Game.profile.name),
-				"bundle": String(Game.profile.bundle), "pk": _pk_pem})
+			_announced_im = in_match_now()
+			_publish_json(ROOT + "/lobby", hello_msg())
 	var now := Time.get_ticks_msec()
 	var gone := []
 	for id in peers:
@@ -969,6 +972,27 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 
 # ---------------------------------------------------------------- lobby and invites
 
+## The lobby announce ("hi"): the id, name, outfit and public key, and "im": true while this phone
+## plays a match (in_match_now: the FRIENDS / ONLINE rows read IN A MATCH there). Only that flag:
+## never the session's room or code. Without "im" (as before, and every older build) a player
+## reads as in the lobby.
+func hello_msg() -> Dictionary:
+	var d := {"t": "hi", "id": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle), "pk": _pk_pem}
+	if in_match_now():
+		d["im"] = true
+	return d
+
+
+## Whether this phone is in a match now (a session running, or an all-human one starting).
+func in_match_now() -> bool:
+	return in_session or session_multi
+
+
+## Whether the player `id` in the lobby said it is in a match (its last "hi": "im").
+func peer_in_match(id: String) -> bool:
+	return peers.has(id) and bool((peers[id] as Dictionary).get("im", false))
+
+
 func _on_lobby(d: Dictionary) -> void:
 	if String(d.get("t", "")) != "hi":
 		return
@@ -979,9 +1003,10 @@ func _on_lobby(d: Dictionary) -> void:
 		return
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
 	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
-	var known := peers.has(id) and String(peers[id].name) == who
+	var im := typeof(d.get("im")) == TYPE_BOOL and bool(d.im)
+	var known := peers.has(id) and String(peers[id].name) == who and bool((peers[id] as Dictionary).get("im", false)) == im
 	var new_here := not peers.has(id)
-	peers[id] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec()}
+	peers[id] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec(), "im": im}
 	if new_here and _want_lobby:
 		_announce_t = minf(_announce_t, ANNOUNCE_REPLY_S * randf_range(0.5, 1.0))   # so it sees this phone soon too
 	if not known:
@@ -1001,7 +1026,7 @@ func _on_inbox(d: Dictionary) -> void:
 			if sec.size() != 80:
 				return
 			var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80)}
-			if in_session or session_multi or not _outgoing.is_empty() or not _incoming.is_empty():
+			if busy_for_challenge():
 				_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 				return
 			var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
@@ -1161,7 +1186,8 @@ func team_invite_proven(d: Dictionary, from: String) -> bool:
 
 
 ## A "tinv" in this phone's inbox. Unsigned, from a blocked player or naming no team: ignored. Busy
-## (in a match, a challenge going out or waiting here): declined at once, as a duel. A quick one is
+## (busy_for_challenge: in a match, a challenge going out or waiting here, a room handshake under
+## way): declined at once, as a duel. A quick one is
 ## taken at once, never shown, only while this phone searches that size (seek_team) and heard that
 ## seeker, as NetMatch.allowed lets it; any other quick one is declined. Any other one is shown
 ## (invited, invite_from().team) only when it comes from a friend, or is the play-again this phone's
@@ -1179,7 +1205,7 @@ func _on_team_invite(from: String, d: Dictionary) -> void:
 		return
 	var inv := {"id": from, "room": sec.slice(0, 16).hex_encode(), "aes": sec.slice(16, 48), "mac": sec.slice(48, 80),
 		"team": {"size": int(team.size), "coop": bool(team.coop)}}
-	if in_session or session_multi or not _outgoing.is_empty() or not _incoming.is_empty():
+	if busy_for_challenge():
 		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
 	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
@@ -1482,6 +1508,29 @@ func forget_me() -> bool:
 	return told
 
 
+## Whether a duel challenge or team invite coming in now is declined at once: in a match, a
+## challenge going out or waiting here, or a room handshake under way (a challenge accepted here,
+## a QUICK MATCH one included, before the first "join" starts the session).
+func busy_for_challenge() -> bool:
+	return in_session or session_multi or _room != "" or _accept_ms != 0 or not _outgoing.is_empty() or not _incoming.is_empty()
+
+
+## A session starts: a challenge and a group invite still waiting here are declined now, so their
+## senders hear it at once instead of after INVITE_TIMEOUT_MS (the popup closes: invite_cancelled,
+## group_changed).
+func _decline_waiting() -> void:
+	if not _incoming.is_empty():
+		var inv := _incoming
+		_incoming = {}
+		_publish_json(ROOT + "/u/" + String(inv.id), {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
+		invite_cancelled.emit()
+	if not _ginv.is_empty():
+		var g := _ginv
+		_ginv = {}
+		_publish_json(ROOT + "/u/" + String(g.id), {"t": "dec", "from": my_id, "mac": _tag(g, "dec", my_id)})
+		group_changed.emit()
+
+
 func answer(accept: bool, rules := {}) -> void:
 	if _incoming.is_empty():
 		return
@@ -1770,12 +1819,13 @@ func try_resume() -> bool:
 
 
 ## A match entered from the file that ends before its arena is up (too late, LEAVE MATCH, lost
-## again): counted when its first fight began, it goes into the profile as QUIT MATCH puts it.
-func _record_resume_left() -> void:
+## again): counted when its first fight began, it goes into the profile as QUIT MATCH puts it;
+## `ended`: an all-human match its host left meanwhile, as ENDED (no win, no loss).
+func _record_resume_left(ended := false) -> void:
 	if not bool(resume_note.get("counted", false)):
 		return
 	resume_note.counted = false
-	Game.record_match({"won": false, "draw": false, "left": true, "invalid": false, "kills": 0, "damage": 0, "headshots": 0,
+	Game.record_match({"won": false, "draw": false, "left": not ended, "ended": ended, "invalid": false, "kills": 0, "damage": 0, "headshots": 0,
 		"accuracy": 0.0, "time": 0.0, "xp": 0, "enemy": String(opponent.get("name", "PLAYER")), "mode": String(resume_note.get("mode", "")),
 		"mode_id": String(resume_note.get("mode_id", "lonewolf")), "map": "", "weapon": "", "score_player": int(resume_note.get("mine", 0)),
 		"score_bot": int(resume_note.get("theirs", 0)), "hp_left": 0, "difficulty": "ONLINE", "taken": 0, "shots": 0, "hits": 0,
@@ -2569,6 +2619,7 @@ func _on_room(msg: PackedByteArray) -> void:
 				_resume_off = false
 				_in_match_unix = Time.get_unix_time_from_system()
 				_save_resume()
+				_decline_waiting()
 				session_started.emit(is_host)
 		"st":
 			if _on_state_msg(d as Dictionary):
@@ -2644,16 +2695,28 @@ func _on_room(msg: PackedByteArray) -> void:
 ## one leaves the arena) or "connection lost" (this phone lost the relay or was away too long).
 ## A session entered from the file whose arena is not up yet: this phone's own end (LEAVE MATCH,
 ## lost again) puts a counted match into the profile as LEFT; the other phone's "bye" meanwhile
-## (it quit, or lost its own link: a LEFT for it) never does.
+## (it quit, or lost its own link: a LEFT for it) never does. In an all-human match that is the
+## host's (`theirs`: it quit or fell silent): the match ENDED, counted as ENDED (no win, no loss)
+## when its first fight began. Whatever ends it, resumed and resume_note are cleared after
+## (rejoin_notice keeps what the rejoin's end said, [] for any other end).
 func end_session(reason := "left", theirs := false) -> void:
 	var was := in_session
 	if in_session:
 		_room_send({"k": "ev", "e": "bye", "d": []})
 		last_end_reason = reason
+		rejoin_notice = []
 		if resumed and not _arena_listens():
 			# (entered from the file, ended before its arena was up)
 			var counted := bool(resume_note.get("counted", false))
-			if theirs:
+			if theirs and session_multi:
+				var host := "THE HOST"
+				for e: Dictionary in session_roster:
+					if String(e.get("id", "")) == session_host_id:
+						host = String(e.get("name", host))
+				_record_resume_left(true)
+				rejoin_notice = ["THE HOST LEFT", "%s left while you were rejoining - THE MATCH ENDED. " % host
+					+ ("It counts as ENDED: no win, no loss." if counted else "Nothing was counted.")]
+			elif theirs:
 				rejoin_notice = ["OPPONENT LEFT", "%s left the match while you were rejoining: it does not count as a defeat."
 					% String(opponent.get("name", "PLAYER"))]
 			else:
@@ -2661,6 +2724,8 @@ func end_session(reason := "left", theirs := false) -> void:
 				rejoin_notice = [] if reason == "left" else ["CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat)."
 					if counted else "The match could not be rejoined in time. Nothing was counted."]
 	in_session = false
+	resumed = false
+	resume_note = {}
 	_resume_emit = false
 	_resume_wait = false
 	clear_resume()
@@ -2989,7 +3054,8 @@ func _on_group_invite(from: String, d: Dictionary) -> void:
 		return
 	var gid := sec.slice(0, 16).hex_encode()
 	var inv := {"id": from, "gid": gid, "room": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "size": int(sec[80])}
-	var busy := in_session or session_multi or in_group() or (not group.is_empty() and not is_group_leader()) or not _ginv.is_empty() or in_room()
+	var busy := in_session or session_multi or in_group() or (not group.is_empty() and not is_group_leader()) or not _ginv.is_empty() or in_room() \
+			or _room != "" or _accept_ms != 0       # (a duel's room handshake under way: no popup over it)
 	if busy or not Game.is_friend(from) or not NetMatch.allowed(from, my_id) or group_invited.get_connections().is_empty():
 		_publish_json(ROOT + "/u/" + from, {"t": "dec", "from": my_id, "mac": _tag(inv, "dec", my_id)})
 		return
@@ -3248,12 +3314,12 @@ func join_group_code(code: String) -> String:
 	code = code.replace(" ", "").replace("-", "").strip_edges()
 	if not is_group_code(code):
 		return "A GROUP CODE HAS %d DIGITS" % CODE_LEN
-	if code_state == "in" and bool(_grp.get("joining", false)) and not in_room() and code == String(group.get("code", "")):
-		_group_close(true)               # the same code again while its join waits to be let in: asked afresh
-		code_state = ""
-	if code == group_code():
+	# The same code again while its join waits to be let in: asked afresh, the waiting join dropped
+	# only once every check below lets the new ask go out (a refused one keeps it as it was).
+	var again := code_state == "in" and bool(_grp.get("joining", false)) and not in_room() and code == String(group.get("code", ""))
+	if code == (my_code if again else group_code()):
 		return "THIS IS YOUR OWN GROUP CODE"
-	if in_group() or in_room() or (not group.is_empty() and String(group.leader) != my_id):
+	if not again and (in_group() or in_room() or (not group.is_empty() and String(group.leader) != my_id)):
 		return "EXIT YOUR GROUP FIRST"
 	if in_session or session_multi:
 		return "A MATCH IS ALREADY STARTING"
@@ -3267,6 +3333,9 @@ func join_group_code(code: String) -> String:
 	_code_tries = _code_tries.filter(func(t: int) -> bool: return now - t < 60000)
 	if _code_tries.size() >= CODE_TRIES_MAX:
 		return "TOO MANY TRIES: WAIT A MINUTE"
+	if again:
+		_group_close(true)
+		code_state = ""
 	_code_tries.append(now)
 	_cjoin = {"code": code, "key": _code_key(code), "t": now, "ask_t": 0.0}
 	code_state = "asking"
@@ -4037,6 +4106,7 @@ func _multi_start() -> void:
 	resume_note = {}
 	_in_match_unix = Time.get_unix_time_from_system()
 	_save_resume()                   # (a closed app can come back into it: the session file)
+	_decline_waiting()
 	session_started.emit(is_host)
 	if is_host:
 		for id: String in (_multi.left as Dictionary).keys():
@@ -4170,7 +4240,7 @@ func _multi_member_left(f: String) -> void:
 	_multi.left[f] = true
 	_away_ids.erase(f)
 	if f == session_host_id:
-		end_session("left")
+		end_session("left", true)    # (the host's doing: rejoining, this phone is not LEFT)
 		return
 	_save_resume()                   # (a restart keeps it LEFT: the file's "left")
 	if in_session:

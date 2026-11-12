@@ -84,7 +84,9 @@ listed here. If a part needs something new from the core, add it in its own file
   sends no "sync" of its own blanks; both apps closed, the resumed host takes the guest's "back"
   as its cue and enters its note's round from the prep (`Arena._resume_from_note`). Too late (or
   LEAVE MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once;
-  the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it).
+  the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it);
+  in an all-human match the host's "bye" or silence meanwhile is the host's doing: ENDED when
+  counted, never LEFT ("THE HOST LEFT"). Every session end clears `resumed` and `resume_note`.
   An all-human match's file adds "multi" (`Cloud.multi_from_file`: the roster as
   `NetGroup.pack_roster`, the host's id, the size, every member's counter, the ids of members who
   already left, rewritten when one leaves) and its note
@@ -131,7 +133,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - the target dummy (`arena.practice`): a CHANGE GUN plate left of the small slots
   (`HudLayout.weapon_repick`, hit id "weapons:repick") calls `arena.repick()`, which opens the
   weapon pick during the fight
-- `reveal(f: Fighter, seconds)` (enemy shows on the minimap), `match_over: bool`, `tips_time: float`
+- `reveal(f: Fighter, seconds)` (an enemy heard), `shot_heard(f)` (an enemy's shot out of sight: a
+  fading minimap mark where it fired, `shots_heard`, HUD.SHOT_SHOW s; in sight the minimap draws it
+  as an arrowhead, HudMinimap.enemy_marks), `feed_lines` (kill feed lines: 1 in the 1 vs 1, 3 in teams), `match_over: bool`, `tips_time: float`
 - `editor_mode`, `selected_id`, `layout` (used by the HUD editor)
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
   ({Fighter: bool} line of sight, refreshed 10x per second)
@@ -303,8 +307,11 @@ listed here. If a part needs something new from the core, add it in its own file
   sets `Game.team_match = LobbyFriends.session_team_match(cloud)` before the load (team_arena_net).
 - `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
   Android back, signal `closed`. It is the settings at once (`settings`, a `SettingsPanel` with
-  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH, asks once
-  more: its second tap may come up to `PauseMenu.QUIT_CONFIRM_S` real seconds later) at the foot of
+  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH: TRAINING
+  GROUND quits at one tap; any other match, online or a DUO / SQUAD against bots, asks first,
+  `PauseMenu.asks_before_quit` / `PauseMenu.quit_question`, in the panel's own
+  question `Confirm` (`SettingsPanel.ask`) with ConfirmCancel / ConfirmOk "QUIT": a counted match
+  is a defeat, LEFT in HISTORY; back closes the question first) at the foot of
   their tab column, and `edit_hud` set: EDIT CUSTOM HUD opens `HudEditor` (scripts/
   hud_editor_overlay.gd: the lobby's editor, BACK or back closes it to the settings; SAVE reloads
   the match HUD's layout) over the match. The settings' X or back closes the menu (saved; also
@@ -606,7 +613,10 @@ listed here. If a part needs something new from the core, add it in its own file
   DUO", TeamInvite ("+ INVITE"; "WAITING..." + the name while an invite waits), TeamBot_<3|4>. INVITE
   -> TeamInviteList: profile friends (never blocked ones), the ones in `Cloud.peers` first with
   TeamAsk_<code> -> `Cloud.team_invite(id, Game.team_size, true)` (false: "<NAME> COULD NOT BE
-  REACHED", TeamListNote); offline rows greyed, INVITE disabled; no friends: a note and TeamFriends
+  REACHED", TeamListNote); offline rows greyed, INVITE disabled; a friend whose lobby announce
+  ("hi", `Cloud.hello_msg`) carries "im" (in a match: `Cloud.peer_in_match`, no more about the match;
+  older builds send none and read ONLINE) reads IN A MATCH with INVITE greyed (GroupAsk_<code>), and
+  in the FRIENDS / ONLINE lists with DUEL 1 VS 1 greyed (Duel_<code>) until it is back in the lobby; no friends: a note and TeamFriends
   (opens FRIENDS). Then TeamWait "WAITING FOR <NAME>" + TeamWaitCancel (`Cloud.cancel_invite`); a no
   (`Cloud.invite_answered(false, name)`, also the 25 s time-out) reads "<NAME> DECLINED" (LobbyFriends
   hands answers on: `LobbyTeam.on_answered`).
@@ -656,8 +666,8 @@ listed here. If a part needs something new from the core, add it in its own file
   ADD FRIEND left of REMATCH while not friends; after a forfeit or once a player left only LOBBY,
   plus ADD FRIEND (in PLAY AGAIN's place) when result.enemy_id is another player's id and not yet a
   friend.
-- Pause menu: PauseMenu.host_of_team() (Game.team_match online + coop + host): the first QUIT tap
-  also shows QuitWarning, PauseMenu.HOST_WARNING.
+- Pause menu: PauseMenu.host_of_team() (Game.team_match online + host, coop or multi): QUIT MATCH's
+  question also holds QuitWarning, PauseMenu.HOST_WARNING (coop) / HOST_WARNING_ALL (all-human).
 - Tests: tests/team_hud_unit.gd (stand-in arena); the HUD tour's team part
   (`LW_TOUR=team tools/qa/capture.sh <dir> 1280x720 script:res://tests/shots_hud.gd` runs it alone;
   the full tour runs it after the 1 vs 1 part).
