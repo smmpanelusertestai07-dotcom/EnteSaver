@@ -2228,7 +2228,13 @@ func _test_release_fixes() -> void:
 		_check(FileAccess.get_file_as_string(path).contains("application/config/version"), "%s shows the project's version" % path)
 	_check(not FileAccess.get_file_as_string("res://scripts/lobby.gd").contains("application/config/version"),
 		"the lobby shows no version (as the reference: only before the lobby)")
-	_check(PauseMenu.QUIT_CONFIRM_S >= 5.0, "QUIT MATCH's second tap may come a while later")
+	_check(PauseMenu.quit_question(false, true).is_empty(), "TRAINING GROUND's QUIT MATCH quits at one tap")
+	var q := PauseMenu.quit_question(true, true)
+	_check(q.size() == 2 and String(q[0]).contains("defeat") and String(q[0]).contains("LEFT in HISTORY") and String(q[1]) == "",
+		"QUIT MATCH in a counted online match asks first: a defeat, LEFT in HISTORY (%s)" % str(q))
+	q = PauseMenu.quit_question(true, false, PauseMenu.HOST_WARNING)
+	_check(q.size() == 2 and String(q[0]).contains("nothing is counted") and String(q[1]) == PauseMenu.HOST_WARNING,
+		"before the first fight it says nothing counts; the host's warning goes into the same question")
 	var arena_script: GDScript = load("res://scripts/arena.gd")
 	var v := Bot.new()
 	var k := Bot.new()

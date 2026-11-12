@@ -284,8 +284,10 @@ listed here. If a part needs something new from the core, add it in its own file
   sets `Game.team_match = LobbyFriends.session_team_match(cloud)` before the load (team_arena_net).
 - `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
   Android back, signal `closed`. It is the settings at once (`settings`, a `SettingsPanel` with
-  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH, asks once
-  more: its second tap may come up to `PauseMenu.QUIT_CONFIRM_S` real seconds later) at the foot of
+  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH: TRAINING
+  GROUND quits at one tap; online it asks first, `PauseMenu.quit_question`, in the panel's own
+  question `Confirm` (`SettingsPanel.ask`) with ConfirmCancel / ConfirmOk "QUIT": a counted match
+  is a defeat, LEFT in HISTORY; back closes the question first) at the foot of
   their tab column, and `edit_hud` set: EDIT CUSTOM HUD opens `HudEditor` (scripts/
   hud_editor_overlay.gd: the lobby's editor, BACK or back closes it to the settings; SAVE reloads
   the match HUD's layout) over the match. The settings' X or back closes the menu (saved; also
@@ -640,8 +642,8 @@ listed here. If a part needs something new from the core, add it in its own file
   ADD FRIEND left of REMATCH while not friends; after a forfeit or once a player left only LOBBY,
   plus ADD FRIEND (in PLAY AGAIN's place) when result.enemy_id is another player's id and not yet a
   friend.
-- Pause menu: PauseMenu.host_of_team() (Game.team_match online + coop + host): the first QUIT tap
-  also shows QuitWarning, PauseMenu.HOST_WARNING.
+- Pause menu: PauseMenu.host_of_team() (Game.team_match online + host, coop or multi): QUIT MATCH's
+  question also holds QuitWarning, PauseMenu.HOST_WARNING (coop) / HOST_WARNING_ALL (all-human).
 - Tests: tests/team_hud_unit.gd (stand-in arena); the HUD tour's team part
   (`LW_TOUR=team tools/qa/capture.sh <dir> 1280x720 script:res://tests/shots_hud.gd` runs it alone;
   the full tour runs it after the 1 vs 1 part).

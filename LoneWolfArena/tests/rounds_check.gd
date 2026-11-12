@@ -114,8 +114,7 @@ func run(autotest: Node) -> int:
 	var quit := pm.find_child("Quit", true, false) as Button
 	if quit == null:
 		return _done("the in-match settings have no QUIT MATCH")
-	quit.pressed.emit()                    # QUIT MATCH, then TAP AGAIN TO QUIT
-	quit.pressed.emit()
+	quit.pressed.emit()                    # QUIT MATCH (TRAINING GROUND: one tap; online it asks first)
 	t = 0.0
 	while (get_tree().current_scene == arena or get_tree().current_scene == null or get_tree().current_scene.name != "Lobby") and t < 20.0:
 		await at.wait(0.25)
