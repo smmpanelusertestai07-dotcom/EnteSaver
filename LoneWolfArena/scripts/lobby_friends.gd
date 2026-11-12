@@ -22,14 +22,13 @@ extends RefCounted
 ## (Game.team_match = TeamArena.link_match), any other one the 1 vs 1 (Game.team_match = {}).
 ## GROUPS (design/GROUPS.txt, through Cloud's group API): a GROUP INVITE
 ## (Cloud.group_invited) shows "<NAME> invites you to their group" with ACCEPT / DECLINE / BLOCK and
-## waits behind a busy popup as a duel does; LONE WOLF DUO / SQUAD's search shows SEARCHING PLAYERS
-## n/N (Cloud.search_found / search_needed), the time searched and CANCEL (Cloud.group_search_stop):
-## real players only, no bots. Cloud.group_changed redraws the lobby's group parts (Lobby.on_group_changed).
+## waits behind a busy popup as a duel does; LONE WOLF DUO / SQUAD's search has no popup: the
+## lobby's search tab shows PLAYERS n/N (Cloud.search_found / search_needed) and the time searched,
+## its X is cancel_search (Cloud.group_search_stop): real players only, no bots. Cloud.group_changed redraws the lobby's group parts (Lobby.on_group_changed).
 ## Node names: Tab_<online|friends|room|local>, NetList, MyId, FriendSearch, FriendAccept,
 ## FriendDecline, RoomHead, RoomStart, RoomPin, RoomMode_<1|2|4>, Rule_<key>, RoomCreate, JoinCode, JoinPin,
 ## RoomJoin, JoinState, AcceptButton, Player_<friend code> (a list row's name: opens the card),
-## GroupInvitePopup (GroupInviteText, GroupInviteBlock, DeclineButton, AcceptButton), GroupSearch
-## (GroupSearchCount, GroupSearchTimer, GroupSearchNote, GroupSearchCancel).
+## GroupInvitePopup (GroupInviteText, GroupInviteBlock, DeclineButton, AcceptButton).
 
 var lobby: Lobby
 var _net_kind := "online"
@@ -52,12 +51,6 @@ var _badge_n := -1                     # the unread count the ONLINE 1 VS 1 row 
 var _badge_t := 0.0
 var _kb_field: LineEdit = null         # the text field the popup is lifted for (_lift_for_keyboard)
 var _kb_seen := false                  # the on-screen keyboard was up for it (_follow_keyboard)
-var _search_modal: Control             # the open SEARCHING PLAYERS popup
-var _search_count: Label
-var _search_timer: Label
-var _search_t := 0.0
-var _search_sec := -1
-var _search_seen := false              # the search was counting (needed > 0) once
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -103,7 +96,6 @@ func on_lobby_exit() -> void:
 ## Every frame: the open list follows the service (players, requests, invites); the unread badge.
 func process(delta: float) -> void:
 	_follow_keyboard()
-	_follow_search(delta)
 	_badge_t -= delta
 	if _badge_t <= 0.0:
 		_badge_t = 0.5
@@ -864,78 +856,12 @@ func _ask_block_group_inviter(who: String) -> void:
 			Game.block(id, who), back, true)
 
 
-## LONE WOLF DUO / SQUAD searching for real players (after Cloud.group_start said ""): SEARCHING
-## PLAYERS n/N, the time searched, CANCEL (also X and back: Cloud.group_search_stop). No bots: it
-## waits until every place is taken. The session that starts closes it (_on_net_session).
-func open_search(size: int) -> void:
-	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
-	var v := lobby.dialogs.open_modal("LONE WOLF %s" % word, 640.0)
-	v.name = "GroupSearch"
-	_search_modal = lobby.dialogs.modal
-	_search_modal.set_meta("on_back", cancel_search)
-	_search_count = UI.label("", 30, UI.ACCENT, "heavy")
-	_search_count.name = "GroupSearchCount"
-	_search_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_search_count)
-	_search_timer = UI.label("0:00", 40, UI.TEXT)
-	_search_timer.name = "GroupSearchTimer"
-	_search_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_search_timer)
-	var line := UI.label("%s: %d VS %d, real players only. Your group stays one team; the match starts when every place is taken." % [
-		word, size, size], 17, UI.TEXT_DIM, "semi")
-	line.name = "GroupSearchNote"
-	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	line.custom_minimum_size = Vector2(560, 0)
-	v.add_child(line)
-	var cancel := UI.button("CANCEL", 22, "dark", Vector2(240, 56))
-	cancel.name = "GroupSearchCancel"
-	cancel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	cancel.pressed.connect(cancel_search)
-	v.add_child(cancel)
-	_search_t = 0.0
-	_search_sec = -1
-	_search_seen = false
-	_follow_search(0.0)
-
-
-## CANCEL: the search stops and its popup closes.
+## LONE WOLF DUO / SQUAD searching for real players (after Cloud.group_start said ""): no popup,
+## the lobby's search tab (Lobby.search_tab) shows PLAYERS n/N and the time searched while
+## Cloud.search_needed > 0; its X (and Android back with no window open) is this. No bots: it waits
+## until every place is taken; the session that starts loads the match (_on_net_session).
 func cancel_search() -> void:
-	var m := _search_modal
-	_search_modal = null
 	Game.cloud_service().group_search_stop()
-	if m and is_instance_valid(m) and lobby.dialogs.modal == m:
-		lobby.dialogs.close_modal()
-
-
-## The search popup follows Cloud.search_found / search_needed every frame (texts change only when
-## the numbers or the second do); its popup gone another way (not a match starting) stops the
-## search, as QUICK MATCH's does; a search that ended (needed back to 0) closes it.
-func _follow_search(delta: float) -> void:
-	if _search_modal == null:
-		return
-	var cloud := Game.cloud_service()
-	if not is_instance_valid(_search_modal) or _search_modal.is_queued_for_deletion() or lobby.dialogs.modal != _search_modal:
-		_search_modal = null
-		if not cloud.in_session:
-			Game.cloud_service().group_search_stop()
-		return
-	_search_t += delta
-	var f := cloud.search_found
-	var n := cloud.search_needed
-	if n > 0:
-		_search_seen = true
-	elif _search_seen and not cloud.in_session:
-		_search_modal = null               # the search ended (not with a match): nothing to wait for
-		lobby.dialogs.close_modal()
-		return
-	var count := LobbyTeam.search_text(f, n)
-	if _search_count.text != count:
-		_search_count.text = count
-	var sec := int(_search_t)
-	if sec != _search_sec:
-		_search_sec = sec
-		_search_timer.text = "%d:%02d" % [sec / 60, sec % 60]
 
 
 ## The team of the challenge waiting here ({"size", "coop"}: a TEAM INVITE), {} for a duel.
@@ -1161,7 +1087,7 @@ func _on_net_session(_host: bool) -> void:
 	Game.room_rules = cloud.session_rules.duplicate()
 	cloud.close_room()
 	cloud.leave_join()
-	lobby.dialogs.close_modal()
+	lobby.close_layers()                # (a window open meanwhile closes: the match loads)
 	lobby.start_btn.disabled = true
 	UI.set_caption(lobby.start_btn, "LOADING")
 	Loading.start_match(lobby)

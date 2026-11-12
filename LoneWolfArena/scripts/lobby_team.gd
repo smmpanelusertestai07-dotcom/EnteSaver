@@ -9,6 +9,10 @@ extends RefCounted
 ## (GroupExit, a member) or DISBAND GROUP (GroupDisband, the leader). INVITE opens the list of online
 ## friends (GroupInviteList: Cloud.peers ∩ friends, never blocked ones; GroupAsk_<code> ->
 ## Cloud.group_invite(id)), then a popup says INVITED <NAME> and how they answered (GroupInvited).
+## Every group has a GROUP CODE (Cloud.group_code; a solo's is the code of the group it would lead)
+## shown under the head with COPY and, for the leader, the switch JOIN BY CODE: ON / OFF; a solo also
+## has JOIN BY CODE: a friend's code puts this player in their group at once, no invite needed
+## (Cloud.join_group_code; full, wrong code, blocked: the popup says so).
 ## Hidden while Game.TEAMS_ONLINE is off, and outside LONE WOLF unless the player is in a group.
 ## The lobby makes it (Lobby.team), builds it (build), redraws it on Cloud.group_changed and on
 ## SELECT MODE (refresh) and calls process() every frame; LobbyFriends hands it a declined invite
@@ -17,7 +21,8 @@ extends RefCounted
 ## in_group / is_leader / group_max / search_progress). A CUSTOM ROOM with slots is a group too
 ## (Cloud.in_room): its players show in the room's own slot panel (LobbyFriends), not in this bar.
 ## Node names: GroupBar, GroupHead, GroupMember_<n>, GroupRemove_<n>, GroupInvite, GroupTeams,
-## GroupExit, GroupDisband, GroupInviteList, GroupFriend_<code>, GroupAsk_<code>, GroupListNote,
+## GroupExit, GroupDisband, GroupCodeRow (GroupCode, GroupCodeCopy, GroupCodeSwitch), GroupJoinCode,
+## JoinCodePopup (JoinGroupCode, JoinGroupGo, JoinGroupState), GroupInviteList, GroupFriend_<code>, GroupAsk_<code>, GroupListNote,
 ## GroupFriends, GroupInvited, GroupInvitedOk, GroupTeamPanel (with a SlotPanel).
 
 const TILE_W := 280.0
@@ -35,6 +40,9 @@ var _invited_id := ""                    # the friend the last GROUP INVITE went
 var _invited_name := ""
 var _invited_label: Label
 var _slot_panel: SlotPanel               # the open TEAMS popup's panel
+var _code_state: Label                   # the open JOIN BY CODE popup's status line
+var _code_field: LineEdit
+var _code_asked := false                 # the popup's JOIN went out: its line follows Cloud.code_state
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -99,20 +107,12 @@ static func bar_actions(grouped: bool, leader: bool, count: int, size: int, max_
 		"disband": grouped and leader, "remove": grouped and leader, "teams": grouped and size > 1}
 
 
-## What sits in START's place: "" (START works) or the line a member sees.
-static func start_gate_text(grouped: bool, leader: bool, leader_n: String, searching := Vector2i.ZERO) -> String:
+## What sits in START's place outside a search: "" (START works) or the line a member sees (a
+## search shows the MATCHING... plate instead, and the search tab with PLAYERS n/N: SearchTab).
+static func start_gate_text(grouped: bool, leader: bool, leader_n: String) -> String:
 	if not grouped or leader:
 		return ""
-	if searching.y > 0:
-		return "SEARCHING PLAYERS %d/%d" % [searching.x, searching.y]
 	return "WAITING FOR %s TO START" % (leader_n if leader_n != "" else "THE LEADER")
-
-
-## The search popup's count line.
-static func search_text(found: int, needed: int) -> String:
-	if needed <= 0:
-		return "STARTING MATCH..."
-	return "SEARCHING PLAYERS %d/%d" % [clampi(found, 0, needed), needed]
 
 
 ## The friends to invite: [{"id", "name", "online"}], online ones first, then by name; blocked
@@ -184,7 +184,8 @@ func refresh() -> void:
 	var list := members()
 	var grouped := in_group()
 	var leader := is_leader()
-	var sig := "%s|%s|%s|%d|%s|%s" % [str(list), grouped, leader, Game.team_size, Game.mode, _invited_id]
+	var cloud := Game.cloud_service()
+	var sig := "%s|%s|%s|%d|%s|%s|%s|%s" % [str(list), grouped, leader, Game.team_size, Game.mode, _invited_id, cloud.group_code(), cloud.code_join]
 	if sig == _sig:
 		return
 	_sig = sig
@@ -198,9 +199,13 @@ func refresh() -> void:
 	var head := UI.shadowed(UI.label("YOUR GROUP  %d/%d" % [maxi(list.size(), 1), group_max()], 15, UI.TEXT, "heavy"))
 	head.name = "GroupHead"
 	bar.add_child(head)
+	if cloud.group_code() != "":
+		bar.add_child(_code_row(cloud.group_code(), leader, cloud.code_join))
 	for i in list.size():
 		bar.add_child(_member_tile(i + 1, list[i], bool(acts.remove)))
 	bar.add_child(_invite_tile(list.size() + 1 if grouped else 2, bool(acts.invite_on)))
+	if not grouped:
+		bar.add_child(_action_button("JOIN BY CODE", "GroupJoinCode", "dark", open_join_code))
 	if acts.teams:
 		bar.add_child(_action_button("TEAMS", "GroupTeams", "dark", open_teams))
 	if acts.exit:
@@ -313,6 +318,107 @@ func _invite_tile(n: int, on: bool) -> Button:
 		Audio.play("ui_click", -4.0)
 		open_list())
 	return b
+
+
+## The GROUP CODE (GroupCodeRow): the code (GroupCode), COPY (GroupCodeCopy) and, for the leader
+## (or a solo), the switch JOIN BY CODE: ON / OFF (GroupCodeSwitch: Cloud.set_code_join).
+func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.name = "GroupCodeRow"
+	p.add_theme_stylebox_override("panel", _tile_style(Color(0.02, 0.02, 0.025, 0.66), Color(1, 1, 1, 0.14)))
+	p.custom_minimum_size = Vector2(TILE_W, UI.TOUCH_MIN)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	p.add_child(h)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", -4)
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(UI.label("GROUP CODE", 11, UI.TEXT_DIM, "bold"))
+	var l := UI.label(code, 22, UI.ACCENT, "heavy")
+	l.name = "GroupCode"
+	v.add_child(l)
+	h.add_child(v)
+	var copy := UI.button("COPY", 13, "dark", Vector2(UI.TOUCH_MIN + 4, UI.TOUCH_MIN))
+	copy.name = "GroupCodeCopy"
+	copy.pressed.connect(func() -> void:
+		DisplayServer.clipboard_set(code)
+		LobbyNet.toast(lobby, "GROUP CODE COPIED", code, Callable()))
+	h.add_child(copy)
+	if leader:
+		var sw := UI.button("JOIN BY CODE\n%s" % ("ON" if on else "OFF"), 11, "ghost" if not on else "dark", Vector2(96, UI.TOUCH_MIN))
+		sw.name = "GroupCodeSwitch"
+		sw.add_theme_color_override("font_color", UI.ACCENT if on else UI.TEXT_DIM)
+		sw.pressed.connect(func() -> void: Game.cloud_service().set_code_join(not Game.cloud_service().code_join))
+		h.add_child(sw)
+	return p
+
+
+## What JOIN BY CODE's status line says for Cloud.code_state ("" while nothing is under way).
+static func code_state_text(state: String) -> String:
+	match state:
+		"asking":
+			return "LOOKING FOR THE GROUP..."
+		"in":
+			return "JOINING THE GROUP..."
+		"full":
+			return "THE GROUP IS FULL"
+		"none":
+			return "NO GROUP WITH THIS CODE"
+		"blocked":
+			return "YOU BLOCKED THIS GROUP'S LEADER"
+	return ""
+
+
+## JOIN BY CODE (a solo's GROUP bar): the 6-digit code (JoinGroupCode) and JOIN (JoinGroupGo):
+## Cloud.join_group_code; the line under it (JoinGroupState) follows Cloud.code_state, and the popup
+## closes once this player is in the group (no invite needed).
+func open_join_code() -> void:
+	var v := lobby.dialogs.open_modal("JOIN BY CODE", 640.0, true)
+	v.name = "JoinCodePopup"
+	_code_asked = false
+	var t := UI.label("Enter a friend's GROUP CODE to join their group at once.", 18, UI.TEXT_DIM, "semi")
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(560, 0)
+	v.add_child(t)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	v.add_child(row)
+	_code_field = lobby.friends._text_field("GROUP CODE", 6, true)
+	_code_field.name = "JoinGroupCode"
+	row.add_child(_code_field)
+	var go := UI.button("JOIN", 22, "primary", Vector2(170, UI.TOUCH_MIN))
+	go.name = "JoinGroupGo"
+	row.add_child(go)
+	_code_state = UI.label("", 18, UI.ACCENT, "heavy")
+	_code_state.name = "JoinGroupState"
+	_code_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_code_state.custom_minimum_size = Vector2(560, 0)
+	v.add_child(_code_state)
+	var join := func() -> void:
+		var why := Game.cloud_service().join_group_code(_code_field.text)
+		_code_asked = why == ""
+		_code_state.text = why if why != "" else code_state_text(Game.cloud_service().code_state)
+	go.pressed.connect(join)
+	_code_field.text_submitted.connect(func(_t: String) -> void: join.call())
+
+
+## The open JOIN BY CODE popup follows Cloud.code_state (and closes once in the group).
+func _follow_join_code() -> void:
+	if _code_state == null:
+		return
+	if not is_instance_valid(_code_state) or not _code_state.is_inside_tree():
+		_code_state = null
+		return
+	var c := Game.cloud_service()
+	if in_group():
+		_code_state = null
+		lobby.dialogs.close_modal()
+		return
+	var st := code_state_text(c.code_state)
+	if _code_asked and st != "" and _code_state.text != st:
+		_code_state.text = st
 
 
 func _action_button(text: String, node_name: String, style: String, action: Callable) -> Button:
@@ -517,6 +623,7 @@ func open_teams() -> void:
 func on_group_changed() -> void:
 	refresh()
 	_follow_invited()
+	_follow_join_code()
 	if _slot_panel and is_instance_valid(_slot_panel):
 		_slot_panel.editable = is_leader()
 		_slot_panel.show_slots(NetGroup.per_team(Game.team_size), team_entries(members(), Game.team_size))
@@ -527,6 +634,7 @@ func process(delta: float) -> void:
 	if _refresh_t > 0.0:
 		return
 	_refresh_t = 0.5
+	_follow_join_code()
 	if _list and is_instance_valid(_list):
 		_fill_list()
 	elif _list:

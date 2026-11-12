@@ -9,7 +9,7 @@ extends Node
 ##   TEAM bar in 1.5 has its own check: tests/group_lobby_check.gd);
 ## - a stand-in TEAM INVITE (Cloud._incoming with a team) shows TEAM INVITE; DECLINE closes it;
 ## - START in LONE WOLF SOLO clears a team match left over (the 1 vs 1 QUICK MATCH);
-## - LONE WOLF x DUO searches real players only (Cloud's search: SEARCHING PLAYERS 1/4, no bots, no
+## - LONE WOLF x DUO searches real players only (Cloud's search: the search tab PLAYERS 1/4, no bots, no
 ##   match against bots ever); CANCEL stops it;
 ## - TRAINING GROUND x SQUAD loads scenes/team_arena.tscn with eight fighters' roster;
 ## - every touch target on the way is at least 56 px.
@@ -144,29 +144,41 @@ func _quick_clears(lobby: Lobby) -> void:
 
 
 ## LONE WOLF x DUO: the search for real players (Cloud.group_start: a solo is a unit of one),
-## SEARCHING PLAYERS 1/4 with no word of bots; CANCEL stops it. Never a match against bots.
+## the search tab (no popup) with PLAYERS 1/4 and no word of bots, START a greyed MATCHING... plate,
+## the mode card saying CANCEL THE SEARCH FIRST; the tab's X stops it. Never a match against bots.
 func _team_search(lobby: Lobby) -> void:
 	await _pick_size(lobby, "lonewolf", 2)
 	var cloud := Game.cloud_service()
 	await _tap(lobby.start_btn)
 	await at.wait(1.2)
-	var popup := lobby.dialogs.modal
-	if popup == null or popup.find_child("GroupSearch", true, false) == null or popup.find_child("GroupSearchCancel", true, false) == null \
-			or _text(popup, "GroupSearchCount") != "SEARCHING PLAYERS 1/4" or cloud.search_needed != 4:
-		_fail("START in LONE WOLF DUO does not search real players (%s)" % _text(popup, "GroupSearchCount"))
+	var tab := lobby.search_tab
+	if lobby.dialogs.modal != null or not tab.is_visible_in_tree() or tab.find_child("SearchCancel", true, false) == null \
+			or _text(tab, "SearchPlayers") != "PLAYERS 1/4" or cloud.search_needed != 4:
+		_fail("START in LONE WOLF DUO does not show the search tab for real players (%s)" % _text(tab, "SearchPlayers"))
 		return
-	for l in popup.find_children("*", "Label", true, false):
+	var plate := lobby.find_child("MatchingPlate", true, false) as Control
+	if plate == null or not plate.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree():
+		_fail("START does not turn into the MATCHING... plate while searching")
+	for l in tab.find_children("*", "Label", true, false):
 		if (l as Label).text.contains("BOT"):
 			_fail("the search mentions bots: %s" % (l as Label).text)
-	_touch_ok(popup)
+	if _text(tab, "SearchLine") != ("ESTIMATED 0:10" if cloud.status == "online" else "CONNECTING..."):     # (no relay here)
+		_fail("the search tab's first line is not the estimate (%s)" % _text(tab, "SearchLine"))
+	_touch_ok(tab)
 	await at.shot("t08_team_search")
+	# The lobby stays usable: the mode card answers CANCEL THE SEARCH FIRST, WARDROBE opens.
+	await _tap(lobby.mode_card)
+	await at.wait(0.3)
+	if _text(lobby.dialogs.modal, "NoticeText") != "CANCEL THE SEARCH FIRST":
+		_fail("a tap on the mode card during a search does not say CANCEL THE SEARCH FIRST")
+	lobby.dialogs.close_modal()
 	await at.wait(3.5)                   # (longer than the old LW_FILL_S: no match against bots comes)
 	if get_tree().current_scene != lobby or not Game.team_match.is_empty():
 		_fail("the search loaded a match on its own")
-	await _tap(popup.find_child("GroupSearchCancel", true, false) as Control)
+	await _tap(tab.find_child("SearchCancel", true, false) as Control)
 	await at.wait(0.4)
-	if cloud.search_needed != 0 or lobby.dialogs.modal != null:
-		_fail("CANCEL does not stop the search")
+	if cloud.search_needed != 0 or tab.is_visible_in_tree() or not lobby.start_btn.is_visible_in_tree():
+		_fail("the search tab's X does not stop the search")
 
 
 ## TRAINING GROUND x SQUAD loads the team arena on this phone.

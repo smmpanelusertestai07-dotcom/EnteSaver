@@ -9,7 +9,7 @@ extends Node
 ## - the leader of 4: three member models on the podium besides the hero, with name plates; REMOVE
 ##   on each other member (asked first) drops them, DISBAND GROUP, INVITE greyed (full);
 ## - START (leader, DUO): a group of 3 is told why it cannot start offline; a group of 2 searches:
-##   SEARCHING PLAYERS n/N with CANCEL; TEAMS: the slot panel moves a member (Cloud.set_group_team);
+##   the search tab with PLAYERS n/N and its X (no popup); TEAMS: the slot panel moves a member (Cloud.set_group_team);
 ## - a member: WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
 ##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
@@ -135,7 +135,7 @@ func _leader(lobby: Lobby) -> void:
 
 
 ## START (the leader, DUO): a group of 3 (2 VS 1) is told it needs the internet; a group of 2 (one
-## team) searches: SEARCHING PLAYERS n/N, CANCEL.
+## team) searches: the search tab with PLAYERS n/N, its X.
 func _start_and_search(lobby: Lobby) -> void:
 	if not lobby.start_btn.is_visible_in_tree():
 		_fail("the leader has no START")
@@ -150,23 +150,22 @@ func _start_and_search(lobby: Lobby) -> void:
 	await at.wait(0.3)
 	await _tap(lobby.start_btn)
 	await at.wait(0.5)
-	var popup := lobby.dialogs.modal
-	if popup == null or popup.find_child("GroupSearch", true, false) == null or _text(popup, "GroupSearchCount") != "SEARCHING PLAYERS 2/4" \
+	var tab := lobby.search_tab
+	if lobby.dialogs.modal != null or not tab.is_visible_in_tree() or _text(tab, "SearchPlayers") != "PLAYERS 2/4" \
 			or cloud.search_needed != 4:
-		_fail("no SEARCHING PLAYERS 2/4 popup (%s)" % _text(popup, "GroupSearchCount"))
-	if popup and (_find_text(popup, "BOT") or _text(popup, "GroupSearchTimer") == ""):
-		_fail("the search popup mentions bots or has no timer")
+		_fail("no search tab with PLAYERS 2/4 (and no popup) (%s)" % _text(tab, "SearchPlayers"))
+	if _find_text(tab, "BOT") or _text(tab, "SearchTimer") == "":
+		_fail("the search tab mentions bots or has no timer")
 	cloud.search_found = 3
 	await at.wait(0.3)
-	if _text(lobby.dialogs.modal, "GroupSearchCount") != "SEARCHING PLAYERS 3/4":
+	if _text(tab, "SearchPlayers") != "PLAYERS 3/4":
 		_fail("the search count does not follow Cloud.search_found")
-	if popup:
-		_touch_ok(popup)
+	_touch_ok(tab)
 	await at.shot("g03_searching_players")
-	await _tap(popup.find_child("GroupSearchCancel", true, false) as Control if popup else null)
+	await _tap(tab.find_child("SearchCancel", true, false) as Control)
 	await at.wait(0.3)
-	if cloud.search_needed != 0 or lobby.dialogs.modal != null:
-		_fail("CANCEL does not stop the search and close its popup")
+	if cloud.search_needed != 0 or tab.is_visible_in_tree():
+		_fail("the search tab's X does not stop the search")
 
 
 ## TEAMS: the leader's slot panel; tap a member, then a place: Cloud.set_group_team.
@@ -230,8 +229,27 @@ func _member(lobby: Lobby) -> void:
 	cloud.search_found = 5
 	cloud.search_needed = 8
 	await at.wait(0.5)
-	if _find_label(wait, "SEARCHING PLAYERS 5/8") == null:
-		_fail("a member does not see the group's search")
+	# The group's search: the same tab as the leader's, without the X (the leader cancels), and
+	# the MATCHING... plate in START's place instead of WAITING FOR.
+	var tab := lobby.search_tab
+	var x := tab.find_child("SearchCancel", true, false) as Control
+	var plate := lobby.find_child("MatchingPlate", true, false) as Control
+	if not tab.is_visible_in_tree() or _text(tab, "SearchPlayers") != "PLAYERS 5/8" or x.is_visible_in_tree() \
+			or wait.is_visible_in_tree() or plate == null or not plate.is_visible_in_tree():
+		_fail("a member does not see the group's search tab without its X (%s)" % _text(tab, "SearchPlayers"))
+	_no_overlap([tab, plate, bar])
+	await at.shot("g05b_member_searching")
+	# TEAMS opened meanwhile: its popup stays clear of the search tab.
+	await _tap(bar.find_child("GroupTeams", true, false) as Control)
+	await at.wait(0.4)
+	var frame := lobby.dialogs.modal.find_child("Frame", true, false) as Control if lobby.dialogs.modal else null
+	if frame == null:
+		_fail("a member's TEAMS did not open")
+	else:
+		_no_overlap([tab, frame])
+		await at.shot("g05c_member_teams_searching")
+	lobby.dialogs.close_modal()
+	await at.wait(0.2)
 	cloud.search_found = 0
 	cloud.search_needed = 0
 	await at.wait(0.3)
@@ -366,6 +384,20 @@ func _new_lobby(old: Node) -> Lobby:
 
 
 ## Every visible button under `root` is a 56 px touch target.
+## None of these (the visible ones) overlap on the screen.
+func _no_overlap(nodes: Array) -> void:
+	var shown: Array = []
+	for n: Variant in nodes:
+		if n is Control and (n as Control).is_visible_in_tree():
+			shown.append(n)
+	for i in shown.size():
+		for j in range(i + 1, shown.size()):
+			var a := (shown[i] as Control).get_global_rect()
+			var b := (shown[j] as Control).get_global_rect()
+			if a.intersects(b):
+				_fail("%s %s overlaps %s %s" % [(shown[i] as Control).name, str(a), (shown[j] as Control).name, str(b)])
+
+
 func _touch_ok(root: Node) -> void:
 	for b in root.find_children("*", "BaseButton", true, false):
 		var c := b as Control

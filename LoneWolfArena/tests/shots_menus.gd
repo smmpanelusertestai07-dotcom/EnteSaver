@@ -479,22 +479,23 @@ func _tour_modes(lobby: Node) -> void:
 	_check(_label_text(card, "ModeName") == "LONE WOLF" and _label_text(card, "ModeFormat") == "1 VS 1 ONLINE",
 		"the LONE WOLF card says 1 VS 1 ONLINE")
 	await _at.shot("m02c_lobby_lone_wolf")
-	# LONE WOLF's START searches for a random opponent (QUICK MATCH: SEARCHING..., the time, CANCEL;
-	# no match loads by itself); CANCEL stops the search.
+	# LONE WOLF's START searches for a random opponent (QUICK MATCH: the search tab at the top with
+	# the time and its X; no popup, no match loads by itself); the X stops the search.
 	var start := lobby.get("start_btn") as Button
 	await _tap(start)
 	await _settle(1.2)
-	var online := lobby.get("_modal") as Control
+	var tab := lobby.get("search_tab") as Control
 	var quick := lobby.get_node_or_null("NetMatch") as NetMatch
-	_check(online != null and online.find_child("QuickCancel", true, false) != null and quick != null and quick.searching
-		and not start.disabled and Game.cloud_service().seeking, "LONE WOLF's START opens the QUICK MATCH search")
+	_check(lobby.get("_modal") == null and tab != null and tab.is_visible_in_tree() and tab.find_child("SearchCancel", true, false) != null
+		and quick != null and quick.searching and not start.disabled and Game.cloud_service().seeking,
+		"LONE WOLF's START shows the QUICK MATCH search tab (no popup)")
 	_check(_find_overlay() == null, "LONE WOLF's START loads no match")
 	await _at.shot("m02d_lone_wolf_start")
-	if online:
-		await _tap(online.find_child("QuickCancel", true, false) as Control)
+	if tab:
+		await _tap(tab.find_child("SearchCancel", true, false) as Control)
 		await _settle(0.4)
-	_check(lobby.get("_modal") == null and quick != null and not quick.searching and not Game.cloud_service().seeking,
-		"QUICK MATCH's CANCEL stops the search")
+	_check(tab != null and not tab.is_visible_in_tree() and quick != null and not quick.searching and not Game.cloud_service().seeking,
+		"the search tab's X stops the search")
 	# And back to TRAINING GROUND (a tap on its card, away from the chips).
 	await _tap(card)
 	await _settle(0.5)

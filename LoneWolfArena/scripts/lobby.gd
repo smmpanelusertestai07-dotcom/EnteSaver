@@ -11,7 +11,11 @@ extends Node3D
 ## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
 ## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
 ## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
-## scripts/net_match.gd; DUO / SQUAD: Cloud.group_start, real players only, design/GROUPS.txt). In
+## scripts/net_match.gd; DUO / SQUAD: Cloud.group_start, real players only, design/GROUPS.txt; in a
+## group of two, SOLO is a DUEL between the two: start_duel). A search has no popup: the search tab
+## (SearchTab, scripts/lobby_search.gd) drops from the top centre with the time searched and a
+## cancel X, START turns into the greyed MATCHING... plate, and the lobby stays usable (a tap on the
+## mode card says CANCEL THE SEARCH FIRST; the match found closes whatever window is open). In
 ## LONE WOLF the GROUP bar under the player card (LobbyTeam, scripts/lobby_team.gd) invites online
 ## friends into a group of up to 4; the other members stand on the podium beside the hero, smaller,
 ## with name plates and a LEADER mark (show_group_members); only the leader's START works (a member
@@ -27,7 +31,8 @@ extends Node3D
 ## bar and its invites).
 ## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard, BottomBar,
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
-## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader; 3D: GroupMembers with
+## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader, MatchingPlate, SearchLayer
+## with SearchTab (SearchLine, SearchTimer, SearchPlayers, SearchCancel); 3D: GroupMembers with
 ## GroupModel_<1..3> (CharacterModel), each with NamePlate and, on the leader, LeaderMark.
 
 const PODIUM_TOP := 0.24
@@ -114,6 +119,12 @@ var _wait_label: Label
 var _gate_t := 0.0
 var _gate_member := false
 var _gate_leader_name := ""
+## The search tab (SearchTab, scripts/lobby_search.gd) on its own layer over the lobby's windows,
+## and the plate that stands in START's place while a search runs.
+var search_tab: SearchTab
+var _search_layer: CanvasLayer
+var _matching: Button
+var _search_was := ""
 
 
 func _ready() -> void:
@@ -580,6 +591,19 @@ func _build_ui() -> void:
 	_build_right_column(root)
 	_build_bottom_bar(root)
 	team.build(root)
+	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
+	# so the search stays in sight and its X in reach while the player looks around.
+	_search_layer = CanvasLayer.new()
+	_search_layer.name = "SearchLayer"
+	_search_layer.layer = ui.layer + 1
+	add_child(_search_layer)
+	var holder := Control.new()
+	UI.full_rect(holder)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_search_layer.add_child(holder)
+	UI.keep_clear_of_cutout(holder)
+	search_tab = SearchTab.new()
+	holder.add_child(search_tab)
 
 
 func _build_top_bar(root: Control) -> void:
@@ -827,6 +851,17 @@ func _build_right_column(root: Control) -> void:
 	_wait_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_wait_leader.add_child(_wait_label)
 	root.add_child(_wait_leader)
+	# While a search runs, START is a greyed plate (the search tab at the top cancels it).
+	_matching = UI.hero_button("MATCHING...", 40, Vector2(330, 78))
+	_matching.name = "MatchingPlate"
+	_matching.disabled = true
+	_matching.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_matching.offset_left = -342
+	_matching.offset_top = -90
+	_matching.offset_right = -12
+	_matching.offset_bottom = -12
+	_matching.visible = false
+	root.add_child(_matching)
 	# Mode card above it: the mode START plays (name, map, format, the mode's art); a tap opens
 	# SELECT MODE.
 	mode_card = Button.new()
@@ -844,6 +879,9 @@ func _build_right_column(root: Control) -> void:
 		mode_card.connect(sig, mode_card.queue_redraw)
 	mode_card.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
+		if search_kind() != "":
+			dialogs.notice("SELECT MODE", "CANCEL THE SEARCH FIRST")
+			return
 		_select_mode())
 	root.add_child(mode_card)
 	var text := VBoxContainer.new()
@@ -948,13 +986,15 @@ func _start() -> void:
 	if start_btn.disabled or LobbyTeam.is_member():
 		return                          # (a member's START is the leader's: GroupWaitLeader shows instead)
 	var size := Game.team_size
-	match start_route(Game.mode, size):
+	match start_route(Game.mode, size, Game.TEAMS_ONLINE, LobbyTeam.members().size()):
 		"quick":
 			if LobbyTeam.in_group():
 				dialogs.notice("LONE WOLF 1 VS 1", "EXIT GROUP to play 1 VS 1, or pick DUO or SQUAD in SELECT MODE to play with your group.")
 				return
 			Game.team_match = {}
 			NetMatch.open(self)
+		"duel":
+			start_duel()
 		"team_search":
 			start_group(size)
 		"team_later":
@@ -969,15 +1009,86 @@ func _start() -> void:
 
 ## LONE WOLF DUO / SQUAD (GROUPS.txt 1): the leader (or a solo, who leads itself) starts the group's
 ## match or its search for real players (Cloud.group_start); a text back is a notice (a group of 3 in
-## DUO...). Searching: the popup SEARCHING PLAYERS n/N (LobbyFriends.open_search).
+## DUO...). Searching: the search tab with PLAYERS n/N (search_kind "group").
 func start_group(size: int) -> void:
 	Game.team_match = {}
 	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
 	var why := Game.cloud_service().group_start(size)
 	if why != "":
 		dialogs.notice("LONE WOLF %s" % word, why)
+
+
+## A group of exactly two with SOLO: the leader's START plays the plain 1 vs 1 between the two
+## (Cloud.group_duel: a duel challenge the member's phone takes at once from its leader); the match
+## and its results are the usual 1 vs 1's, and both come back to the lobby still in the group.
+func start_duel() -> void:
+	Game.team_match = {}
+	var why := Game.cloud_service().group_duel()
+	if why != "":
+		dialogs.notice("DUEL", why)
+
+
+## What the lobby is searching for now: "quick" (the 1 vs 1 QUICK MATCH, NetMatch), "group" (a DUO
+## / SQUAD search: Cloud.search_needed > 0, on the leader's phone and every member's), "" nothing.
+func search_kind() -> String:
+	var nm := get_node_or_null(^"NetMatch") as NetMatch
+	if nm and nm.searching:
+		return "quick"
+	if Game.cloud and Game.cloud.search_needed > 0 and not Game.cloud.in_session and not Game.cloud.session_multi:
+		return "group"
+	return ""
+
+
+## The search tab's X and Android back: the search stops (a member's search is the leader's).
+func cancel_search() -> void:
+	match search_kind():
+		"quick":
+			(get_node(^"NetMatch") as NetMatch).cancel()
+		"group":
+			if not LobbyTeam.is_member():
+				friends.cancel_search()
+
+
+## Every frame: the search tab follows what searches (shown, its X, the time, PLAYERS n/N).
+func _follow_search(delta: float) -> void:
+	if search_tab == null:
 		return
-	friends.open_search(size)
+	var kind := search_kind()
+	if kind == "":
+		search_tab.end()
+		_search_was = ""
+		return
+	if kind != _search_was:
+		search_tab.end()             # (a new kind of search counts from 0:00)
+		_search_was = kind
+	var member := kind == "group" and LobbyTeam.is_member()
+	search_tab.begin(Callable() if member else cancel_search)
+	var c := Game.cloud_service()
+	if kind == "quick":
+		var nm := get_node(^"NetMatch") as NetMatch
+		search_tab.elapsed = nm.elapsed
+		search_tab.set_status(nm.status_line())
+		search_tab.set_players(0, 0)
+	else:
+		search_tab.elapsed += delta
+		search_tab.set_status("CONNECTING..." if c.status != "online" else "")
+		search_tab.set_players(c.search_found, c.search_needed)
+	search_tab.refresh()
+
+
+## A match was found: every window on the lobby goes (a popup, SETTINGS, PROFILE, WARDROBE), so
+## the match loads in their place.
+func close_layers() -> void:
+	dialogs.close_modal()
+	var sp := _find_settings()
+	if sp:
+		sp.queue_free()
+		Game.save_settings()
+	if profile_ui.layer:
+		profile_ui.close()
+	if wardrobe:
+		model.apply_bundle(String(Game.profile.bundle))
+		_close_wardrobe()
 
 
 ## The group changed (Cloud.group_changed): a member's mode card follows the leader's choice, the
@@ -1006,19 +1117,21 @@ func on_group_changed() -> void:
 	update_start_gate()
 
 
-## START or, for a member, who starts (and the group's search) in its place. Polled 4 times a
-## second for the search's count; outside a group (or as the leader) it reads nothing more.
+## START or, for a member, who starts in its place; while a search runs (search_kind) the greyed
+## MATCHING... plate (MatchingPlate) for everyone, the leader's and a member's phone alike (the
+## search tab at the top shows the rest). Polled 4 times a second.
 func update_start_gate() -> void:
 	if _wait_leader == null:
 		return
+	var searching := search_kind() != ""
 	var text := ""
-	if _gate_member:
-		var c := Game.cloud_service()
-		text = LobbyTeam.start_gate_text(true, false, _gate_leader_name, Vector2i(c.search_found, c.search_needed))
+	if _gate_member and not searching:
+		text = LobbyTeam.start_gate_text(true, false, _gate_leader_name)
 	if _wait_label.text != text:
 		_wait_label.text = text
 	_wait_leader.visible = text != ""
-	start_btn.visible = text == ""
+	_matching.visible = searching and not start_btn.disabled
+	start_btn.visible = text == "" and not _matching.visible
 
 
 ## Which of the 3 spots each other member takes: a member keeps theirs while in the group, a new one
@@ -1141,11 +1254,12 @@ static func _plate(text: String, color: Color, font_size: int, y: float) -> Labe
 ## What START does for a mode and a team size: "training" (the 1 vs 1 against the bot or the
 ## dummy), "training_team" (DUO / SQUAD against bots on this phone), "quick" (the 1 vs 1 QUICK
 ## MATCH), "team_search" (the group's DUO / SQUAD: Cloud.group_start) or "team_later" (online teams
-## switched off).
-static func start_route(m: String, size: int, teams_online := Game.TEAMS_ONLINE) -> String:
+## switched off); "duel" for SOLO in a group of exactly two (`group_n`: the group's players, 0 or 1
+## for a solo): the 1 vs 1 between the two (start_duel).
+static func start_route(m: String, size: int, teams_online := Game.TEAMS_ONLINE, group_n := 0) -> String:
 	if m == "lonewolf":
 		if size <= 1:
-			return "quick"
+			return "duel" if group_n == 2 else "quick"
 		return "team_search" if teams_online else "team_later"
 	return "training_team" if size > 1 else "training"
 
@@ -1260,6 +1374,7 @@ func _process(delta: float) -> void:
 	wardrobe_ui.process()
 	profile_ui.process(delta)
 	team.process(delta)
+	_follow_search(delta)
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
 	_gate_t -= delta
@@ -1269,8 +1384,8 @@ func _process(delta: float) -> void:
 
 
 ## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the
-## wardrobe); with nothing open it asks before quitting; while START's match loading runs it does
-## nothing.
+## wardrobe); with nothing open it cancels a running search (the search tab's X), else asks before
+## quitting; while START's match loading runs it does nothing.
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_GO_BACK_REQUEST:
 		return
@@ -1286,5 +1401,7 @@ func _notification(what: int) -> void:
 	elif wardrobe:
 		model.apply_bundle(String(Game.profile.bundle))
 		_close_wardrobe()
+	elif search_kind() != "" and search_tab.on_cancel.is_valid():
+		cancel_search()             # with no window open, back cancels the search (not a member's)
 	else:
 		dialogs.confirm_quit()
