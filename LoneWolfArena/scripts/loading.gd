@@ -36,8 +36,9 @@ const TIPS := [
 	"Tap the wall or frag button to take it in hand, then FIRE to put it down or throw it.",
 	"Put up a shield wall, then heal behind it.",
 	"Push the joystick past the ring to sprint.",
-	"Pick your gun in the 10-second prep: a 1 VS 1 shares it, DUO and SQUAD pick their own.",
-	"The safe zone starts closing after 25 seconds. Stay inside.",
+	"Pick the gun in the 15-second prep: a 1 VS 1 shares it, DUO and SQUAD pick their own.",
+	"In a 1 VS 1 a gun picked for two rounds rests for the 4 rounds after.",
+	"The first 20 seconds the zone covers the hall; then it closes until the clock runs out. Stay inside.",
 	"Crouch or go prone to make yourself a smaller target.",
 	"A frag does up to 150 damage after a 3-second fuse. A vest stops a third of it.",
 ]

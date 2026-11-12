@@ -5,7 +5,10 @@ extends Control
 ##    ROUND n", a "| WEAPON" label, a 6-column grid of gun cards (silhouette, name, class; the
 ##    choice gets a yellow outline and a tick), the choice's bars, magazine and attachments, a
 ##    countdown and a yellow SELECT button. It calls on_pick exactly once: SELECT or the close X
-##    confirm the current choice, so does the timer;
+##    confirm the current choice, so does the timer. A 1 vs 1 adds the ROUNDS strip under the title
+##    (a numbered disc per round of the match: blue the rounds this player picks for, orange the
+##    other's, the pair being picked ringed in yellow) and greys the guns on cooldown (our clock
+##    glyph and "n ROUNDS" on the card; a tap on one does nothing);
 ##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs. It stays
 ##    between the widgets listed in `avoid` (the HUD passes the minimap and the weapon panel),
 ##    so on 16:9 it gets narrower and its header and columns shrink to fit instead of covering them.
@@ -26,6 +29,8 @@ var pick_choice := ""
 var pick_left := 0.0
 var pick_total := 1.0
 var pick_round := 1
+var pick_cooldown := {}           # gun -> rounds it still waits (RoundRules.cooldowns): greyed, not pickable
+var pick_strip: Array = []        # per round of the match: true when this player picks its gun (ROUNDS strip)
 var board_open := false
 var avoid: Array[Rect2] = []      # screen rects the scoreboard keeps clear of (set by the HUD)
 var _pick_cb := Callable()
@@ -44,11 +49,19 @@ func _ready() -> void:
 
 # ---------------------------------------------------------------- weapon pick
 
-func open_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, round_index := 1) -> void:
+func open_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, round_index := 1,
+		cooldown := {}, strip := []) -> void:
 	pick_options = options.duplicate()
 	if pick_options.is_empty():
 		pick_options = [Weapons.DEFAULT_PICK]
-	pick_choice = preselect if pick_options.has(preselect) else String(pick_options[0])
+	pick_cooldown = cooldown.duplicate()
+	pick_strip = strip.duplicate()
+	pick_choice = preselect if pick_options.has(preselect) and not pick_cooldown.has(preselect) else String(pick_options[0])
+	if pick_cooldown.has(pick_choice):
+		for o: String in pick_options:
+			if not pick_cooldown.has(o):
+				pick_choice = o
+				break
 	pick_total = maxf(seconds, 0.1)
 	pick_left = pick_total
 	pick_round = round_index
@@ -83,7 +96,7 @@ func finish_pick() -> void:
 
 
 func select(id: String) -> void:
-	if pick_options.has(id):
+	if pick_options.has(id) and not pick_cooldown.has(id):
 		pick_choice = id
 
 
@@ -133,9 +146,21 @@ func pick_rect() -> Rect2:
 	var x0 := 0.025 * u
 	var w := minf(1.42 * u, size.x - x0 - 0.56 * u)
 	var rows := maxi(1, ceili(pick_options.size() / float(COLS)))
-	var h := u * (0.08 + 0.06 + rows * 0.205 + (rows - 1) * 0.018 + 0.03 + 0.1)
+	var h := u * (0.08 + 0.06 + rows * 0.205 + (rows - 1) * 0.018 + 0.03 + 0.1) + strip_h()
 	var y0 := clampf((size.y - h) * 0.5 - 0.03 * size.y, 0.105 * size.y, maxf(size.y - h - 4.0, 0.105 * size.y))
 	return Rect2(x0, y0, w, h)
+
+
+## Height of the ROUNDS strip (0 without one: DUO / SQUAD, the target dummy).
+func strip_h() -> float:
+	return 0.07 * _u() if not pick_strip.is_empty() else 0.0
+
+
+## Centre of the ROUNDS strip's disc for round `r` (1-based).
+func strip_disc(r: int) -> Vector2:
+	var u := _u()
+	var pr := pick_rect()
+	return Vector2(pr.position.x + 0.2 * u + (r - 1) * 0.06 * u, pr.position.y + 0.08 * u + strip_h() * 0.5)
 
 
 func _card_size() -> Vector2:
@@ -150,7 +175,7 @@ func card_rect(i: int) -> Rect2:
 	var r := pick_rect()
 	var cs := _card_size()
 	var gap := 0.018 * u
-	var top := r.position.y + 0.14 * u
+	var top := r.position.y + 0.14 * u + strip_h()
 	return Rect2(Vector2(r.position.x + 0.025 * u + (i % COLS) * (cs.x + gap), top + (i / COLS) * (cs.y + gap)), cs)
 
 
@@ -217,6 +242,8 @@ func tap(pos: Vector2) -> bool:
 				return true
 			for i in pick_options.size():
 				if card_rect(i).has_point(pos):
+					if pick_cooldown.has(String(pick_options[i])):
+						return true                  # resting: not pickable this time
 					if pick_choice != String(pick_options[i]):
 						Audio.play("ui_select", -6.0)
 					pick_choice = String(pick_options[i])
@@ -258,8 +285,10 @@ func _draw_pick() -> void:
 		Vector2(r.get_center().x, r.position.y + 0.042 * u), int(0.038 * u), 1, 0, "bold", a)
 	var xr := pick_close_rect()
 	HudDraw.close_button(self, xr.get_center(), xr.size.x * 0.5, a)
+	if not pick_strip.is_empty():
+		_draw_strip(a, u)
 	# "| WEAPON" label.
-	var ly := r.position.y + 0.11 * u
+	var ly := r.position.y + 0.11 * u + strip_h()
 	draw_rect(Rect2(Vector2(r.position.x + 0.025 * u, ly - 0.014 * u), Vector2(0.007 * u, 0.028 * u)), Color(HudDraw.YELLOW, a))
 	var lw := HudDraw.text(self, "WEAPON", Vector2(r.position.x + 0.045 * u, ly), int(0.03 * u), Color(1, 1, 1, a), 0, 0, "bold")
 	# (DUO / SQUAD: every fighter picks its own gun, TeamArena; a 1 vs 1: both use the one picked)
@@ -310,11 +339,51 @@ func _draw_card(i: int, a: float, u: float) -> void:
 	var gun_box := Vector2(r.size.x * 0.8, r.size.y * 0.46)
 	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(r.get_center().x, r.position.y + r.size.y * 0.66), gun_box,
 		Color(1, 1, 1, (0.97 if sel else 0.62) * a))
+	if pick_cooldown.has(id):
+		_draw_resting(r, int(pick_cooldown[id]), a, u)
 	if sel:
 		draw_rect(r, Color(HudDraw.YELLOW, a), false, maxf(2.0, 0.004 * u))
 		var tcen := Vector2(r.end.x - 0.024 * u, r.position.y + 0.024 * u)
 		HudDraw.disk(self, tcen, 0.017 * u, Color(HudDraw.YELLOW, a))
 		HudDraw.icon(self, HudDraw.tex("v_tick"), tcen, Vector2(0.022, 0.022) * u, Color(0.1, 0.07, 0.02, a))
+
+
+## A gun on cooldown: the card dimmed, our clock glyph (a ring with two hands) and "n ROUNDS".
+func _draw_resting(r: Rect2, n: int, a: float, u: float) -> void:
+	draw_rect(r, Color(0.02, 0.03, 0.04, 0.62 * a))
+	var c := r.get_center() + Vector2(0, -0.01 * u)
+	var cr := 0.026 * u
+	HudDraw.disk(self, c, cr, Color(0, 0, 0, 0.55 * a))
+	HudDraw.ring(self, c, cr, Color(0.86, 0.88, 0.92, a), maxf(2.0, 0.005 * u))
+	var w := maxf(2.0, 0.004 * u)
+	draw_line(c, c + Vector2(0, -cr * 0.62), Color(0.86, 0.88, 0.92, a), w)
+	draw_line(c, c + Vector2(cr * 0.5, cr * 0.18), Color(0.86, 0.88, 0.92, a), w)
+	HudDraw.text(self, "%d ROUND%s" % [n, "" if n == 1 else "S"], Vector2(c.x, c.y + cr + 0.026 * u), int(0.024 * u),
+		Color(0.86, 0.88, 0.92, a), 1, 2, "bold")
+
+
+## The ROUNDS strip: "ROUNDS", a numbered disc per round of the match (blue: this player picks its
+## gun, orange: the other one does; the pair being picked ringed in yellow), and what a pick means.
+func _draw_strip(a: float, u: float) -> void:
+	var pr := pick_rect()
+	var cy := pr.position.y + 0.08 * u + strip_h() * 0.5
+	HudDraw.text(self, "ROUNDS", Vector2(pr.position.x + 0.03 * u, cy), int(0.024 * u), Color(0.72, 0.76, 0.82, a), 0, 0, "bold")
+	var dr := 0.022 * u
+	var first := pick_round - (pick_round - 1) % RoundRules.PICK_ROUNDS
+	for i in pick_strip.size():
+		var rr := i + 1
+		var c := strip_disc(rr)
+		var col: Color = HudDraw.BLUE if bool(pick_strip[i]) else HudDraw.ORANGE
+		if rr < first:
+			col = col.darkened(0.45)
+		HudDraw.disk(self, c, dr, Color(col, a))
+		if rr == first or rr == first + 1:
+			HudDraw.ring(self, c, dr + 0.006 * u, Color(HudDraw.YELLOW, a), maxf(2.0, 0.004 * u))
+		HudDraw.text(self, str(rr), c, int(0.024 * u), Color(1, 1, 1, a), 1, 0, "number")
+	var nx := strip_disc(pick_strip.size()).x + 0.05 * u
+	HudDraw.text(self, "THE GUN YOU PICK RESTS FOR THE %d ROUNDS AFTER" % RoundRules.COOLDOWN_ROUNDS, Vector2(nx, cy),
+		_fit("THE GUN YOU PICK RESTS FOR THE 4 ROUNDS AFTER", 0.02 * u, pr.end.x - nx - 0.03 * u, "semi"),
+		Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
 
 
 ## Font size for `t`: `px` px, smaller when the text would be wider than `room`.

@@ -2,9 +2,9 @@ extends Node3D
 ## Match controller of a 1 vs 1 on the warehouse arena CARGO CAGE, first to rounds_to_win rounds:
 ## TRAINING GROUND against the bot or the target dummy (practice), LONE WOLF against another
 ## phone online (`mode`, `mode_name`). Each round: PREP (spawn alcoves behind a red barrier,
-## weapon pick for both players, red countdown) -> FIGHT (round banner, 90 s timer, safe zone that
-## holds then shrinks) -> a break, or END (kill, time-out on HP, or an integrity flag) -> results
-## screen. Also renders the top-down minimap image once, runs the pause menu and feeds the HUD and
+## weapon pick for both players, red countdown) -> FIGHT (round banner, the two-stage clock of
+## RoundRules: stage 1 with the zone over the whole hall, stage 2 with the zone closing) -> a break,
+## or END (kill, time-out on HP, or an integrity flag) -> results screen. Also renders the top-down minimap image once, runs the pause menu and feeds the HUD and
 ## scoreboard.
 
 enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two rounds
@@ -13,14 +13,19 @@ enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two round
 ## results screen offers to accept it.
 signal rematch_asked
 
-const PREP_TIME := 10.0
+## The prep of a round that opens a pick pair (the pick panel closes a second before it ends).
+const PREP_TIME := 15.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
 const BREAK_TIME := 3.5
 const SPECTATE_EXTRA := 1.5       # s more between rounds while the eliminated player watches the killer
-const ROUND_TIME := 90.0
-const ZONE_HOLD := 25.0
-const ZONE_SHRINK := 40.0
-const ZONE_MIN := 4.0
+## The 1 vs 1's fight: stage 1 (the zone holds over the whole hall) and stage 2 (it closes to
+## ZONE_MIN); RoundRules has the clock, team_arena.gd a longer SQUAD stage 2 (stage2_time).
+const ROUND_TIME := 110.0          # RoundRules.STAGE1_S + RoundRules.STAGE2_S
+const ZONE_HOLD := 20.0            # RoundRules.STAGE1_S
+const ZONE_SHRINK := 90.0          # RoundRules.STAGE2_S
+const ZONE_MIN := 0.5              # RoundRules.ZONE_FINAL_R
+## The final centre keeps this far (m, and a metre more) from the hall's walls (zone_final_for).
+const ZONE_EDGE := 4.0
 ## The most rounds a match lasts (the best-of, 2 x rounds_to_win - 1, is never longer): rounds that
 ## keep ending in draws still end the match, which the most rounds won wins (level: a DRAW).
 const MAX_ROUNDS := 9
@@ -51,7 +56,7 @@ var pick_note := ""                # prep line under PREPARE: who picks the gun,
 var zone_center := Vector3.ZERO
 var zone_radius := 999.0
 var zone_start_radius := 30.0
-var zone_state := "stationary"      # "stationary" (before the shrink), "shrinking", "closed"
+var zone_state := "stationary"      # "stationary" (stage 1), "shrinking" (stage 2), "closed"
 var zone_warning := ""
 var map_name := "CARGO CAGE"
 var map_rect := Rect2(-22, -16, 44, 32)   # world XZ area shown by the minimap
@@ -123,6 +128,13 @@ var _last_rend: Array = []       # the host's last "rend" (sent again after a "s
 ## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
 ## map's centre while it shrinks.
 var zone_final := Vector3.ZERO
+## This round's ELIMINATED BY card (the HUD draws it while the player spectates): {} until the
+## player goes down, then {"cause": death_cause, "name", "gun", "gun_id", "damage" (what the
+## killer dealt the player this round)}.
+var eliminated_by := {}
+## The 1 vs 1 weapon cooldown (RoundRules.cooldown_left): pick round -> the gun picked for that pair
+## of rounds, whoever picked it. Both phones fill it alike from the same picks.
+var picks := {}
 
 
 func _ready() -> void:
@@ -256,9 +268,10 @@ func _on_net_event(kind: String, data: Array) -> void:
 				_follow_host_clock()
 		"pick":
 			# Its pick for this round (late ones still count: both must hold the same gun).
+			# A gun on cooldown is replaced by the first free one, as the picker's phone does.
 			if data.size() == 2 and Weapons.PICKABLE.has(String(data[0])) and int(data[1]) == round_index \
 					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT):
-				_apply_pick(String(data[0]))
+				_apply_pick(legal_pick(String(data[0])))
 		"shot":
 			# Its shots: muzzle flash, tracer, impact and sound here, while the round is fought and
 			# never faster than its gun (or fists) fire.
@@ -372,7 +385,9 @@ func _on_peer_away(_id: String, away: bool) -> void:
 
 ## This phone's word on the other phone's fighter and on the match, for that phone back from being
 ## away: [round, phase, prep left or fight time, this phone's score, the other's score, its HP,
-## alive, x, y, z, the round's gun, what took it out]. The host's last word on a round that is over
+## alive, x, y, z, the round's gun, what took it out, the match's picks (RoundRules.picks_text: the
+## weapon cooldown)]. The fight time is the whole fight's, so both phones show the same stage of the
+## two-stage clock. The host's last word on a round that is over
 ## here ("rend", and "fin" once the match is) goes again after it: the other phone missed it.
 func _send_sync() -> void:
 	if not session_up():
@@ -381,7 +396,7 @@ func _send_sync() -> void:
 	var at := r.global_position
 	Game.session.send_event("sync", [round_index, int(phase), prep_left if phase == Phase.PREP else elapsed, int(score.player),
 		int(score.bot), snappedf(r.hp, 0.1), r.alive, snappedf(at.x, 0.01), snappedf(at.y, 0.01), snappedf(at.z, 0.01),
-		picked_weapon, String(_down_cause.get(r, ""))])
+		picked_weapon, String(_down_cause.get(r, "")), RoundRules.picks_text(picks)])
 	if _net_host and _last_rend.size() == 7 and int(_last_rend[0]) == round_index and (phase == Phase.BREAK or phase == Phase.END):
 		Game.session.send_event("rend", _last_rend)
 		if phase == Phase.END:
@@ -389,13 +404,13 @@ func _send_sync() -> void:
 			_send_final()
 
 
-## The other phone's word ("sync", see _send_sync). The guest follows the host's round as it stands
-## (_follow_round); then either takes its own player's HP (never more than it has: no healing back
+## The other phone's word ("sync", see _send_sync). The guest takes the host's picks (the weapon
+## cooldown) and follows the host's round as it stands (_follow_round); then either takes its own player's HP (never more than it has: no healing back
 ## what it lost while away), its place and, gone down meanwhile, its death. The host answers with its
 ## own word, so the guest follows its round.
 func _on_sync(data: Array) -> void:
-	if data.size() != 12 or not _net_rate_ok("sync", 2.0, 4.0) or not data[6] is bool or typeof(data[10]) != TYPE_STRING \
-			or typeof(data[11]) != TYPE_STRING:
+	if data.size() < 12 or data.size() > 13 or not _net_rate_ok("sync", 2.0, 4.0) or not data[6] is bool \
+			or typeof(data[10]) != TYPE_STRING or typeof(data[11]) != TYPE_STRING or (data.size() == 13 and typeof(data[12]) != TYPE_STRING):
 		return
 	for i: int in [0, 1, 2, 3, 4, 5, 7, 8, 9]:
 		if not (data[i] is float or data[i] is int) or not is_finite(float(data[i])):
@@ -406,6 +421,8 @@ func _on_sync(data: Array) -> void:
 		return
 	Game.session.rejoined()
 	if not _net_host:
+		if data.size() == 13:
+			picks = RoundRules.picks_from_text(String(data[12]), Weapons.PICKABLE)     # the host's cooldowns
 		_follow_round(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
 	if r == round_index and ph == int(phase) and (phase == Phase.FIGHT or phase == Phase.PREP) and player.alive:
 		var pos := Vector3(float(data[7]), float(data[8]), float(data[9]))
@@ -440,8 +457,8 @@ func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int
 	if Weapons.PICKABLE.has(gun) and gun != picked_weapon:
 		_apply_pick(gun)
 	if phase == Phase.FIGHT and ph == int(Phase.FIGHT):
-		elapsed = clampf(clock, 0.0, ROUND_TIME)
-		time_left = ROUND_TIME - elapsed
+		elapsed = clampf(clock, 0.0, round_time())
+		time_left = round_time() - elapsed
 	elif phase == Phase.PREP and ph == int(Phase.PREP):
 		prep_left = clampf(clock, 0.0, PREP_TIME)
 
@@ -764,6 +781,7 @@ func _apply_room_rules() -> void:
 
 
 func _start_prep() -> void:
+	eliminated_by = {}
 	_round_deaths.clear()
 	_down_cause.clear()
 	_settle_t = -1.0
@@ -783,7 +801,8 @@ func _start_prep() -> void:
 	if pick_round:
 		picked_weapon = ""
 		if _i_pick():
-			hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
+			var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
+			hud.open_weapon_pick(Weapons.PICKABLE, preselected_pick(), prep_left - 1.0, _on_weapon_picked, pick_cooldowns(), strip)
 		else:
 			pick_note = "%s IS PICKING THE WEAPON" % bot.display_name
 			if not online:
@@ -795,6 +814,24 @@ func _start_prep() -> void:
 	Game.mark("prep started")
 
 
+## The guns on cooldown at this round's pick (gun -> rounds left; none against the target dummy).
+func pick_cooldowns() -> Dictionary:
+	return {} if practice else RoundRules.cooldowns(Weapons.PICKABLE, round_index, picks)
+
+
+## The gun the pick panel starts on and the one taken when nothing is chosen in time: the last one
+## this player picked, or the first free gun when that one rests.
+func preselected_pick() -> String:
+	return legal_pick(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+
+
+## `id` when it may be picked for this round, else the first free gun (both phones alike).
+func legal_pick(id: String) -> String:
+	if practice:
+		return id if Weapons.DEFS.has(id) else Weapons.DEFAULT_PICK
+	return RoundRules.legal_pick(id, Weapons.PICKABLE, round_index, picks)
+
+
 func _i_pick() -> bool:
 	var first := ((round_index - 1) / 2) % 2 == 0
 	return not first if online and not Game.session.is_host else first
@@ -804,6 +841,7 @@ func _i_pick() -> bool:
 func _on_weapon_picked(id: String) -> void:
 	if not Weapons.DEFS.has(id):
 		id = Weapons.DEFAULT_PICK
+	id = legal_pick(id)
 	Game.settings.last_pick = id
 	Game.save_settings()
 	_apply_pick(id)
@@ -820,6 +858,8 @@ func repick() -> void:
 
 func _apply_pick(id: String) -> void:
 	picked_weapon = id
+	if not practice:
+		picks[RoundRules.pick_round_of(round_index)] = id      # (rests for the next rounds' picks)
 	for f in fighters:
 		f.set_loadout(id)
 	pick_note = "" if _i_pick() else "%s PICKED: %s" % [bot.display_name, String(Weapons.DEFS[id].name)]
@@ -834,13 +874,13 @@ func _start_fight() -> void:
 		_counted = true
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
-		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+		_on_weapon_picked(preselected_pick())
 	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:
 		f.hold_fire = false
 		f.frozen = false
-	time_left = ROUND_TIME
+	time_left = round_time()
 	elapsed = 0.0
 	zone_radius = zone_start_radius
 	zone_state = "stationary"
@@ -879,7 +919,7 @@ func _physics_process(delta: float) -> void:
 			if _bot_pick_t > 0.0:
 				_bot_pick_t -= delta
 				if _bot_pick_t <= 0.0:
-					_apply_pick(String(Weapons.PICKABLE[_rng.randi() % Weapons.PICKABLE.size()]))
+					_apply_pick(_bot_choice())
 			prep_left -= delta
 			var n := ceili(prep_left)
 			if prep_left <= 3.0 and n != _last_count and n > 0:
@@ -929,6 +969,17 @@ func _physics_process(delta: float) -> void:
 				_next_round()
 
 
+## The bot's pick: any gun not on cooldown.
+func _bot_choice() -> String:
+	var free: Array = []
+	for g: String in Weapons.PICKABLE:
+		if RoundRules.cooldown_left(g, round_index, picks) == 0:
+			free.append(g)
+	if free.is_empty():
+		return legal_pick(Weapons.DEFAULT_PICK)
+	return String(free[_rng.randi() % free.size()])
+
+
 ## Both back at their spawns with full HP, items and ammo for the next round (stats carry over).
 func _next_round() -> void:
 	round_index += 1
@@ -965,31 +1016,61 @@ func _refill_practice_ammo() -> void:
 		w.reserve = int(w.def.get("reserve", 0))
 
 
-## Seconds until the zone changes state (for the HUD's "SAFE ZONE SHRINKS IN" text).
+## Stage 2's length (s): RoundRules.STAGE2_S; a SQUAD's is longer (team_arena.gd).
+func stage2_time() -> float:
+	return RoundRules.STAGE2_S
+
+
+## The whole fight of a round (s): stage 1 and stage 2.
+func round_time() -> float:
+	return RoundRules.fight_time(stage2_time())
+
+
+## The stage being fought (1 or 2; the HUD's clock and the checks read it).
+func stage() -> int:
+	return RoundRules.stage_at(elapsed)
+
+
+## What the top clock shows in the fight: the seconds left of the current stage.
+func stage_left() -> float:
+	return RoundRules.stage_left(elapsed, stage2_time())
+
+
+## Seconds until the zone changes state (for the HUD's "SAFE ZONE" strip): to the start of the
+## closing in stage 1, to its end in stage 2.
 func zone_next() -> float:
-	if zone_state == "stationary":
-		return maxf(ZONE_HOLD - elapsed, 0.0)
-	if zone_state == "shrinking":
-		return maxf(ZONE_HOLD + ZONE_SHRINK - elapsed, 0.0)
-	return 0.0
+	if zone_state == "closed":
+		return 0.0
+	return RoundRules.zone_next(elapsed, stage2_time())
+
+
+## Where the zone will be `t` s into this round's fight: [centre, radius] (the bot heads there).
+func zone_at(t: float) -> Array:
+	return [RoundRules.zone_center_at(t, map.zone_center, zone_final, stage2_time()),
+		RoundRules.zone_radius_at(t, zone_start_radius, stage2_time())]
+
+
+## Whether this arena applies the zone's damage to `f` (team_arena.gd: only fighters run here).
+func zone_hurts(f: Fighter) -> bool:
+	return f.alive
 
 
 func _update_zone(delta: float) -> void:
-	var to_start := ZONE_HOLD - elapsed
+	var to_start := RoundRules.STAGE1_S - elapsed
 	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 else ""
-	if elapsed >= ZONE_HOLD:
+	if elapsed >= RoundRules.STAGE1_S:
 		if zone_state == "stationary":
 			zone_state = "shrinking"
 			hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
 			Audio.play("countdown_beep", -6.0, 0.7)
-		var t := clampf((elapsed - ZONE_HOLD) / ZONE_SHRINK, 0.0, 1.0)
-		zone_radius = lerpf(zone_start_radius, ZONE_MIN, t)
-		zone_center = map.zone_center.lerp(zone_final, t)
-		if t >= 1.0:
+		var z := zone_at(elapsed)
+		zone_center = z[0]
+		zone_radius = z[1]
+		if RoundRules.zone_t(elapsed, stage2_time()) >= 1.0:
 			zone_state = "closed"
 		_update_zone_mesh()
 	for f in fighters:
-		if f.alive and not in_zone(f.global_position):
+		if zone_hurts(f) and not in_zone(f.global_position):
 			_outside[f] = float(_outside[f]) + delta
 			var o: float = _outside[f]
 			var dps := 5.0 if o < 10.0 else (10.0 if o < 20.0 else 20.0)
@@ -1002,15 +1083,16 @@ func _update_zone_mesh() -> void:
 
 
 ## Where the safe zone closes in round `r`: a random spot of the hall's floor, the last circle inside
-## the walls (MapBuilder.HX / HZ less ZONE_MIN and a margin) and its centre off the cover (the
+## the walls (MapBuilder.HX / HZ less ZONE_EDGE and a margin) and its centre off the cover (the
 ## obstacles), a new one every round. Online every phone gets the same (Cloud.match_seed: the room's
 ## key and the round); TRAINING draws it at random. (The start circle, from the map's centre, always
-## holds the final one: the hall's farthest spot is closer than zone_start_radius - ZONE_MIN.)
+## holds the final one, and the circles of stage 2 are nested: the centre moves at most 18.9 m in
+## stage 2, less than the 27.1 m the radius shrinks.)
 func zone_final_for(r: int) -> Vector3:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = Game.session.match_seed("zone%d" % r) if online and Game.session != null else _rng.randi()
-	var mx := MapBuilder.HX - ZONE_MIN - 1.0
-	var mz := MapBuilder.HZ - ZONE_MIN - 1.0
+	var mx := MapBuilder.HX - ZONE_EDGE - 1.0
+	var mz := MapBuilder.HZ - ZONE_EDGE - 1.0
 	var best := Vector3(map.zone_center.x, 0.0, map.zone_center.z)
 	for i in 16:
 		var p := Vector3(rng.randf_range(-mx, mx), 0.0, rng.randf_range(-mz, mz))
@@ -1058,6 +1140,8 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		_deaths += 1
 	var cause := death_cause(victim, killer)
 	_down_cause[victim] = cause
+	if victim == player:
+		_note_eliminated_by(cause, killer)
 	if online and victim == player:
 		Game.session.send_event("died", [headshot and cause == "gun", cause, round_index])
 	if cause == "left":
@@ -1086,6 +1170,15 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		return
 	var winner := killer if killer else ((player as Fighter) if victim == bot else (bot as Fighter))
 	_end_round(winner, headshot, false, killer)
+
+
+## The ELIMINATED BY card's numbers when the player went down (see eliminated_by).
+func _note_eliminated_by(cause: String, killer: Fighter) -> void:
+	var by: Fighter = killer if killer != null and is_instance_valid(killer) and killer != player else bot
+	var gun_id := String(by.weapon().id) if cause == "gun" and by != null else ""
+	eliminated_by = {"cause": cause, "name": by.display_name if by != null else "",
+		"gun": "FRAG" if cause == "frag" else (String(by.weapon().def.name) if by != null else ""),
+		"gun_id": gun_id, "damage": roundi(float(player.round_taken.get(by, 0.0)))}
 
 
 ## What took a fighter out: "gun" (or fists) and "frag" are the other fighter's kill; "zone",

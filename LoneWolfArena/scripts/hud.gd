@@ -173,11 +173,13 @@ func show_round_result(title: String, mine: int, theirs: int) -> void:
 	_round_banner = {"t": 2.6, "dur": 2.6, "title": title, "mine": mine, "theirs": theirs}
 
 
-func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable) -> void:
+## The weapon pick panel (HudPanels.open_pick); a 1 vs 1 passes the guns on cooldown and the ROUNDS
+## strip (who picks for each round).
+func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, cooldown := {}, strip := []) -> void:
 	var r := 1
 	if arena != null:
 		r = int(arena.get("round_index"))
-	panels.open_pick(options, preselect, seconds, on_pick, r)
+	panels.open_pick(options, preselect, seconds, on_pick, r, cooldown, strip)
 
 
 func close_weapon_pick() -> void:
@@ -889,6 +891,7 @@ func _draw() -> void:
 	_draw_round_banner(vs, u)
 	_draw_kill_banner(vs, u)
 	_draw_spectating(vs, u)
+	_draw_eliminated_by(vs, u)
 	_draw_center_text(vs, u)
 	_draw_tips(vs, u)
 	if Game.settings.show_fps:
@@ -1506,7 +1509,14 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		theirs = int(sc.get("bot", 0))
 		goal = int(arena.get("rounds_to_win"))
 		var phase := int(arena.get("phase"))
-		t = float(arena.get("prep_left")) if phase == 0 else float(arena.get("time_left"))
+		# The fight's clock counts each stage down on its own (RoundRules): 00:20 to 00:00, then
+		# stage 2 from its full length; red in the prep and the last 10 s of a stage.
+		if phase == 0:
+			t = float(arena.get("prep_left"))
+		elif bool(arena.get("practice")):
+			t = float(arena.get("time_left"))
+		else:
+			t = float(arena.call("stage_left"))
 		red = phase == 0 or (t <= 10.0 and not bool(arena.get("practice")))
 		if player != null:
 			hp_me = clampf(player.hp / Fighter.MAX_HP, 0.0, 1.0)
@@ -1692,6 +1702,55 @@ func _draw_spectating(vs: Vector2, u: float) -> void:
 	HudDraw.plate(self, Rect2(c.x - w * 0.5, c.y - 0.04 * u, w, 0.085 * u), 0.7)
 	HudDraw.text(self, "SPECTATING", Vector2(c.x, c.y - 0.015 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
 	HudDraw.text(self, nm, Vector2(c.x, c.y + 0.022 * u), fs, Color.WHITE, 1, 2, "bold")
+
+
+## The 1 vs 1 player is out of the round: a small card at the bottom left while it spectates (the
+## controls are hidden then): "ELIMINATED BY <NAME>" over a row with the killer's name, the gun
+## (its silhouette and name) and the damage that player dealt this one this round; the zone, a fall
+## or the player's own frag read "ELIMINATED BY THE ZONE" / "... A FALL" / "... YOUR OWN FRAG".
+func _draw_eliminated_by(vs: Vector2, u: float) -> void:
+	if team != null or arena == null or player == null or player.alive or int(arena.get("phase")) < 2:
+		return
+	var e: Dictionary = arena.get("eliminated_by")
+	if e.is_empty():
+		return
+	var cause := String(e.get("cause", ""))
+	var by_name := String(e.get("name", "")).to_upper()
+	var what := String({"zone": "THE ZONE", "fall": "A FALL", "self": "YOUR OWN FRAG", "left": "LEAVING"}.get(cause, by_name))
+	var line := String({"zone": "OUTSIDE THE SAFE ZONE TOO LONG", "fall": "A DROP FROM THE HIGH GROUND",
+		"self": "STAY CLEAR OF YOUR OWN FRAG", "left": ""}.get(cause, ""))
+	var fs := int(0.026 * u)
+	var w := 0.56 * u                    # (clear of the HP block's armour icons)
+	var h := 0.13 * u
+	var r := Rect2(0.03 * u, vs.y - h - 0.035 * u, w, h)
+	HudDraw.plate(self, r, 0.78)
+	draw_rect(Rect2(r.position, Vector2(0.008 * u, r.size.y)), HudDraw.RED)
+	var tx := r.position.x + 0.03 * u
+	var ty := r.position.y + 0.035 * u
+	HudDraw.text_parts(self, [["ELIMINATED BY ", Color(0.78, 0.8, 0.84)], [what, Color(1.0, 0.5, 0.45)]],
+		Vector2(tx, ty), fs, 0, 2, "bold")
+	draw_line(Vector2(tx, ty + 0.025 * u), Vector2(r.end.x - 0.03 * u, ty + 0.025 * u), Color(1, 1, 1, 0.14), 1.0)
+	var ry := r.position.y + h * 0.68
+	if cause in ["gun", "frag"]:
+		var nfs := int(0.028 * u)
+		var nm := by_name
+		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.17 * u)
+		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.17 * u), Color.WHITE, 0, 2, "bold")
+		var gx := tx + nw + 0.03 * u
+		var gid := String(e.get("gun_id", ""))
+		var t: Texture2D = HudDraw.tex("item_grenade") if cause == "frag" else HudDraw.weapon_tex(Weapons.DEFS.get(gid, Weapons.DEFS[Weapons.DEFAULT_PICK]))
+		HudDraw.icon(self, t, Vector2(gx + 0.04 * u, ry), Vector2(0.08, 0.04) * u, Color(1, 1, 1, 0.92))
+		HudDraw.text(self, String(e.get("gun", "")), Vector2(gx + 0.09 * u, ry), int(0.022 * u), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+		HudDraw.text_parts(self, [["DMG ", Color(0.78, 0.8, 0.84)], [str(int(e.get("damage", 0))), HudDraw.YELLOW]],
+			Vector2(r.end.x - 0.03 * u, ry), nfs, 2, 2, "bold")
+	elif line != "":
+		HudDraw.text(self, line, Vector2(tx, ry), int(0.022 * u), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+
+
+## Font size for `t`: `px`, smaller when the text would be wider than `room`.
+func _fit_fs(t: String, px: int, room: float) -> int:
+	var w := HudDraw.text_width(t, px, "bold")
+	return maxi(9, int(px * minf(1.0, room / maxf(w, 1.0))))
 
 
 func _draw_round_banner(vs: Vector2, u: float) -> void:

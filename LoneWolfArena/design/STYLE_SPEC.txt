@@ -11,13 +11,13 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 |---|---|
 | Modes | Two, both 1 vs 1 on the one map CARGO CAGE: TRAINING GROUND (against a bot, EASY / NORMAL / HARD, or the TARGET DUMMY: endless HP, no zone, the clock counts up, nothing counted) and LONE WOLF (online against another player; START opens the ONLINE list). TRAINING GROUND is the default |
 | Format | First to 5 rounds (best of 9), as in the reference mode; a custom room plays first to 1-7 |
-| Flow | Lobby START -> loading -> PREP 10 s (spawn alcove behind a glowing red floor barrier, red countdown, weapon pick panel) -> "ROUND 1 / AREA: CARGO CAGE" banner -> FIGHT 90 s -> next round (gun picked every 2 rounds, the pick alternates) ... -> result |
-| Weapon pick | Grid of weapons, the chosen gun is used by BOTH players; 10 s; default pick if the timer ends |
-| Loadout | Chosen gun + fists, 2 medkits, 2 shield walls, 1 frag grenade, Lv2 helmet + Lv2 vest |
+| Flow | Lobby START -> loading -> PREP 15 s (spawn alcove behind a glowing red floor barrier, red countdown, weapon pick panel; the second round of a pick 5 s) -> "ROUND 1 / AREA: CARGO CAGE" banner -> FIGHT in two stages on the one clock, stage 1 20 s then stage 2 90 s (DUO the same, SQUAD 120 s), fighting in both -> next round (gun picked every 2 rounds, the pick alternates) ... -> result |
+| Weapon pick | 1 vs 1: grid of weapons, the chosen gun is used by BOTH players; 15 s (the panel 14 s); a gun picked for a pair of rounds rests for the next 4 rounds, whoever picks (its card greyed with our clock glyph and "n ROUNDS"); a ROUNDS strip of numbered discs under the title (blue: this player picks, orange: the other, the current pair ringed yellow); the preselected free gun if the timer ends. DUO / SQUAD: every fighter picks its own gun in a 10 s prep, no cooldown |
+| Loadout | Chosen gun + fists, 2 medkits, 3 shield walls, 1 frag grenade, Lv2 helmet + Lv2 vest |
 | HP | 200, resets each round; no knock-down in 1v1 (0 HP = eliminated) |
-| Zone | Holds 25 s, then shrinks over 40 s to r = 4 m; damage 5 HP/s (first 10 s outside), then 10, then 20 |
+| Zone | Stage 1: covers the whole hall and stays put (the strip counts down to the closing, the warning band in its last 10 s); stage 2: closes continuously and evenly to r = 0.5 m exactly when the clock ends, its centre sliding to a new spot every round (the same on both phones); damage 5 HP/s (first 10 s outside), then 10, then 20 |
 | Time-out | Higher HP wins; equal HP -> draw |
-| Score HUD | Top centre: [your bar][blue box: your rounds][timer + "OBJECTIVE: 5" (the rounds to win)][orange box: enemy rounds][enemy bar]; timer red in the last 10 s and during prep |
+| Score HUD | Top centre: [your bar][blue box: your rounds][timer + "OBJECTIVE: 5" (the rounds to win)][orange box: enemy rounds][enemy bar]; the timer counts each stage down (00:20 -> 00:00, then 01:30 -> 00:00), red in the last 10 s of a stage and during prep |
 
 ## 2. Map "Cargo Cage" (original, warehouse duel arena)
 - Enclosed industrial hall, 42 x 30 m inside, 9 m walls, 180-degree rotational symmetry, spawn
@@ -29,7 +29,7 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 - Shipping containers in light blue, deep blue, rust red, orange and cream (20 ft and 40 ft, some
   stacked 2-high, an open walk-through container), steel ramps and crate steps up to the
   high ground: a 40 ft container on each side of an open 8.5 m centre bay (bare floor where the
-  safe zone's final 4 m circle closes), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
+  safe zone's last circle can close), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
   bollards, roll-up doors, fire cabinets, area signs (A / B).
 - Lighting: neutral bright daylight + fluorescent ambience, soft shadows, vivid colours.
 - Performance budget (phone): <= 220 draw calls and <= 250k primitives per frame in the arena.
@@ -56,6 +56,7 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 | Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above, player arrow, enemy red dot when revealed; safe-zone strip under it |
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
 | Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
+| Eliminated by | bottom left, 0.56 u wide | 0.13 u high | 1 vs 1, while the eliminated player spectates: dark plate with a red left edge, "ELIMINATED BY <NAME>" (the name red; THE ZONE / A FALL / YOUR OWN FRAG), a thin rule, then the killer's name, the gun's silhouette and name, and "DMG n" (what that player dealt this round) in yellow at the right |
 | Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
 | Weapon panel | top-right 0.861, 0.158, anchor r (main slot y 0.003 .. 0.155, three slots under it) | slot 0.152 h | main slot (big mag + small /reserve, RELOAD / RELOADING, gun silhouette, underline bar, top-right corner cut; tap = reload) over three square slots (gun, empty, fists; against the target dummy the empty one reads CHANGE GUN) |
 | HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |

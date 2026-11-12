@@ -1,14 +1,16 @@
 extends Node
 ## HUD screenshot tour:
 ##   tools/qa/capture.sh <out_dir> 1560x720 script:res://tests/shots_hud.gd
-## Prep with the weapon pick panel (pick + SELECT by touch), PREPARE countdown, round banner,
+## Prep with the weapon pick panel (pick + SELECT by touch; a later pick with guns on cooldown and
+## the ROUNDS strip), PREPARE countdown, round banner,
 ## the bot in view (red crosshair), firing (each shot its own damage number, hit marker),
 ## separate damage numbers in a row (never on top of each other), red-dot ADS, the RELOAD button
 ## (grey on a full magazine) and the reload ring, fists and back with SWITCH, the lever shotgun's
 ## own silhouette, sniper scope, sprint (stick past the ring and the
 ## button), the settings gear (over the weapon panel's corner), scoreboard (tap on the score bar,
 ## clear of the weapon panel), healing, low HP with
-## damage arcs, the elimination (red X, badge, kill feed) and the HUD editor (select + drag).
+## damage arcs, the elimination (red X, badge, kill feed), the ELIMINATED BY card (by the bot, by
+## the zone) and the HUD editor (select + drag).
 ## Then DUO / SQUAD in TRAINING GROUND (team_tour, alone with LW_TOUR=team): the BLUE vs ORANGE prep
 ## line, the teammates panel and ally tags, a knocked teammate (marker on them and pinned to the
 ## edge), REVIVE (a real tap) and reviving, the player knocked (BLEEDING OUT, BEING REVIVED),
@@ -57,6 +59,19 @@ func run(at: Node) -> int:
 	await _tap(at, hud.panels.select_rect().get_center())
 	await at.wait(0.4)
 	_check(String(arena.get("picked_weapon")) == "smg" and not hud.panels.pick_open, "SELECT applies the pick", at)
+	# A later pick of the 1 vs 1: guns on cooldown greyed with the clock and "n ROUNDS", the ROUNDS
+	# strip (blue: this player's picks); the preselection skips a resting gun, a tap on one does nothing.
+	hud.open_weapon_pick(Weapons.PICKABLE, "ar", 30.0, func(_id: String) -> void: pass, {"ar": 2, "sniper": 4},
+		RoundRules.picker_rows(9, true))
+	hud.panels.pick_round = 5
+	await at.wait(0.4)
+	await at.shot("hud_02b_pick_cooldown")
+	_check(hud.panels.pick_choice != "ar", "the preselection skips a gun on cooldown", at)
+	var before := hud.panels.pick_choice
+	await _tap(at, hud.panels.card_rect(0).get_center())
+	_check(hud.panels.pick_choice == before, "a tap on a resting gun does not pick it", at)
+	_check(hud.panels.card_rect(0).position.y > hud.panels.strip_disc(1).y, "the ROUNDS strip sits above the cards", at)
+	hud.close_weapon_pick()
 	arena.set("prep_left", 4.6)
 	await at.wait(0.7)
 	await at.shot("hud_03_prepare")
@@ -258,6 +273,17 @@ func run(at: Node) -> int:
 		and HudLayout.hit_rect("wall", hud.layout.wall, vs).position.x >= 64.0, "a camera cutout on the left moves the minimap and WALL off it", at)
 	UI.margins_for_test = Vector2(-1, -1)
 	hud._update_safe_area()
+	# The ELIMINATED BY card at the bottom left while the player spectates (held up for the picture).
+	arena.set("eliminated_by", {"cause": "gun", "name": b.display_name, "gun": String(b.gun().def.name), "gun_id": String(b.gun().id), "damage": 187})
+	p.alive = false
+	hud.queue_redraw()
+	await at.wait(0.3)
+	await at.shot("hud_16c_eliminated_by")
+	arena.set("eliminated_by", {"cause": "zone"})
+	await at.wait(0.2)
+	await at.shot("hud_16d_eliminated_by_zone")
+	p.alive = true
+	arena.set("eliminated_by", {})
 	# HUD editor.
 	Game.goto_hud_editor()
 	await at.wait(1.2)

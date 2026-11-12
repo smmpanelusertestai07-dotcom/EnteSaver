@@ -23,13 +23,13 @@ const GROUPS := [
 	]],
 	["ITEMS", [
 		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
-		["v_wall", "SHIELD WALL  x2", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
+		["v_wall", "SHIELD WALL  x3", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
 		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest stops a third), 3 s fuse."],
 	]],
 	["THE MATCH", [
 		["v_player", "FIRST TO {rounds} ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win {rounds} rounds to win the match."],
-		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use (12 guns, fixed attachments); the pick takes turns."],
-		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
+		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use in the 15 s prep (12 guns, fixed attachments); the pick takes turns. A gun picked rests for the 4 rounds after."],
+		["v_zone", "SAFE ZONE", "A round has two stages on the clock: 20 s with the zone over the whole hall, then 90 s (SQUAD 120 s) while it closes to a spot. Outside it you lose HP; at time-out more HP wins."],
 	]],
 ]
 
