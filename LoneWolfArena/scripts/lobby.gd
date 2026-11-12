@@ -7,7 +7,8 @@ extends Node3D
 ## the logo, the ping chip, FRIENDS and the settings gear top-right; the bar of main buttons
 ## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
 ## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
-## the opponent and the team size SOLO / DUO / SQUAD are picked too) and the big START. START plays
+## the opponent and the team size SOLO / DUO / SQUAD are picked too; the figure at its right end
+## opens the compact team-size box above it, LobbyDialogs.open_size_box) and the big START. START plays
 ## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
 ## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
 ## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
@@ -29,7 +30,8 @@ extends Node3D
 ## ONLINE 1 VS 1, FRIENDS, custom rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE),
 ## LobbyProfile (`profile_ui`: PROFILE and another player's card) and LobbyTeam (`team`: the TEAM
 ## bar and its invites).
-## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard, BottomBar,
+## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard (with
+## SizeBoxButton), BottomBar,
 ## PodiumInvite (the podium's "+": a place to add a teammate, _build_podium_invite),
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
 ## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader, MatchingPlate, SearchLayer
@@ -908,7 +910,38 @@ func _build_right_column(root: Control) -> void:
 	_mode_sub.name = "ModeFormat"
 	_mode_sub.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	line.add_child(_mode_sub)
+	mode_card.add_child(_build_size_box_button())
 	_refresh_mode()
+
+
+## The figure at the mode card's right end (SizeBoxButton, over the art's right part): a tap opens
+## the team-size box just above the card (LobbyDialogs.open_size_box) instead of SELECT MODE.
+## Hidden for a group member and during a search (update_start_gate).
+func _build_size_box_button() -> Button:
+	var b := Button.new()
+	b.name = "SizeBoxButton"
+	b.focus_mode = Control.FOCUS_NONE
+	b.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
+	b.offset_left = -UI.TOUCH_MIN - 2.0
+	b.offset_right = -2.0
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var c := b.size * 0.5
+		var hot := b.is_hovered() or b.is_pressed() or dialogs.size_box != null
+		b.draw_circle(c, 21.0, Color(0, 0, 0, 0.72), true, -1.0, true)
+		b.draw_circle(c, 21.0, UI.ACCENT if hot else Color(1, 1, 1, 0.5), false, 2.0, true)
+		HudDraw.icon(b, HudDraw.tex("v_player"), c, Vector2(26, 26), UI.ACCENT if hot else Color.WHITE))
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		b.connect(sig, b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		if dialogs.size_box:
+			dialogs.close_size_box()
+		else:
+			dialogs.open_size_box()
+		b.queue_redraw())
+	return b
 
 
 ## Draws a mode's art into `dest` of `ci`, cut from its MODE_ART part to dest's shape (centred).
@@ -1112,6 +1145,7 @@ func _follow_search(delta: float) -> void:
 ## lobby's back handling read the tree), except while it runs DELETE MY DATA (busy), which keeps
 ## its waiting screen until the scene changes.
 func close_layers() -> void:
+	dialogs.close_size_box()
 	dialogs.close_modal()
 	var sp := _find_settings()
 	if sp:
@@ -1165,6 +1199,12 @@ func update_start_gate() -> void:
 	_wait_leader.visible = text != ""
 	_matching.visible = (searching or duel_waiting()) and not start_btn.disabled
 	start_btn.visible = text == "" and not _matching.visible
+	var box_ok := LobbyDialogs.size_box_allowed(_gate_member, searching)
+	var fig := mode_card.get_node_or_null(^"SizeBoxButton") as Control if mode_card else null
+	if fig:
+		fig.visible = box_ok
+	if not box_ok:
+		dialogs.close_size_box()
 
 
 ## The "+" plate on the podium (PodiumInvite, GROUPS.txt 1): while the group has room and this
@@ -1432,7 +1472,7 @@ func _move_camera(pos: Vector3, look: Vector3) -> void:
 # ---------------------------------------------------------------- input / anim
 
 func _modal_open() -> bool:
-	return _modal != null or _find_settings() != null or profile_ui.layer != null
+	return _modal != null or dialogs.size_box != null or _find_settings() != null or profile_ui.layer != null
 
 
 func _input(event: InputEvent) -> void:
@@ -1491,8 +1531,8 @@ func _process(delta: float) -> void:
 		update_start_gate()
 
 
-## Android back: closes the top-most layer (settings, a popup: its own way back, PROFILE, the
-## wardrobe); with nothing open it cancels a running search (the search tab's X), else asks before
+## Android back: closes the top-most layer (settings, the team-size box, a popup: its own way
+## back, PROFILE, the wardrobe); with nothing open it cancels a running search (the search tab's X), else asks before
 ## quitting; while START's match loading runs it does nothing.
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_GO_BACK_REQUEST:
@@ -1502,7 +1542,9 @@ func _notification(what: int) -> void:
 	var sp := _find_settings()
 	if sp and not sp.covered():
 		return                      # the panel closes itself
-	if _modal:                      # (also a popup that came in over the settings panel)
+	if dialogs.size_box:
+		dialogs.close_size_box()
+	elif _modal:                    # (also a popup that came in over the settings panel)
 		dialogs.back()
 	elif profile_ui.layer:
 		profile_ui.close()
