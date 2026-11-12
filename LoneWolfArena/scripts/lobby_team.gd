@@ -99,20 +99,12 @@ static func bar_actions(grouped: bool, leader: bool, count: int, size: int, max_
 		"disband": grouped and leader, "remove": grouped and leader, "teams": grouped and size > 1}
 
 
-## What sits in START's place: "" (START works) or the line a member sees.
-static func start_gate_text(grouped: bool, leader: bool, leader_n: String, searching := Vector2i.ZERO) -> String:
+## What sits in START's place outside a search: "" (START works) or the line a member sees (a
+## search shows the MATCHING... plate instead, and the search tab with PLAYERS n/N: SearchTab).
+static func start_gate_text(grouped: bool, leader: bool, leader_n: String) -> String:
 	if not grouped or leader:
 		return ""
-	if searching.y > 0:
-		return "SEARCHING PLAYERS %d/%d" % [searching.x, searching.y]
 	return "WAITING FOR %s TO START" % (leader_n if leader_n != "" else "THE LEADER")
-
-
-## The search popup's count line.
-static func search_text(found: int, needed: int) -> String:
-	if needed <= 0:
-		return "STARTING MATCH..."
-	return "SEARCHING PLAYERS %d/%d" % [clampi(found, 0, needed), needed]
 
 
 ## The friends to invite: [{"id", "name", "online"}], online ones first, then by name; blocked

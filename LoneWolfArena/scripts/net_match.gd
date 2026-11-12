@@ -7,13 +7,13 @@ extends Node
 ## challenge marked quick (Cloud.invite(id, {"quick": true})); the other takes it at once, but only
 ## from a seeker it heard (Cloud._on_inbox), and the duel goes on as any other (host = the
 ## challenger): the lobby loads the match on Cloud.session_started. Never this phone itself, never a
-## blocked player, only who DUEL CHALLENGES FROM allows; after GIVE_UP_S a short note ends it.
-## The popup (node "Modal": "QuickStatus", "QuickTimer", "QuickNote", "QuickCancel") shows the
-## time searched; CANCEL, its X and Android back stop the search. Friends' direct duels (ONLINE 1
-## VS 1) are untouched.
+## blocked player, only who DUEL CHALLENGES FROM allows. The search never gives up by itself: it
+## runs until CANCEL.
+## No popup: the lobby's search tab (SearchTab, Lobby.search_tab) shows the time searched and
+## status_line(), its X (and Android back with no window open) calls cancel(); the lobby stays
+## usable meanwhile. Friends' direct duels (ONLINE 1 VS 1) are untouched.
 
 const SEEK_S := 2.0
-const GIVE_UP_S := 60.0
 const SEEN_MS := 6000          # a seeker not heard this long is left out of "saw"
 const SNUB_MS := 15000         # a seeker that said no (or never got going) is skipped this long
 
@@ -23,11 +23,6 @@ var elapsed := 0.0
 var _seek_t := 0.0
 var _asked := ""               # the seeker our quick challenge went to
 var _snubbed := {}             # id -> ms
-var _modal: Control
-var _status: Label
-var _timer: Label
-var _note: Label
-var _cancel: Button
 
 
 ## START in LONE WOLF: opens the search (or brings back the one running).
@@ -53,9 +48,10 @@ static func allowed(id: String, mine: String) -> bool:
 
 func start() -> void:
 	var cloud := Game.cloud_service()
-	_build()
 	if int(Game.settings.get("challenges_from", Game.CHALLENGES_EVERYONE)) == Game.CHALLENGES_NOBODY:
-		_end("DUEL CHALLENGES FROM IS NOBODY (SETTINGS, ONLINE): NOBODY CAN BE MATCHED WITH YOU.")
+		stop()
+		if lobby:
+			lobby.dialogs.notice("QUICK MATCH", "DUEL CHALLENGES FROM IS NOBODY (SETTINGS, ONLINE): NOBODY CAN BE MATCHED WITH YOU.")
 		return
 	if searching:
 		return
@@ -71,11 +67,9 @@ func start() -> void:
 		cloud.invite_failed.connect(_on_failed)
 
 
-## CANCEL, X, back: the search stops (a challenge on its way is called off).
+## The search tab's X, back: the search stops (a challenge on its way is called off).
 func cancel() -> void:
 	stop()
-	if lobby and lobby.dialogs.modal == _modal:
-		lobby.dialogs.close_modal()
 
 
 func stop() -> void:
@@ -105,22 +99,10 @@ func _process(delta: float) -> void:
 		stop()                       # paired: the lobby loads the match
 		return
 	elapsed += delta
-	if _timer:
-		_timer.text = "%d:%02d" % [int(elapsed) / 60, int(elapsed) % 60]
-	if _status:
-		if not cloud.opponent.is_empty():
-			_status.text = "OPPONENT FOUND: %s" % String(cloud.opponent.get("name", "PLAYER"))
-		elif cloud.status != "online":
-			_status.text = "CONNECTING..."
-		else:
-			_status.text = "SEARCHING..."
 	_seek_t -= delta
 	if _seek_t <= 0.0:
 		_seek_t = SEEK_S
 		cloud.send_seek(_saw(cloud))
-	# 60 s without a match: a short note (a pairing already under way is let finish).
-	if elapsed >= GIVE_UP_S and cloud.opponent.is_empty() and cloud.waiting_for() == "":
-		_end("NO OPPONENT FOUND. TRY AGAIN LATER, OR CHALLENGE A FRIEND IN ONLINE 1 VS 1.")
 
 
 ## The seekers heard lately (they go out with this phone's seek).
@@ -155,47 +137,12 @@ func _on_failed(_who: String) -> void:
 		_asked = ""
 
 
-## The popup: SEARCHING..., the time searched, CANCEL.
-func _build() -> void:
-	if _modal and is_instance_valid(_modal) and lobby.dialogs.modal == _modal:
-		return
-	var v := lobby.dialogs.open_modal("QUICK MATCH", 640.0)
-	_modal = lobby.dialogs.modal
-	_modal.set_meta("on_back", cancel)
-	_status = UI.label("SEARCHING...", 30, UI.ACCENT)
-	_status.name = "QuickStatus"
-	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_status)
-	_timer = UI.label("0:00", 40, UI.TEXT)
-	_timer.name = "QuickTimer"
-	_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(_timer)
-	_note = UI.label("A random player who pressed START in LONE WOLF too", 17, UI.TEXT_DIM, "semi")
-	_note.name = "QuickNote"
-	_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(_note)
-	_cancel = UI.button("CANCEL", 22, "dark", Vector2(240, 54))
-	_cancel.name = "QuickCancel"
-	_cancel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_cancel.pressed.connect(cancel)
-	v.add_child(_cancel)
-	if not lobby.dialogs.modal_closed.is_connected(_on_modal_closed):
-		lobby.dialogs.modal_closed.connect(_on_modal_closed)
-
-
-## Our popup went (the match loads, another popup took its place): the search ends with it.
-func _on_modal_closed() -> void:
-	if _modal and (not is_instance_valid(_modal) or _modal.is_queued_for_deletion()) and searching:
-		stop()
-
-
-## The search is over without a match: the note, and CANCEL becomes OK.
-func _end(why: String) -> void:
-	stop()
-	if _status:
-		_status.text = "NO MATCH"
-	if _note:
-		_note.text = why
-	if _cancel:
-		UI.set_caption(_cancel, "OK")
+## The search tab's small line: CONNECTING... while the relay is not reached, the opponent's name
+## once one is found, else "" (the tab's own estimate / STILL SEARCHING...).
+func status_line() -> String:
+	var cloud := Game.cloud_service()
+	if not cloud.opponent.is_empty():
+		return "OPPONENT FOUND: %s" % String(cloud.opponent.get("name", "PLAYER"))
+	if cloud.status != "online":
+		return "CONNECTING..."
+	return ""

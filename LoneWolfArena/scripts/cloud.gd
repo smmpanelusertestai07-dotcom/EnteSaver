@@ -599,6 +599,7 @@ func _process(delta: float) -> void:
 	_tick_room(delta)
 	if not _grp.is_empty():
 		_tick_group(delta, Time.get_ticks_msec())
+	_tick_code(delta, Time.get_ticks_msec())
 	if not _mm.is_empty():
 		_tick_mm(delta, Time.get_ticks_msec())
 	_card_t -= delta
@@ -879,6 +880,12 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 		if not _mm.is_empty() and topic == _mm_topic():
 			_on_gseek(payload)
 		return
+	if topic.begins_with(ROOT + "/gc/"):
+		if _code_topic != "" and topic == _code_topic:
+			var ca: Variant = JSON.parse_string(payload.get_string_from_utf8())
+			if ca is Dictionary:
+				_on_code_ask(ca)
+		return
 	if topic == SEEK_TOPIC or topic.begins_with(ROOT + "/mm/t"):
 		if topic == _seek_topic():          # only the search running here (1 vs 1, or that team size)
 			_on_seek(payload)
@@ -969,6 +976,13 @@ func _on_inbox(d: Dictionary) -> void:
 					_room_tag(_join.key, "inv", from).to_utf8_buffer(), String(d.rc).to_utf8_buffer()):
 				answer(true, rules_from(d.get("rules")))
 				return
+			# The leader of this phone's group of two starts a DUEL (group_duel): taken at once from
+			# the leader, and only with the group's own tag over it.
+			if typeof(d.get("gd")) == TYPE_STRING and in_group() and not in_room() and from == String(group.leader) \
+					and _crypto.constant_time_compare(group_duel_tag(from).to_utf8_buffer(), String(d.gd).to_utf8_buffer()) \
+					and invite_proven(d, from):
+				answer(true)
+				return
 			if invited.get_connections().is_empty() or not challenge_allowed(from, d):
 				# In a match (no lobby listening), or DUEL CHALLENGES FROM leaves this player out:
 				# a polite no at once (not after 25 s), never shown here.
@@ -984,6 +998,8 @@ func _on_inbox(d: Dictionary) -> void:
 				_on_gmatch(from, d)
 		"gacc":
 			_on_gmatch_answer(from, d, true)
+		"gin", "gno":
+			_on_code_answer(from, d)
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
 				_incoming = {}
@@ -2767,6 +2783,254 @@ func _search_begin(size: int) -> void:
 	group_changed.emit()
 
 
+# ---------------------------------------------------------------- GROUP CODE (join by code)
+# Every group has a 6-digit GROUP CODE (group_code: the leader's my_code; a solo shows its own, the
+# code of the group it would lead). JOIN BY CODE is built on the custom room's discovery and key
+# exchange, with the code itself the secret: the joiner says "gask" {from, name, bundle, pk, mac} on
+# ROOT/gc/<bucket> (code_topic: two hex characters of the code's hash, so the topic names 256
+# buckets, never the code), mac = HMAC(code key, "gask" + from) with the code's stretched key
+# (_code_key). Every leader listening on that bucket checks the tag against its own code and stays
+# silent when it is not theirs. The leader whose code it is answers in the joiner's inbox: "gin"
+# {sec, rt} with the group's id and keys RSA-wrapped for the joiner's key (as a room's "rin") and rt
+# = HMAC(code key, "gin" + sec + leader), or "gno" {full: true, rt} when the group is full. The
+# joiner then says "gjoin" in the group room as an invitee does; the leader's roster is the truth.
+# Rules: a blocked player is never answered, and a joiner never takes a "gin" from a leader it
+# blocked; the leader's switch JOIN BY CODE (code_join, ON by default) off = nobody listens; a host
+# checks at most CODE_RATE asks a second (and one a 2 s per asker), a joiner starts at most
+# CODE_TRIES_MAX attempts a minute, each asks every CODE_ASK_S and gives up after CODE_WAIT_MS ("NO
+# GROUP WITH THIS CODE"). A custom room has its own code and password: no group code in a room.
+const CODE_ASK_S := 1.5
+const CODE_WAIT_MS := 8000
+const CODE_TRIES_MAX := 5
+const CODE_RATE := 4.0
+var my_code := ""              # this phone's group code (6 digits), made once per run
+var code_join := true          # the leader's switch JOIN BY CODE
+var code_state := ""           # this phone's own JOIN BY CODE: "", "asking", "in", "full", "none", "blocked"
+var _cjoin := {}               # {"code", "key", "t", "ask_t"}: the join by code under way
+var _code_topic := ""          # the bucket this phone listens on for asks with its code
+var _code_keys := {}           # code -> its stretched key (the own one, the one being joined)
+var _code_tries: Array = []    # when the last join attempts began (ms)
+
+
+## The GROUP CODE the GROUP bar shows: a member's is the leader's (from the roster), a leader's or
+## a solo's its own; "" in a custom room.
+func group_code() -> String:
+	if in_room():
+		return ""
+	if not group.is_empty() and String(group.leader) != my_id:
+		return String(group.get("code", ""))
+	if my_code == "" and my_id != "":
+		my_code = "%06d" % (_crypto.generate_random_bytes(4).decode_u32(0) % 1000000)
+	return my_code
+
+
+## The bucket topic asks for a code go to (never the code itself).
+static func code_topic(code: String) -> String:
+	return ROOT + "/gc/" + ("lonewolfarena-gcode|" + code).sha256_text().left(2)
+
+
+## A code's key (stretched a little: it is only six digits).
+func _code_key(code: String) -> PackedByteArray:
+	if _code_keys.has(code):
+		return _code_keys[code]
+	var k := ("lonewolfarena-gcode|%s" % code).sha256_buffer()
+	for i in 2000:
+		k = _crypto.hmac_digest(HashingContext.HASH_SHA256, k, code.to_utf8_buffer())
+	if _code_keys.size() > 8:
+		_code_keys.clear()
+	_code_keys[code] = k
+	return k
+
+
+func _code_tag(key: PackedByteArray, what: String) -> String:
+	return _crypto.hmac_digest(HashingContext.HASH_SHA256, key, what.to_utf8_buffer()).hex_encode()
+
+
+## The leader's (or a solo's) switch JOIN BY CODE.
+func set_code_join(on: bool) -> void:
+	if code_join != on:
+		code_join = on
+		group_changed.emit()
+
+
+## JOIN BY CODE: "" when the ask went out (code_state then tells how it goes), else the notice.
+func join_group_code(code: String) -> String:
+	code = code.strip_edges()
+	if code.length() != 6 or not code.is_valid_int():
+		return "A GROUP CODE HAS 6 DIGITS"
+	if code == group_code():
+		return "THIS IS YOUR OWN GROUP CODE"
+	if in_group() or in_room():
+		return "EXIT YOUR GROUP FIRST"
+	if in_session or session_multi:
+		return "A MATCH IS ALREADY STARTING"
+	if not _connected or _key == null:
+		return "OFFLINE: JOINING A GROUP NEEDS THE INTERNET"
+	if code_state == "asking":
+		return "A JOIN IS ALREADY UNDER WAY"
+	var now := Time.get_ticks_msec()
+	_code_tries = _code_tries.filter(func(t: int) -> bool: return now - t < 60000)
+	if _code_tries.size() >= CODE_TRIES_MAX:
+		return "TOO MANY TRIES: WAIT A MINUTE"
+	_code_tries.append(now)
+	_cjoin = {"code": code, "key": _code_key(code), "t": now, "ask_t": 0.0}
+	code_state = "asking"
+	group_changed.emit()
+	return ""
+
+
+## The joiner's "gask" as it goes out.
+func _code_ask_msg() -> Dictionary:
+	return {"t": "gask", "from": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle), "pk": _pk_pem,
+		"mac": _code_tag(_cjoin.key, "gask" + my_id)}
+
+
+## Every frame: the leader listens on its code's bucket while code joins can come in; a join by
+## code asks every CODE_ASK_S until answered or CODE_WAIT_MS.
+func _tick_code(delta: float, now: int) -> void:
+	var want := ""
+	if _connected and _want_lobby and code_join and my_id != "" and is_group_leader() and not in_room() and room_code == "" \
+			and not in_session and not session_multi and code_state != "asking":
+		want = code_topic(group_code())
+	if want != _code_topic:
+		if _code_topic != "" and _connected:
+			_unsubscribe(_code_topic)
+		_code_topic = want
+		if want != "":
+			_subscribe(want)
+	if code_state == "asking" and not _cjoin.is_empty():
+		_cjoin.ask_t = float(_cjoin.ask_t) - delta
+		if float(_cjoin.ask_t) <= 0.0:
+			_cjoin.ask_t = CODE_ASK_S
+			_publish_json(code_topic(String(_cjoin.code)), _code_ask_msg())
+		if now - int(_cjoin.t) > CODE_WAIT_MS:
+			_cjoin = {}
+			code_state = "none"
+			group_changed.emit()
+
+
+## A "gask" on this phone's bucket: answered only when its tag is this phone's code's ("" else, the
+## ask is another group's). Returns the answer that went out ({} for none).
+func _on_code_ask(d: Dictionary) -> Dictionary:
+	var from := String(d.get("from", "")).left(32)
+	if String(d.get("t", "")) != "gask" or from == "" or from == my_id or typeof(d.get("mac")) != TYPE_STRING:
+		return {}
+	if not code_join or in_room() or not is_group_leader() or in_session or session_multi:
+		return {}
+	if not _bucket("gc", CODE_RATE, 8.0) or not _bucket("gc" + from, 0.5, 3.0):
+		return {}
+	var key := _code_key(group_code())
+	if not _crypto.constant_time_compare(_code_tag(key, "gask" + from).to_utf8_buffer(), String(d.mac).to_utf8_buffer()):
+		return {}                    # another group's code in the same bucket
+	if Game.is_blocked(from) or typeof(d.get("pk")) != TYPE_STRING or String(d.pk).length() > 1200 \
+			or from != String(d.pk).sha256_text().left(32):
+		return {}                    # a blocked player never joins (and hears nothing)
+	var taken := 0
+	if not group.is_empty():
+		taken = (group.members as Array).size() + (_grp.invited as Dictionary).size()
+		if (_grp.invited as Dictionary).has(from):
+			taken -= 1
+	if not _group_has(from) and taken >= GROUP_MAX:
+		var no := {"t": "gno", "from": my_id, "full": true, "rt": _code_tag(key, "gno" + my_id)}
+		_publish_json(ROOT + "/u/" + from, no)
+		return no
+	var made := group.is_empty()
+	if made:
+		_group_create(clampi(int(Game.team_size), 1, 4))
+	var sec := _room_sec(String(d.pk))
+	if sec == "":
+		if made:
+			_group_close(false)
+		return {}
+	if not _group_has(from):
+		(_grp.invited as Dictionary)[from] = Time.get_ticks_msec()
+	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
+	if not peers.has(from) and peers.size() < MAX_PEERS:
+		peers[from] = {"name": who if who != "" else "PLAYER", "bundle": b, "pk": String(d.pk), "seen": Time.get_ticks_msec()}
+	var msg := {"t": "gin", "from": my_id, "name": String(Game.profile.name), "bundle": String(Game.profile.bundle), "sec": sec,
+		"rt": _code_tag(key, "gin" + sec + my_id)}
+	_publish_json(ROOT + "/u/" + from, msg)
+	group_changed.emit()
+	return msg
+
+
+## The joiner: the leader's "gin" (the group's keys, wrapped for this phone) or "gno" (full), both
+## tagged with the code's key; a "gin" from a leader this phone blocked is refused.
+func _on_code_answer(from: String, d: Dictionary) -> void:
+	if code_state != "asking" or _cjoin.is_empty() or typeof(d.get("rt")) != TYPE_STRING:
+		return
+	var key: PackedByteArray = _cjoin.key
+	if String(d.t) == "gno":
+		if _crypto.constant_time_compare(_code_tag(key, "gno" + from).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
+			_cjoin = {}
+			code_state = "full"
+			group_changed.emit()
+		return
+	var sec_text := String(d.get("sec", "")) if typeof(d.get("sec")) == TYPE_STRING else ""
+	if sec_text == "" or sec_text.length() > 1024 \
+			or not _crypto.constant_time_compare(_code_tag(key, "gin" + sec_text + from).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
+		return
+	if Game.is_blocked(from):
+		_cjoin = {}
+		code_state = "blocked"           # never into the group of a leader this player blocked
+		group_changed.emit()
+		return
+	if in_group() or in_room() or in_session or session_multi or _key == null:
+		return
+	var sec := _crypto.decrypt(_key, Marshalls.base64_to_raw(sec_text))
+	if sec.size() != 81 or not int(sec[80]) in [1, 2, 4]:
+		return
+	var code := String(_cjoin.code)
+	_cjoin = {}
+	code_state = "in"
+	_mm_stop()
+	search_needed = 0
+	search_found = 0
+	if not group.is_empty():
+		_group_close(false)              # (a group of one this phone led, an invite still out)
+	var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+	var b := String(CharacterModel.bundle_info(String(d.get("bundle", "default")) if typeof(d.get("bundle")) == TYPE_STRING else "default").id)
+	var gid := sec.slice(0, 16).hex_encode()
+	_grp = {"gid": gid, "aes": sec.slice(16, 48), "mac": sec.slice(48, 80), "seq": _group_seq0(), "their": {}, "seen": {}, "invited": {},
+		"beat_t": GROUP_BEAT_S, "join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": true, "manual": false}
+	group = {"gid": gid, "leader": from, "members": [{"id": from, "name": who if who != "" else "PLAYER", "bundle": b, "team": 0, "slot": 0}],
+		"status": "joining", "mode": "lonewolf", "size": int(sec[80]), "code": code}
+	_subscribe(ROOT + "/g/" + gid)
+	group_changed.emit()
+
+
+## The leader of a group of exactly two plays the other member 1 vs 1 (START with SOLO): a plain
+## duel challenge (invite) carrying "gd", the group's tag (group_duel_tag), so the member's phone
+## takes it at once from its leader and from nobody else (_on_inbox). The match and its results are
+## the usual 1 vs 1's; the group stays (its room beats on meanwhile). "" when it went out, else the
+## notice to show.
+func group_duel() -> String:
+	if not in_group() or (group.members as Array).size() != 2 or in_room():
+		return "A DUEL NEEDS A GROUP OF TWO"
+	if String(group.leader) != my_id:
+		return "ONLY THE LEADER CAN START"
+	if in_session or session_multi or not _outgoing.is_empty():
+		return "A MATCH IS ALREADY STARTING"
+	if not _connected:
+		return "OFFLINE: THE MATCH NEEDS THE INTERNET"
+	var other := {}
+	for m: Dictionary in group.members:
+		if String(m.id) != my_id:
+			other = m
+	var oid := String(other.get("id", ""))
+	if Game.is_blocked(oid) or not invite(oid, {"gd": group_duel_tag(my_id)}):
+		return "%s CANNOT BE REACHED RIGHT NOW" % String(other.get("name", "THE OTHER PLAYER"))
+	return ""
+
+
+## The group's tag over a duel from `sender` (HMAC with the group's MAC key: only members can make it).
+func group_duel_tag(sender: String) -> String:
+	if _grp.is_empty():
+		return ""
+	return _crypto.hmac_digest(HashingContext.HASH_SHA256, _grp.mac, ("gduel" + String(_grp.gid) + sender).to_utf8_buffer()).hex_encode()
+
+
 # ---------------------------------------------------------------- matchmaking (gseek / gmatch)
 # Every searching LEADER (a solo searcher leads a unit of one) says "gseek" on ROOT/mm/g<size>
 # every MM_SEEK_S (never retained): {"t": "gseek", "id", "pk", "m": [[id, name, bundle], ...] (its
@@ -3025,8 +3289,11 @@ func _group_send(d: Dictionary) -> void:
 func _group_roster() -> void:
 	if group.is_empty() or String(group.leader) != my_id:
 		return
-	_group_send({"k": "groster", "members": NetGroup.pack_members(group.members), "mode": String(group.mode),
-		"size": int(group.size), "status": String(group.status), "found": search_found})
+	var msg := {"k": "groster", "members": NetGroup.pack_members(group.members), "mode": String(group.mode),
+		"size": int(group.size), "status": String(group.status), "found": search_found}
+	if not in_room():
+		msg.code = group_code()          # (inside the group room's encryption: only members read it)
+	_group_send(msg)
 
 
 ## Leaves the group here (tell: "gleave", the leader's "gend") and forgets its keys.
@@ -3171,6 +3438,9 @@ func _on_groster(d: Dictionary) -> void:
 	var mode := String(d.get("mode", "lonewolf")).left(16) if typeof(d.get("mode")) == TYPE_STRING else "lonewolf"
 	var before := JSON.stringify([group.members, group.status, group.mode, group.size, search_found, search_needed])
 	_grp.joining = false
+	var gc: Variant = d.get("code")
+	if typeof(gc) == TYPE_STRING and String(gc).length() == 6 and String(gc).is_valid_int():
+		group.code = String(gc)
 	group.members = list
 	group.status = g_status
 	group.mode = mode

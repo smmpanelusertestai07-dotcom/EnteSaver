@@ -1,6 +1,6 @@
 extends RefCounted
 ## Unit tests of the lobby's GROUP parts (design/GROUPS.txt 1, UI), run from tests/run_tests.gd:
-## - the texts: SEARCHING PLAYERS n/N, WAITING FOR <LEADER> TO START, GROUP INVITE, SELECT MODE's
+## - the texts: the search tab (ESTIMATED 0:10 / STILL SEARCHING..., m:ss, PLAYERS n/N), WAITING FOR <LEADER> TO START, GROUP INVITE, SELECT MODE's
 ##   DUO / SQUAD lines (real players, never bots);
 ## - the gating rules: what the GROUP bar offers a solo, a leader and a member (INVITE greyed when
 ##   full or not the leader, EXIT for a member, DISBAND and REMOVE for the leader), where it shows;
@@ -32,11 +32,12 @@ func _check(cond: bool, what: String) -> void:
 
 
 func _texts() -> void:
-	_check(LobbyTeam.search_text(3, 4) == "SEARCHING PLAYERS 3/4" and LobbyTeam.search_text(9, 8) == "SEARCHING PLAYERS 8/8",
-		"the search popup counts n/N (%s)" % LobbyTeam.search_text(3, 4))
-	_check(LobbyTeam.search_text(0, 0) == "STARTING MATCH...", "a group of 4 in DUO starts at once")
+	_check(SearchTab.players_text(3, 4) == "PLAYERS 3/4" and SearchTab.players_text(9, 8) == "PLAYERS 8/8" and SearchTab.players_text(0, 0) == "",
+		"the search tab counts PLAYERS n/N, nothing for the 1 vs 1 (%s)" % SearchTab.players_text(3, 4))
+	_check(SearchTab.line_text(0.0) == "ESTIMATED 0:10" and SearchTab.line_text(10.5) == "ESTIMATED 0:10" and SearchTab.line_text(11.0) == "STILL SEARCHING...",
+		"the search tab's line: the estimate for 10 s, then STILL SEARCHING...")
+	_check(SearchTab.timer_text(0.0) == "0:00" and SearchTab.timer_text(75.4) == "1:15", "the search tab counts up (m:ss)")
 	_check(LobbyTeam.start_gate_text(true, false, "ZORA") == "WAITING FOR ZORA TO START", "a member waits for the leader")
-	_check(LobbyTeam.start_gate_text(true, false, "ZORA", Vector2i(5, 8)) == "SEARCHING PLAYERS 5/8", "a member sees the group's search")
 	_check(LobbyTeam.start_gate_text(true, true, "ME") == "" and LobbyTeam.start_gate_text(false, true, "") == "",
 		"the leader's and a solo's START works")
 	_check(LobbyFriends.group_invite_text("VIPER") == "VIPER invites you to their group", "GROUP INVITE's words")

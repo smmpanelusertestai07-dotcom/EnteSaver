@@ -31,20 +31,21 @@ func run(autotest: Node) -> int:
 		lobby.call("_start")
 		await at.wait(ALONE_S)
 		var nm := lobby.get_node_or_null("NetMatch") as NetMatch
-		var modal := lobby.dialogs.modal
-		if nm == null or not nm.searching or not cloud.seeking or modal == null or modal.find_child("QuickCancel", true, false) == null:
-			_fail("START in LONE WOLF did not open the QUICK MATCH search")
+		var tab := lobby.search_tab
+		if nm == null or not nm.searching or not cloud.seeking or lobby.dialogs.modal != null or not tab.is_visible_in_tree() \
+				or not (tab.find_child("SearchCancel", true, false) as Control).is_visible_in_tree():
+			_fail("START in LONE WOLF did not show the QUICK MATCH search tab (no popup)")
 		elif not cloud.quick_seen.is_empty() or cloud.waiting_for() != "" or started[0]:
 			_fail("a lone search paired with something (seen %s)" % str(cloud.quick_seen.keys()))
 		else:
-			var timer := modal.find_child("QuickTimer", true, false) as Label
-			at.log_line("searching alone: timer %s, status %s" % [timer.text if timer else "?", (modal.find_child("QuickStatus", true, false) as Label).text])
+			var timer := tab.find_child("SearchTimer", true, false) as Label
+			at.log_line("searching alone: timer %s, line %s" % [timer.text if timer else "?", (tab.find_child("SearchLine", true, false) as Label).text])
 			if timer == null or timer.text == "0:00":
 				_fail("the search's timer does not run")
-			(modal.find_child("QuickCancel", true, false) as Button).pressed.emit()
+			(tab.find_child("SearchCancel", true, false) as Button).pressed.emit()
 			await at.wait(0.5)
-			if nm.searching or cloud.seeking or lobby.dialogs.modal != null:
-				_fail("CANCEL did not stop the search")
+			if nm.searching or cloud.seeking or tab.is_visible_in_tree():
+				_fail("the search tab's X did not stop the search")
 		await at.wait(GUEST_DELAY_S - ALONE_S - 0.5)
 	else:
 		await at.wait(GUEST_DELAY_S)
