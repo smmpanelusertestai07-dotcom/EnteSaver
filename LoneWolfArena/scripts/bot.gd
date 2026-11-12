@@ -219,12 +219,14 @@ func _think(delta: float) -> void:
 			_aim_and_shoot(delta)
 		else:
 			_face_point(_zone_goal + Vector3.UP * 1.5, delta, 0.6)
+		_arm_up()
 		if weapon().ammo <= 0 and not weapon().reloading:
 			start_reload()
 		_check_stuck(delta)
 		return
 	_maybe_grenade()
 	if (state == S.SEARCH or state == S.CHASE) and not allies.is_empty() and _team_errand(delta, state == S.SEARCH):
+		_arm_up()
 		if weapon().ammo <= 0 and not weapon().reloading:
 			start_reload()
 		_check_stuck(delta)
@@ -248,8 +250,7 @@ func _think(delta: float) -> void:
 					state = S.ENGAGE
 		_:
 			_search(delta)
-	if current == Weapons.SIDE and state != S.ENGAGE and (gun().ammo > 0 or gun().reserve > 0 or gun().reloading):
-		switch_weapon(Weapons.GUN)          # the fight broke off: the gun again, reloaded out of sight
+	_arm_up()
 	if weapon().ammo <= 0 and not weapon().reloading:
 		start_reload()
 	_zone_clamp_move()
@@ -456,8 +457,9 @@ func _aim_and_shoot(delta: float) -> void:
 ## Which weapon of the kit to hold in a fight with the enemy `dist` m away: the gun while it has
 ## rounds; its magazine empty with the enemy within SIDEARM_DRAW_M, the sidearm instead of a reload
 ## in the open (unless the reload is nearly done); back to the gun (which _think then reloads) once
-## the sidearm's magazine is empty or the enemy is past SIDEARM_KEEP_M (out of sight, or the fight
-## over: _think); the fists only when the gun and the sidearm are both dry.
+## the sidearm's magazine is empty (even with its reload begun: the gun's reserve first) or the
+## enemy is past SIDEARM_KEEP_M (out of sight, or the fight over: _arm_up); the fists only when
+## the gun and the sidearm are both dry.
 func _choose_arm(dist: float) -> void:
 	var g := gun()
 	var sa := sidearm()
@@ -465,7 +467,7 @@ func _choose_arm(dist: float) -> void:
 	var side_dry := sa == null or (sa.ammo <= 0 and sa.reserve <= 0 and not sa.reloading)
 	match current:
 		Weapons.SIDE:
-			if not gun_dry and ((sa.ammo <= 0 and not sa.reloading) or dist > SIDEARM_KEEP_M):
+			if not gun_dry and (sa.ammo <= 0 or dist > SIDEARM_KEEP_M):
 				switch_weapon(Weapons.GUN)
 			elif gun_dry and side_dry:
 				switch_weapon(Weapons.FISTS)
@@ -480,6 +482,20 @@ func _choose_arm(dist: float) -> void:
 				switch_weapon(Weapons.GUN)
 			elif not side_dry:
 				switch_weapon(Weapons.SIDE)
+
+
+## The kit at the end of every path of _think, just before its reload of an empty magazine: in a
+## fight with the enemy in sight, _choose_arm (so a magazine emptied this frame is answered now:
+## the sidearm drawn up close, or the gun back for an emptied sidearm, never a reload of the
+## sidearm while the gun has rounds); otherwise (fight broken off, healing, heading into the zone,
+## on a team errand) the sidearm goes away for the gun, reloaded out of sight.
+func _arm_up() -> void:
+	if state == S.ENGAGE and see_target and target != null:
+		var to := target.global_position - global_position
+		to.y = 0.0
+		_choose_arm(to.length())
+	elif current == Weapons.SIDE and (gun().ammo > 0 or gun().reserve > 0 or gun().reloading):
+		switch_weapon(Weapons.GUN)
 
 
 ## Preferred fighting distance (min, max) for the round's gun.

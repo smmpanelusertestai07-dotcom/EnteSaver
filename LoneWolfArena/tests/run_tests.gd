@@ -363,6 +363,37 @@ func _test_bot_sidearm() -> void:
 	_check(b.current == Weapons.GUN, "back to the gun when the sidearm is empty")
 	b._choose_arm(3.0)
 	_check(b.current == Weapons.GUN, "an empty sidearm is not drawn again")
+	# The sidearm's magazine emptied and its reload begun (the end-of-frame reload): still back to
+	# the gun while it has rounds, not a reload of the sidearm in the open.
+	b.sidearm().ammo = 5
+	b.switch_weapon(Weapons.SIDE)
+	b.sidearm().ammo = 0
+	var side_reloads := b.sidearm().start_reload()
+	b._choose_arm(3.0)
+	_check(side_reloads and b.current == Weapons.GUN and not b.sidearm().reloading,
+		"an emptied sidearm whose reload has begun: back to the gun all the same")
+	# _arm_up (every path of _think): off a fight in sight (the zone run, a team errand, a chase)
+	# the sidearm goes away for the gun; in one, _choose_arm.
+	b.sidearm().ammo = 5
+	b.switch_weapon(Weapons.SIDE)
+	b.state = Bot.S.CHASE
+	b.see_target = false
+	b._arm_up()
+	_check(b.current == Weapons.GUN, "off the fight the sidearm goes away for the gun")
+	var foe := Bot.new()
+	add_child(foe)
+	foe.process_mode = Node.PROCESS_MODE_DISABLED
+	foe.global_position = b.global_position + Vector3(3.0, 0.0, 0.0)
+	b.target = foe
+	b.state = Bot.S.ENGAGE
+	b.see_target = true
+	b._arm_up()
+	_check(b.current == Weapons.SIDE, "in a fight up close with the gun empty, the sidearm")
+	b.sidearm().ammo = 0
+	b._arm_up()
+	_check(b.current == Weapons.GUN, "its magazine emptied in that fight: the gun again, before any reload")
+	b.target = null
+	foe.free()
 	b.gun().reserve = 0
 	b.sidearm().reserve = 0
 	b._choose_arm(3.0)
