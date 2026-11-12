@@ -1720,7 +1720,7 @@ func _draw_eliminated_by(vs: Vector2, u: float) -> void:
 	var line := String({"zone": "OUTSIDE THE SAFE ZONE TOO LONG", "fall": "A DROP FROM THE HIGH GROUND",
 		"self": "STAY CLEAR OF YOUR OWN FRAG", "left": ""}.get(cause, ""))
 	var fs := int(0.026 * u)
-	var w := 0.62 * u
+	var w := 0.56 * u                    # (clear of the HP block's armour icons)
 	var h := 0.13 * u
 	var r := Rect2(0.03 * u, vs.y - h - 0.035 * u, w, h)
 	HudDraw.plate(self, r, 0.78)
@@ -1734,9 +1734,9 @@ func _draw_eliminated_by(vs: Vector2, u: float) -> void:
 	if cause in ["gun", "frag"]:
 		var nfs := int(0.028 * u)
 		var nm := by_name
-		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.2 * u)
-		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.2 * u), Color.WHITE, 0, 2, "bold")
-		var gx := tx + nw + 0.05 * u
+		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.17 * u)
+		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.17 * u), Color.WHITE, 0, 2, "bold")
+		var gx := tx + nw + 0.03 * u
 		var gid := String(e.get("gun_id", ""))
 		var t: Texture2D = HudDraw.tex("item_grenade") if cause == "frag" else HudDraw.weapon_tex(Weapons.DEFS.get(gid, Weapons.DEFS[Weapons.DEFAULT_PICK]))
 		HudDraw.icon(self, t, Vector2(gx + 0.04 * u, ry), Vector2(0.08, 0.04) * u, Color(1, 1, 1, 0.92))
