@@ -891,6 +891,7 @@ func _draw() -> void:
 	_draw_round_banner(vs, u)
 	_draw_kill_banner(vs, u)
 	_draw_spectating(vs, u)
+	_draw_eliminated_by(vs, u)
 	_draw_center_text(vs, u)
 	_draw_tips(vs, u)
 	if Game.settings.show_fps:
@@ -1701,6 +1702,55 @@ func _draw_spectating(vs: Vector2, u: float) -> void:
 	HudDraw.plate(self, Rect2(c.x - w * 0.5, c.y - 0.04 * u, w, 0.085 * u), 0.7)
 	HudDraw.text(self, "SPECTATING", Vector2(c.x, c.y - 0.015 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
 	HudDraw.text(self, nm, Vector2(c.x, c.y + 0.022 * u), fs, Color.WHITE, 1, 2, "bold")
+
+
+## The 1 vs 1 player is out of the round: a small card at the bottom left while it spectates (the
+## controls are hidden then): "ELIMINATED BY <NAME>" over a row with the killer's name, the gun
+## (its silhouette and name) and the damage that player dealt this one this round; the zone, a fall
+## or the player's own frag read "ELIMINATED BY THE ZONE" / "... A FALL" / "... YOUR OWN FRAG".
+func _draw_eliminated_by(vs: Vector2, u: float) -> void:
+	if team != null or arena == null or player == null or player.alive or int(arena.get("phase")) < 2:
+		return
+	var e: Dictionary = arena.get("eliminated_by")
+	if e.is_empty():
+		return
+	var cause := String(e.get("cause", ""))
+	var by_name := String(e.get("name", "")).to_upper()
+	var what := String({"zone": "THE ZONE", "fall": "A FALL", "self": "YOUR OWN FRAG", "left": "LEAVING"}.get(cause, by_name))
+	var line := String({"zone": "OUTSIDE THE SAFE ZONE TOO LONG", "fall": "A DROP FROM THE HIGH GROUND",
+		"self": "STAY CLEAR OF YOUR OWN FRAG", "left": ""}.get(cause, ""))
+	var fs := int(0.026 * u)
+	var w := 0.62 * u
+	var h := 0.13 * u
+	var r := Rect2(0.03 * u, vs.y - h - 0.035 * u, w, h)
+	HudDraw.plate(self, r, 0.78)
+	draw_rect(Rect2(r.position, Vector2(0.008 * u, r.size.y)), HudDraw.RED)
+	var tx := r.position.x + 0.03 * u
+	var ty := r.position.y + 0.035 * u
+	HudDraw.text_parts(self, [["ELIMINATED BY ", Color(0.78, 0.8, 0.84)], [what, Color(1.0, 0.5, 0.45)]],
+		Vector2(tx, ty), fs, 0, 2, "bold")
+	draw_line(Vector2(tx, ty + 0.025 * u), Vector2(r.end.x - 0.03 * u, ty + 0.025 * u), Color(1, 1, 1, 0.14), 1.0)
+	var ry := r.position.y + h * 0.68
+	if cause in ["gun", "frag"]:
+		var nfs := int(0.028 * u)
+		var nm := by_name
+		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.2 * u)
+		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.2 * u), Color.WHITE, 0, 2, "bold")
+		var gx := tx + nw + 0.05 * u
+		var gid := String(e.get("gun_id", ""))
+		var t: Texture2D = HudDraw.tex("item_grenade") if cause == "frag" else HudDraw.weapon_tex(Weapons.DEFS.get(gid, Weapons.DEFS[Weapons.DEFAULT_PICK]))
+		HudDraw.icon(self, t, Vector2(gx + 0.04 * u, ry), Vector2(0.08, 0.04) * u, Color(1, 1, 1, 0.92))
+		HudDraw.text(self, String(e.get("gun", "")), Vector2(gx + 0.09 * u, ry), int(0.022 * u), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+		HudDraw.text_parts(self, [["DMG ", Color(0.78, 0.8, 0.84)], [str(int(e.get("damage", 0))), HudDraw.YELLOW]],
+			Vector2(r.end.x - 0.03 * u, ry), nfs, 2, 2, "bold")
+	elif line != "":
+		HudDraw.text(self, line, Vector2(tx, ry), int(0.022 * u), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+
+
+## Font size for `t`: `px`, smaller when the text would be wider than `room`.
+func _fit_fs(t: String, px: int, room: float) -> int:
+	var w := HudDraw.text_width(t, px, "bold")
+	return maxi(9, int(px * minf(1.0, room / maxf(w, 1.0))))
 
 
 func _draw_round_banner(vs: Vector2, u: float) -> void:

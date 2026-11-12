@@ -138,6 +138,9 @@ var revive_t := 0.0              # s of that revive done so far
 var net_local := false
 var revived_by: Fighter          # the teammate reviving this knocked fighter now (null: nobody; it bleeds)
 var last_attacker: Fighter       # the last enemy whose damage landed (bots in teams turn to it)
+## The damage each other fighter dealt this one this round (attacker -> HP), for the ELIMINATED BY
+## card; cleared by reset_for_round.
+var round_taken := {}
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
@@ -343,6 +346,7 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 		last_attacked_time = last_damage_time
 		if attacker != self:
 			last_attacker = attacker
+			round_taken[attacker] = float(round_taken.get(attacker, 0.0)) + dmg
 	if healing and zone != "zone":
 		cancel_heal()
 	damaged.emit(dmg, from_pos, zone == "head", attacker)
@@ -486,6 +490,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_stop_reviving()
 	revived_by = null
 	last_attacker = null
+	round_taken.clear()
 	cancel_heal()
 	_stop_heal_sound()
 	healing = false

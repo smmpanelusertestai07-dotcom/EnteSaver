@@ -2,7 +2,9 @@ extends Node
 ## A match over several rounds against the bot (run with LW_ROUNDS_TO_WIN=2): each round ends
 ## with an elimination; the next one puts both back at their spawns with full HP, items and
 ## collisions; the gun is picked every two rounds by alternating sides (round 3 is the bot's
-## pick, and both hold that gun); the match ends at 2 wins with the right result, which the
+## pick, and both hold that gun, never the one of rounds 1-2, which rests on its cooldown); each
+## fight starts in stage 1 of the two-stage clock (00:20); the player's elimination in round 2 fills
+## the ELIMINATED BY card (the bot, its gun, the 200 damage it dealt); the match ends at 2 wins with the right result, which the
 ## profile's HISTORY and CAREER hold as played. Then a second match, quit with QUIT MATCH in
 ## round 2: HISTORY says LEFT (a defeat) with the round won before, CAREER counts it, no win.
 ## Prints one line per round and "ROUNDS CHECK DONE bad=N".
@@ -20,6 +22,7 @@ func run(autotest: Node) -> int:
 	var b: Fighter = arena.get("bot")
 	var map: MapBuilder = arena.get("map")
 	Engine.time_scale = 3.0
+	var first_gun := ""
 	# Round 1: the bot goes down; round 2: the player; round 3 (the bot's pick): the bot.
 	for r in [1, 2, 3]:
 		await at.wait_for_phase(arena, 1, 60.0)
@@ -31,7 +34,7 @@ func run(autotest: Node) -> int:
 		if r > 1:
 			if not p.alive or not b.alive or p.hp < Fighter.MAX_HP or b.hp < Fighter.MAX_HP:
 				_fail("round %d: the fighters were not reset (alive %s/%s)" % [r, p.alive, b.alive])
-			if p.medkits != 2 or p.shields != 2 or b.grenades != 1:
+			if p.medkits != 2 or p.shields != Fighter.START_SHIELDS or b.grenades != 1:
 				_fail("round %d: the items were not refilled" % r)
 			if p.global_position.distance_to(map.spawn_a) > 3.0 or b.global_position.distance_to(map.spawn_b) > 4.0:
 				_fail("round %d: not back at the spawns" % r)
@@ -41,6 +44,12 @@ func run(autotest: Node) -> int:
 			_fail("round %d: the fighters hold different guns" % r)
 		if r == 3 and String(arena.get("picked_weapon")) == "":
 			_fail("round 3: the bot never picked the gun")
+		if r == 1:
+			first_gun = gun_p
+		if r == 3 and gun_p == first_gun:
+			_fail("round 3: the bot picked %s, which rests after rounds 1-2" % gun_p)
+		if int(arena.call("stage")) != 1 or HudDraw.time_text(float(arena.call("stage_left"))) not in ["00:20", "00:19"]:
+			_fail("round %d: the fight did not start in stage 1 (stage %d, %.1f s)" % [r, arena.call("stage"), arena.call("stage_left")])
 		await at.wait(0.6)
 		var victim := p if r == 2 else b
 		var killer := b if r == 2 else p
@@ -49,6 +58,12 @@ func run(autotest: Node) -> int:
 		while arena.get("phase") == 1 and wait_end < 10.0:
 			await at.wait(0.1)
 			wait_end += 0.1
+		if r == 2:
+			var e: Dictionary = arena.get("eliminated_by")
+			at.log_line("round 2: eliminated by %s" % str(e))
+			if String(e.get("cause", "")) != "gun" or String(e.get("name", "")) != b.display_name or int(e.get("damage", 0)) != 200 \
+					or String(e.get("gun", "")) != String(b.gun().def.name):
+				_fail("round 2: the ELIMINATED BY card does not name the bot, its gun and its 200 damage")
 	var t := 0.0
 	while not arena.get("_result_shown") and t < 30.0:
 		await at.wait(0.25)

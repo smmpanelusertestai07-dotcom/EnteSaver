@@ -128,6 +128,10 @@ var _last_rend: Array = []       # the host's last "rend" (sent again after a "s
 ## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
 ## map's centre while it shrinks.
 var zone_final := Vector3.ZERO
+## This round's ELIMINATED BY card (the HUD draws it while the player spectates): {} until the
+## player goes down, then {"cause": death_cause, "name", "gun", "gun_id", "damage" (what the
+## killer dealt the player this round)}.
+var eliminated_by := {}
 ## The 1 vs 1 weapon cooldown (RoundRules.cooldown_left): pick round -> the gun picked for that pair
 ## of rounds, whoever picked it. Both phones fill it alike from the same picks.
 var picks := {}
@@ -777,6 +781,7 @@ func _apply_room_rules() -> void:
 
 
 func _start_prep() -> void:
+	eliminated_by = {}
 	_round_deaths.clear()
 	_down_cause.clear()
 	_settle_t = -1.0
@@ -1135,6 +1140,8 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		_deaths += 1
 	var cause := death_cause(victim, killer)
 	_down_cause[victim] = cause
+	if victim == player:
+		_note_eliminated_by(cause, killer)
 	if online and victim == player:
 		Game.session.send_event("died", [headshot and cause == "gun", cause, round_index])
 	if cause == "left":
@@ -1163,6 +1170,15 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 		return
 	var winner := killer if killer else ((player as Fighter) if victim == bot else (bot as Fighter))
 	_end_round(winner, headshot, false, killer)
+
+
+## The ELIMINATED BY card's numbers when the player went down (see eliminated_by).
+func _note_eliminated_by(cause: String, killer: Fighter) -> void:
+	var by: Fighter = killer if killer != null and is_instance_valid(killer) and killer != player else bot
+	var gun_id := String(by.weapon().id) if cause == "gun" and by != null else ""
+	eliminated_by = {"cause": cause, "name": by.display_name if by != null else "",
+		"gun": "FRAG" if cause == "frag" else (String(by.weapon().def.name) if by != null else ""),
+		"gun_id": gun_id, "damage": roundi(float(player.round_taken.get(by, 0.0)))}
 
 
 ## What took a fighter out: "gun" (or fists) and "frag" are the other fighter's kill; "zone",
