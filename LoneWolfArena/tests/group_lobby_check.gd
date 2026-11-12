@@ -15,6 +15,10 @@ extends Node
 ##   SHARES THE GROUP CODE); WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
 ##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
+## - the DUEL in a group of two: the leader's START shows MATCHING... until the member's phone takes
+##   it; one never taken gives START back with a notice;
+## - the podium's "+" plate: a solo's, right of the hero and clear of the mode card and START, opens
+##   the INVITE list; none in a full group or for a member;
 ## - CUSTOM ROOM with slots: CREATE with SQUAD shows 8 places with the HOST tag; in a DUO room a
 ##   player who joined sits on ORANGE with the host's KICK, START goes once both teams have a
 ##   player, a tap on an empty place moves the host there, KICK removes the player (START waits
@@ -51,6 +55,7 @@ func run(autotest: Node) -> int:
 	await _teams(lobby)
 	await _member(lobby)
 	await _group_invite(lobby)
+	await _duel_plate(lobby)
 	await _room(lobby)
 	cloud.leave_group()
 	Game.profile.friends = saved_friends
@@ -69,6 +74,24 @@ func _solo(lobby: Lobby) -> void:
 	if invite == null or invite.disabled or bar.find_child("GroupExit", true, false) or bar.find_child("GroupDisband", true, false):
 		_fail("a solo's GROUP bar is not + INVITE alone")
 	_touch_ok(bar)
+	# The podium's "+": right of the hero, clear of the mode card and START, opens the INVITE list.
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	if plus == null or not plus.is_visible_in_tree():
+		_fail("a solo in LONE WOLF has no + plate on the podium")
+	else:
+		var r := plus.get_global_rect()
+		var view := lobby.get_viewport().get_visible_rect()
+		if r.get_center().x <= view.size.x * Lobby.HERO_X or not view.encloses(r):
+			_fail("the podium's + plate is not right of the hero on the screen (%s)" % str(r))
+		_no_overlap([plus, lobby.mode_card, lobby.start_btn, bar])
+		_touch_ok(plus)
+		await at.shot("g00_podium_invite")
+		await _tap(plus)
+		await at.wait(0.6)
+		if lobby.dialogs.modal == null or lobby.dialogs.modal.find_child("GroupInviteList", true, false) == null:
+			_fail("a tap on the podium's + does not open the INVITE list")
+		lobby.dialogs.close_modal()
+		await at.wait(0.2)
 	Game.profile.friends = {ids.ZORA: {"name": "ZORA"}, ids["OFFLINE PAL"]: {"name": "ABBY"}}
 	cloud.peers[ids.ZORA] = {"name": "ZORA", "bundle": "neon", "pk": "", "seen": Time.get_ticks_msec() + 600000}
 	await _tap(invite)
@@ -125,6 +148,9 @@ func _leader(lobby: Lobby) -> void:
 		_fail("the leader's row has no LEADER tag")
 	if bar.find_child("GroupInvite", true, false) != null:
 		_fail("a full group still shows the + INVITE row (its badge would repeat the last member's number)")
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	if plus == null or plus.is_visible_in_tree():
+		_fail("the podium's + plate shows in a full group")
 	var bottom := lobby.find_child("BottomBar", true, false) as Control
 	var bar_end := 0.0
 	for c: Node in bar.get_children():
@@ -231,6 +257,9 @@ func _member(lobby: Lobby) -> void:
 				_fail("the LEADER mark is not on ZORA's model")
 	if marks != 1:
 		_fail("%d models show the LEADER mark, not 1" % marks)
+	var plus := lobby.find_child("PodiumInvite", true, false) as Control
+	if plus == null or plus.is_visible_in_tree():
+		_fail("a member sees the podium's + plate (only the leader invites)")
 	var bar := lobby.find_child("GroupBar", true, false) as Control
 	if bar.find_child("GroupExit", true, false) == null or bar.find_child("GroupDisband", true, false) != null \
 			or bar.find_child("GroupRemove_2", true, false) != null:
@@ -295,6 +324,46 @@ func _member(lobby: Lobby) -> void:
 	await at.wait(0.6)
 	if not cloud.group.is_empty() or not _models(lobby).is_empty() or not lobby.start_btn.is_visible_in_tree():
 		_fail("EXIT GROUP did not leave (models %d)" % _models(lobby).size())
+
+
+## The DUEL in a group of two: the leader's START shows MATCHING... (and the podium's + plate,
+## in a group with room, stands right of the hero meanwhile no more: a challenge is out) until the
+## member's phone takes it; a duel it never takes gives START back with a notice. No relay here: the
+## check lets Cloud think it is connected so the challenge "goes out" (to nowhere).
+func _duel_plate(lobby: Lobby) -> void:
+	cloud.leave_group()
+	lobby.dialogs.close_modal()
+	var size_was := Game.team_size
+	Game.team_size = 1
+	_set_group(cloud.my_id, "lonewolf", 1)
+	(cloud.group.members as Array).resize(2)                 # this player and ZORA
+	cloud.group_changed.emit()
+	await at.wait(0.5)
+	var zora := ids.ZORA as String
+	cloud.peers[zora] = {"name": "ZORA", "bundle": "neon", "pk": Crypto.new().generate_rsa(1024).save_to_string(true),
+		"seen": Time.get_ticks_msec() + 600000}
+	var was_connected := cloud._connected
+	cloud._connected = true
+	await _tap(lobby.start_btn)
+	await at.wait(0.6)
+	var matching := lobby.find_child("MatchingPlate", true, false) as Control
+	if cloud.waiting_for_id() != zora or matching == null or not matching.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree() \
+			or lobby.dialogs.modal != null:
+		_fail("the leader's DUEL start does not show MATCHING... while the member's phone answers (to %s)" % cloud.waiting_for())
+	await at.shot("g09_duel_matching")
+	# The member's phone never takes it: START comes back, a notice says so.
+	cloud.cancel_invite(false)
+	cloud.invite_answered.emit(false, "ZORA")
+	await at.wait(0.6)
+	if matching.is_visible_in_tree() or not lobby.start_btn.is_visible_in_tree() or lobby.dialogs.modal == null \
+			or not _find_text(lobby.dialogs.modal, "ZORA did not take the duel"):
+		_fail("a DUEL never taken does not give START back with a notice")
+	lobby.dialogs.close_modal()
+	cloud._connected = was_connected
+	cloud.peers.erase(zora)
+	cloud.leave_group()
+	Game.team_size = size_was
+	await at.wait(0.3)
 
 
 ## GROUP INVITE: the popup, waiting behind a question, ACCEPT.

@@ -81,6 +81,14 @@ func _gating() -> void:
 
 func _placement() -> void:
 	_check(Lobby.MEMBER_SPOTS.size() == 3, "up to 3 other members on the podium")
+	_check(Lobby.podium_invite_shown(true, true, 1, 4, false) and Lobby.podium_invite_shown(true, true, 3, 4, false)
+		and not Lobby.podium_invite_shown(true, true, 4, 4, false) and not Lobby.podium_invite_shown(true, false, 2, 4, false)
+		and not Lobby.podium_invite_shown(true, true, 2, 4, true) and not Lobby.podium_invite_shown(false, true, 1, 4, false),
+		"the podium's +: the leader or a solo with room, never full, for a member, during a search or without the GROUP bar")
+	_check(Lobby.podium_invite_spot({}) == 1 and Lobby.podium_invite_spot({"a": 0}) == 1 and Lobby.podium_invite_spot({"a": 0, "b": 1}) == 2
+		and Lobby.podium_invite_spot({"a": 1, "b": 2}) == -1, "the podium's + stands over the first free spot right of the hero")
+	for i: int in Lobby.INVITE_SPOTS:
+		_check((Lobby.MEMBER_SPOTS[i] as Vector3).x > 0.0, "the + plate's spot %d is right of the hero" % i)
 	for i in Lobby.MEMBER_SPOTS.size():
 		var p: Vector3 = Lobby.MEMBER_SPOTS[i]
 		_check(p.z < -0.3 and absf(p.x) > 0.5, "member spot %d stands behind and beside the hero (%s)" % [i, str(p)])
