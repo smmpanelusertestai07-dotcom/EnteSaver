@@ -1,0 +1,115 @@
+extends RefCounted
+## Unit tests of a round's rules (run from tests/run_tests.gd, which counts the checks):
+## - the two-stage clock: stage 1 is 20 s, stage 2 90 s (SQUAD 120 s), each counted down on its own;
+## - the zone over time: the whole hall and still through stage 1, closing evenly in stage 2 to
+##   0.5 m exactly at its end, the centre sliding to the final spot; the circles are nested;
+## - the 1 vs 1 weapon cooldown: a gun picked for a pair of rounds rests for the next 4 rounds
+##   (4 ROUNDS, then 2), whoever picked it; both phones replace a pick that breaks it alike, and a
+##   phone back from being away gets the same cooldowns from the "sync" text;
+## - the kit: 3 shield walls a round.
+
+const ArenaCode := preload("res://scripts/arena.gd")     # (the arena script has no class name)
+
+var t: Node
+
+
+static func run(runner: Node) -> void:
+	var me := new()
+	me.t = runner
+	me._stage_clock()
+	me._zone_over_time()
+	me._cooldown()
+	me._kit()
+
+
+func _check(cond: bool, what: String) -> void:
+	t.call("_check", cond, what)
+
+
+func _stage_clock() -> void:
+	var s2 := RoundRules.STAGE2_S
+	_check(RoundRules.STAGE1_S == 20.0 and s2 == 90.0 and RoundRules.SQUAD_STAGE2_S == 120.0,
+		"stages: 20 s, then 90 s (SQUAD 120 s)")
+	_check(RoundRules.fight_time(s2) == 110.0 and ArenaCode.ROUND_TIME == RoundRules.fight_time(s2),
+		"a 1 vs 1 fight lasts both stages (110 s)")
+	_check(RoundRules.stage_at(0.0) == 1 and RoundRules.stage_at(19.9) == 1 and RoundRules.stage_at(20.0) == 2,
+		"stage 2 begins at 20 s")
+	_check(HudDraw.time_text(RoundRules.stage_left(0.0, s2)) == "00:20" and HudDraw.time_text(RoundRules.stage_left(19.99, s2)) == "00:01",
+		"stage 1 counts 00:20 down")
+	_check(HudDraw.time_text(RoundRules.stage_left(20.0, s2)) == "01:30" and HudDraw.time_text(RoundRules.stage_left(109.99, s2)) == "00:01"
+		and RoundRules.stage_left(115.0, s2) == 0.0, "stage 2 counts 01:30 down to 00:00")
+	_check(HudDraw.time_text(RoundRules.stage_left(20.0, RoundRules.SQUAD_STAGE2_S)) == "02:00", "a SQUAD's stage 2 counts 02:00 down")
+	_check(ArenaCode.PREP_TIME == 15.0 and ArenaCode.PREP_SHORT == 5.0, "the pick prep is 15 s, the round after it 5 s")
+
+
+func _zone_over_time() -> void:
+	var s2 := RoundRules.STAGE2_S
+	var start := 27.6
+	var from := Vector3(0, 0, 0)
+	var to := Vector3(14.0, 0, -9.0)
+	var still := true
+	for i in 21:
+		var e := float(i) * 0.99
+		still = still and RoundRules.zone_radius_at(e, start, s2) == start and RoundRules.zone_center_at(e, from, to, s2) == from
+	_check(still, "through stage 1 the zone covers the whole hall and does not move")
+	_check(is_equal_approx(RoundRules.zone_radius_at(110.0, start, s2), 0.5) and RoundRules.zone_radius_at(200.0, start, s2) == 0.5,
+		"the zone is 0.5 m when stage 2 ends")
+	_check(RoundRules.zone_center_at(110.0, from, to, s2).is_equal_approx(to), "its centre reaches the round's final spot")
+	var mid := RoundRules.zone_radius_at(65.0, start, s2)
+	_check(is_equal_approx(mid, (start + 0.5) * 0.5), "it closes evenly (half way at the middle of stage 2: %.2f m)" % mid)
+	_check(RoundRules.zone_radius_at(20.5, start, s2) < start, "it starts closing in the first second of stage 2")
+	# The farthest final spot (zone_final_for) moves less than the radius shrinks: nested circles.
+	var far := Vector3(MapBuilder.HX - ArenaCode.ZONE_EDGE - 1.0, 0, MapBuilder.HZ - ArenaCode.ZONE_EDGE - 1.0)
+	var nested := true
+	for i in 90:
+		var e := 20.0 + float(i)
+		var c0 := RoundRules.zone_center_at(e, from, far, s2)
+		var c1 := RoundRules.zone_center_at(e + 1.0, from, far, s2)
+		nested = nested and c0.distance_to(c1) <= RoundRules.zone_radius_at(e, start, s2) - RoundRules.zone_radius_at(e + 1.0, start, s2)
+	_check(nested, "each later circle lies inside the earlier ones")
+	_check(is_equal_approx(RoundRules.zone_next(5.0, s2), 15.0) and is_equal_approx(RoundRules.zone_next(30.0, s2), 80.0),
+		"zone_next: to the closing in stage 1, to its end in stage 2")
+
+
+func _cooldown() -> void:
+	var guns := ["ar", "smg", "lever", "sg"]
+	var picks := {1: "ar"}
+	_check(RoundRules.pick_round_of(1) == 1 and RoundRules.pick_round_of(2) == 1 and RoundRules.pick_round_of(4) == 3,
+		"a pick holds for a pair of rounds")
+	_check(RoundRules.cooldown_left("ar", 3, picks) == 4 and RoundRules.cooldown_left("ar", 5, picks) == 2
+		and RoundRules.cooldown_left("ar", 7, picks) == 0, "a gun picked for rounds 1-2 rests 4 rounds, then 2, then is free")
+	_check(RoundRules.cooldown_left("smg", 3, picks) == 0 and RoundRules.cooldown_left("ar", 1, picks) == 0,
+		"other guns are free, and a pick does not block its own round")
+	picks[3] = "smg"
+	var cd := RoundRules.cooldowns(guns, 5, picks)
+	_check(cd == {"ar": 2, "smg": 4}, "both sides' picks rest, whoever picked (%s)" % str(cd))
+	_check(RoundRules.legal_pick("ar", guns, 5, picks) == "lever" and RoundRules.legal_pick("sg", guns, 5, picks) == "sg",
+		"a pick that breaks the cooldown becomes the first free gun")
+	_check(RoundRules.legal_pick("nuke", guns, 5, picks) == "lever", "an unknown gun becomes the first free gun")
+	# Both phones: the same picks give the same answer, and the "sync" text carries them over.
+	var other := RoundRules.picks_from_text(RoundRules.picks_text(picks), guns)
+	_check(other == picks and RoundRules.cooldowns(guns, 5, other) == cd, "the other phone works the cooldowns out alike (%s)" % RoundRules.picks_text(picks))
+	_check(RoundRules.picks_from_text("1:ar,x:smg,3:nuke,200:sg", guns) == {1: "ar"}, "a sync text keeps only real rounds and guns")
+	_check(RoundRules.picker_rows(9, true) == [true, true, false, false, true, true, false, false, true]
+		and RoundRules.picker_rows(4, false) == [false, false, true, true], "the ROUNDS strip: the picks alternate by pair")
+	# The arena: a pick on cooldown is replaced, the bot never picks one, the preselection skips one.
+	var a: Node3D = ArenaCode.new()
+	a.round_index = 3
+	a.picks = {1: "ar"}
+	var saved := String(Game.settings.get("last_pick", "ar"))
+	Game.settings.last_pick = "ar"
+	_check(a.legal_pick("ar") == String(Weapons.PICKABLE[1]) and a.preselected_pick() != "ar", "the arena skips the resting gun")
+	var bot_ok := true
+	for i in 40:
+		bot_ok = bot_ok and a._bot_choice() != "ar"
+	_check(bot_ok, "the bot never picks a gun on cooldown")
+	a.practice = true
+	_check(a.pick_cooldowns().is_empty() and a.legal_pick("ar") == "ar", "the target dummy has no cooldown")
+	Game.settings.last_pick = saved
+	a.free()
+
+
+func _kit() -> void:
+	var f := Fighter.new()
+	_check(Fighter.START_SHIELDS == 3 and f.shields == 3, "a round starts with 3 shield walls")
+	f.free()
