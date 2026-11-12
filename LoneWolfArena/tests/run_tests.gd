@@ -2075,6 +2075,18 @@ func _test_session_file() -> void:
 	_check(not FileAccess.file_exists(Cloud.resume_path()), "the file goes when the session ends")
 	_check((Game.profile.history as Array).size() == 1 and String((Game.profile.history as Array)[0].get("result")) == "left",
 		"a rejoined match lost before its arena was up counts as LEFT, once")
+	_check(again.rejoin_notice.size() == 2 and String(again.rejoin_notice[1]).contains("LEFT"), "and the lobby says so")
+	# The other phone says bye while this one rejoins (it quit): no LEFT here, and the notice says who left.
+	start.call(cl)
+	cl.note_match(true, 1, 1, "LONE WOLF")
+	var quitter := Cloud.new()
+	quitter._use_key(key)
+	var had := (Game.profile.history as Array).size()
+	_check(quitter.try_resume(), "the match is rejoined again")
+	quitter.end_session("left", true)
+	_check((Game.profile.history as Array).size() == had and not FileAccess.file_exists(Cloud.resume_path())
+		and quitter.rejoin_notice.size() == 2 and String(quitter.rejoin_notice[0]) == "OPPONENT LEFT",
+		"the other player's bye during the rejoin records no LEFT for this one, and says they left")
 	# Tampered, another install's key, another player, too late: none is entered, the file goes.
 	start.call(cl)
 	cl.note_match(true, 0, 0, "LONE WOLF")
@@ -2113,7 +2125,7 @@ func _test_session_file() -> void:
 		and (Game.profile.history as Array).size() == before, "a recorded match keeps no session file: nothing to rejoin or record")
 	var lan := Lan.new()
 	_check(not lan.resume_allowed(), "PLAY WITHOUT INTERNET keeps no session file")
-	for c: Node in [cl, again, other, stranger, late, done, lan]:
+	for c: Node in [cl, again, quitter, other, stranger, late, done, lan]:
 		c.free()
 	Game.profile = saved_profile
 	Game.autotest = at

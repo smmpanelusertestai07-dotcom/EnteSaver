@@ -165,8 +165,8 @@ func _ready() -> void:
 		var lost := Game.session != null and Game.session.last_end_reason != "left"
 		Game.match_notice = ["CONNECTION LOST" if lost else "OPPONENT LEFT", ("The connection was lost" if lost
 			else "The other player left") + " before the match began. Nothing was counted."]
-		if Game.session != null and Game.session.resumed:
-			Game.match_notice = ["CONNECTION LOST", "The match could not be rejoined in time: it counts as LEFT (a defeat)."]
+		if Game.session != null and Game.session.resumed and Game.session.rejoin_notice.size() == 2:
+			Game.match_notice = Game.session.rejoin_notice.duplicate()     # (what ended the rejoin, and what it counted)
 		Game.goto_lobby.call_deferred()
 		return
 	_build_zone()
