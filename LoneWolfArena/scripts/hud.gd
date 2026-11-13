@@ -32,7 +32,7 @@ const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_
 	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sidearm", "weapon_sniper", "v_skull"]
 const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
 const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming, 2 off
-const DMG_LIFE := 0.95
+const DMG_LIFE := 0.7
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
 ## The elimination badge stays through the break's beat only (the result band follows at
@@ -394,30 +394,60 @@ func confirm_kill(pos: Vector3) -> void:
 	Game.vibrate(60, "shooting")
 
 
-## Every shot shows its own number, what it really took from the target's HP (like the
-## reference's "43 43 43" for a rifle's hits; numbers that added several shots up read as one hit
-## doing far more than the gun does). A shotgun shell's pellets add up into the shell's number,
-## its head part a number of its own. A new number is placed beside the ones still showing (a row,
-## then a row above), never on top of them; every number then rises at the same speed, so the row
-## keeps its shape.
+## Damage numbers like the reference's: small bold yellow digits up and left of the target's
+## head, one number per burst: a hit on the same target within DMG_MERGE s of the newest number's
+## last hit adds to it (it pops again with the sum) while that number is younger than
+## DMG_MERGE_MAX; else a new number with a small random spread (at most +-DMG_SPREAD u), overlap
+## allowed. A number rises DMG_RISE m/s and goes DMG_LIFE s after its last hit.
+const DMG_MERGE := 0.3
+const DMG_MERGE_MAX := 1.0
+const DMG_RISE := 0.25
+const DMG_SPREAD := 0.04
+const DMG_HEAD_WARM := Color(1.0, 0.6, 0.16)
 func _add_damage_number(target: Fighter, amount: float, headshot: bool, pos: Vector3) -> void:
-	var nn := {"pos": pos + Vector3(0, 0.2, 0), "amount": amount, "head": headshot, "t": 0.0, "target": target, "off": Vector2.ZERO}
-	nn.off = _dmg_free_offset(nn)
-	_dmg_numbers.append(nn)
+	if target != null:
+		for i in range(_dmg_numbers.size() - 1, -1, -1):
+			var o: Dictionary = _dmg_numbers[i]
+			if o.target != target:
+				continue
+			if float(o.last) < DMG_MERGE and float(o.t) < DMG_MERGE_MAX:
+				o.amount = float(o.amount) + amount
+				o.head = bool(o.head) or headshot
+				o.last = 0.0
+				return
+			break
+	var jit := Vector2.ZERO
+	for o: Dictionary in _dmg_numbers:
+		if o.target == target:
+			jit = Vector2(randf_range(-DMG_SPREAD, DMG_SPREAD), randf_range(-DMG_SPREAD, DMG_SPREAD) * 0.5)
+			break
+	_dmg_numbers.append({"pos": pos, "amount": amount, "head": headshot, "t": 0.0, "last": 0.0, "target": target, "off": jit})
 	if _dmg_numbers.size() > 8:
 		_dmg_numbers.pop_front()
 
 
-## Font size of a damage number: grows a little with the damage, headshots larger.
+## Font size of a damage number: 0.032u .. 0.05u growing a little with the damage, heads x1.15.
 func _dmg_size(amount: float, head: bool, u: float) -> int:
-	return int(clampf(0.044 * u + amount * 0.09, 0.044 * u, 0.085 * u) * (1.25 if head else 1.0))
+	return int(clampf((0.032 + amount * 0.00015) * u, 0.032 * u, 0.05 * u) * (1.15 if head else 1.0))
 
 
-## Screen centre of a damage number now: its hit point (rising) plus its place in the row.
+## The 3D point a damage number hangs from: over the target's head (rising), else the hit point.
+func _dmg_anchor3(n: Dictionary) -> Vector3:
+	var tg: Variant = n.target
+	var p3: Vector3 = n.pos
+	if tg is Fighter and is_instance_valid(tg) and (tg as Fighter).is_inside_tree():
+		p3 = (tg as Fighter).head_position() + Vector3.UP * 0.22
+	return p3 + Vector3.UP * minf(float(n.t), DMG_MERGE_MAX) * DMG_RISE
+
+
+## A number's place on screen relative to its head point, in px: up-left plus its spread.
+static func dmg_offset(n: Dictionary, u: float) -> Vector2:
+	return Vector2(-0.03 * u, 0.0) + (n.off as Vector2) * u
+
+
+## Screen centre of a damage number now.
 func _dmg_point(n: Dictionary, u: float) -> Vector2:
-	var t := float(n.t)
-	var p3: Vector3 = n.pos + Vector3.UP * t * 0.55
-	return player.camera.unproject_position(p3) + (n.off as Vector2) * u + Vector2(0, -t * 0.03 * u)
+	return player.camera.unproject_position(_dmg_anchor3(n)) + dmg_offset(n, u)
 
 
 ## Screen rect of a damage number now; min_digits keeps room for a number that may still grow.
@@ -427,35 +457,6 @@ func _dmg_rect(n: Dictionary, u: float, min_digits := 1) -> Rect2:
 	var w := UI.font("number").get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var c := _dmg_point(n, u)
 	return Rect2(c - Vector2(w * 0.5 + 0.004 * u, fs * 0.42), Vector2(w + 0.008 * u, fs * 0.84))
-
-
-## Row offset (in HUD units) that keeps a new damage number clear of the ones still showing.
-func _dmg_free_offset(n: Dictionary) -> Vector2:
-	var u := HudLayout.unit(size)
-	if player == null or player.camera == null or u <= 0.0 or player.camera.is_position_behind(n.pos):
-		return Vector2.ZERO
-	var taken: Array[Rect2] = []
-	for o: Dictionary in _dmg_numbers:
-		if float(o.t) < DMG_LIFE - 0.15 and not player.camera.is_position_behind(o.pos):
-			taken.append(_dmg_rect(o, u, 3))
-	var base := _dmg_rect(n, u, 3)
-	var off := Vector2.ZERO
-	for attempt in 8:
-		var r := Rect2(base.position + off * u, base.size)
-		var hit := false
-		for other in taken:
-			if other.intersects(r.grow(0.012 * u)):
-				# step to the right of the number in the way, a clear gap and a little higher (two
-				# numbers side by side read as one: 48 and 32 as "4832"); far from the hit, a row above
-				off.x = (other.end.x - base.position.x) / u + 0.03
-				off.y = (other.position.y - base.position.y) / u - 0.02
-				if off.x > 0.2:
-					off = Vector2(0.0, (other.position.y - base.end.y) / u - 0.012)
-				hit = true
-				break
-		if not hit:
-			break
-	return off
 
 
 func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fighter) -> void:
@@ -803,7 +804,8 @@ func _process(delta: float) -> void:
 	tips_time = maxf(tips_time - real, 0.0)
 	for n in _dmg_numbers:
 		n.t += real
-	_dmg_numbers = _dmg_numbers.filter(func(n: Dictionary) -> bool: return float(n.t) < DMG_LIFE)
+		n.last += real
+	_dmg_numbers = _dmg_numbers.filter(func(n: Dictionary) -> bool: return float(n.last) < DMG_LIFE)
 	for d in _dmg_dirs:
 		d.t -= real
 	_dmg_dirs = _dmg_dirs.filter(func(d: Dictionary) -> bool: return float(d.t) > 0.0)
@@ -1511,22 +1513,22 @@ func _draw_damage_numbers(u: float) -> void:
 		return
 	var f := UI.font("number")
 	for n in _dmg_numbers:
-		var t := float(n.t)
-		if player.camera.is_position_behind(n.pos + Vector3.UP * t * 0.55):
+		var last := float(n.last)
+		if player.camera.is_position_behind(_dmg_anchor3(n)):
 			continue
 		var sp := _dmg_point(n, u)
 		var head := bool(n.head)
 		var amount := float(n.amount)
-		var a := clampf(1.0 - (t - 0.6) / 0.35, 0.0, 1.0)
-		var pop := 1.0 + clampf(0.12 - t, 0.0, 0.12) * 4.0          # pops when it appears
+		var a := clampf(1.0 - (last - (DMG_LIFE - 0.25)) / 0.25, 0.0, 1.0)
+		var pop := 1.0 + clampf(0.1 - last, 0.0, 0.1) * 3.0          # pops when it appears or grows
 		var fs := int(_dmg_size(amount, head, u) * pop)
-		var col := HudDraw.DMG_HEAD if head else HudDraw.DMG_BODY
+		var col := DMG_HEAD_WARM if head else HudDraw.DMG_BODY
 		var txt := str(maxi(roundi(amount), 1))
 		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		# Bold italic: skew the glyphs to the right around their centre.
 		draw_set_transform_matrix(Transform2D(0.0, Vector2.ONE, -0.22, sp))
 		var base := Vector2(-w * 0.5, (f.get_ascent(fs) - f.get_descent(fs)) * 0.5)
-		draw_string_outline(f, base, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(4, fs / 7), Color(0.05, 0.02, 0.0, 0.85 * a))
+		draw_string_outline(f, base, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(3, fs / 7), Color(0.05, 0.02, 0.0, 0.85 * a))
 		draw_string(f, base, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, a))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 

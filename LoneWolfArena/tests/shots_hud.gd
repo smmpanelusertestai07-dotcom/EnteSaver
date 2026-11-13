@@ -182,21 +182,20 @@ func run(at: Node) -> int:
 	var hits0 := int(p.stats.hits)
 	var gd: Dictionary = p.gun().def
 	var one_shot := b.hit_points(float(gd.damage) * Weapons.zone_mult(gd, "head") * Weapons.pen_mult(gd, "head"), "head") * int(gd.pellets)
-	var single := true
+	var most := 0
 	_touch(at, 5, fire_c, true)
 	for i in 9:
 		b.hp = maxf(b.hp, 150.0)      # keep the bot standing for the rest of the tour
 		_aim_at(p, b.chest_position() + Vector3(0, 0.05 * sin(i), 0))
 		_drag(at, 5, fire_c + Vector2(1, 0), Vector2(1, 0))
 		await at.wait(0.06)
-		for n: Dictionary in hud._dmg_numbers:
-			single = single and float(n.amount) <= one_shot + 0.01
+		most = maxi(most, hud._dmg_numbers.size())
 	await at.shot("hud_06_firing")
 	var burst_hits := int(p.stats.hits) - hits0
-	# A spray never adds its hits up into one bigger number (what each hit really takes is the
-	# unit tests' check, Fighter.land_hits).
-	_check(single, "every damage number is one shot's (%d hits, none above %d)" % [burst_hits, roundi(one_shot)], at)
-	_check(_numbers_apart(hud, p, vs), "damage numbers never cover each other", at)
+	# A spray adds its hits up into one number per burst (round 8, like the reference: what each
+	# hit really takes is the unit tests' check, Fighter.land_hits), hung up-left of the head.
+	_check(burst_hits <= 1 or most <= 3, "a burst of %d hits shows at most 3 numbers (got %d; one shot %d)" % [burst_hits, most, roundi(one_shot)], at)
+	_check(_numbers_near_head(hud, p, vs), "damage numbers hang by the target's head", at)
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
 	b.hp = maxf(b.hp, 150.0)
@@ -205,17 +204,16 @@ func run(at: Node) -> int:
 	# The HUD is held still for the picture (at 1-3 FPS a frame can outlast a number's life).
 	hud.process_mode = Node.PROCESS_MODE_DISABLED
 	hud._dmg_numbers.clear()
-	# Two quick body hits show two numbers (never one that reads as a single bigger hit); the
-	# headshot shows its own.
+	# Quick hits on one target add up into one number (a headshot among them turns it warm).
 	for hit: Array in [[b, 22.0, false], [b, 22.0, false], [b, 41.0, true]]:
 		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
 	var nums: Array = hud._dmg_numbers
-	_check(nums.size() == 3 and is_equal_approx(float(nums[0].amount), 22.0) and is_equal_approx(float(nums[1].amount), 22.0)
-		and bool(nums[2].head), "two quick body hits show 22 and 22, the headshot its own number", at)
+	_check(nums.size() == 1 and is_equal_approx(float(nums[0].amount), 85.0) and bool(nums[0].head),
+		"three quick hits on one target read as one number 85, marked head", at)
 	hud._dmg_numbers.clear()
 	for hit: Array in [[b, 22.0, false], [b, 41.0, true], [null, 22.0, false]]:
 		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
-	_check(hud._dmg_numbers.size() == 3 and _numbers_apart(hud, p, vs), "separate damage numbers line up side by side", at)
+	_check(hud._dmg_numbers.size() == 2 and _numbers_near_head(hud, p, vs), "a hit with no target keeps its own number", at)
 	hud.queue_redraw()
 	await at.get_tree().process_frame
 	hud.queue_redraw()
@@ -517,17 +515,14 @@ func run(at: Node) -> int:
 	return 1 if _fails > 0 else 0
 
 
-## True when no two damage numbers on screen overlap.
-func _numbers_apart(hud: HUD, p: Player, vs: Vector2) -> bool:
+## True when every damage number on screen sits within 0.1u of its target's head point.
+func _numbers_near_head(hud: HUD, p: Player, vs: Vector2) -> bool:
 	var u := HudLayout.unit(vs)
-	var rects: Array[Rect2] = []
 	for n: Dictionary in hud._dmg_numbers:
-		if float(n.t) < HUD.DMG_LIFE - 0.1 and not p.camera.is_position_behind(n.pos):
-			var r: Rect2 = hud._dmg_rect(n, u).grow(0.01 * u)     # a clear gap: 48 and 32 never read as 4832
-			for o in rects:
-				if o.intersects(r):
-					return false
-			rects.append(r)
+		if n.target is Fighter and not p.camera.is_position_behind(hud._dmg_anchor3(n)):
+			var head := p.camera.unproject_position(hud._dmg_anchor3(n))
+			if hud._dmg_point(n, u).distance_to(head) > 0.1 * u:
+				return false
 	return true
 
 

@@ -10,6 +10,7 @@ static func run(runner: Node) -> void:
 	var me := new()
 	me.t = runner
 	me._test_death_card()
+	me._test_damage_numbers()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -49,4 +50,34 @@ func _test_death_card() -> void:
 	_check(hud.hp_subject() == null, "nobody alive to watch: no HP block")
 	hud.free()
 	me.free()
+	foe.free()
+
+
+## A 10-hit burst (one hit every 0.1 s) makes at most 3 numbers, each within 0.1u of the head
+## point; a hit 0.4 s after the last one starts a new number.
+func _test_damage_numbers() -> void:
+	var hud := _hud()
+	var foe := Fighter.new()
+	var u := 720.0
+	for i in 10:
+		hud._add_damage_number(foe, 20.0, i == 4, Vector3.ZERO)
+		for n: Dictionary in hud._dmg_numbers:
+			n.t += 0.1
+			n.last += 0.1
+	_check(hud._dmg_numbers.size() <= 3, "a 10-hit burst shows at most 3 numbers (got %d)" % hud._dmg_numbers.size())
+	var total := 0.0
+	for n: Dictionary in hud._dmg_numbers:
+		total += float(n.amount)
+		_check(HUD.dmg_offset(n, u).length() < 0.1 * u, "a number sits within 0.1u of the head point")
+	_check(is_equal_approx(total, 200.0), "the numbers add up to the burst's damage (got %.0f)" % total)
+	_check(bool(hud._dmg_numbers[0].head), "a headshot in the burst marks its number")
+	hud._dmg_numbers.clear()
+	hud._add_damage_number(foe, 30.0, false, Vector3.ZERO)
+	hud._dmg_numbers[0].last = 0.4
+	hud._dmg_numbers[0].t = 0.4
+	hud._add_damage_number(foe, 30.0, false, Vector3.ZERO)
+	_check(hud._dmg_numbers.size() == 2, "a hit 0.4 s after the last one shows a new number")
+	_check(HUD.dmg_offset(hud._dmg_numbers[1], u).length() < 0.1 * u, "the second number stays by the head (spread at most 0.04u)")
+	_check(hud._dmg_size(20.0, false, u) <= int(0.05 * u) and hud._dmg_size(20.0, false, u) >= int(0.032 * u), "numbers are 0.032u .. 0.05u")
+	hud.free()
 	foe.free()
