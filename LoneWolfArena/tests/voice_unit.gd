@@ -133,3 +133,5 @@ func _resample() -> void:
 			NetVoice.FRAME_SAMPLES, v._pending.size()])
 		v.free()
 	_check(NetVoice.source_rate() > 0.0, "the capture's rate is known")
+	for n: String in ["ui_invite", "ui_msg", "match_found"]:
+		_check(Audio.stream(n) != null, "the sound %s is shipped" % n)

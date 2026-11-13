@@ -9,10 +9,15 @@ extends PanelContainer
 ## sees it without the X: only the leader cancels. The lobby makes one (Lobby.search_tab) and shows
 ## or hides it from what is searching (Lobby.search_kind); the tab itself only draws and counts.
 ## Node names: SearchTab, SearchLine, SearchTimer, SearchPlayers, SearchCancel.
+## Round 8: a yellow plate (UI.ACCENT) with dark text, the X in a darker square; the lobby music is
+## ducked MUSIC_DUCK_DB while it searches, and match_found plays when the search hands over to the
+## match (Cloud.session_started while the tab is shown).
 
 const ESTIMATE_S := 10              # what the line promises at first (seconds)
 const TAB_W := 340.0
 const DROP_S := 0.22                # the slide down from the top edge
+const MUSIC_DUCK_DB := -6.0
+const INK_DARK := Color(0.07, 0.06, 0.05)
 
 var elapsed := 0.0                  # seconds searched (the caller may set it, e.g. NetMatch.elapsed)
 var on_cancel := Callable()         # the X (none: a member's tab)
@@ -33,7 +38,7 @@ func _init() -> void:
 	offset_right = TAB_W * 0.5
 	offset_top = 0.0
 	grow_vertical = Control.GROW_DIRECTION_END
-	add_theme_stylebox_override("panel", UI.chamfer(Color(0.03, 0.03, 0.035, 0.9), 14, 2, Color(UI.ACCENT, 0.85), 10.0, ["bl", "br"]))
+	add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 14, 2, UI.ACCENT_EDGE, 10.0, ["bl", "br"]))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	add_child(row)
@@ -41,21 +46,24 @@ func _init() -> void:
 	col.add_theme_constant_override("separation", -4)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(col)
-	_line = UI.label("", 15, UI.ACCENT, "heavy")
+	_line = UI.label("", 15, INK_DARK, "heavy")
 	_line.name = "SearchLine"
 	_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_line)
-	_timer = UI.shadowed(UI.label("0:00", 38, UI.TEXT, "heavy"))
+	_timer = UI.label("0:00", 38, INK_DARK, "heavy")
 	_timer.name = "SearchTimer"
 	_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_timer)
-	_players = UI.label("", 15, UI.TEXT_DIM, "bold")
+	_players = UI.label("", 15, Color(INK_DARK, 0.75), "bold")
 	_players.name = "SearchPlayers"
 	_players.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_players.visible = false
 	col.add_child(_players)
 	_cancel = UI.close_button(UI.TOUCH_MIN)
 	_cancel.name = "SearchCancel"
+	# (the X in a darker square on the yellow plate)
+	_cancel.add_theme_stylebox_override("normal", UI.box(Color(0.1, 0.085, 0.05, 0.92), 4, 0, Color.TRANSPARENT, 0.0))
+	_cancel.add_theme_stylebox_override("hover", UI.box(Color(0.18, 0.15, 0.09, 0.95), 4, 0, Color.TRANSPARENT, 0.0))
 	_cancel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_cancel.pressed.connect(func() -> void:
 		if on_cancel.is_valid():
@@ -93,6 +101,10 @@ func begin(cancel: Callable) -> void:
 	_status = ""
 	visible = true
 	refresh()
+	Audio.duck_music(MUSIC_DUCK_DB)
+	var cloud := Game.cloud_service()
+	if not cloud.session_started.is_connected(_on_found):
+		cloud.session_started.connect(_on_found)
 	offset_top = -120.0
 	create_tween().tween_property(self, "offset_top", 0.0, DROP_S).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
@@ -104,6 +116,21 @@ func end() -> void:
 	_shown = false
 	on_cancel = Callable()
 	visible = false
+	Audio.duck_music(0.0)
+
+
+## The search handed over to its match (the session started while the tab is shown): match_found.
+func _on_found(_host: bool) -> void:
+	if _shown:
+		Audio.play("match_found", -2.0)
+
+
+func _exit_tree() -> void:
+	if _shown:
+		Audio.duck_music(0.0)
+	var cloud := Game.cloud_service()
+	if cloud.session_started.is_connected(_on_found):
+		cloud.session_started.disconnect(_on_found)
 
 
 func is_shown() -> bool:

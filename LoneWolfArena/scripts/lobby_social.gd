@@ -71,11 +71,17 @@ func build(root: Control) -> void:
 		open())
 	root.add_child(arrow)
 	var cloud := Game.cloud_service()
-	if not cloud.code_asked.is_connected(_on_code_asked):
-		cloud.code_asked.connect(_on_code_asked)
+	# The lobby's sounds for what comes in: an invite or a challenge (ui_invite, a short buzz), a
+	# message while no chat is open (ui_msg); a GROUP CODE ask goes to its notice (_on_code_asked).
+	var links := [[cloud.code_asked, _on_code_asked], [cloud.invited, _on_invite_sound], [cloud.group_invited, _on_invite_sound],
+		[cloud.friend_chat_changed, _on_message_sound], [cloud.group_chat_changed, _on_message_sound]]
+	for l: Array in links:
+		if not (l[0] as Signal).is_connected(l[1]):
+			(l[0] as Signal).connect(l[1])
 	arrow.tree_exiting.connect(func() -> void:
-		if cloud.code_asked.is_connected(_on_code_asked):
-			cloud.code_asked.disconnect(_on_code_asked))
+		for l: Array in links:
+			if (l[0] as Signal).is_connected(l[1]):
+				(l[0] as Signal).disconnect(l[1]))
 
 
 ## Every frame: the arrow shows with the lobby's own controls (not in a room, not while teams are
@@ -385,6 +391,17 @@ static func pad_text(state: String) -> String:
 		"said_no":
 			return "THE LEADER SAID NO"
 	return LobbyTeam.code_state_text(state)
+
+
+func _on_invite_sound(_who: String) -> void:
+	LobbyNet.alert(true)
+
+
+func _on_message_sound(_id := "") -> void:
+	var m := lobby.dialogs.modal if lobby and is_instance_valid(lobby) else null
+	if m != null and is_instance_valid(m) and m.find_child("ChatWindow", true, false) != null:
+		return                           # (the chat is open: it shows the message itself)
+	LobbyNet.alert(false)
 
 
 ## The leader: a player typed this group's code while JOIN BY CODE is off (Cloud.code_asked): a

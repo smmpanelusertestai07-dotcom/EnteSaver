@@ -631,6 +631,47 @@ def ui_back():
     return finalize(out, max_len=0.17, fout=0.05)
 
 
+
+@sfx("ui_invite", "Invite ring (0.5 s): two soft bell tones alternating twice (B5 / E6), like a small phone ring.")
+def ui_invite():
+    rng = np.random.default_rng(2626)
+    n = ns(0.7)
+    out = np.zeros(n)
+    for i, mn in enumerate([83, 88, 83, 88]):
+        m = ns(0.25)
+        f = mtof(mn)
+        v = sine(f, m) + 0.3 * sine(2.0 * f, m) + 0.08 * sine(3.01 * f, m)
+        place(out, v * env_ad(m, 0.003, 0.05), i * 0.11, 0.9 if i % 2 == 0 else 0.75)
+    out = reverb(out, room(rng, 0.3), wet=0.1)
+    return finalize(out, max_len=0.5, fout=0.06)
+
+
+@sfx("ui_msg", "Message pop (0.12 s): a soft rounded pop with a quick upward pitch glide.")
+def ui_msg():
+    rng = np.random.default_rng(2727)
+    n = ns(0.2)
+    f = np.linspace(700.0, 1300.0, n)
+    out = sine(f, n) * env_ad(n, 0.002, 0.025)
+    out += 0.25 * sine(2.0 * f, n) * env_ad(n, 0.001, 0.012)
+    out = reverb(lp(out, 5000), room(rng, 0.15), wet=0.05)
+    return finalize(out, max_len=0.12, fout=0.03)
+
+
+@sfx("match_found", "Match found (0.6 s): a rising three-note sting (D5, A5, D6) over a soft swell.")
+def match_found():
+    rng = np.random.default_rng(2828)
+    n = ns(0.9)
+    out = np.zeros(n)
+    for mn, st, tau, a in [(74, 0.0, 0.06, 0.7), (81, 0.09, 0.07, 0.85), (86, 0.18, 0.22, 1.0)]:
+        m = ns(0.5)
+        f = mtof(mn)
+        v = sine(f, m) + 0.35 * triangle(2.0 * f, m) + 0.12 * saw(f, m)
+        place(out, lp(v, 4500) * env_ad(m, 0.004, tau), st, a)
+    swell = lp(white(n, rng), 1800) * env_ad(n, 0.25, 0.12) * 0.12
+    out += swell
+    out = reverb(out, room(rng, 0.45), wet=0.14)
+    return finalize(out, max_len=0.6, fout=0.12)
+
 INTRO_HIT = 0.90    # where the intro sting's impact lands (sync the emblem's landing to it)
 
 
