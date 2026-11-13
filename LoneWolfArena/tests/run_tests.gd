@@ -1122,7 +1122,7 @@ func _test_settings_panel() -> void:
 		"graphics: a picture tile for each level; DISPLAY has no sub-tabs")
 	for i in Game.GRAPHICS_NAMES.size():
 		_check(ResourceLoader.exists(SettingsPanel.PIC_DIR + "gfx_%d.png" % i), "the picture of %s is in the game" % Game.GRAPHICS_NAMES[i])
-	for pic in ["hud.png", "hud_eye.png", "map_turn.png", "map_north.png"]:
+	for pic in ["hud.png", "hud_eye.png", "arena.png", "map_turn.png", "map_north.png"]:
 		_check(ResourceLoader.exists(SettingsPanel.PIC_DIR + pic), "the settings picture %s is in the game" % pic)
 	_check(panel.find_child("Toggle_show_fps", true, false) == null and panel.find_child("Toggle_vibration", true, false) == null
 		and panel.find_child("ClearCache", true, false) == null, "DISPLAY: no FPS counter, vibration or cache rows")
