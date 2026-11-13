@@ -15,9 +15,11 @@ extends Control
 ## after it. Automated runs (Game.autotest) skip both and go to the lobby (their scripts expect
 ## it) unless a screenshot tour sets `hold_for_test` to look at this screen.
 ##
-## MATCH: Loading.start_match(host) puts an overlay on top of `host` (the mode + map card
-## "TRAINING GROUND / CARGO CAGE" or "LONE WOLF / CARGO CAGE" with the match's chips, see
-## match_info(), or for DUO / SQUAD team_info(); the map name; the bar), loads the arena scene
+## MATCH: Loading.start_match(host) puts an overlay on top of `host`: a teaching card (one of
+## TOPICS drawn by us with dashed callouts, the logo top right), the match's own card under the
+## topic's title (the mode, "TRAINING GROUND" or "LONE WOLF", with the match's chips, see
+## match_info(), or for DUO / SQUAD team_info()) and "LOADING <MODE> (CARGO CAGE)..." over the
+## progress line), loads the arena scene
 ## (Game.arena_scene()) on a thread for at least MATCH_MIN_S, then Game.goto_arena().
 
 const TIMEOUT_S := 12.0
@@ -94,6 +96,9 @@ var _status: Label
 var _tip: Label
 var _art: TextureRect
 var _arena_scene: Resource
+var _match_status := "LOADING..."
+## The teaching topic the match card shows (TOPICS key; a test may set it), random when "".
+static var topic_for_test := ""
 var _leaving := false
 var _start_ms := 0
 
@@ -182,45 +187,54 @@ func _build_boot() -> void:
 	add_child(ver)
 
 
-## Bar at y = 0.905 H from x = 0.155 W to 0.84 W, percent at its right, status above its left
-## end, the tip line centred below it.
+## The progress line as the reference's loading card: 4 px at y = 0.92 H from x = 0.04 W to
+## 0.96 W, the percentage above its right end, the status ("LOADING LONE WOLF (CARGO CAGE)...", small
+## caps) above its left end, the tip in caps centred under it.
 func _build_bar(status: String) -> void:
 	_bar = Control.new()
-	_bar.anchor_left = 0.155
-	_bar.anchor_right = 0.84
-	_bar.anchor_top = 0.905
-	_bar.anchor_bottom = 0.905
-	_bar.offset_top = -3
-	_bar.offset_bottom = 3
+	_bar.name = "ProgressLine"
+	_bar.anchor_left = 0.04
+	_bar.anchor_right = 0.96
+	_bar.anchor_top = 0.92
+	_bar.anchor_bottom = 0.92
+	_bar.offset_top = -2
+	_bar.offset_bottom = 2
 	_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bar.draw.connect(_draw_bar)
 	add_child(_bar)
-	_pct = UI.label("0%", 22, UI.TEXT, "number")
-	_pct.anchor_left = 0.848
-	_pct.anchor_right = 0.95
-	_pct.anchor_top = 0.905
-	_pct.anchor_bottom = 0.905
-	_pct.offset_top = -16
-	_pct.offset_bottom = 16
+	_pct = UI.label("0%", 20, UI.TEXT, "number")
+	_pct.name = "ProgressPct"
+	_pct.anchor_left = 0.8
+	_pct.anchor_right = 0.96
+	_pct.anchor_top = 0.92
+	_pct.anchor_bottom = 0.92
+	_pct.offset_top = -30
+	_pct.offset_bottom = -6
+	_pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_pct.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_pct)
-	_status = UI.label(status, 15, Color(1, 1, 1, 0.75), "bold")
-	_status.anchor_left = 0.155
-	_status.anchor_right = 0.6
-	_status.anchor_top = 0.905
-	_status.anchor_bottom = 0.905
+	_status = UI.label(status, 16, Color(1, 1, 1, 0.85), "heavy")
+	_status.name = "ProgressStatus"
+	_status.anchor_left = 0.04
+	_status.anchor_right = 0.7
+	_status.anchor_top = 0.92
+	_status.anchor_bottom = 0.92
 	_status.offset_top = -30
-	_status.offset_bottom = -8
+	_status.offset_bottom = -6
+	_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_status)
-	_tip = UI.label("", 18, Color(1, 1, 1, 0.92), "semi")
-	_tip.anchor_left = 0.1
-	_tip.anchor_right = 0.9
-	_tip.anchor_top = 0.955
-	_tip.anchor_bottom = 0.955
-	_tip.offset_top = -14
-	_tip.offset_bottom = 14
+	_tip = UI.label("", 16, Color(1, 1, 1, 0.92), "heavy")
+	_tip.name = "ProgressTip"
+	_tip.anchor_left = 0.06
+	_tip.anchor_right = 0.94
+	_tip.anchor_top = 0.92
+	_tip.anchor_bottom = 0.92
+	_tip.offset_top = 8
+	_tip.offset_bottom = 34
 	_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_tip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_tip.clip_text = true
+	_tip.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	add_child(_tip)
 	_show_tip()
 
@@ -241,7 +255,7 @@ func _draw_bar() -> void:
 func _show_tip() -> void:
 	if _tip == null:
 		return
-	_tip.text = "TIP:  " + String(TIPS[_tip_i % TIPS.size()])
+	_tip.text = String(TIPS[_tip_i % TIPS.size()]).to_upper()
 	_tip.modulate.a = 0.0
 	create_tween().tween_property(_tip, "modulate:a", 1.0, 0.35)
 
@@ -315,10 +329,21 @@ static func team_info(tm: Dictionary, rounds: int) -> Dictionary:
 		"chips": chips, "desc": desc}
 
 
+## The match card is a teaching card, as the reference's loading screen: the topic's title by a
+## yellow bar with a grey line under it (top left), a big diagram of it drawn by us with dashed
+## yellow callouts (TeachCard), the logo top right, the match's own card (MatchCard: the mode, the
+## chips, one line) under the title, and the progress line with "LOADING <MODE> (CARGO CAGE)...".
+const TOPICS := {
+	"zone": ["THE CLOSING ZONE", "Where the round is fought"],
+	"wall": ["SHIELD WALL", "Cover you carry with you"],
+	"rounds": ["ROUNDS", "How a match is won"],
+}
+
+
 func _build_match() -> void:
 	_backdrop(1.12)
 	var shade := ColorRect.new()
-	shade.color = Color(0.02, 0.02, 0.05, 0.35)
+	shade.color = Color(0.02, 0.02, 0.04, 0.72)          # the art dim behind the diagram
 	UI.full_rect(shade)
 	add_child(shade)
 	var online := Game.online and Game.session != null
@@ -327,49 +352,40 @@ func _build_match() -> void:
 		int(Game.settings.difficulty), Game.rounds_to_win(online), online and Game.session is Lan)
 	if not Game.team_match.is_empty():
 		info = team_info(Game.team_match, team_rounds_to_win())
-	# Mode + map card, top-left.
+	var topic := topic_for_test if TOPICS.has(topic_for_test) else String(TOPICS.keys()[randi() % TOPICS.size()])
+	# The topic's title and line, top left.
+	var head := VBoxContainer.new()
+	head.name = "TeachHead"
+	head.position = Vector2(48, 40)
+	head.add_theme_constant_override("separation", 2)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(head)
+	var title := UI.section(String(TOPICS[topic][0]), 32)
+	title.name = "TeachTitle"
+	head.add_child(title)
+	var sub := UI.label(String(TOPICS[topic][1]), 19, UI.TEXT_DIM, "semi")
+	sub.name = "TeachSub"
+	head.add_child(sub)
+	head.add_child(UI.spacer(14))
+	# The match's own card under it: the mode, the chips, one line.
 	var card := PanelContainer.new()
 	card.name = "MatchCard"
-	card.add_theme_stylebox_override("panel", UI.chamfer(Color(0.07, 0.065, 0.06, 0.9), 14, 1, Color(1, 1, 1, 0.12), 0.0, ["br"]))
-	card.position = Vector2(40, 34)
-	card.custom_minimum_size = Vector2(360, 0)
-	add_child(card)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 0)
-	card.add_child(v)
-	var thumb_tex := UI.texture("mode_lonewolf.jpg")
-	if thumb_tex:
-		var thumb := TextureRect.new()
-		thumb.texture = thumb_tex
-		thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		thumb.custom_minimum_size = Vector2(360, 190)
-		thumb.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		thumb.clip_contents = true
-		v.add_child(thumb)
-		var badge := UI.label(" %s " % String(info.badge), 16, UI.INK, "heavy")
-		var bp := PanelContainer.new()
-		bp.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 6, 0, Color.TRANSPARENT, 6.0, ["br"]))
-		bp.add_child(badge)
-		bp.position = Vector2(10, 10)
-		thumb.add_child(bp)
-	var body := MarginContainer.new()
-	for side in ["left", "right"]:
-		body.add_theme_constant_override("margin_" + side, 16)
-	body.add_theme_constant_override("margin_top", 10)
-	body.add_theme_constant_override("margin_bottom", 14)
-	v.add_child(body)
+	card.add_theme_stylebox_override("panel", UI.chamfer(Color(0.07, 0.065, 0.06, 0.82), 10, 1, Color(1, 1, 1, 0.1), 12.0, ["br"]))
+	card.custom_minimum_size = Vector2(300, 0)
+	card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	head.add_child(card)
 	var bv := VBoxContainer.new()
 	bv.add_theme_constant_override("separation", 4)
-	body.add_child(bv)
-	# Mode and map on one line; the map moves to a second one when they do not fit.
-	var t_row := HFlowContainer.new()
-	t_row.add_theme_constant_override("h_separation", 12)
-	t_row.add_theme_constant_override("v_separation", -6)
-	var mode_l := UI.label(String(info.mode), 32, UI.AMBER, "heavy")
+	card.add_child(bv)
+	var t_row := HBoxContainer.new()
+	t_row.add_theme_constant_override("separation", 10)
+	var badge := UI.label(" %s " % String(info.badge), 14, UI.INK, "heavy")
+	badge.add_theme_stylebox_override("normal", UI.chamfer(UI.ACCENT, 5, 0, Color.TRANSPARENT, 4.0, ["br"]))
+	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	t_row.add_child(badge)
+	var mode_l := UI.label(String(info.mode), 24, UI.AMBER, "heavy")
 	mode_l.name = "MatchMode"
 	t_row.add_child(mode_l)
-	t_row.add_child(UI.label("CARGO CAGE", 32, UI.TEXT, "heavy"))
 	bv.add_child(t_row)
 	var chips := HFlowContainer.new()
 	chips.name = "MatchChips"
@@ -377,28 +393,151 @@ func _build_match() -> void:
 	chips.add_theme_constant_override("v_separation", 4)
 	for c: String in info.chips:
 		var cp := PanelContainer.new()
-		cp.add_theme_stylebox_override("panel", UI.chamfer(Color(1, 1, 1, 0.1), 4, 0, Color.TRANSPARENT, 10.0, []))
-		cp.add_child(UI.label(c, 15, UI.TEXT, "bold"))
+		cp.add_theme_stylebox_override("panel", UI.chamfer(Color(1, 1, 1, 0.1), 4, 0, Color.TRANSPARENT, 8.0, []))
+		cp.add_child(UI.label(c, 14, UI.TEXT, "bold"))
 		chips.add_child(cp)
 	bv.add_child(chips)
 	var said := String(info.desc).begins_with("NO PLAYER FOUND")      # the team search found nobody: said plainly
-	var desc := UI.label(String(info.desc), 18 if said else 16, UI.ACCENT if said else UI.TEXT_DIM, "heavy" if said else "semi")
+	var desc := UI.label(String(info.desc), 16 if said else 14, UI.ACCENT if said else UI.TEXT_DIM, "heavy" if said else "semi")
 	desc.name = "MatchDesc"
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.custom_minimum_size = Vector2(280, 0)
 	bv.add_child(desc)
-	# The map name, big, above the bar.
-	var big := UI.shadowed(UI.outlined(UI.label("CARGO CAGE", 132, UI.TEXT, "italic"), 10, Color(0.05, 0.04, 0.03, 0.95)), Vector2(0, 8), Color(0, 0, 0, 0.5))
-	big.anchor_left = 0.0
-	big.anchor_right = 1.0
-	big.anchor_top = 0.62
-	big.anchor_bottom = 0.62
-	big.offset_top = -80
-	big.offset_bottom = 90
-	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	big.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	big.material = gradient_text_material(Color(1, 1, 1), Color(1.0, 0.72, 0.2), 170.0)
-	UI.center_italic(big, 132)
-	add_child(big)
-	_build_bar("ENTERING THE ARENA")
+	# The logo, top right.
+	var lg_tex := UI.texture("logo.png")
+	if lg_tex:
+		var lg := TextureRect.new()
+		lg.name = "MatchLogo"
+		lg.texture = lg_tex
+		lg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		lg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+		lg.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		var h := 84.0
+		var w := h * lg_tex.get_width() / float(lg_tex.get_height())
+		lg.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+		lg.offset_left = -40.0 - w
+		lg.offset_right = -40.0
+		lg.offset_top = 30.0
+		lg.offset_bottom = 30.0 + h
+		lg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(lg)
+	# The diagram in the middle.
+	var teach := TeachCard.new()
+	teach.name = "TeachCard"
+	teach.topic = topic
+	teach.rounds = Game.rounds_to_win(online) if Game.team_match.is_empty() else team_rounds_to_win()
+	teach.anchor_left = 0.33
+	teach.anchor_right = 0.75
+	teach.anchor_top = 0.2
+	teach.anchor_bottom = 0.8
+	teach.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(teach)
+	_match_status = "LOADING %s (CARGO CAGE)..." % String(info.mode)
+	_build_bar(_match_status)
+
+
+## The teaching diagram (ours, drawn): ZONE the arena from above with the closing ring, SHIELD WALL
+## a fighter crouched behind a wall with shots stopping on it, ROUNDS the score band; each with
+## dashed yellow callouts to short labels.
+class TeachCard extends Control:
+	var topic := "zone"
+	var rounds := 5
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		draw_rect(r, Color(0.05, 0.05, 0.06, 0.85))
+		draw_rect(r, Color(1, 1, 1, 0.85), false, 3.0)
+		match topic:
+			"wall":
+				_wall(r)
+			"rounds":
+				_rounds(r)
+			_:
+				_zone(r)
+
+	func _callout(at: Vector2, to: Vector2, text: String) -> void:
+		draw_dashed_line(at, to, UI.ACCENT, 3.0, 9.0)
+		draw_circle(at, 5.0, UI.ACCENT)
+		var right := to.x >= at.x
+		HudDraw.text(self, text, to + Vector2(8.0 if right else -8.0, 0), 18, UI.TEXT, 0 if right else 2, 3, "heavy")
+
+	func _zone(r: Rect2) -> void:
+		var c := r.get_center()
+		var s := minf(r.size.x, r.size.y)
+		# the hall from above: the floor, its containers
+		var floor_r := Rect2(c - Vector2(s * 0.42, s * 0.42), Vector2(s * 0.84, s * 0.84))
+		draw_rect(floor_r, Color(0.2, 0.21, 0.24))
+		for b: Array in [[0.12, 0.15, 0.22, 0.1, Color(0.62, 0.22, 0.16)], [0.6, 0.12, 0.1, 0.24, Color(0.18, 0.36, 0.62)],
+				[0.18, 0.66, 0.1, 0.22, Color(0.7, 0.48, 0.14)], [0.58, 0.7, 0.26, 0.1, Color(0.24, 0.5, 0.3)], [0.42, 0.42, 0.14, 0.14, Color(0.5, 0.5, 0.52)]]:
+			draw_rect(Rect2(floor_r.position + Vector2(b[0], b[1]) * floor_r.size, Vector2(b[2], b[3]) * floor_r.size), b[4])
+		# outside the ring: the zone's colour; the ring and where it closes to
+		var ring_c := c + Vector2(s * 0.05, s * 0.03)
+		var ring_r := s * 0.3
+		draw_rect(floor_r, Color(0.3, 0.45, 0.95, 0.22))
+		draw_circle(ring_c, ring_r, Color(0.2, 0.21, 0.24, 0.55))
+		draw_arc(ring_c, ring_r, 0.0, TAU, 72, Color(1, 1, 1, 0.95), 3.0, true)
+		draw_arc(ring_c, ring_r * 0.45, 0.0, TAU, 48, Color(1, 1, 1, 0.6), 2.0, true)
+		for i in 4:
+			var a := TAU * i / 4.0 + 0.6
+			var p0 := ring_c + Vector2.from_angle(a) * ring_r * 0.92
+			var p1 := ring_c + Vector2.from_angle(a) * ring_r * 0.55
+			draw_line(p0, p1, Color(1, 1, 1, 0.7), 2.0, true)
+			draw_colored_polygon(PackedVector2Array([p1, p1 + Vector2.from_angle(a + 2.6) * 9.0, p1 + Vector2.from_angle(a - 2.6) * 9.0]), Color(1, 1, 1, 0.7))
+		_callout(ring_c + Vector2(-ring_r * 0.2, -ring_r * 0.1), Vector2(r.position.x - 30.0, r.position.y + r.size.y * 0.55), "SAFE ZONE")
+		_callout(ring_c + Vector2.from_angle(-0.7) * ring_r, Vector2(r.end.x + 30.0, r.position.y + r.size.y * 0.18), "IT CLOSES IN")
+		_callout(floor_r.position + floor_r.size * Vector2(0.92, 0.92), Vector2(r.end.x + 30.0, r.position.y + r.size.y * 0.82), "OUTSIDE: YOU LOSE HP")
+
+	func _wall(r: Rect2) -> void:
+		var g := r.position.y + r.size.y * 0.78
+		draw_rect(Rect2(r.position.x + 6, g, r.size.x - 12, r.end.y - g - 6), Color(0.18, 0.18, 0.2))
+		# the wall: a tall panel with its hazard stripes
+		var wall := Rect2(r.position.x + r.size.x * 0.52, r.position.y + r.size.y * 0.34, r.size.x * 0.06, g - r.position.y - r.size.y * 0.34)
+		draw_rect(wall, Color(0.35, 0.62, 0.95, 0.85))
+		draw_rect(wall, Color(0.8, 0.9, 1.0), false, 2.0)
+		UI.draw_hazard(self, Rect2(wall.position.x, wall.position.y, wall.size.x, 10.0), 6.0)
+		# the fighter crouched behind it (a simple figure of ours)
+		var fx := r.position.x + r.size.x * 0.4
+		var col := Color(0.92, 0.92, 0.94)
+		draw_circle(Vector2(fx, g - r.size.y * 0.3), r.size.y * 0.045, col)
+		draw_colored_polygon(PackedVector2Array([Vector2(fx - r.size.x * 0.05, g - r.size.y * 0.25), Vector2(fx + r.size.x * 0.04, g - r.size.y * 0.25),
+			Vector2(fx + r.size.x * 0.06, g - r.size.y * 0.1), Vector2(fx - r.size.x * 0.06, g - r.size.y * 0.1)]), col)
+		draw_rect(Rect2(fx - r.size.x * 0.06, g - r.size.y * 0.1, r.size.x * 0.12, r.size.y * 0.1), col.darkened(0.25))
+		# the medkit's cross by it
+		var mk := Vector2(fx - r.size.x * 0.13, g - r.size.y * 0.06)
+		draw_rect(Rect2(mk - Vector2(14, 14), Vector2(28, 28)), Color(0.9, 0.2, 0.2))
+		draw_rect(Rect2(mk - Vector2(3, 10), Vector2(6, 20)), Color.WHITE)
+		draw_rect(Rect2(mk - Vector2(10, 3), Vector2(20, 6)), Color.WHITE)
+		# shots from the right stopping on it
+		for i in 3:
+			var y := wall.position.y + wall.size.y * (0.25 + 0.25 * i)
+			draw_dashed_line(Vector2(r.end.x - 20.0, y - 10.0 + i * 6.0), Vector2(wall.end.x + 4.0, y), Color(1, 0.6, 0.2, 0.9), 2.0, 12.0)
+			draw_circle(Vector2(wall.end.x + 2.0, y), 4.0, Color(1, 0.85, 0.4))
+		_callout(wall.position + Vector2(wall.size.x * 0.5, 4.0), Vector2(r.end.x + 30.0, r.position.y + r.size.y * 0.16), "SHIELD WALL")
+		_callout(mk, Vector2(r.position.x - 30.0, r.position.y + r.size.y * 0.5), "HEAL BEHIND IT")
+		_callout(Vector2(wall.end.x + 2.0, wall.position.y + wall.size.y * 0.75), Vector2(r.end.x + 30.0, r.position.y + r.size.y * 0.74), "SHOTS STOP HERE")
+
+	func _rounds(r: Rect2) -> void:
+		var c := r.get_center()
+		var band := Rect2(c.x - r.size.x * 0.4, c.y - 44.0, r.size.x * 0.8, 88.0)
+		draw_rect(band, Color(0.08, 0.08, 0.1, 0.95))
+		var half := band.size.x * 0.5
+		draw_rect(Rect2(band.position, Vector2(half - 30.0, band.size.y)), Color(0.18, 0.4, 0.85, 0.85))
+		draw_rect(Rect2(band.position + Vector2(half + 30.0, 0), Vector2(half - 30.0, band.size.y)), Color(0.9, 0.42, 0.14, 0.85))
+		HudDraw.text(self, "3", Vector2(band.position.x + half * 0.5, c.y), 56, Color.WHITE, 1, 4, "number")
+		HudDraw.text(self, "2", Vector2(band.end.x - half * 0.5, c.y), 56, Color.WHITE, 1, 4, "number")
+		HudDraw.text(self, "VS", c, 22, UI.TEXT_DIM, 1, 0, "heavy")
+		# the round pips under the band: won ones lit
+		var n := clampi(rounds, 1, 9)
+		for side in 2:
+			for i in n:
+				var won := i < (3 if side == 0 else 2)
+				var x := band.position.x + 18.0 + i * 22.0 if side == 0 else band.end.x - 18.0 - i * 22.0
+				var pc := Vector2(x, band.end.y + 22.0)
+				draw_circle(pc, 7.0, (Color(0.4, 0.65, 1.0) if side == 0 else Color(1, 0.6, 0.3)) if won else Color(1, 1, 1, 0.18))
+		_callout(Vector2(band.position.x + half * 0.5, band.position.y), Vector2(r.position.x - 30.0, r.position.y + r.size.y * 0.62), "YOUR ROUNDS")
+		_callout(Vector2(band.end.x - half * 0.5, band.position.y), Vector2(r.end.x + 30.0, r.position.y + r.size.y * 0.15), "THEIRS")
+		_callout(Vector2(band.position.x + 18.0 + (n - 1) * 22.0, band.end.y + 22.0), Vector2(r.end.x + 30.0, r.position.y + r.size.y * 0.86),
+			"FIRST TO %d WINS" % n)
 
 
 ## Vertical gradient for big outlined titles: glyph fill fades from `top` to `bottom` over
@@ -570,7 +709,7 @@ func _process_match(delta: float) -> void:
 			loaded = false
 	var goal := clampf(_t / MATCH_MIN_S, 0.0, 1.0) * (1.0 if loaded else 0.85)
 	progress = maxf(progress, lerpf(progress, goal, minf(1.0, delta * 8.0)))
-	_status.text = "PREPARING WEAPONS" if progress < 0.5 else "ENTERING THE ARENA"
+	_status.text = _match_status
 	var real_s := (Time.get_ticks_msec() - _start_ms) / 1000.0
 	if not _leaving and real_s >= delay_for_test and ((loaded and _t >= MATCH_MIN_S) or real_s >= MATCH_MAX_S):
 		_leaving = true

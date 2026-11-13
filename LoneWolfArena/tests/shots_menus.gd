@@ -359,9 +359,14 @@ func run(at: Node) -> int:
 		lobby = next_lobby
 	# START (TRAINING GROUND, the bot) -> match loading overlay (back is ignored there) -> arena.
 	var start := lobby.get("start_btn") as Button
+	Loading.topic_for_test = "zone"
 	await _tap(start, 0.05)
 	await _settle(0.25)
 	await at.shot("m13_match_loading")
+	var ov0 := _find_overlay()
+	_check(ov0 != null and _label_text(ov0, "ProgressStatus") == "LOADING TRAINING GROUND (CARGO CAGE)..."
+		and ov0.find_child("TeachCard", true, false) != null and ov0.find_child("MatchLogo", true, false) != null,
+		"the match loading card: a teaching diagram, the logo, LOADING <MODE> (CARGO CAGE)... over the line")
 	_check(start.disabled and (start.get_node("Caption") as Label).text == "LOADING", "START says LOADING (not MATCHING) for a bot match")
 	var ov := _find_overlay()
 	_check(ov != null and _label_text(ov, "MatchMode") == "TRAINING GROUND"
@@ -671,6 +676,7 @@ func _tour_online_card(lobby: Node) -> Node:
 	Game.online = true
 	Game.session = cloud
 	(lobby.get("start_btn") as Button).disabled = true
+	Loading.topic_for_test = "wall"
 	Loading.start_match(lobby)
 	await _settle(0.25)
 	await _at.shot("m13b_match_loading_online")
@@ -679,6 +685,7 @@ func _tour_online_card(lobby: Node) -> Node:
 	_check(ov != null and _label_text(ov, "MatchMode") == "LONE WOLF" and texts.contains("1 VS 1 ONLINE")
 		and texts.contains("VS SHADOWHUNTER77") and texts.contains("FIRST TO %d" % Game.rounds_to_win(true))
 		and not texts.contains("BOT"), "the online match card: LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent")
+	Loading.topic_for_test = ""
 	var t := 0.0
 	var next: Node = null
 	while t < 30.0:
