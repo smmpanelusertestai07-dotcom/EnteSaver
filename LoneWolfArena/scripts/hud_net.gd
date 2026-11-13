@@ -505,6 +505,8 @@ func _draw_button(id: String, c: Vector2) -> void:
 		draw_line(c + Vector2(-R * 0.55, -R * 0.55), c + Vector2(R * 0.55, R * 0.55), UI.BAD, 3.0, true)
 	if label != "":
 		HudDraw.text(self, label, c + Vector2(0, R + 9.0), 11, Color(UI.TEXT, 0.9), 1, 3)
+	if id == "mic" and voice != null and voice.capturing and voice.no_input:
+		HudDraw.text(self, NetVoice.NO_INPUT_NOTE, c + Vector2(0, R + 10.0), 11, UI.BAD, 1, 3, "bold")
 
 
 ## A speech bubble (filled with three dots, or an outline).

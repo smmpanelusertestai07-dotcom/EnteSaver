@@ -28,6 +28,14 @@ extends Node
 ##    this phone (its gate open).
 ##  - MIC TEST (SOUND > VOICE CHAT, `test_loop`): the microphone's frames come back here through
 ##    the codec (what the others would hear) with the level meter (`level`), nothing is sent.
+## The permission (perm_state): not asked, waiting (the system's question open), granted, denied
+## (asked again only on the player's next tap) or denied for good ("don't ask again": Android shows
+## no question any more, so the game never asks again and only says where to allow it). A refusal
+## puts MIC MODE back to OFF with one note (mic_refused: REFUSED_NOTE). The OS calls are a seam
+## (os_granted, os_request) the tests replace. Capturing with nothing but silence for NO_INPUT_MS
+## (no frames, or exact zeros: a microphone another app holds, an input that never started) logs
+## "voice: no input", shows NO MIC INPUT (MIC TEST, under the match's mic) and starts the stream
+## once more; so does the grant, and the app's focus coming back while it captures.
 ## The microphone plays into the muted bus BUS through an AudioEffectCapture; the sound is cut to
 ## 8 kHz mono and packed as IMA ADPCM (4 bits a sample) in FRAME_MS frames (`encode`). On Android
 ## Godot starts the input only when the microphone stream starts, and it fails without the
@@ -72,7 +80,16 @@ const TONE_HZ := 440.0
 const TONE_ON_S := 1.0
 const TONE_OFF_S := 1.5                                 # (longer than the gate's hang: it closes between words)
 const ME := ""                                           # this phone in `speaking` and the MIC TEST's player
-const REFUSED_NOTE := "MICROPHONE NOT ALLOWED: ALLOW IT IN YOUR PHONE'S SETTINGS > APPS > WOLF ARENA > PERMISSIONS"
+const REFUSED_NOTE := "MICROPHONE NOT ALLOWED - ALLOW IT FOR WOLF ARENA IN ANDROID SETTINGS"
+const NO_INPUT_NOTE := "NO MIC INPUT"
+const NO_INPUT_MS := 2000                                # capturing with no frames (or only zeros) this long: no input
+## The microphone permission as this phone knows it (perm_state).
+const PERM_NOT_ASKED := "not_asked"
+const PERM_WAITING := "waiting"                          # the system's question is open
+const PERM_GRANTED := "granted"
+const PERM_DENIED := "denied"                            # refused once: asked again only on the player's next tap
+const PERM_DENIED_FOREVER := "denied_forever"            # "don't ask again": no dialog comes any more, never asked again
+const QUICK_DENIAL_MS := 400                             # a refusal this fast with no dialog seen: "don't ask again"
 
 const STEPS := [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80,
 	88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724,
@@ -116,6 +133,19 @@ var _asking := false
 var _paused := false
 var _speaker_back := ALL                      # the match's speaker button turns this back on
 var _log_t := 0.0
+var perm_state := PERM_NOT_ASKED
+var no_input := false                         # capturing, but the microphone gives nothing (NO_INPUT_NOTE)
+var restarts := 0                             # times the microphone's stream was started again (tests, logs)
+var _ask_ms := -1                             # when the permission was last asked for
+var _focus_lost := false                      # the app lost focus since then (the system's dialog showed)
+var _denials := 0
+var _input_ms := 0                            # when the microphone last gave a frame that was not silence
+var _input_retry := false                     # the one restart after NO_INPUT_MS was made
+## The OS seam (tests replace them): whether RECORD_AUDIO is granted, and the request (true when
+## granted at once; false when a question is shown, or with "don't ask again" none).
+static var os_granted := func() -> bool: return MIC_PERMISSION in OS.get_granted_permissions()
+static var os_request := func() -> bool: return OS.request_permission(MIC_PERMISSION)
+static var on_android := OS.get_name() == "Android"
 
 
 ## The one NetVoice (made on first use under the tree's root; it outlives scene changes).
@@ -233,7 +263,7 @@ static func mates() -> int:
 
 
 static func mic_allowed() -> bool:
-	return tone_source or OS.get_name() != "Android" or MIC_PERMISSION in OS.get_granted_permissions()
+	return tone_source or not on_android or bool(os_granted.call())
 
 
 ## MIC MODE (the lobby's and the match's popup): a mode other than OFF asks Android for the
@@ -270,18 +300,30 @@ func set_push_to_talk(on: bool) -> void:
 	changed.emit()
 
 
-## True when the microphone may run now; else asks for it (the answer comes in _on_permission).
+## True when the microphone may run now; else asks for it (only on the player's tap: MIC MODE,
+## TALK, MIC TEST; never at start or in a loop) and the answer comes in _on_permission. After
+## "don't ask again" (PERM_DENIED_FOREVER) Android shows no question any more: nothing is asked,
+## the mic goes OFF and mic_refused says where to allow it.
 func ask_mic() -> bool:
 	if mic_allowed():
+		perm_state = PERM_GRANTED
 		return true
+	if perm_state == PERM_DENIED_FOREVER:
+		_refused()
+		return false
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree != null and not tree.on_request_permissions_result.is_connected(_on_permission):
 		tree.on_request_permissions_result.connect(_on_permission)
-	if _asking:
-		return false
+	var now := Time.get_ticks_msec()
+	if _asking and now - _ask_ms < 30000:
+		return false                     # (the question is open: one at a time)
 	_asking = true
-	if OS.request_permission(MIC_PERMISSION):
+	perm_state = PERM_WAITING
+	_ask_ms = now
+	_focus_lost = false
+	if bool(os_request.call()):
 		_asking = false
+		perm_state = PERM_GRANTED
 		return true
 	return false
 
@@ -291,15 +333,39 @@ func _on_permission(perm: String, granted: bool) -> void:
 		return
 	_asking = false
 	if granted:
-		if capturing and not tone_source and _mic != null:
-			_mic.stop()                  # Godot's input failed to start without it: start it again
-			_mic.play()
+		perm_state = PERM_GRANTED
+		if capturing:
+			restart_input()              # Godot's input failed to start without it: start it again
 	else:
-		test_loop = false
-		Game.settings["mic_mode"] = OFF
-		Game.save_settings()
-		mic_refused.emit()
+		_denials += 1
+		# A refusal at once with no question seen (the app never lost focus), or a second one:
+		# Android asks no more ("don't ask again"), so neither does the game.
+		var quick := _ask_ms >= 0 and Time.get_ticks_msec() - _ask_ms < QUICK_DENIAL_MS and not _focus_lost
+		perm_state = PERM_DENIED_FOREVER if quick or _denials >= 2 else PERM_DENIED
+		_refused()
 	changed.emit()
+
+
+## Refused: the mic OFF again (MIC MODE, MIC TEST, TALK) and one note (mic_refused: REFUSED_NOTE).
+func _refused() -> void:
+	test_loop = false
+	ptt_held = false
+	Game.settings["mic_mode"] = OFF
+	Game.save_settings()
+	mic_refused.emit()
+	changed.emit()
+
+
+## The microphone's stream started again with an empty buffer (Godot on Android starts the input
+## only when the stream starts: after the permission came, back from the background or a call).
+func restart_input() -> void:
+	restarts += 1
+	_input_ms = Time.get_ticks_msec()
+	if _capture:
+		_capture.clear_buffer()
+	if not tone_source and _mic != null and _mic.is_inside_tree():
+		_mic.stop()
+		_mic.play()
 
 
 # ---------------------------------------------------------------- codec
@@ -410,11 +476,16 @@ func _exit_tree() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED:
 		_paused = true
+		_focus_lost = true
 		ptt_held = false
 		if capturing:
 			_set_capture(false)
 	elif what == NOTIFICATION_APPLICATION_RESUMED:
 		_paused = false
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_focus_lost = true               # (the permission question, a call, the notification shade)
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN and capturing:
+		restart_input()                  # (another app may have held the microphone meanwhile)
 
 
 func _new_player() -> AudioStreamPlayer:
@@ -457,6 +528,9 @@ func _set_capture(on: bool) -> void:
 	_tone_due = 0.0
 	_gate = {"open": false, "hang": 0, "loud": 0}
 	_prev = []
+	_input_ms = Time.get_ticks_msec()
+	_input_retry = false
+	no_input = false
 	if not tone_source and _mic != null:
 		if on:
 			if _capture:
@@ -476,6 +550,7 @@ func _process(delta: float) -> void:
 		_set_capture(want)
 	if capturing:
 		_read_source(delta)
+		_check_input(Time.get_ticks_msec())
 		while _pending.size() >= FRAME_SAMPLES:
 			_frame(_pending.slice(0, FRAME_SAMPLES))
 			_pending = _pending.slice(FRAME_SAMPLES)
@@ -611,9 +686,17 @@ func _read_mic() -> void:
 	var avail := _capture.get_frames_available()
 	if avail <= 0:
 		return
-	var buf := _capture.get_buffer(avail)
-	var ratio := float(RATE) / AudioServer.get_mix_rate()
+	take_capture(_capture.get_buffer(avail), source_rate())
+
+
+## Frames of the capture at `rate` Hz into _pending at RATE (the resampler keeps its place between
+## calls); a frame that is not silence marks the input alive (_check_input).
+func take_capture(buf: PackedVector2Array, rate: float) -> void:
+	var ratio := float(RATE) / maxf(rate, float(RATE))
+	var live := false
 	for f in buf:
+		if not live and (f.x != 0.0 or f.y != 0.0):
+			live = true
 		_acc += (f.x + f.y) * 0.5
 		_acc_n += 1
 		_phase += ratio
@@ -622,6 +705,38 @@ func _read_mic() -> void:
 			_pending.append(clampf(_acc / _acc_n, -1.0, 1.0))
 			_acc = 0.0
 			_acc_n = 0
+	if live:
+		_input_ms = Time.get_ticks_msec()
+		if no_input:
+			no_input = false
+			changed.emit()
+
+
+## The rate the capture's frames come at. The microphone's stream (AudioStreamPlaybackMicrophone,
+## a resampled playback) is converted by Godot from the input's rate (get_input_mix_rate: 48 kHz
+## on many phones) to the mix rate of the bus it plays on, which the capture reads: so the mix rate
+## is the right one here, whatever the input runs at (a 48 kHz input never plays at a wrong pitch
+## or speed). The input's own rate counts only if the mix rate is unknown.
+static func source_rate() -> float:
+	var r := AudioServer.get_mix_rate()
+	if r <= 0.0:
+		r = AudioServer.get_input_mix_rate()
+	return r if r > 0.0 else 44100.0
+
+
+## Capturing the microphone with nothing but silence (no frames, or only exact zeros) for
+## NO_INPUT_MS: "voice: no input" once in the log, the NO MIC INPUT note (no_input), and the
+## stream started once more.
+func _check_input(now: int) -> void:
+	if tone_source or no_input or now - _input_ms < NO_INPUT_MS:
+		return
+	no_input = true
+	print("voice: no input")
+	changed.emit()
+	if not _input_retry:
+		_input_retry = true
+		restart_input()
+		no_input = true                  # (the note stays until a frame comes)
 
 
 ## A talker's frames into its generator. After its sound ran dry (between two sentences)
