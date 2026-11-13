@@ -2,7 +2,7 @@ class_name PauseMenu
 extends Control
 ## The in-match menu behind the HUD's gear (and Android back), the reference's way: the settings
 ## open straight away (`SettingsPanel`, in_match) with QUIT MATCH at the foot of their tab column
-## (outside TRAINING GROUND it asks first: quit_question) and EDIT CUSTOM HUD in CONTROLS opening the editor over the match
+## (outside TRAINING GROUND it asks first: quit_question) and the HUD page's CUSTOM opening the editor over the match
 ## (scripts/hud_editor_overlay.gd: SAVE applies it to this match). The settings' X (or back) closes
 ## the menu and the match goes on. A TRAINING GROUND match is paused while it is open (the arena
 ## pauses the tree); online the match runs on underneath (the other phone plays on): the fighter
@@ -106,7 +106,7 @@ static func quit_question(asks: bool, counted: bool, host_warning := "") -> Arra
 		else "Quit this match? It has not begun yet: nothing is counted."), host_warning]
 
 
-## EDIT CUSTOM HUD in a match: the editor over it (back or BACK closes it again, to the settings).
+## CUSTOM (the settings' HUD page) in a match: the editor over it (back or BACK closes it again, to the settings).
 func _open_hud_editor() -> void:
 	if _closing or (_editor != null and is_instance_valid(_editor)):
 		return

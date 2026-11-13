@@ -1,5 +1,5 @@
 extends "res://scripts/hud_editor.gd"
-## The custom HUD editor over a match: SETTINGS > CONTROLS > EDIT CUSTOM HUD in the in-match menu
+## The custom HUD editor over a match: CUSTOM on the HUD page of the settings in the in-match menu
 ## (PauseMenu) opens it on top of the match, as the reference lets its HUD be edited mid-match.
 ## Everything is the lobby's editor (scripts/hud_editor.gd); BACK (and Android back) closes it back
 ## to the settings instead of going to the lobby (a second BACK still discards unsaved changes),

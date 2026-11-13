@@ -4,7 +4,8 @@ extends Node
 ##   tools/qa/capture.sh <out_dir> 1280x720 script:res://tests/shots_settings_pics.gd
 ## then `godot --headless --path . --import`. Writes:
 ##  - hud.png / hud_eye.png (455x256): a fight in TRAINING GROUND seen from behind, the default HUD
-##    (hud_eye.png with the free look button on), the bot ahead;
+##    (hud_eye.png with the free look button on), the bot ahead; arena.png the same view without
+##    the HUD (the HUD page draws the player's own layout over it);
 ##  - map_turn.png / map_north.png (128x128): the minimap turned with the view and north up;
 ##  - gfx_0.png .. gfx_3.png (256x144): the same view without the HUD at LOW .. EXTREME.
 ## It prints the HUD widgets' places in the picture (SPOTS) for settings_panel.gd.
@@ -75,6 +76,12 @@ func run(at: Node) -> int:
 	await at.wait(0.4)
 	ok = await _save(at, dir + "hud_eye.png", Vector2i(roundi(PIC_H * vs.x / vs.y), PIC_H)) and ok
 	Game.settings.freelook_button = false
+	# The same view without the HUD: the HUD page draws the player's own layout over it.
+	hud.visible = false
+	await at.wait(0.3)
+	ok = await _save(at, dir + "arena.png", Vector2i(roundi(PIC_H * vs.x / vs.y), PIC_H)) and ok
+	hud.visible = true
+	await at.wait(0.3)
 	# The minimap: turned a little so that TURNS WITH VIEW and NORTH UP differ.
 	p.rotate_y(0.9)
 	await at.wait(0.5)

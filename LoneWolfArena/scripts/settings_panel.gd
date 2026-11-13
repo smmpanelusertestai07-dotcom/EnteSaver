@@ -8,7 +8,8 @@ extends Control
 ## graphics and visual effects also through Game.settings_changed, which the arena and the lobby
 ## follow); there is no save button: closing saves (Game.save_settings()) and emits `closed`.
 ## Works while the tree is paused.
-##  - HUD: a picture of our HUD (assets/ui/settings/hud.png) with CUSTOM (node "EditHud") on it.
+##  - HUD: MY HUD, the player's own layout (draw_layout: HudLayout.current() drawn over our arena
+##    without a HUD, assets/ui/settings/arena.png; node "HudTile") with CUSTOM (node "EditHud") on it.
 ##  - CONTROLS and SENSITIVITY: the reference's preview pages. A picture on the left (node
 ##    "Preview": a screenshot of our own HUD with the button the row is about ringed in dashed
 ##    yellow and a yellow callout; "PreviewText" under it says what the row's current value does);
@@ -107,6 +108,13 @@ const RUN_MODE_NOTES := [
 	"Push the stick past its ring to sprint (no sprint button)",
 	"The sprint button, or the stick pushed past its ring",
 ]
+## The free look button (setting freelook_button: OFF, ON) and what each does. Free look itself
+## needs no button: a drag while standing already turns the camera round the fighter; the eye
+## button only matters while running (the run keeps its direction while the view turns).
+const FREELOOK_NOTES := [
+	"No eye button. Standing still, a drag on the right side already turns the camera round you; while you run, a drag turns the run with it",
+	"Hold the eye button and drag to look around while you run: the run keeps its direction. Standing still, a drag already turns the camera round",
+]
 ## The left fire choices left to right as values of the setting (0 always, 1 while aiming, 2 off:
 ## the values of version 5 keep their meaning).
 const LEFT_FIRE_VALUES := [2, 0, 1]
@@ -139,10 +147,12 @@ const SPOTS := {
 	"sprint": {"x": 0.226, "y": 0.438, "r": 0.066}, "joystick": {"x": 0.225, "y": 0.71, "r": 0.115},
 	"center": {"x": 0.5, "y": 0.5, "r": 0.05},
 }
-## Colours of this page (design/STYLE_SPEC.txt, SETTINGS): the column, row plates, the unselected
-## segment and the sub-tab bar.
-const COLUMN_BG := Color(0.059, 0.031, 0.063, 0.96)
-const ROW_BG := Color(0.067, 0.059, 0.071, 0.82)
+## Colours of this page (design/STYLE_SPEC.txt, SETTINGS). The column and the rows are the kit's
+## own (ui.gd: TAB_DARK for side columns, ROW for setting rows), so the settings look like the
+## other full pages (FRIENDS, PROFILE); the column's tabs are UI.side_tab. Only the settings have
+## these: the unselected segment, the sub-tab bar and the open sub-tab's light grey.
+const COLUMN_BG := UI.TAB_DARK
+const ROW_BG := UI.ROW
 const SEG_OFF := Color(0.051, 0.043, 0.055, 0.95)
 const SUBBAR_BG := Color(0.192, 0.184, 0.196, 0.9)
 const SUBTAB_ON := Color(0.906, 0.906, 0.906)
@@ -173,6 +183,9 @@ var _prows := {}
 var _sel := ""
 ## The ACCOUNT tab's links along the bottom (in the hint's place), while that tab shows.
 var _footer: Control
+## The HUD page's picture of the player's layout (node HudTile) and the layout it shows.
+var _hud_tile: Control
+var _hud_seen: Variant
 ## A task that must not be left halfway (DELETE MY DATA): back and the X do nothing meanwhile.
 var busy := false
 ## True when opened during a match (set by the pause menu; also detected from the scene).
@@ -192,8 +205,11 @@ func _ready() -> void:
 	shade.color = Color(0.02, 0.015, 0.025, 0.82)
 	UI.full_rect(shade)
 	add_child(shade)
-	var bg := UI.gradient_rect([[0.0, Color(0.12, 0.09, 0.12, 0.97)], [0.5, Color(0.16, 0.12, 0.19, 0.97)], [1.0, Color(0.09, 0.07, 0.1, 0.98)]], true)
+	var bg := Control.new()          # the full pages' backdrop (UI.draw_page_bg), as FRIENDS and PROFILE
+	bg.name = "PageBg"
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UI.full_rect(bg)
+	bg.draw.connect(func() -> void: UI.draw_page_bg(bg, bg.size))
 	add_child(bg)
 	# Left tab column.
 	var col := Panel.new()
@@ -203,9 +219,9 @@ func _ready() -> void:
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(col)
 	_menu = VBoxContainer.new()
-	_menu.add_theme_constant_override("separation", 7)
-	_menu.position = Vector2(0, 68)
-	_menu.custom_minimum_size = Vector2(MENU_W, 0)
+	_menu.add_theme_constant_override("separation", 6)
+	_menu.position = Vector2(8, 68)
+	_menu.custom_minimum_size = Vector2(MENU_W - 16.0, 0)
 	add_child(_menu)
 	for m in MENU.size():
 		var b := _menu_button(String(MENU[m][0]), m)
@@ -339,35 +355,12 @@ func _ready() -> void:
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.18)
 
 
+## A tab of the column: the kit's side tab (UI.side_tab, as FRIENDS' and PROFILE's tabs: a dark box
+## with a light lower edge; the open one yellow with hazard stripes, a cut line and a notch).
 func _menu_button(text: String, m: int) -> Button:
-	var b := Button.new()
-	b.toggle_mode = true
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(MENU_W - 4.0, 58)
-	b.text = text
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 22)
-	var normal := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 24.0)
-	var hover := UI.box(Color(1, 1, 1, 0.06), 0, 0, Color.TRANSPARENT, 24.0)
-	var on := UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 24.0, ["br"])
-	for st in [normal, hover, on]:
-		st.content_margin_left = 22
-	b.add_theme_stylebox_override("normal", normal)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT)
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	# hazard stripes, corner cut and notch on the selected (yellow) tab
-	b.draw.connect(func() -> void:
-		if b.button_pressed:
-			UI.draw_tab_selected(b, b.size))
+	var b := UI.side_tab(text, false, 22, Vector2(MENU_W - 16.0, 58))
+	b.name = "Menu_" + text
 	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
 		var pages: Array = MENU[m][1]
 		_show_tab(_current if _current in pages else int(pages[0])))
 	return b
@@ -434,9 +427,7 @@ func _show_tab(i: int) -> void:
 	_current = clampi(i, 0, TABS.size() - 1)
 	var m := menu_of(_current)
 	for k in _menu_buttons:
-		var b: Button = _menu_buttons[k]
-		b.set_pressed_no_signal(k == m)
-		b.queue_redraw()
+		UI.style_side_tab(_menu_buttons[k] as Button, k == m)
 	for c in _subbar.get_children():
 		_subbar.remove_child(c)
 		c.queue_free()
@@ -450,6 +441,7 @@ func _show_tab(i: int) -> void:
 		c.queue_free()
 	_sens_rows.clear()
 	_prows.clear()
+	_hud_tile = null
 	_sel = ""
 	_preset_seg = null
 	_graphics_seg = null
@@ -528,6 +520,12 @@ func _plate(title: String, control: Control, note := "") -> PanelContainer:
 	var row := UI.plate_row(title, control, note)
 	row.add_theme_stylebox_override("panel", _row_style(false))
 	_dark_segments(control)
+	if note != "":
+		# The help line takes the row's free width (at least plate_row's title width): the control
+		# keeps its own width at the right end; a slider shares the room with the text.
+		(row.get_child(0).get_child(0) as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if not control.has_meta("slider"):
+			control.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return row
 
 
@@ -579,9 +577,30 @@ func _prow(id: String, title: String, control: Control, info: Callable) -> Panel
 	row.add_theme_stylebox_override("panel", _row_style(false))
 	_dark_segments(control)
 	_prows[id] = [row, info]
+	# A tap on the row selects it when the finger lifts, and only if it moved less than the
+	# list's scroll dead zone: a drag that scrolls the page leaves the selection (and the picture)
+	# alone. The row's own controls select it through their signals below.
+	var down := {}       # where the finger (or the mouse, which the engine doubles as touches) went down
 	row.gui_input.connect(func(e: InputEvent) -> void:
-		if (e is InputEventMouseButton and (e as InputEventMouseButton).pressed) or (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed):
-			_select(id))
+		var kind := ""
+		var at := Vector2.ZERO
+		var pressed := false
+		if e is InputEventMouseButton and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			kind = "mouse"
+			at = (e as InputEventMouseButton).global_position
+			pressed = (e as InputEventMouseButton).pressed
+		elif e is InputEventScreenTouch:
+			kind = "touch"
+			at = row.get_global_transform_with_canvas() * (e as InputEventScreenTouch).position
+			pressed = (e as InputEventScreenTouch).pressed
+		if kind == "":
+			return
+		if pressed:
+			down[kind] = at
+		elif down.has(kind):
+			if at.distance_to(down[kind]) < float(UI.SCROLL_DEADZONE):
+				_select(id)
+			down.erase(kind))
 	for b in control.find_children("*", "Button", true, false):
 		(b as Button).pressed.connect(func() -> void: _select(id))
 	for s in control.find_children("*", "Slider", true, false):
@@ -747,13 +766,14 @@ func _build_hud() -> void:
 	var tile := Control.new()
 	tile.name = "HudTile"
 	tile.custom_minimum_size = Vector2(tw, tw * 9.0 / 16.0 + 30.0)
-	var tex := UI.texture(PIC_DIR + "hud.png")
+	var tex := UI.texture(PIC_DIR + "arena.png")
 	tile.draw.connect(func() -> void:
 		var r := Rect2(0, 30, tile.size.x, tile.size.y - 30.0)
 		if tex:
 			tile.draw_texture_rect(tex, r, false)
 		else:
 			tile.draw_rect(r, Color(0.14, 0.12, 0.15))
+		draw_layout(tile, r)
 		tile.draw_rect(r.grow(-1.0), UI.ACCENT, false, 2.0)
 		# the header tab over the picture: a yellow trapezoid with the layout's name
 		var cx := tile.size.x * 0.5
@@ -771,6 +791,8 @@ func _build_hud() -> void:
 	else:
 		center.add_child(_edit_hud_button(edit_hud if in_match else Game.goto_hud_editor))
 	h.add_child(tile)
+	_hud_tile = tile
+	_hud_seen = Game.hud_layout
 	var side := VBoxContainer.new()
 	side.add_theme_constant_override("separation", 10)
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -784,6 +806,57 @@ func _build_hud() -> void:
 	_body.add_child(h)
 	if in_match and not edit_hud.is_valid():
 		_hint.text = "Leaving for the editor now would end this match: open it from the lobby."
+
+
+## The player's own HUD layout (HudLayout.current(): their saved places, sizes and see-through) drawn
+## into `r` as if it were the screen, with the HUD's own drawing (HudDraw): the round buttons with
+## their glyphs, the stick, the weapon panel's slots and the minimap's square; the buttons the
+## settings turn off (HUD.button_enabled; SPRINT under the run mode DRAG) are left out.
+static func draw_layout(ci: CanvasItem, r: Rect2) -> void:
+	var vs := r.size
+	var saved_inset := HudLayout.inset
+	HudLayout.inset = Vector2.ZERO          # a picture has no camera cutout
+	var lay := HudLayout.current()
+	for i in range(HudLayout.ORDER.size() - 1, -1, -1):          # the first in ORDER on top
+		var id := String(HudLayout.ORDER[i])
+		if not HUD.button_enabled(id) or (id == "sprint" and int(Game.settings.get("run_mode", 2)) == 1):
+			continue
+		var w: Dictionary = lay[id]
+		var o := float(w.o)
+		var c := r.position + HudLayout.center(w, vs)
+		var rad := HudLayout.radius(w, vs)
+		match HudLayout.kind(id):
+			"panel":
+				var main := HudLayout.weapon_main(w, vs)
+				main.position += r.position
+				HudDraw.slot_rect(ci, main, main.size.y * 0.25, Color(0, 0, 0, 0.5 * o))
+				HudDraw.icon(ci, HudDraw.tex("weapon_ar"), main.get_center(), main.size * Vector2(0.5, 0.7), Color(1, 1, 1, 0.9 * o))
+				for sr: Rect2 in HudLayout.weapon_slots(w, vs):
+					HudDraw.slot_rect(ci, Rect2(sr.position + r.position, sr.size), sr.size.y * 0.25, Color(0, 0, 0, 0.42 * o))
+			"square":
+				var m := HudLayout.minimap_rect(w, vs)
+				m.position += r.position
+				ci.draw_rect(m, Color(0.05, 0.06, 0.07, 0.6 * o))
+				ci.draw_rect(m, Color(1, 1, 1, 0.45 * o), false, 1.5)
+				HudDraw.icon(ci, HudDraw.tex("v_chevron"), m.get_center(), m.size * 0.2, Color(UI.ACCENT, o))
+			"joy":
+				HudDraw.disk(ci, c, rad, Color(0, 0, 0, 0.22 * o))
+				HudDraw.ring(ci, c, rad, Color(1, 1, 1, 0.5 * o), 2.0)
+				HudDraw.disk(ci, c, rad * 0.4, Color(1, 1, 1, 0.45 * o))
+			_:
+				var glyph := HudDraw.tex(String(HUD.GLYPHS.get(id, "")), String(HUD.GLYPH_FALLBACK.get(id, "")))
+				if id == "settings":
+					HudDraw.glyph_button(ci, c, rad, glyph, o)
+				else:
+					HudDraw.button(ci, c, rad, glyph, o, false, false, true, float(HUD.GLYPH_SCALE.get(id, 0.62)))
+	HudLayout.inset = saved_inset
+
+
+## The HUD page's picture follows a layout saved while it shows (the editor over a match).
+func _process(_delta: float) -> void:
+	if _hud_tile and is_instance_valid(_hud_tile) and not is_same(_hud_seen, Game.hud_layout):
+		_hud_seen = Game.hud_layout
+		_hud_tile.queue_redraw()
 
 
 ## CUSTOM (node EditHud): saves the settings, then `open` opens the editor (the lobby's scene, or
@@ -853,7 +926,7 @@ func cache_row() -> Control:
 	clear_btn.name = "ClearCache"
 	clear_btn.pressed.connect(_ask_clear_cache)
 	var row := _plate("Cache", clear_btn, "Shader cache, old logs, leftover temporary files: %s" % CacheCleaner.size_text(int(CacheCleaner.scan().bytes)))
-	clear_btn.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_SHRINK_END      # at the row's end
+	clear_btn.size_flags_horizontal = Control.SIZE_SHRINK_END      # at the row's end (the note takes the rest)
 	_cache_note = _note_of(row)
 	return row
 
@@ -1009,7 +1082,7 @@ static func sens_value(key: String, shown: int) -> int:
 
 func _sens_row(title: String, key: String, note: String) -> void:
 	var st := UI.stepper(sens_shown(key, int(Game.settings[key])), 0, 100, func(v: float) -> void:
-		_apply(key, sens_value(key, int(v)))
+		_apply(key, sens_stored(key, int(v)))
 		_refresh_preset())
 	st.name = "Sens_" + key
 	(st.get_meta("slider") as Control).custom_minimum_size.x = 150.0
@@ -1028,12 +1101,24 @@ func _sens_row(title: String, key: String, note: String) -> void:
 		return {"pic": pic, "spot": spot, "callout": callout, "value": "", "text": note})
 
 
+## What a sensitivity row stores for the number `shown` it was set to: a preset's own value where
+## that preset reads `shown` (so stepping back to a preset's number is that preset exactly, though
+## the 0-100 steps do not land on every stored value), else sens_value.
+static func sens_stored(key: String, shown: int) -> int:
+	for n: String in PRESET_NAMES:
+		var p: Dictionary = SENS_PRESETS[n]
+		if p.has(key) and sens_shown(key, int(p[key])) == shown:
+			return int(p[key])
+	return sens_value(key, shown)
+
+
+## The preset the sensitivities match as the rows show them (0-100), or -1.
 func _preset_index() -> int:
 	for i in PRESET_NAMES.size():
 		var p: Dictionary = SENS_PRESETS[PRESET_NAMES[i]]
 		var same := true
 		for k: String in p:
-			if int(Game.settings[k]) != int(p[k]):
+			if sens_shown(k, int(Game.settings[k])) != sens_shown(k, int(p[k])):
 				same = false
 		if same:
 			return i
@@ -1093,9 +1178,9 @@ func _build_controls() -> void:
 	_prow("freelook_button", "Free look button", _toggle("freelook_button"), func() -> Dictionary:
 		if bool(Game.settings.freelook_button):
 			return {"pic": "hud_eye.png", "spot": "freelook", "callout": "Hold and drag to look around", "value": "ON",
-				"text": "The eye button: hold it and drag to look around while you keep running the same way"}
+				"text": FREELOOK_NOTES[1]}
 		return {"pic": "hud.png", "spot": "swipe", "callout": "Drag the right side to look around", "value": "OFF",
-			"text": "No eye button: drag the right side of the screen to turn the camera"})
+			"text": FREELOOK_NOTES[0]})
 	_body.add_child(UI.spacer(2))
 	_body.add_child(UI.section("MOVEMENT"))
 	var dynamic := bool(Game.settings.dynamic_joystick)

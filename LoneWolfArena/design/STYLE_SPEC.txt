@@ -184,20 +184,24 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   with the spread up to 0.06 h), shotgun ring 0.035 h fixed, fists a dot in a 0.0175 h ring; lines
   ~1.4 px with a soft shadow.
 - Settings (the reference's layout, groups and defaults, our own words and pictures; only what it
-  offers plus what the owner asked for). Frame: page gradient dark purple-brown (#1F1720 ..
-  #2A1F31), tab column #0F0810 (SettingsPanel.COLUMN_BG, MENU_W 210) with IN-MATCH, DISPLAY,
-  SOUND, ONLINE, ACCOUNT (active: yellow tile, hazard stripes, notch), HOW TO PLAY and the
+  offers plus what the owner asked for). Frame: the full pages' backdrop (UI.draw_page_bg, as
+  FRIENDS and PROFILE), tab column UI.TAB_DARK #0F0810 (SettingsPanel.COLUMN_BG, MENU_W 210) with
+  the kit's side tabs (UI.side_tab, as FRIENDS' left tabs: dark boxes with a light lower edge;
+  active: yellow tile, hazard stripes, notch) IN-MATCH, DISPLAY, SOUND, ONLINE, ACCOUNT, HOW TO PLAY and the
   player's name at its foot; SETTINGS title top-right left of the X box; IN-MATCH has a sub-tab
   bar (#312F32, a yellow line under it; active sub-tab light grey #E7E7E7 with dark text, cut
   top-left corner, hazard stripes along its right and bottom edges): HUD, CONTROLS, SENSITIVITY,
-  VIBRATION. Rows: dark plates #110F12 at 82 % (ROW_BG), 6 px apart, 54 px tall, title left (a dim
-  help line under it on pages without a picture), the control at the right end; section titles
+  VIBRATION. Rows: the kit's row plates UI.ROW (#21181D translucent; ROW_BG), 6 px apart, 54 px
+  tall, title left (a dim help line under it on pages without a picture, as wide as the row's free
+  room), the control at the right end; section titles
   with the 4 px yellow bar. Segments: chosen light grey #D9D8D6 with dark text, the others
   near-black #0D0B0E (SEG_OFF) with a thin light border. Sliders: number, [-], yellow bar with a
   white grip, [+]. Square RESET (circular arrow) bottom-left of the content on pages with
   settings; no save button (changes apply at once).
-  HUD: a large picture of our own HUD (assets/ui/settings/hud.png) under a yellow trapezoid tab
-  "MY HUD" in a 2 px yellow frame, a yellow CUSTOM button on it (the editor).
+  HUD: a large picture of the player's own HUD (their saved layout drawn by the HUD's own drawing
+  over our arena without a HUD, assets/ui/settings/arena.png: a moved FIRE shows where they put
+  it, buttons turned off in CONTROLS are left out) under a yellow trapezoid tab "MY HUD" in a 2 px
+  yellow frame, a yellow CUSTOM button on it (the editor).
   CONTROLS and SENSITIVITY: a picture pane on the left (40 % of the content, 340-520 px): our HUD
   screenshot cropped around the row's button, the button ringed in dashed yellow, a yellow callout
   with a shadow (a white drag trail and two yellow turn arrows for camera rows), and under it the

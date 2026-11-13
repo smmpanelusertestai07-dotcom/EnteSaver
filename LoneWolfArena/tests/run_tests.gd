@@ -1051,7 +1051,36 @@ func _test_settings_panel() -> void:
 	_check(Game.settings.sens_freelook == SettingsPanel.sens_value("sens_freelook", 50) and panel._preset_index() == -1,
 		"a slider moved off the preset applies at once")
 	_check(panel._sel == "sens_freelook" and panel.find_child("Preview", true, false).visible, "moving a slider selects its row (the preview follows)")
+	# Stepped back on the 0-100 scale to the preset's numbers, the sliders are that preset again
+	# (its exact stored values: the steps do not land on every stored one).
+	for k: String in sens:
+		var sl: HSlider = (panel._sens_rows[k] as Control).get_meta("slider")
+		sl.value = SettingsPanel.sens_shown(k, int(fp[k])) - 1
+		sl.value = SettingsPanel.sens_shown(k, int(fp[k]))
+	_check(panel._preset_index() == 1 and sens.all(func(k: String) -> bool: return int(Game.settings[k]) == int(fp[k])),
+		"sliders stepped back to HIGH's numbers light HIGH and store its values")
+	_check(SettingsPanel.sens_stored("sens_general", 64) == SettingsPanel.sens_value("sens_general", 64)
+		and SettingsPanel.sens_stored("sens_general", 65) == 100, "a number no preset shows stores the scale's value")
 	panel._show_tab(2)
+	# A finger that drags across a row (the list scrolls) leaves the selection; a tap selects it.
+	var joy_row := panel.find_child("Row_joystick", true, false) as Control
+	var tap := func(from: Vector2, to: Vector2) -> void:
+		for down: bool in [true, false]:
+			var mb := InputEventMouseButton.new()
+			mb.button_index = MOUSE_BUTTON_LEFT
+			mb.pressed = down
+			mb.global_position = from if down else to
+			mb.position = mb.global_position
+			joy_row.gui_input.emit(mb)
+			var tc := InputEventScreenTouch.new()
+			tc.pressed = down
+			tc.position = mb.position
+			joy_row.gui_input.emit(tc)
+	tap.call(Vector2(40, 30), Vector2(40, 30 + UI.SCROLL_DEADZONE * 3))
+	_check(panel._sel == "aim", "a drag across a row scrolls: the selected row and its picture stay")
+	tap.call(Vector2(40, 30), Vector2(43, 32))
+	_check(panel._sel == "joystick", "a tap on a row selects it")
+	panel._select("aim")
 	_check(panel._sel == "aim" and panel.find_child("Preview", true, false).visible and panel.find_child("SubTabs", true, false).visible,
 		"CONTROLS: the preview picture and the IN-MATCH sub-tabs, the first row selected")
 	(panel.find_child("AimPrecision", true, false).get_child(2) as Button).pressed.emit()
@@ -1093,7 +1122,7 @@ func _test_settings_panel() -> void:
 		"graphics: a picture tile for each level; DISPLAY has no sub-tabs")
 	for i in Game.GRAPHICS_NAMES.size():
 		_check(ResourceLoader.exists(SettingsPanel.PIC_DIR + "gfx_%d.png" % i), "the picture of %s is in the game" % Game.GRAPHICS_NAMES[i])
-	for pic in ["hud.png", "hud_eye.png", "map_turn.png", "map_north.png"]:
+	for pic in ["hud.png", "hud_eye.png", "arena.png", "map_turn.png", "map_north.png"]:
 		_check(ResourceLoader.exists(SettingsPanel.PIC_DIR + pic), "the settings picture %s is in the game" % pic)
 	_check(panel.find_child("Toggle_show_fps", true, false) == null and panel.find_child("Toggle_vibration", true, false) == null
 		and panel.find_child("ClearCache", true, false) == null, "DISPLAY: no FPS counter, vibration or cache rows")
