@@ -20,6 +20,7 @@ static func run(runner: Node) -> void:
 	me._test_zoom_label()
 	me._test_gun_alert()
 	me._test_impact_kind()
+	me._test_outline_meshes()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -246,3 +247,38 @@ func _test_impact_kind() -> void:
 	for f: String in ["weapon_draw", "punch_swish", "punch_hit", "dry_click", "bullet_whiz", "impact_metal", "impact_wood",
 			"impact_concrete", "grunt_1", "grunt_2", "grunt_3"]:
 		_check(ResourceLoader.exists("res://assets/audio/%s.wav" % f), "the sound %s ships" % f)
+
+
+## ENEMY OUTLINE: only the outer silhouette (skin and outfit) gets the hull; the eyes, brows,
+## lashes, hair and alpha-cut cards never do (a hull round them rang the eyes and painted the face).
+func _test_outline_meshes() -> void:
+	for n: String in ["Eyes", "Eyebrows", "Eyelashes", "Hair_Default", "Teeth"]:
+		_check(not CharacterModel.outline_mesh_ok(n), "no outline on %s" % n)
+	for n: String in ["Body_Head", "Body_Torso", "Body_Hands", "Outfit_shadow_Top", "Outfit_desert_Cap"]:
+		_check(CharacterModel.outline_mesh_ok(n), "the outline on %s" % n)
+	var m := CharacterModel.new()
+	t.add_child(m)
+	m.setup("neon", false)
+	m.set_outline(true)
+	var on_body := false
+	var on_inner := false
+	for n: String in m.meshes:
+		var mi: MeshInstance3D = m.meshes[n]
+		for i in mi.mesh.get_surface_count():
+			var bm := mi.get_surface_override_material(i) as BaseMaterial3D
+			if bm == null or bm.next_pass == null:
+				continue
+			if CharacterModel.outline_mesh_ok(n) and bm.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED:
+				on_body = true
+			else:
+				on_inner = true
+	_check(on_body and not on_inner, "set_outline puts the hull on the body and outfit only (body %s, inner %s)" % [on_body, on_inner])
+	m.set_outline(false)
+	var left := false
+	for n: String in m.meshes:
+		var mi: MeshInstance3D = m.meshes[n]
+		for i in mi.mesh.get_surface_count():
+			var bm := mi.get_surface_override_material(i) as BaseMaterial3D
+			left = left or (bm != null and bm.next_pass != null)
+	_check(not left, "set_outline(false) clears every hull")
+	m.free()
