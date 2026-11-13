@@ -35,50 +35,58 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 - Performance budget (phone): <= 220 draw calls and <= 250k primitives per frame in the arena.
 
 ## 3. In-match HUD (default layout, 16:9 .. 22:9)
-Positions of the movable widgets start from the reference's default layout, measured on a 20:9
-recording (no reload, scoreboard or free-look buttons there), and live in code:
-`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor l / c / r,
-so the layout keeps its look on 16:9; y and sizes in screen heights). The table quotes them on
-20:9; the unit tests check that no two default touch areas overlap from 16:10 to 22:9 (the gear
-on the weapon panel's corner aside). Our own decisions where it departs from the reference:
-- the shield wall button sits on the left edge above the medkit (the right thumb is busy with
-  FIRE, SCOPE and the jumps; the left one is free while the stick is not held);
-- the settings gear sits outside the weapon panel, in the screen's top-right corner beside it;
-- PRONE sits under the weapon panel, left of SCOPE: the reference's place (top, right of the
-  score bar, centre-anchored) is under the right-anchored panel on screens below about 18:9;
-- a LEFT FIRE button (hold to fire with the left thumb) and a FREE LOOK eye are added (the eye
-  starts off, as the reference's free camera button; SETTINGS > CONTROLS turns it on);
+Positions of the movable widgets follow the reference's default layout as measured on its 16:9
+screen (2026-11 observation, a training squad layout and a ranked match), and live in code:
+`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor l / c / r: on
+16:9 a left-anchored x is the frame's x * 0.8, a right-anchored one 1 - (1 - frame x) * 0.8; y and
+sizes in screen heights). The table quotes the layout's own numbers; the unit tests check that no
+two default touch areas overlap from 16:10 to 22:9. A layout the player saved (HUD editor) stays as
+they made it, every widget of it, sizes included. Our own decisions where it departs from the
+reference:
+- the column right of the minimap holds the gear on top (the reference's place); its next two
+  places (frame (0.185, 0.11) and (0.185, 0.182)) are for the voice buttons (SPEAKER, MIC), the
+  ping (signal bars and the number) sits right of the gear (frame about (0.278, 0.031)); we have no
+  pet, emote, camera, backpack, skill, map marker or quick chat bubble, so those places stay empty;
+- SPRINT sits a little lower than the reference's (frame (0.17, 0.49)), clear of the DUO / SQUAD
+  team list under the minimap;
+- a LEFT FIRE button (hold to fire with the left thumb) shows always and the reference's quick
+  RELOAD and quick weapon SWITCH buttons start on (the owner's wish; the reference ships them off
+  and the left fire button only while scoped); each can be turned off in SETTINGS > CONTROLS. They
+  sit out of the middle of the screen: LEFT FIRE on the left edge under the team list's place,
+  RELOAD and SWITCH up and left of SCOPE, under the weapon panel;
+- a FREE LOOK eye can be turned on (off by default, as the reference's free camera button);
 - free look needs no button (as the reference): standing still, a drag on the free area takes the
   camera round the character, 360 degrees, its face too, and the body keeps its facing (the head
   turns a little toward the look); FIRE turns the body to the crosshair at once, the stick or the
   sprint lock turns it back and it runs away from the camera; a drag while running turns the run;
-- the reference's quick RELOAD and quick weapon SWITCH buttons start on (the owner's wish; the
-  reference ships them off); each can be turned off in SETTINGS > CONTROLS, as LEFT FIRE;
 - a camera cutout on a short side moves the edge-anchored widgets in by its width.
 | Element | Position (x, y) | Size | Style |
 |---|---|---|---|
-| Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above that turns with the view by default (the player in the middle, its arrow up, everything on the map turning with it, a small N on the edge where north is; SETTINGS > DISPLAY > MINIMAP: TURNS WITH VIEW / NORTH UP), player arrow, each enemy in sight a red arrowhead pointing where it faces, out of sight its shots leave small red marks that fade over 2 s (no live position), red footprints of its running steps; safe-zone strip under it in DUO / SQUAD only |
+| Minimap (square) | top-left corner 0.0625, 0.137, anchor l | 0.27 h | dark translucent square, floor plan from above that turns with the view by default (the player in the middle, its arrow up, everything on the map turning with it, a small N on the edge where north is; SETTINGS > DISPLAY > MINIMAP: TURNS WITH VIEW / NORTH UP), player arrow, each enemy in sight a red arrowhead pointing where it faces, out of sight its shots leave small red marks that fade over 2 s (no live position), red footprints of its running steps; teammates as dots numbered and coloured as the team list's boxes; safe-zone strip under it in DUO / SQUAD only |
+| Team list (DUO / SQUAD) | under the minimap (and its zone strip), lined up with its left edge | 0.88 x the minimap wide; header 0.042 h, rows 0.036 h | dark header with a small flag and TEAM, a yellow rule under it; a row per member in slot order: a square number box in the member's colour (1 cyan, 2 orange, 3 pink, 4 purple; grey once out), the name (the player's yellow), the leader's yellow flag at the right end, a thin HP bar; KNOCKED with a red cross and the bleed-out bar (green while revived), OUT / LEFT grey. No "+" rows: nobody can join a running match |
+| Teammate tag | over each standing teammate's head | number box 0.03 h, name 0.019 h | the member's number box in its colour and the name; enemies have no name tag |
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
 | Zone warning | under the score bar | text 0.03 h | "OUTSIDE THE SAFE ZONE - MOVE IN!" (red, every mode); "SAFE ZONE SHRINKS IN 7s" in DUO / SQUAD only |
 | Eliminated by | bottom left, 0.56 u wide | 0.13 u high | 1 vs 1, while the eliminated player spectates: dark plate with a red left edge, "ELIMINATED BY <NAME>" (the name red; THE ZONE / A FALL / YOUR OWN FRAG), a thin rule, then the killer's name, the gun's silhouette and name, and "DMG n" (what that player dealt this round) in yellow at the right |
-| Kill feed | bottom centre, y 0.85 (1 vs 1: one line, a new one replaces it); DUO / SQUAD y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange; the 1 vs 1 line has the gun's silhouette before the text, on a soft highlight fading to both sides |
-| Weapon panel | top-right 0.861, 0.158, anchor r (main slot y 0.003 .. 0.155, three slots under it) | slot 0.152 h | main slot (the gun or the sidearm in hand, the gun dimmed with TAP TO SWITCH while the fists are out: big mag + small /reserve, RELOAD / RELOADING, silhouette, underline bar, top-right corner cut; tap = reload) over three square slots in SWITCH's order: gun | sidearm | fists, the one in hand lit gold, the gun's and the sidearm's rounds left (red at 0) under their silhouettes; a tap on a slot draws it; against the target dummy a CHANGE GUN plate sits left of the small slots |
-| HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
-| Joystick | 0.18, 0.71, anchor l | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |
-| Sprint | 0.181, 0.438, anchor l | 0.131 | running-figure glyph |
-| Medkit | left edge 0.0375, 0.678, anchor l | 0.104 | kit glyph + count badge |
-| Shield wall | left edge 0.0375, 0.53, anchor l (above the medkit) | 0.11 | wall glyph + count badge |
-| Left fire | 0.09, 0.39, anchor l | 0.15 | bullet glyph; hold to fire (it does not aim); setting: off, always or only while aiming |
-| Fire | 0.798, 0.68, anchor r | 0.26 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
-| Scope / ADS | 0.835, 0.40, anchor r | 0.104 | reticle glyph |
-| Free look | 0.945, 0.375, anchor r | 0.09 | eye glyph (off by default: a drag standing still already turns the camera round); hold and drag to look round while running, the run keeps its direction |
-| Jump | right of the fire button 0.906, 0.519, anchor r | 0.166 | leaping-figure silhouette |
-| Crouch | right, below 0.922, 0.834, anchor r | 0.166 | crouching-figure silhouette |
-| Prone | under the weapon panel, left of SCOPE 0.762, 0.385, anchor r | 0.104 | lying-figure silhouette |
-| Reload | up and left of FIRE 0.73, 0.52, anchor r | 0.10 | magazine glyph with a turning arrow; reloads the gun or the sidearm in hand; grey on a full magazine, without reserve or with the fists out; gold progress ring while reloading |
-| Switch | beside RELOAD on its left (the reference's quick switch), 0.672, 0.52, anchor r | 0.10 | the next weapon's glyph (the sidearm with the gun out, the fist with the sidearm out, the gun with the fists out) between two chasing arrows; gun -> sidearm -> fists -> gun (only the fists before a pick lands) |
-| Grenade | bottom 0.678, 0.912, anchor c | 0.13 | grenade silhouette + count |
-| Settings / pause | top-right corner 0.9865, 0.035, anchor r, beside the weapon panel's corner | 0.046 (touch radius >= 0.036 h, a tap counts to 1.15 x it) | small gear on a soft dark disk, drawn over the panel's corner and winning a touch there |
+| Kill feed | bottom centre: 1 vs 1 y 0.77 (one line, a new one replaces it; the reference's place); DUO / SQUAD y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange; the 1 vs 1 line has the gun's silhouette before the text, on a soft highlight fading to both sides |
+| Elimination badge | top centre, y 0.17 | 0.12 h | the player's own kill: our emblem (red-tinted with the head target for a headshot) over ELIMINATED / HEADSHOT and the name on one dark plate; still (no pop, glow or pulse), gone after 2.3 s or when a result band shows |
+| Weapon panel | top-right corner 0.9184, 0.1535, anchor r (the frame's x 0.80 .. 1.0, y 0.04 .. 0.27) | slot 0.108 h | main slot (the gun or the sidearm in hand, the gun dimmed with TAP TO SWITCH while the fists are out: big mag + small /reserve, RELOAD / RELOADING, silhouette, underline bar, top-right corner cut; tap = reload) over three square slots in SWITCH's order: gun | sidearm | fists, the one in hand lit gold, the gun's and the sidearm's rounds left (red at 0) under their silhouettes; a tap on a slot draws it; against the target dummy a CHANGE GUN plate sits left of the small slots |
+| HP block | bottom centre, y 0.948 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
+| Joystick | 0.135, 0.75, anchor l | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |
+| Sprint | 0.136, 0.49, anchor l | 0.115 | running-figure glyph |
+| Medkit | bottom left 0.1832, 0.897, anchor l | 0.104 | kit glyph + count badge |
+| Shield wall | up and left of FIRE 0.7904, 0.757, anchor r (the reference's wall place) | 0.098 | wall glyph + count badge |
+| Left fire | left edge 0.044, 0.60, anchor l | 0.13 | bullet glyph; hold to fire (it does not aim); setting: off, always or only while aiming |
+| Fire | 0.8624, 0.687, anchor r | 0.17 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
+| Scope / ADS | right edge 0.964, 0.53, anchor r | 0.104 | reticle glyph |
+| Free look | right edge 0.964, 0.40, anchor r | 0.09 | eye glyph (off by default: a drag standing still already turns the camera round); hold and drag to look round while running, the run keeps its direction |
+| Jump | right edge, right of FIRE 0.964, 0.70, anchor r | 0.115 | leaping-figure silhouette |
+| Crouch | bottom-right corner 0.964, 0.90, anchor r | 0.115 | crouching-figure silhouette |
+| Prone | left of CROUCH 0.8952, 0.90, anchor r | 0.115 | lying-figure silhouette |
+| Reload | up and left of SCOPE 0.90, 0.47, anchor r | 0.09 | magazine glyph with a turning arrow; reloads the gun or the sidearm in hand; grey on a full magazine, without reserve or with the fists out; gold progress ring while reloading |
+| Switch | beside RELOAD on its left 0.848, 0.47, anchor r | 0.09 | the next weapon's glyph (the sidearm with the gun out, the fist with the sidearm out, the gun with the fists out) between two chasing arrows; gun -> sidearm -> fists -> gun (only the fists before a pick lands) |
+| Grenade | bottom, left of PRONE 0.7408, 0.90, anchor r (the reference's throwable place) | 0.10 | grenade silhouette + count |
+| Settings / pause | top, right of the minimap 0.148, 0.04, anchor l (the reference's column) | 0.06 (touch radius >= 0.036 h, a tap counts to 1.15 x it) | small gear on a soft dark disk; the ping (signal bars and the number, DIRECT / RELAY under it) right of it |
 | Scoreboard | (no button) | - | a tap on the score bar opens it |
 - Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
 - Crosshair: WHITE by default, a thin circle + small centre dot (fixed with four short outer ticks
