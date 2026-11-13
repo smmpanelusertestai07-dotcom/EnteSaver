@@ -12,7 +12,8 @@ extends Node
 ## - Cloud.prepare_identity makes (then reloads) the player ID without going online;
 ## - the intro sting: automated runs skip it, a tap before SKIP_AFTER is ignored and one after it
 ##   skips, it ends by itself, and IntroSting.playing() follows it;
-## - the Privacy Notice stays true to scripts/cloud.gd: every relay host, the card and request
+## - the Privacy Notice stays true to scripts/cloud.gd (and scripts/net_rooms.gd's public room
+##   card): every relay host, the card and request
 ##   ages, and the player card still carries what the notice lists (Cloud.card_text, card2_text,
 ##   card3_text, my_card), chat and voice as they work (NetChat, NetVoice), the direct connection
 ##   (NetDirect: its STUN servers, the IP address the opponent learns, OFF), PLAY WITHOUT INTERNET
@@ -69,6 +70,15 @@ func _check_texts() -> void:
 	shown.sort()
 	_check(shown == ["avatar", "banner", "bundle", "career", "level", "name", "signature"], "the player card shows what the notice lists (%s)" % str(shown))
 	_check(Cloud.CAREER_KEYS == ["matches", "wins", "kills", "kd", "hs"], "the career summary is what the notice lists")
+	# A PUBLIC room's card (NetRooms.card_json) carries what the notice lists: the room's name, the
+	# host's name, ID and public key, the room ID, its mode (size) and rules, the players in it and
+	# whether it has a password. A card that carries more needs the notice changed.
+	var room_card: Dictionary = JSON.parse_string(NetRooms.card_json({"host": "H", "name": "R", "size": 1, "filled": 1, "total": 2,
+		"rules": "X", "pw": false, "code": "123456"}, "id", "pk", 1, Crypto.new().generate_rsa(2048)))
+	var room_keys := room_card.keys()
+	room_keys.sort()
+	_check(room_keys == ["code", "filled", "host", "id", "name", "pk", "pw", "rules", "sig", "size", "t", "total", "ts", "v"],
+		"a public room's card carries what the notice lists (%s)" % str(room_keys))
 	# The lobby announce: the ID, name, outfit and public key, and in a match only the flag "im".
 	var hello := Cloud.new()
 	var hi_keys := hello.hello_msg().keys()
@@ -90,7 +100,9 @@ func _check_texts() -> void:
 			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data",
 			"these games never leave the local network", "your name, outfit, player ID and public key", "pairing code",
 			"never to know where you are", "DELETE MY DATA (Settings, ACCOUNT) deletes everything the game keeps on this phone",
-			"asks the relay to delete your player card", "the last chat message to and from each friend"]:
+			"asks the relay to delete your player card", "the last chat message to and from each friend",
+			"If you make a custom room PUBLIC, every player online can see its name, your name and player ID, its room ID",
+			"whether it has a password (never the password)", "a private room is never listed"]:
 		_check(notice.contains(what), "the Privacy Notice says: %s" % what)
 	# A host's beacon (Lan.beacon) tells the local network what the notice lists: name, outfit, player
 	# ID and public key, plus the protocol, its port and a random nonce. A beacon that says more needs

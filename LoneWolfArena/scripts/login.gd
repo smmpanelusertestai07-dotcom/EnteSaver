@@ -143,7 +143,10 @@ static func privacy_sections() -> Array:
 			+ "challenges and TEAM INVITES) and friend requests carry no more than that: a TEAM INVITE's team size "
 			+ "travels encrypted inside it. While you search for a random match (QUICK MATCH, or a DUO or SQUAD "
 			+ "match), your phone also tells the relay your player ID and the IDs of the other players it saw "
-			+ "searching, so two searching players can find each other. Like any internet service, the relay sees "
+			+ "searching, so two searching players can find each other. If you make a custom room PUBLIC, every "
+			+ "player online can see its name, your name and player ID, its room ID, its mode and rules, how many "
+			+ "players are in it and whether it has a password (never the password) while it is open; a private room "
+			+ "is never listed. Like any internet service, the relay sees "
 			+ "your phone's internet (IP) address while it is connected.") % relay],
 		["Matches and chat are end-to-end encrypted", "Everything sent during an online match, chat included, is "
 			+ "encrypted on the two phones, with keys only they hold, before it leaves them: the relay only passes on "
