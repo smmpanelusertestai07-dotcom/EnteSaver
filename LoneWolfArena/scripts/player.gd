@@ -545,8 +545,31 @@ func use_medkit() -> void:
 ## The wall and grenade buttons take the item in hand (like the reference mode: nothing is
 ## thrown yet, a preview shows where it goes); FIRE then uses it, the same button again or a
 ## weapon puts it away.
+## WALL. With QUICK WALL on (setting wall_quick, the default) one tap places the shield wall at
+## once where the ghost would show it (ahead along the aim, wall_distance()) and the gun stays in
+## hand; off, the tap readies it and FIRE places it. Online both send the same "wall" event.
 func use_shield() -> void:
+	if bool(Game.settings.get("wall_quick", true)) and ready_item != "wall":
+		quick_wall()
+		return
 	_take_item("wall")
+
+
+## QUICK WALL: places a wall now (one charge). False when it could not (none left, out, busy).
+func quick_wall() -> bool:
+	if not alive or hold_fire or knocked or reviving != null or shields <= 0:
+		return false
+	if ready_item != "":
+		put_away_item()
+	if healing:
+		cancel_heal()
+	var f := aim_forward()
+	if not deploy_shield(Vector3(f.x, 0.0, f.z), wall_distance()):
+		return false
+	if model:
+		model.play_throw()          # the toss; the foam sets at once
+	Game.mark("player wall")
+	return true
 
 
 func use_grenade() -> void:

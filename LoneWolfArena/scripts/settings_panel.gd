@@ -47,23 +47,24 @@ extends Control
 
 signal closed
 
-const TABS := ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION"]
+const TABS := ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION", "INFORMATION"]
 ## The tab column top to bottom: [caption, its pages (indices into TABS; more than one: sub-tabs)].
-const MENU := [["IN-MATCH", [6, 2, 1, 7]], ["DISPLAY", [0]], ["SOUND", [3]], ["ONLINE", [4]], ["ACCOUNT", [5]]]
+const MENU := [["IN-MATCH", [6, 2, 1, 7, 8]], ["DISPLAY", [0]], ["SOUND", [3]], ["ONLINE", [4]], ["ACCOUNT", [5]]]
 ## The settings each page shows, and its RESET puts back (HUD and ACCOUNT have none: no RESET).
 const TAB_KEYS := [
 	["graphics_auto", "graphics", "fps", "visual_effects", "minimap_turns"],
 	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook"],
 	["aim_precision", "left_fire", "hold_fire_scope", "switch_button", "reload_button", "reload_on_crosshair",
-		"freelook_button", "dynamic_joystick", "run_mode"],
+		"freelook_button", "dynamic_joystick", "run_mode", "wall_quick"],
 	["vol_sfx", "vol_music", "vol_voice", "push_to_talk"],
 	["chat", "friend_chat", "show_career", "challenges_from", "friend_requests", "vibration", "direct_connect"],
 	[],
 	[],
 	["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"],
+	["damage_numbers", "hit_ring", "dynamic_crosshair", "enemy_outline", "gunshot_alerts", "kill_badges"],
 ]
 ## The pages with the preview picture on the left (CONTROLS, SENSITIVITY).
-const PREVIEW_TABS := [1, 2]
+const PREVIEW_TABS := [1, 2, 8]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
 const SCENE_KEYS := ["visual_effects"]
 ## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
@@ -72,6 +73,9 @@ const SCENE_KEYS := ["visual_effects"]
 ## or the game's own bookkeeping.
 const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size", "team_status",
 	"team_fill", "mic_mode", "speaker_mode"]
+## INFORMATION's pictures (tests/shots_settings_pics.gd makes them; hud.png until then).
+const INFO_PIC := {"hit_ring": "info_hit.png", "damage_numbers": "info_hit.png", "enemy_outline": "info_outline.png",
+	"gunshot_alerts": "info_gunshot.png"}
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
 ## The minimap (setting minimap_turns: TURNS WITH VIEW true, NORTH UP false) and what each does.
 const MINIMAP_NAMES := ["TURNS WITH VIEW", "NORTH UP"]
@@ -150,6 +154,8 @@ const SPOTS := {
 	"reload": {"x": 0.875, "y": 0.47, "r": 0.045}, "swap": {"x": 0.81, "y": 0.47, "r": 0.045},
 	"sprint": {"x": 0.17, "y": 0.49, "r": 0.057}, "joystick": {"x": 0.169, "y": 0.75, "r": 0.115},
 	"center": {"x": 0.5, "y": 0.5, "r": 0.05},
+	"wall": {"x": 0.738, "y": 0.757, "r": 0.049}, "minimap": {"x": 0.078, "y": 0.137, "r": 0.135},
+	"top": {"x": 0.5, "y": 0.2, "r": 0.06}, "feed": {"x": 0.5, "y": 0.77, "r": 0.05},
 }
 ## Colours of this page (design/STYLE_SPEC.txt, SETTINGS). The column and the rows are the kit's
 ## own (ui.gd: TAB_DARK for side columns, ROW for setting rows), so the settings look like the
@@ -479,6 +485,8 @@ func _show_tab(i: int) -> void:
 			_build_hud()
 		7:
 			_build_vibration()
+		8:
+			_build_information()
 	if not _prows.is_empty():
 		_select(String(_prows.keys()[0]))
 	# A finger drag that starts on a row scrolls the tab (a tap still presses); a slider keeps its
@@ -1201,6 +1209,52 @@ func _build_controls() -> void:
 		var v := clampi(int(Game.settings.run_mode), 0, RUN_MODE_NAMES.size() - 1)
 		return {"pic": "hud.png", "spot": "joystick" if v == 1 else "sprint", "callout": ["Tap to sprint", "Push past the ring", "Tap, or push past the ring"][v],
 			"value": RUN_MODE_NAMES[v], "text": RUN_MODE_NOTES[v]})
+	_body.add_child(UI.spacer(2))
+	_body.add_child(UI.section("ITEMS"))
+	_switch_prow("wall_quick", "Quick wall", "wall", "TAP to place the wall",
+		"QUICK WALL - TAP WALL TO PLACE IT AT ONCE; the gun stays in hand", "Tap WALL to take the wall in hand, then FIRE to place it")
+
+
+# ---------------------------------------------------------------- INFORMATION
+
+## IN-MATCH > INFORMATION (round 8): what the match tells you, built like CONTROLS (the picture on
+## the left, the rows on the right, the selected row framed in yellow, its line under the picture).
+func _build_information() -> void:
+	_body.add_child(UI.section("HITS"))
+	_info_prow("damage_numbers", "Damage numbers", "center", "Damage over the target's head",
+		"The damage you deal shows in small numbers by the target's head, one per burst", "No damage numbers")
+	_prow("hit_ring", "Hit marker", _seg_bool("hit_ring", ["RING", "TICKS"]), func() -> Dictionary:
+		var ring := bool(Game.settings.hit_ring)
+		return {"pic": INFO_PIC.get("hit_ring", "hud.png"), "spot": "center", "callout": "A hit", "value": "RING" if ring else "TICKS",
+			"text": "A hit blooms the crosshair into an orange ring" if ring else "A hit shows four short ticks round the crosshair"})
+	_prow("dynamic_crosshair", "Crosshair", _seg_bool("dynamic_crosshair", ["DYNAMIC", "FIXED"]), func() -> Dictionary:
+		var dyn := bool(Game.settings.dynamic_crosshair)
+		return {"pic": "hud.png", "spot": "center", "callout": "Your crosshair", "value": "DYNAMIC" if dyn else "FIXED",
+			"text": "The ring widens while you move, jump or spray" if dyn else "The ring keeps one size"})
+	_body.add_child(UI.spacer(2))
+	_body.add_child(UI.section("ENEMIES"))
+	_info_prow("enemy_outline", "Enemy outline", "center", "A thin red edge",
+		"Fighters of the other side get a thin red outline", "No outline on the other side's fighters")
+	_info_prow("gunshot_alerts", "Gunshot alerts", "center", "Shots you cannot see",
+		"Marks round the crosshair point to shooters off screen within 60 m; fainter further away", "No marks for gunshots off screen")
+	_info_prow("kill_badges", "Kill streak badges", "top", "Your elimination",
+		"An elimination badge with your name, DOUBLE and TRIPLE for a streak", "No elimination badge")
+
+
+## An OFF / ON row of INFORMATION with its picture.
+func _info_prow(key: String, title: String, spot: String, callout: String, on_text: String, off_text: String) -> void:
+	_prow(key, title, _toggle(key), func() -> Dictionary:
+		var on := bool(Game.settings[key])
+		return {"pic": INFO_PIC.get(key, "hud.png"), "spot": spot, "callout": callout, "value": "ON" if on else "OFF",
+			"text": on_text if on else off_text})
+
+
+## Two choices for one on / off setting: the first is true.
+func _seg_bool(key: String, names: Array) -> Control:
+	var seg := UI.segmented(names, 0 if bool(Game.settings[key]) else 1, func(v: int) -> void: _apply(key, v == 0), 14, 112.0)
+	seg.name = "Toggle_" + key
+	_dark_segments(seg)
+	return seg
 
 
 ## An OFF / ON row of CONTROLS with its picture: the button `spot` ringed, the text for each value.

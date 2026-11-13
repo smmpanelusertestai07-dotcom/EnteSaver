@@ -87,9 +87,12 @@ const DEFAULT_SETTINGS := {
 	"enemy_outline": true,        # ENEMY OUTLINE: a thin red outline on the other side's fighters (CharacterModel)
 	"gunshot_alerts": true,       # GUNSHOT ALERTS: marks toward unseen shooters within 60 m (HUD)
 	"kill_badges": true,          # KILL STREAK BADGES: the elimination badge and streak words (HUD)
+	"damage_numbers": true,       # DAMAGE NUMBERS (fixed on until v8)
+	"dynamic_crosshair": true,    # CROSSHAIR DYNAMIC (widens with the spread) / FIXED (fixed on until v8)
 }
 ## Round 8's on / off settings (checked like BOOL_SETTINGS).
-const BOOL_SETTINGS_R8 := ["wall_quick", "hit_ring", "enemy_outline", "gunshot_alerts", "kill_badges"]
+const BOOL_SETTINGS_R8 := ["wall_quick", "hit_ring", "enemy_outline", "gunshot_alerts", "kill_badges", "damage_numbers",
+	"dynamic_crosshair"]
 ## The values of the setting challenges_from (SettingsOnline shows them in this order).
 const CHALLENGES_EVERYONE := 0
 const CHALLENGES_FRIENDS := 1
@@ -101,7 +104,7 @@ const CHALLENGES_NOBODY := 2
 ## turn show_fps on in memory) and a drag that starts on FIRE turns at the view's own sensitivity
 ## (sens_fire 100 %, Player).
 const FIXED_SETTINGS := {
-	"damage_numbers": true, "dynamic_crosshair": true, "show_fps": false, "sens_fire": 100,
+	"show_fps": false, "sens_fire": 100,
 }
 ## Settings that FIXED_SETTINGS held until version 4, whatever the file said: a file from then
 ## has no say in them, they start from their defaults (what version 4 played with).
@@ -401,6 +404,10 @@ func _migrate_settings(saved: Dictionary) -> void:
 		var lf: Variant = saved.get("left_fire")
 		if (lf is int or lf is float) and int(lf) == 0:
 			saved["left_fire"] = 1
+		# Damage numbers and the dynamic crosshair were fixed on until now: an older file has no
+		# say in them (they start on, INFORMATION turns them off).
+		saved.erase("damage_numbers")
+		saved.erase("dynamic_crosshair")
 
 
 ## Every setting as on a new install (DELETE MY DATA): the defaults, the fixed behaviour, AUTO

@@ -759,8 +759,9 @@ func _test_settings_v6() -> void:
 		"vibration as the reference's rows: enemy footsteps on, taking damage and shooting off, out of a match on")
 	for k in ["show_fps", "crosshair_color", "crosshair_size", "sens_fire", "vol_master"]:
 		_check(not d.has(k) and not Game.SETTING_RANGES.has(k) and not (k in Game.BOOL_SETTINGS), "%s is no longer a setting" % k)
-	_check(Game.FIXED_SETTINGS.show_fps == false and Game.FIXED_SETTINGS.sens_fire == 100 and Game.FIXED_SETTINGS.has("damage_numbers")
-		and Game.FIXED_SETTINGS.has("dynamic_crosshair"), "no FPS counter, FIRE drags at the view's own sensitivity: fixed")
+	_check(Game.FIXED_SETTINGS.show_fps == false and Game.FIXED_SETTINGS.sens_fire == 100 and not Game.FIXED_SETTINGS.has("damage_numbers")
+		and not Game.FIXED_SETTINGS.has("dynamic_crosshair") and d.damage_numbers == true and d.dynamic_crosshair == true,
+		"no FPS counter, FIRE drags at the view's own sensitivity: fixed; damage numbers and the dynamic crosshair are settings (v8, on)")
 	_check(Game.crosshair_color() == Color.WHITE and is_equal_approx(Game.crosshair_scale(), Game.CROSSHAIR_SCALE),
 		"the crosshair is white at its standard size")
 	_near(Game.CROSSHAIR_SCALE, lerpf(0.75, 1.35, 0.5), "the crosshair keeps the size the HUD drew before")
@@ -995,9 +996,9 @@ func _test_settings_panel() -> void:
 	_check(shown.keys().all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k))
 		and SettingsPanel.NOT_SHOWN.all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k) and not shown.has(k)),
 		"the tabs and the not-shown list name real settings")
-	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION"]
+	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION", "INFORMATION"]
 		and SettingsPanel.MENU.map(func(m: Array) -> String: return String(m[0])) == ["IN-MATCH", "DISPLAY", "SOUND", "ONLINE", "ACCOUNT"]
-		and SettingsPanel.MENU[0][1] == [6, 2, 1, 7], "the tabs: IN-MATCH (HUD, CONTROLS, SENSITIVITY, VIBRATION), DISPLAY, SOUND, ONLINE, ACCOUNT")
+		and SettingsPanel.MENU[0][1] == [6, 2, 1, 7, 8], "the tabs: IN-MATCH (HUD, CONTROLS, SENSITIVITY, VIBRATION, INFORMATION), DISPLAY, SOUND, ONLINE, ACCOUNT")
 	var pages := []
 	for m: Array in SettingsPanel.MENU:
 		pages.append_array(m[1])
