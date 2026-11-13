@@ -39,10 +39,10 @@ var _net_sig := ""
 var _net_note := ""
 var _net_refresh_t := 0.0
 var _friend_query := ""                # FRIENDS tab search (an ID or a name)
-var _room_rules := Cloud.ROOM_RULES.duplicate()     # the next custom room's rules
-var _room_pin_draft := ""              # the password typed before a rule button rebuilt the tab
+## The next custom room as the create page (RoomCreate) edits it: its page (ROOM / GAME), name,
+## password, mode (SOLO 1, DUO 2, SQUAD 4) and rules (RoomRules); kept while the tab is redrawn.
+var room_draft := {"page": "room", "name": "", "pin": "", "size": 1, "rules": RoomRules.classic(1)}
 var _room_join_code := ""              # the room this phone asked to join (for its status line)
-var _room_size := 1                    # the next custom room's mode: SOLO 1, DUO 2, SQUAD 4
 var _dir_on := false                   # this window asked the cloud for the player cards
 var _place := {}                       # the tab and scroll a player's card was opened from: {"kind", "scroll"}
 var _scroll_back := -1                 # open(kind, true) scrolls the new list back there once it is laid out
@@ -221,10 +221,9 @@ func open(kind := "online", back := false) -> void:
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
 	_net_status = UI.label("", 20, UI.ACCENT, "bold")
+	_net_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART      # (a room option's help is a sentence)
 	v.add_child(_net_status)
-	if kind == "room":
-		_build_room_tab(v)
-	elif kind == "local":
+	if kind == "local":
 		lan.build(v)
 	_net_scroll = ScrollContainer.new()
 	_net_scroll.name = "NetScroll"
@@ -237,6 +236,9 @@ func open(kind := "online", back := false) -> void:
 	_net_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_net_list.add_theme_constant_override("separation", 6)
 	_net_scroll.add_child(_net_list)
+	if kind == "room":
+		_build_room_tab(_net_list)       # (in the list's scroll: the create page is taller than the screen)
+		UI.drag_scroll(_net_scroll, _net_list)
 	_net_sig = "-"
 	_net_note = ""
 	_refresh_friends()
@@ -299,7 +301,8 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		head.name = "RoomHead"
 		v.add_child(head)
 		var size := int(cloud.group.get("size", 1)) if cloud.in_room() else 1
-		v.add_child(UI.label(_room_mode_text(size, cloud.room_rules), 18, UI.TEXT_DIM, "semi"))
+		v.add_child(UI.label(_room_mode_text(size), 18, UI.TEXT_DIM, "semi"))
+		v.add_child(SlotPanel.rules_strip(cloud.room_rules, size > 1))
 		if cloud.in_room():
 			_room_slots(v, cloud, true)
 		var row := HBoxContainer.new()
@@ -332,7 +335,10 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		st.name = "JoinState"
 		v.add_child(st)
 		if cloud.join_state == "in" and cloud.in_room():
-			v.add_child(UI.label(_room_mode_text(int(cloud.group.get("size", 1)), {}), 18, UI.TEXT_DIM, "semi"))
+			var jsize := int(cloud.group.get("size", 1))
+			v.add_child(UI.label(_room_mode_text(jsize), 18, UI.TEXT_DIM, "semi"))
+			if not cloud.joined_rules.is_empty():       # (an older host sends none: its rules come with START)
+				v.add_child(SlotPanel.rules_strip(cloud.joined_rules, jsize > 1))
 			_room_slots(v, cloud, false)
 		var back := UI.button("LEAVE" if cloud.join_state in ["asking", "in"] else "BACK", 19, "light", Vector2(200, 56))
 		back.pressed.connect(func() -> void:
@@ -340,61 +346,10 @@ func _build_room_tab(v: VBoxContainer) -> void:
 			open("room"))
 		v.add_child(back)
 		return
-	# Create: password (digits), the mode, the rules (SOLO's 1 vs 1).
-	var create := HBoxContainer.new()
-	create.add_theme_constant_override("separation", 10)
-	create.add_child(UI.label("NEW ROOM  ·  PASSWORD", 20, UI.TEXT, "bold"))
-	var pin := _text_field("4-6 DIGITS", 6, true)
-	pin.name = "RoomPin"
-	pin.text = "%04d" % randi_range(0, 9999)
-	pin.custom_minimum_size = Vector2(170, 56)
-	pin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	create.add_child(pin)
-	for m: Array in [[1, "SOLO 1 VS 1"], [2, "DUO 2 VS 2"], [4, "SQUAD 4 VS 4"]]:
-		var n := int(m[0])
-		var mb := UI.button(String(m[1]), 16, "primary" if n == _room_size else "dark", Vector2(150, 56))
-		mb.name = "RoomMode_%d" % n
-		mb.pressed.connect(func() -> void:
-			_room_size = n
-			_room_pin_draft = pin.text
-			open("room"))
-		create.add_child(mb)
-	v.add_child(create)
-	if _room_size == 1:
-		var rules := HBoxContainer.new()
-		rules.add_theme_constant_override("separation", 8)
-		for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-			var key := String(k[0])
-			var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 56))
-			tb.name = "Rule_" + key
-			tb.pressed.connect(func() -> void:
-				_room_rules[key] = not bool(_room_rules[key])
-				_room_pin_draft = pin.text
-				open("room"))
-			rules.add_child(tb)
-		var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 56))
-		rounds.name = "Rule_rounds"
-		rounds.pressed.connect(func() -> void:
-			var steps := [1, 3, 5, 7]
-			_room_rules.rounds = steps[(steps.find(int(_room_rules.rounds)) + 1) % steps.size()]
-			_room_pin_draft = pin.text
-			open("room"))
-		rules.add_child(rounds)
-		v.add_child(rules)
-	if _room_pin_draft != "":
-		pin.text = _room_pin_draft
-	var make := UI.button("CREATE ROOM", 20, "primary", Vector2(230, 56))
-	make.name = "RoomCreate"
-	make.pressed.connect(func() -> void:
-		var p := pin.text
-		if p.length() < 4:
-			_net_note = "THE PASSWORD NEEDS 4 TO 6 DIGITS"
-			_net_sig = "-"
-			return
-		_room_pin_draft = ""
-		Game.cloud_service().open_room(p, _room_rules, "", _room_size)
-		open("room"))
-	v.add_child(make)
+	# Create (RoomCreate: the ROOM and GAME pages), then join by ID and password below it.
+	if String(room_draft.pin) == "":
+		room_draft.pin = "%04d" % randi_range(0, 9999)
+	v.add_child(RoomCreate.build(self))
 	# Join: room ID + password.
 	var join := HBoxContainer.new()
 	join.add_theme_constant_override("separation", 10)
@@ -417,6 +372,36 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		open("room"))
 	join.add_child(go)
 	v.add_child(join)
+
+
+## The create page changed (a tab, a mode, a rule): the tab again, the draft kept.
+func redraw_room() -> void:
+	var at := _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0
+	open("room")
+	_scroll_back = at
+
+
+## CREATE ROOM: the draft's password (4 to 6 digits), mode and rules (the name with them).
+func create_room() -> void:
+	var p := String(room_draft.pin)
+	if p.length() < 4:
+		_net_note = "THE PASSWORD NEEDS 4 TO 6 DIGITS"
+		_net_sig = "-"
+		_refresh_friends()
+		return
+	var rules: Dictionary = (room_draft.rules as Dictionary).duplicate()
+	rules.name = String(room_draft.name).strip_edges() if String(room_draft.name).strip_edges() != "" \
+		else "%s'S ROOM" % String(Game.profile.name)
+	Game.cloud_service().open_room(p, rules, "", int(room_draft.size))
+	room_draft.pin = ""
+	open("room")
+
+
+## A "?" on the create page: its help on the status line.
+func room_help(title: String, text: String) -> void:
+	_net_note = "%s: %s" % [title, text]
+	_net_sig = "-"
+	_refresh_friends()
 
 
 ## The room's places (SlotPanel): its players by name in BLUE / ORANGE; a tap on an empty place
@@ -456,19 +441,12 @@ static func room_ready(cloud: Cloud) -> bool:
 	return NetGroup.plan(cloud.group.members, int(cloud.group.size)) == "match"
 
 
-## What the room plays: SOLO with its rules, DUO / SQUAD between the players in the places.
-func _room_mode_text(size: int, rules: Dictionary) -> String:
+## What the room plays: SOLO 1 VS 1, DUO / SQUAD between the players in the places (its rules
+## under it: SlotPanel.rules_strip).
+func _room_mode_text(size: int) -> String:
 	if size == 1:
-		return _rules_text(rules) if not rules.is_empty() else "SOLO  ·  1 VS 1"
+		return "SOLO  ·  1 VS 1"
 	return "%s  ·  %d VS %d  ·  REAL PLAYERS, EMPTY PLACES STAY EMPTY" % ["DUO" if size == 2 else "SQUAD", size, size]
-
-
-func _rules_text(r: Dictionary) -> String:
-	var parts := ["1 VS 1", "FIRST TO %d" % int(r.get("rounds", 5))]
-	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-		if bool(r.get(String(k[0]), false)):
-			parts.append(String(k[1]))
-	return "   ·   ".join(PackedStringArray(parts))
 
 
 ## A text box in the lobby's style; digits_only keeps only 0-9 and opens the number keyboard.
