@@ -1291,13 +1291,27 @@ func _test_delete_my_data() -> void:
 	var r := Cloud.ROOT
 	var want := [r + "/p/" + me, r + "/fr/" + o + "/" + me, r + "/fa/" + me + "/" + o, r + "/fr/" + w + "/" + me,
 		r + "/fa/" + me + "/" + w, r + "/fr/" + me + "/" + i, r + "/fa/" + f + "/" + me, r + "/fm/" + f + "/" + me,
-		r + "/fm/" + me + "/" + f]
+		r + "/fm/" + me + "/" + f, r + "/rm/" + me]
 	_check(told and empty_retained and topics.size() == want.size() and want.all(func(t: String) -> bool: return topics.has(t)),
-		"forget_me deletes the card, the requests and answers either way and the chat messages either way (%s)" % str(topics.keys()))
+		"forget_me deletes the card, the public room card, the requests and answers either way and the chat messages either way (%s)" % str(topics.keys()))
 	_check(not cl.packets.is_empty() and cl.packets.back() == PackedByteArray([0xE0, 0x00]), "then it leaves the relay (DISCONNECT last)")
 	_check(cl.my_id == "" and cl._key == null and cl._pk_pem == "" and not cl._want_lobby and not cl._connected and cl.peers.is_empty()
 		and cl.directory.is_empty() and cl._dir_wants.is_empty() and cl.room_code == "" and cl.status == "offline" and cl.relay_rtt == -1,
 		"and forgets the key, the id, the lists and the custom room")
+	# A public room's card left on the relay by an app killed while it hosted goes on the next
+	# connection when this phone hosts no room; a room open here keeps its card (NetRooms).
+	var back := RecordingCloud.new()
+	back.my_id = me
+	back._rx = PackedByteArray([0x20, 0x02, 0x00, 0x00])           # CONNACK
+	back._parse()
+	_check(back.published.has([r + "/rm/" + me, 0, true]), "a connection with no room open clears this phone's room card")
+	back.published.clear()
+	back._connected = false
+	back.room_code = "123456"
+	back._rx = PackedByteArray([0x20, 0x02, 0x00, 0x00])
+	back._parse()
+	_check(back._connected and not back.published.has([r + "/rm/" + me, 0, true]), "a connection with a room open keeps its card")
+	back.free()
 	var off := RecordingCloud.new()
 	off.my_id = me
 	_check(not off.forget_me() and off.published.is_empty() and off.my_id == "", "offline the relay is told nothing; the id goes all the same")

@@ -899,6 +899,8 @@ func _parse() -> void:
 						_subscribe(ROOT + "/p/+")
 						_subscribe(ROOT + "/rm/+")                 # public room cards (scripts/net_rooms.gd)
 					_card_t = 0.0                                  # (re)publish this phone's card now
+					if room_code == "":
+						_publish(ROOT + "/rm/" + my_id, PackedByteArray(), true)   # a room card left by a killed app goes (NetRooms)
 					if _want_lobby:
 						_subscribe(ROOT + "/lobby")
 						_announce_t = 0.0
@@ -1509,7 +1511,7 @@ func forget_me() -> bool:
 	var told := _connected and my_id != ""
 	if told:
 		var p: Dictionary = Game.profile
-		var gone := {ROOT + "/p/" + my_id: true}
+		var gone := {ROOT + "/p/" + my_id: true, ROOT + "/rm/" + my_id: true}     # (the room card: NetRooms)
 		for id: Variant in (p.friend_out as Dictionary).keys() + (p.withdrawn as Array):
 			gone[ROOT + "/fr/" + String(id) + "/" + my_id] = true
 			gone[ROOT + "/fa/" + my_id + "/" + String(id)] = true
