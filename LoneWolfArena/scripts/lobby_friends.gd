@@ -584,7 +584,8 @@ func _place_above_keyboard(le: LineEdit, kb_px: int) -> void:
 func _refresh_friends() -> void:
 	if _net_list == null or not is_instance_valid(_net_list):
 		return
-	var req_tab := lobby.dialogs.modal.find_child("Tab_requests", true, false) as Button if lobby.dialogs.modal else null
+	var page: Control = lobby.dialogs.modal if lobby and lobby.dialogs else null      # (no lobby in the unit tests)
+	var req_tab := page.find_child("Tab_requests", true, false) as Button if page else null
 	if req_tab:                       # the REQUESTS count follows ACCEPT, DECLINE and new requests
 		req_tab.text = requests_caption(Game.cloud_service().friend_requests.size())
 	if _net_kind == "local":
