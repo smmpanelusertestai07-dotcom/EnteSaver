@@ -2,6 +2,10 @@ extends RefCounted
 ## Unit tests of the screens out of the match (round 8, run from tests/run_tests.gd):
 ## - HISTORY: a win because the opponent left keeps "left_by_them" through a save and a load; old
 ##   entries read as false; a loss never carries it.
+## - PUBLIC rooms (NetRooms): a signed card is listed; a wrong signature, another key's id, a card
+##   older than 2 minutes or from the future, a blocked host, this phone's own, malformed or
+##   over-long fields are not; one card per host (a newer one replaces it, an empty message takes
+##   it away); at most MAX_CARDS kept; QUICK JOIN picks the newest open room without a password.
 ## - WARDROBE's poses: profile lobby_pose / victory_pose are kept when known, else "" (random).
 
 var t: Node
@@ -12,6 +16,7 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._history_left_by_them()
 	me._poses()
+	me._rooms()
 
 
 func _check(ok: bool, what: String) -> void:
@@ -71,3 +76,69 @@ func _poses() -> void:
 	for clip: String in Game.LOBBY_POSES:
 		_check(clip == "" or CharacterModel.LOBBY_GESTURES.has(clip), "lobby pose %s is a lobby gesture" % clip)
 	Game.profile = saved_profile
+
+
+func _room_card(key: CryptoKey, f: Dictionary, ts: int, id_override := "") -> PackedByteArray:
+	var pk := key.save_to_string(true)
+	var id := id_override if id_override != "" else pk.sha256_text().left(32)
+	return NetRooms.card_json(f, id, pk, ts, key).to_utf8_buffer()
+
+
+func _rooms() -> void:
+	var saved_blocked: Variant = Game.profile.blocked.duplicate(true)
+	var key := Crypto.new().generate_rsa(2048)       # (Cloud.verify_signed takes 2048-bit keys, as the phones make)
+	var other := Crypto.new().generate_rsa(2048)
+	var id := key.save_to_string(true).sha256_text().left(32)
+	var oid := other.save_to_string(true).sha256_text().left(32)
+	var now := int(Time.get_unix_time_from_system())
+	var f := {"host": "HOSTY", "name": "FRIDAY FIGHTS", "size": 2, "filled": 1, "total": 4, "rules": "FIRST TO 4 · HP 200",
+		"pw": false, "code": "123456"}
+	var r := NetRooms.new()
+	_check(r.take(id, _room_card(key, f, now), now) and r.list(now).size() == 1 and String(r.list(now)[0].name) == "FRIDAY FIGHTS"
+		and int(r.list(now)[0].total) == 4, "a signed public room card is listed")
+	# one per host: a newer card replaces it, an older one does not, an empty message removes it
+	var f2 := f.duplicate()
+	f2.filled = 3
+	_check(r.take(id, _room_card(key, f2, now + 1), now + 1) and r.cards.size() == 1 and int(r.cards[id].filled) == 3, "a newer card replaces the host's card")
+	_check(not r.take(id, _room_card(key, f, now - 5), now + 1) and int(r.cards[id].filled) == 3, "an older card does not")
+	_check(r.take(id, PackedByteArray(), now) and r.cards.is_empty(), "an empty message takes the card away")
+	# the signature, the key and the topic must agree
+	var bad_sig: Dictionary = JSON.parse_string(_room_card(key, f, now).get_string_from_utf8())
+	bad_sig.name = "CHANGED"
+	_check(NetRooms.check(JSON.stringify(bad_sig).to_utf8_buffer(), id, now).is_empty(), "a changed field breaks the signature")
+	_check(NetRooms.check(_room_card(other, f, now, id), id, now).is_empty(), "a card for another key's id is refused")
+	_check(NetRooms.check(_room_card(key, f, now), oid, now).is_empty(), "a card on another host's topic is refused")
+	_check(NetRooms.check(_room_card(key, f, now), id, now, id).is_empty(), "this phone's own card is not listed")
+	# expiry: older than 2 minutes, or from the future
+	_check(NetRooms.check(_room_card(key, f, now - NetRooms.MAX_AGE_S - 1), id, now).is_empty(), "a card older than 2 minutes is dropped")
+	_check(NetRooms.check(_room_card(key, f, now + 600), id, now).is_empty(), "a card from the future is dropped")
+	r.take(id, _room_card(key, f, now - 100), now - 100)
+	_check(r.list(now + 30).is_empty(), "a listed card expires after 2 minutes")
+	# blocked hosts never show
+	Game.profile.blocked = [{"id": id, "name": "HOSTY", "t": now}]
+	_check(NetRooms.check(_room_card(key, f, now), id, now).is_empty(), "a blocked host's card is refused")
+	r.cards[id] = {"id": id, "ts": now, "filled": 1, "total": 2, "pw": false, "code": "123456"}
+	_check(r.list(now).is_empty(), "a host blocked later leaves the list")
+	Game.profile.blocked = saved_blocked
+	r.cards.clear()
+	# malformed and over-long fields
+	for m: Array in [["size", 3], ["total", 6], ["filled", 0], ["filled", 9], ["code", "12345"], ["code", "12a456"], ["pw", "no"],
+			["name", "X".repeat(RoomRules.NAME_MAX + 1)], ["host", "H".repeat(NetRooms.FIELD_MAX + 1)], ["rules", "a|b"],
+			["rules", "R".repeat(NetRooms.FIELD_MAX + 1)]]:
+		var g := f.duplicate()
+		g[m[0]] = m[1]
+		var raw := _room_card(key, g, now)
+		_check(NetRooms.check(raw, id, now).is_empty(), "a card with %s = %s is refused" % [m[0], str(m[1])])
+	var big := PackedByteArray()
+	big.resize(Cloud.MAX_MESSAGE + 1)
+	_check(NetRooms.check(big, id, now).is_empty() and NetRooms.check("[1,2]".to_utf8_buffer(), id, now).is_empty(), "junk is refused")
+	# the list keeps MAX_CARDS at most (the oldest go), QUICK JOIN the newest open room without a password
+	for i in NetRooms.MAX_CARDS + 5:
+		r.cards["h%03d" % i] = {"id": "h%03d" % i, "ts": now - 60 + i % 50, "filled": 2, "total": 2, "pw": false, "code": "%06d" % i}
+	r.take(id, _room_card(key, f, now), now)
+	_check(r.cards.size() == NetRooms.MAX_CARDS and r.cards.has(id), "at most %d room cards are kept" % NetRooms.MAX_CARDS)
+	_check(String(r.quick_pick(now).get("code", "")) == "123456", "QUICK JOIN: the newest room with a free place")
+	var locked := f.duplicate()
+	locked.pw = true
+	r.take(id, _room_card(key, locked, now + 1), now + 1)
+	_check(r.quick_pick(now + 1).is_empty() and bool(r.by_code("123456", now + 1).pw), "QUICK JOIN skips a room with a password")
