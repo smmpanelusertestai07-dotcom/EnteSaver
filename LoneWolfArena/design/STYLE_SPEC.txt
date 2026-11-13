@@ -122,8 +122,9 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   5-9 s and now and then a cheer.
 - Lobby (the reference lobby's layout): character large on a lit podium in the middle of a 3D
   container yard; player card top-left (emblem avatar, level, name with EDIT, XP line) and nothing
-  store-like (no currency, no featured or "new" cards); top-right the logo, the ping chip, FRIENDS
-  (two busts; the unread badge) and the gear; bottom-left a dark translucent bar of main buttons
+  store-like (no currency, no featured or "new" cards); top-right the logo, FRIENDS
+  (two busts; the unread badge), the gear and, rightmost, the ping (a wifi mark and a plain number,
+  white when good, yellow, red; the match HUD shows the same at 0.278, 0.031); bottom-left a dark translucent bar of main buttons
   (WARDROBE | PROFILE | ONLINE 1 VS 1, glyph and caption each) with the chat strip above it (a
   speech-bubble square with the unread count and a one-line ticker of the newest friend message,
   "[FRIEND] NAME: text"; a tap opens the chat panel); ADD (person with a plus over its caption) on

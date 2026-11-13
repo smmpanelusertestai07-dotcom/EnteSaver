@@ -3,7 +3,7 @@ extends Control
 ## The match HUD's network layer (HUD.bind adds it to every match: HudNet.attach). Offline
 ## (TRAINING GROUND, `net` false) it is only the ping chip: the relay's round trip while this
 ## phone is connected to it (Cloud.relay_ping), else a grey "--", with no tag. Online (and LOCAL):
-##  - top right, in the column under the gear beside the weapon panel: the round trip to the other
+##  - top left at PING_AT (the reference's place): the round trip of the path to the other
 ##    phone (NetPing: Cloud.match_ping: the direct round trip while the direct path is up, else
 ##    Cloud.peer_rtt, the relay's Cloud.relay_rtt until the other phone answered), with a small
 ##    DIRECT / RELAY tag under it (how the state travels, NetDirect);
@@ -20,6 +20,7 @@ const GAP := 12.0
 const FEED_S := 9.0
 const FEED_LINES := 3
 const IDS := ["chat", "mute", "talk", "speaker"]
+const PING_AT := Vector2(0.278, 0.031)   # the ping's centre, fractions of the screen (the reference's place)
 
 var hud: HUD
 var feed: Array = []             # [{"who", "text", "mine", "t"}], newest last
@@ -309,46 +310,33 @@ func _draw() -> void:
 			Color(UI.ACCENT, minf(_note_t * 2.0, 1.0)), 0, 3)
 
 
-## Under the gear, in the column beside the weapon panel (under the panel's right end when the
-## layout leaves no such column).
+## Top left, where the reference shooter shows it (PING_AT: right of the minimap's gear column, left
+## of the score bar): the wifi mark and the number, no plate, the DIRECT / RELAY tag under it.
 func _draw_ping() -> void:
 	var vs := size
 	var ms := ping_ms()
-	var col := NetPing.color(ms)
-	var wp: Dictionary = hud.layout.weapons
-	var pr := HudLayout.weapon_main(wp, vs)
-	for r: Rect2 in HudLayout.weapon_slots(wp, vs):
-		pr = pr.merge(r)
-	var right := vs.x - HudLayout.inset.y - 3.0
-	var gear: Dictionary = hud.layout.settings
-	var gc := HudLayout.center(gear, vs)
-	var top := gc.y + HudLayout.radius(gear, vs) + 8.0 if gc.x > pr.end.x else 8.0
-	if right - pr.end.x >= 34.0:
-		var w := right - pr.end.x - 2.0
-		var box := Rect2(right - w, top, w, 66.0)
-		draw_rect(box, Color(0, 0, 0, 0.42))
-		draw_rect(Rect2(box.position.x, box.end.y - 2.0, box.size.x, 2.0), Color(col, 0.85))
-		var bw := 4.0
-		var x0 := box.get_center().x - (4 * bw + 3 * 2.5) * 0.5
-		for i in 4:
-			var bh := 6.0 + 3.5 * i
-			var c := col if i < NetPing.bars(ms) else NetPing.UNLIT
-			draw_rect(Rect2(x0 + i * (bw + 2.5), top + 22.0 - bh, bw, bh), c)
-		HudDraw.text(self, "--" if ms < 0 else str(mini(ms, 999)), Vector2(box.get_center().x, top + 37.0), 17, col, 1, 3)
-		HudDraw.text(self, "MS", Vector2(box.get_center().x, top + 54.0), 12, Color(UI.TEXT, 0.85), 1, 3)
-		_draw_tag(Vector2(box.get_center().x, box.end.y + 11.0), 1)
-	else:
-		var w := 112.0
-		var box := Rect2(pr.end.x - w, pr.end.y + 6.0, w, 26.0)
-		draw_rect(box, Color(0, 0, 0, 0.42))
-		NetPing.draw(self, Vector2(box.position.x + 8.0, box.get_center().y), 16.0, ms, 15)
-		_draw_tag(Vector2(box.end.x, box.end.y + 11.0), 2)
+	var h := clampf(vs.y * 0.025, 14.0, 24.0)
+	var fs := int(round(h * 0.9))
+	var c := ping_center()
+	NetPing.draw(self, Vector2(c.x - h * 1.5, c.y), h, ms, fs)
+	_draw_tag(Vector2(c.x, c.y + h * 0.5 + 10.0), 1)
+
+
+## The ping's centre: PING_AT, or just right of this layer's buttons where one of them is there
+## (a layout that keeps CHAT / MUTE beside the minimap's top).
+func ping_center() -> Vector2:
+	var c := Vector2(size.x * PING_AT.x, size.y * PING_AT.y)
+	var half := clampf(size.y * 0.025, 14.0, 24.0) * 1.6
+	for b: Vector2 in button_centers().values():
+		if absf(b.y - c.y) < R + 12.0 and absf(b.x - c.x) < R + half + 4.0:
+			c.x = maxf(c.x, b.x + R + half + 6.0)
+	return c
 
 
 ## The small DIRECT / RELAY tag under the ping (centre or right end at `at`).
 func _draw_tag(at: Vector2, align: int) -> void:
 	var tag := link_tag()
-	HudDraw.text(self, tag, at, 11, Color(NetPing.GREEN if tag == "DIRECT" else UI.TEXT, 0.9), align, 3, "bold")
+	HudDraw.text(self, tag, at, 10, Color(NetPing.GREEN if tag == "DIRECT" else UI.TEXT, 0.85), align, 3, "bold")
 
 
 func _draw_button(id: String, c: Vector2) -> void:
