@@ -1347,7 +1347,7 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	if cause == "left":
 		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "LEFT")
 	elif cause == "zone" or cause == "fall":
-		hud.add_kill_feed(cause.to_upper(), victim.display_name, "", "", false, false)      # (no gun to name)
+		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "ELIMINATED")      # (nobody's kill: no killer)
 	elif cause == "self":
 		hud.add_kill_feed(victim.display_name, victim.display_name, "FRAG", "item_grenade", false, false)
 	else:

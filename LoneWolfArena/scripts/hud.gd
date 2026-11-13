@@ -46,7 +46,9 @@ const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint loc
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
 const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
-const FEED_Y_SOLO := 0.77          # the 1 vs 1's one line: the reference's place, over the bottom row
+const FEED_Y_SOLO := 0.767         # the 1 vs 1's line: the reference's place, over the bottom row
+const FEED_Y_SOLO2 := 0.80         # ... and a second line at the same time stacks under it
+const FEED_LIFE_SOLO := 3.5        # the 1 vs 1's lines stay a short while (team lines FEED_LIFE)
 ## An opponent who went down by itself (nobody's kill): what out_banner says took them out.
 const OUT_LINES := {"zone": "CAUGHT IN THE ZONE", "fall": "DOWN FROM A FALL", "self": "HIT BY THEIR OWN FRAG"}
 const OUT_ICONS := {"zone": "v_zone", "fall": "v_skull", "self": "item_grenade"}
@@ -163,7 +165,7 @@ func bind(p: Player, a: Node) -> void:
 	# DUO / SQUAD: teammates, ally tags, knocked markers, REVIVE, spectating (scripts/hud_team.gd).
 	if HudTeam.wanted(a):
 		team = HudTeam.attach(self, a)
-	feed_lines = 3 if team != null else 1
+	feed_lines = 3 if team != null else 2
 
 
 # ---------------------------------------------------------------- arena -> HUD API
@@ -276,8 +278,9 @@ func close_weapon_pick() -> void:
 
 ## verb: what the line says instead of ELIMINATED / HEADSHOT ("LEFT": killer is then the one who left).
 func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
+	var life := FEED_LIFE if feed_lines > 2 else FEED_LIFE_SOLO
 	_kill_feed.push_front({"killer": killer, "victim": victim, "weapon": weapon_name, "icon": weapon_icon,
-		"head": headshot, "mine": mine, "t": FEED_LIFE, "verb": verb})
+		"head": headshot, "mine": mine, "t": life, "life": life, "verb": verb})
 	while _kill_feed.size() > feed_lines:
 		_kill_feed.pop_back()
 
@@ -1711,7 +1714,7 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 	for i in mini(_kill_feed.size(), FEED_Y.size()):
 		var k: Dictionary = _kill_feed[i]
 		var t := float(k.t)
-		var a := clampf(t / 0.5, 0.0, 1.0) * clampf((FEED_LIFE - t) / 0.15, 0.0, 1.0)
+		var a := clampf(t / 0.5, 0.0, 1.0) * clampf((float(k.get("life", FEED_LIFE)) - t) / 0.15, 0.0, 1.0)
 		var head := bool(k.head)
 		var parts := [[String(k.killer) + "  ", k.get("kc", Color(1, 1, 1) if not bool(k.mine) else Color(0.75, 0.9, 1.0))],
 			[(String(k.get("verb", "")) if String(k.get("verb", "")) != "" else ("HEADSHOT" if head else "ELIMINATED")) + "  ",
@@ -1720,8 +1723,9 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
 		var tw := HudDraw.parts_width(parts, fs)
-		var y := vs.y * (FEED_Y_SOLO if feed_lines == 1 else float(FEED_Y[i]))
-		if feed_lines == 1:
+		var solo := feed_lines <= 2
+		var y := vs.y * (solo_feed_y(i, mini(_kill_feed.size(), feed_lines)) if solo else float(FEED_Y[i]))
+		if solo:
 			_draw_feed_line(parts, tw, String(k.get("icon", "")), y, fs, a)
 			continue
 		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
@@ -1729,7 +1733,15 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		HudDraw.text_parts(self, parts, Vector2(vs.x * 0.5, y), fs, 1, 3, "bold", a)
 
 
-## The 1 vs 1's single kill feed line, centred: the gun's (or the frag's) silhouette, then the text,
+## The 1 vs 1's feed line `i` (0 = newest) of `n` on screen, as a fraction of the height: one line
+## at FEED_Y_SOLO; with two, the older stays there and the newer stacks under it (FEED_Y_SOLO2).
+static func solo_feed_y(i: int, n: int) -> float:
+	if n <= 1:
+		return FEED_Y_SOLO
+	return FEED_Y_SOLO2 if i == 0 else FEED_Y_SOLO
+
+
+## The 1 vs 1's kill feed line, centred: the gun's (or the frag's) silhouette, then the text,
 ## on a soft highlight that fades out to both sides (darkest under the line, none at its ends).
 func _draw_feed_line(parts: Array, tw: float, icon_name: String, y: float, fs: int, a: float) -> void:
 	var t := HudDraw.tex(icon_name) if icon_name != "" else null

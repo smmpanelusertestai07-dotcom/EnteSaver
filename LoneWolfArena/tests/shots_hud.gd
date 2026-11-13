@@ -395,10 +395,12 @@ func run(at: Node) -> int:
 	_check(Engine.time_scale >= 1.0, "the kill plays at normal speed (no slow motion, as the reference)", at)
 	_check(hud.banner_kind() == "kill" and hud.result_title() == "", "the kill shows the small badge, no result band yet", at)
 	_check(arena.find_children("EliminatedTag*", "Label3D", true, false).size() >= 1, "ELIMINATED floats over the bot's body", at)
-	_check(hud.feed_lines == 1 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
-		"the 1 vs 1 kill feed is one line with the gun's silhouette", at)
-	hud.add_kill_feed("ZONE", "BOT", "", "", false, false)
-	_check(hud._kill_feed.size() == 1 and String(hud._kill_feed[0].killer) == "ZONE", "a new kill feed line replaces the old one", at)
+	_check(hud.feed_lines == 2 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
+		"the 1 vs 1 kill feed shows the line with the gun's silhouette", at)
+	hud.add_kill_feed("BOT", "", "", "", false, false, "ELIMINATED")
+	hud.add_kill_feed("BOT", "", "", "", false, false, "LEFT")
+	_check(hud._kill_feed.size() == 2 and String(hud._kill_feed[0].verb) == "LEFT", "the 1 vs 1 kill feed keeps two lines, the newest first", at)
+	hud._kill_feed.pop_front()
 	hud._kill_feed.pop_front()
 	hud.add_kill_feed(p.display_name, b.display_name, String(p.weapon().def.name), String(p.weapon().def.icon), true, true)
 	_check(int(arena.get("phase")) == 3 and hud.break_step() != "", "the round's end starts the break between rounds", at)

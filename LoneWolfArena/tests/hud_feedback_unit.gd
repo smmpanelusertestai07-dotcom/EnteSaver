@@ -15,6 +15,7 @@ static func run(runner: Node) -> void:
 	me._test_hit_bloom()
 	me._test_minimap_whole()
 	me._test_break_controls()
+	me._test_solo_feed()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -160,3 +161,19 @@ func _test_break_controls() -> void:
 	hud.free()
 	me.free()
 	a.free()
+
+
+## The 1 vs 1 feed: one line at 0.767; a second at the same time under it at 0.80; a third pushes
+## the oldest out; lines live 3.5 s; a death to the zone reads "<NAME> ELIMINATED" with no killer.
+func _test_solo_feed() -> void:
+	var hud := _hud()
+	hud.feed_lines = 2
+	_check(is_equal_approx(HUD.solo_feed_y(0, 1), 0.767), "one line at 0.767")
+	_check(is_equal_approx(HUD.solo_feed_y(1, 2), 0.767) and is_equal_approx(HUD.solo_feed_y(0, 2), 0.80), "a second line stacks under the first (0.80)")
+	hud.add_kill_feed("A", "B", "AR", "", false, false)
+	hud.add_kill_feed("C", "", "", "", false, false, "ELIMINATED")
+	hud.add_kill_feed("D", "", "", "", false, false, "LEFT")
+	_check(hud._kill_feed.size() == 2 and String(hud._kill_feed[1].killer) == "C", "two lines at most, the oldest goes")
+	_check(is_equal_approx(float(hud._kill_feed[0].t), HUD.FEED_LIFE_SOLO) and HUD.FEED_LIFE_SOLO <= 4.0, "1 vs 1 lines stay about 3 s")
+	_check(String(hud._kill_feed[1].victim) == "" and String(hud._kill_feed[1].verb) == "ELIMINATED", "a zone death names no killer")
+	hud.free()
