@@ -44,6 +44,7 @@ const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint loc
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
 const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
+const FEED_Y_SOLO := 0.77          # the 1 vs 1's one line: the reference's place, over the bottom row
 ## An opponent who went down by itself (nobody's kill): what out_banner says took them out.
 const OUT_LINES := {"zone": "CAUGHT IN THE ZONE", "fall": "DOWN FROM A FALL", "self": "HIT BY THEIR OWN FRAG"}
 const OUT_ICONS := {"zone": "v_zone", "fall": "v_skull", "self": "item_grenade"}
@@ -1573,7 +1574,7 @@ func _draw_hp_block(vs: Vector2, u: float) -> void:
 	var mx := Fighter.MAX_HP
 	var lim := _bottom_limits(vs, u)
 	var avail := lim.y - lim.x
-	var by := vs.y * 0.968
+	var by := vs.y * 0.948              # (the reference's height, a little over the bottom edge)
 	var bh := maxf(4.0, 0.0105 * u)
 	var label := "HP %d/%d" % [ceili(hp), int(mx)]
 	# Inline like the reference: [helmet][vest] HP 200/200 [bar]. The layout is measured on the
@@ -1640,7 +1641,7 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
 		var tw := HudDraw.parts_width(parts, fs)
-		var y := vs.y * float(FEED_Y[i])
+		var y := vs.y * (FEED_Y_SOLO if feed_lines == 1 else float(FEED_Y[i]))
 		if feed_lines == 1:
 			_draw_feed_line(parts, tw, String(k.get("icon", "")), y, fs, a)
 			continue
@@ -2259,7 +2260,7 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	_draw_zone_strip(vs)
 	var fs := int(0.03 * u)
 	var feed := [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]]
-	var feed_c := Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0]))
+	var feed_c := Vector2(vs.x * 0.5, vs.y * FEED_Y_SOLO)
 	var feed_w := HudDraw.text_parts(self, feed, feed_c, fs, 1, 3, "bold", 0.8)
 	_draw_weapon_panel(vs)                    # as in a match: the panel, the buttons, the gear
 	_draw_controls(vs)

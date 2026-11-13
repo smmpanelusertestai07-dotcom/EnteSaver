@@ -161,6 +161,23 @@ func members(t: int) -> Array[Fighter]:
 	return out
 
 
+## Team `t`'s leader (the flag in the HUD's team list): online the group's leader, who hosts
+## (TeamArenaNet.host_id), when on team `t`; else the first player of `t` who is not a bot (offline
+## the player); else its first member.
+func team_leader(t: int) -> Fighter:
+	var list := members(t)
+	var hid: Variant = get("host_id")
+	var slot_of: Variant = get("_slot_of")
+	if hid is String and slot_of is Dictionary and (slot_of as Dictionary).has(hid):
+		var hf := slot_fighter(int((slot_of as Dictionary)[hid]))
+		if hf != null and hf.team == t:
+			return hf
+	for f: Fighter in list:
+		if not f is Bot:
+			return f
+	return list[0] if not list.is_empty() else null
+
+
 ## "up" | "knocked" | "out" | "left" this round.
 func status_of(f: Fighter) -> String:
 	if f != null and referee.left.has(f.slot):
