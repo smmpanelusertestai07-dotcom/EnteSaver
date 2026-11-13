@@ -496,8 +496,9 @@ func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEd
 ## window is not resized for it: while a text field is being typed in, the popup moves up until the
 ## field sits in the top fifth of the screen (and back down when the typing ends).
 func _lift_for_keyboard(le: LineEdit, on: bool) -> void:
+	# (a page lifts its content column, PageBody; a popup or the chat panel its Frame)
 	var modal := lobby.dialogs.modal
-	var frame := modal.get_node_or_null("Frame") as Control if modal and is_instance_valid(modal) else null
+	var frame := _lift_target(modal)
 	if frame == null or not le.is_inside_tree():
 		return
 	var lifted := float(frame.get_meta("lifted", 0.0))
@@ -533,11 +534,19 @@ func _follow_keyboard() -> void:
 		le.release_focus()
 
 
+## What a text field's lift moves: a popup's or the chat panel's Frame, a page's PageBody.
+static func _lift_target(modal: Control) -> Control:
+	if modal == null or not is_instance_valid(modal):
+		return null
+	var f := modal.get_node_or_null("Frame") as Control
+	return f if f else modal.find_child("PageBody", true, false) as Control
+
+
 ## Lifts the popup just enough that the field clears a keyboard kb_px (screen pixels) high, at most
 ## until the field is near the top of the screen.
 func _place_above_keyboard(le: LineEdit, kb_px: int) -> void:
 	var modal := lobby.dialogs.modal
-	var frame := modal.get_node_or_null("Frame") as Control if modal and is_instance_valid(modal) else null
+	var frame := _lift_target(modal)
 	if frame == null:
 		return
 	var vh := lobby.get_viewport().get_visible_rect().size.y
