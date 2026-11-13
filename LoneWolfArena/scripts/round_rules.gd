@@ -52,6 +52,16 @@ static func zone_t(elapsed: float, stage2: float) -> float:
 	return clampf((elapsed - STAGE1_S) / maxf(stage2, 0.01), 0.0, 1.0)
 
 
+## The zone's starting radius on a map (round 8, like the reference): outside the walls, 0.58 x
+## the diagonal of map_rect, so the circle comes onto the whole-arena minimap some way into stage 2;
+## `fallback` (the map's own) for a map without a rect.
+const ZONE_START_DIAG := 0.58
+static func zone_start_for(map_rect: Rect2, fallback: float) -> float:
+	if not map_rect.has_area():
+		return fallback
+	return ZONE_START_DIAG * map_rect.size.length()
+
+
 ## The zone's radius at `elapsed`: `start` (the whole hall) through stage 1, then evenly down to
 ## ZONE_FINAL_R at the end of stage 2.
 static func zone_radius_at(elapsed: float, start: float, stage2: float) -> float:

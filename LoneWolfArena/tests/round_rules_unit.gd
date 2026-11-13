@@ -24,6 +24,7 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._stage_clock()
 	me._zone_over_time()
+	me._zone_start()
 	me._break_steps()
 	me._cooldown()
 	me._pick_panel()
@@ -198,3 +199,21 @@ func _kit() -> void:
 	f.set_loadout("smg")
 	_check(not f.awaiting_pick and f.current == 0 and f.gun().id == "smg", "the pick equips its gun")
 	f.free()
+
+
+## Round 8: the zone starts outside the walls (0.58 x the map's diagonal) and comes onto the
+## whole-arena minimap (its view: the long side + 5 %) a while into stage 2, not at its first second.
+func _zone_start() -> void:
+	var mr := Rect2(-27.6, -15.6, 55.2, 31.2)
+	var r0 := RoundRules.zone_start_for(mr, 47.0)
+	_check(is_equal_approx(r0, 0.58 * mr.size.length()), "the zone starts at 0.58 x the map's diagonal (%.1f m)" % r0)
+	_check(r0 > mr.size.length() * 0.5, "the starting circle lies outside the walls' corners")
+	var half_view := HudMinimap.view_m(mr) * 0.5
+	var enter := -1.0
+	for i in 900:
+		var el := RoundRules.STAGE1_S + i * 0.1
+		if RoundRules.zone_radius_at(el, r0, RoundRules.STAGE2_S) < half_view:
+			enter = i * 0.1
+			break
+	_check(enter >= 5.0 and enter <= 40.0, "the circle reaches the minimap's sides %.0f s into stage 2" % enter)
+	_check(RoundRules.zone_start_for(Rect2(), 47.0) == 47.0, "a map without a rect keeps its own start")

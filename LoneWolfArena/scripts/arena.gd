@@ -165,7 +165,7 @@ func _ready() -> void:
 	map_rect = map.map_rect
 	map_name = map.map_name
 	zone_center = map.zone_center
-	zone_start_radius = map.zone_start_radius
+	zone_start_radius = RoundRules.zone_start_for(map_rect, map.zone_start_radius)
 	online = Game.online and Game.session != null and Game.session.in_session
 	practice = Game.practice and not online
 	mode = "lonewolf" if online else "training"
