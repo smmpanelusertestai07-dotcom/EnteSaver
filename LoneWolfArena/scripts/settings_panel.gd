@@ -141,10 +141,10 @@ const PIC_DIR := "res://assets/ui/settings/"
 ## Where the HUD's widgets are in hud.png / hud_eye.png (fractions of the picture; r: radius in
 ## picture heights), as tests/shots_settings_pics.gd measured them. "center" is the crosshair.
 const SPOTS := {
-	"fire_r": {"x": 0.748, "y": 0.68, "r": 0.13}, "fire_l": {"x": 0.112, "y": 0.39, "r": 0.075},
-	"scope": {"x": 0.794, "y": 0.4, "r": 0.052}, "freelook": {"x": 0.931, "y": 0.375, "r": 0.045},
-	"reload": {"x": 0.663, "y": 0.52, "r": 0.05}, "swap": {"x": 0.59, "y": 0.52, "r": 0.05},
-	"sprint": {"x": 0.226, "y": 0.438, "r": 0.066}, "joystick": {"x": 0.225, "y": 0.71, "r": 0.115},
+	"fire_r": {"x": 0.828, "y": 0.687, "r": 0.085}, "fire_l": {"x": 0.055, "y": 0.64, "r": 0.065},
+	"scope": {"x": 0.955, "y": 0.53, "r": 0.052}, "freelook": {"x": 0.955, "y": 0.4, "r": 0.045},
+	"reload": {"x": 0.875, "y": 0.47, "r": 0.045}, "swap": {"x": 0.81, "y": 0.47, "r": 0.045},
+	"sprint": {"x": 0.17, "y": 0.49, "r": 0.057}, "joystick": {"x": 0.169, "y": 0.75, "r": 0.115},
 	"center": {"x": 0.5, "y": 0.5, "r": 0.05},
 }
 ## Colours of this page (design/STYLE_SPEC.txt, SETTINGS). The column and the rows are the kit's

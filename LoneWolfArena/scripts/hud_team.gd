@@ -4,13 +4,16 @@ extends Control
 ## the HUD like HudNet: its buttons take their touches first). Reads the TeamArena API only
 ## (members, status_of, revive_candidate, start_revive, cancel_revive, revive_progress, spectated,
 ## spectate_next, my_team), so a stand-in arena drives it in the unit tests:
-##  - the TEAMMATES PANEL near the minimap: a numbered badge in the team's blue (1..n in slot order,
-##    the player too), the name and an HP bar; KNOCKED: a red cross and the bleed-out bar (green while
-##    a teammate revives them); OUT: grey; LEFT: grey with LEFT. It takes the first free place of:
-##    right of the minimap, right of / under HudNet's buttons, under the zone strip (never on a
-##    button: panel_rect);
-##  - ALLY TAGS: a blue numbered badge and the name over each teammate's head (Camera3D
-##    unproject_position; hidden behind the camera or off screen: tag_point);
+##  - the TEAM LIST under the minimap (the reference's place): a TEAM header, then a row per member
+##    in slot order (the player too): a number box in the member's colour (SLOT_COLORS: 1 cyan, 2
+##    orange, 3 pink, 4 purple), the name (the player's yellow), the leader's flag (leader()) and a
+##    thin HP bar; KNOCKED: a red cross and the bleed-out bar (green while a teammate revives them);
+##    OUT: grey; LEFT: grey with LEFT. No "+" rows: nobody can be invited into a running match. It
+##    takes the first free place of: under the zone strip, right of the minimap, right of / under
+##    HudNet's buttons (never on a button: panel_rect);
+##  - ALLY TAGS: the member's number box (its colour) and the name over each teammate's head
+##    (Camera3D unproject_position; hidden behind the camera or off screen: tag_point); enemies get
+##    no name tag (the reference shows none);
 ##  - KNOCKED-ALLY MARKERS: a red cross with the distance on a knocked teammate, pinned to the screen
 ##    edge toward them when they are off screen or behind (edge_point);
 ##  - REVIVE beside FIRE while arena.revive_candidate(player) is not null (a tap: arena.start_revive;
@@ -25,6 +28,9 @@ const BLUE_TEXT := Color(0.55, 0.82, 1.0)
 const ORANGE_TEXT := Color(1.0, 0.68, 0.45)
 const KNOCK_RED := Color(0.95, 0.24, 0.2)
 const OUT_GREY := Color(0.55, 0.56, 0.6)
+## The members' colours by number (the reference's team colours): 1 cyan, 2 orange, 3 pink, 4 purple.
+const SLOT_COLORS := [Color(0.25, 0.8, 0.95), Color(1.0, 0.56, 0.16), Color(0.98, 0.42, 0.7), Color(0.62, 0.45, 0.95)]
+const LEADER_YELLOW := Color(1.0, 0.8, 0.16)
 const TAG_UP := 2.2               # m over a standing teammate's feet: the tag
 const TAG_UP_KNOCKED := 0.9       # ... over a knocked one: the marker
 const EDGE_MARGIN := 46.0         # px a pinned marker keeps from the screen edge
@@ -97,6 +103,22 @@ func badge(f: Fighter) -> int:
 	return i + 1
 
 
+## The colour of member number `n` (1..4; grey for 0).
+static func slot_color(n: int) -> Color:
+	return SLOT_COLORS[(n - 1) % SLOT_COLORS.size()] if n > 0 else OUT_GREY
+
+
+## The player's team's leader (the flag in the list): the arena's team_leader() (online the group's
+## leader), else the first member.
+func leader() -> Fighter:
+	if arena != null and arena.has_method("team_leader"):
+		var l: Variant = arena.call("team_leader", my_team())
+		if l is Fighter:
+			return l
+	var list := members(my_team())
+	return list[0] if not list.is_empty() else null
+
+
 ## How far a revive of `f` has come (0..1), -1 when nobody revives them.
 func revive_progress(f: Fighter) -> float:
 	if arena == null or not arena.has_method("revive_progress"):
@@ -104,16 +126,17 @@ func revive_progress(f: Fighter) -> float:
 	return float(arena.call("revive_progress", f))
 
 
-## The panel's rows: {"n", "name", "me", "status" (up / knocked / out / left), "hp" (0..1), "bleed"
-## (0..1 of the knock HP while knocked), "revive" (0..1 while revived, else -1)}.
+## The list's rows: {"n", "name", "me", "leader", "status" (up / knocked / out / left), "hp" (0..1),
+## "bleed" (0..1 of the knock HP while knocked), "revive" (0..1 while revived, else -1)}.
 func team_rows() -> Array:
 	var rows := []
 	var p := player()
+	var lead := leader()
 	var i := 0
 	for f: Fighter in members(my_team()):
 		i += 1
 		var st := status(f)
-		rows.append({"n": i, "name": f.display_name, "me": f == p, "status": st,
+		rows.append({"n": i, "name": f.display_name, "me": f == p, "leader": f == lead, "status": st,
 			"hp": clampf(f.hp / Fighter.MAX_HP, 0.0, 1.0) if st == "up" else 0.0,
 			"bleed": clampf(f.knock_hp / Fighter.KNOCK_HP, 0.0, 1.0) if st == "knocked" else 0.0,
 			"revive": revive_progress(f) if st == "knocked" else -1.0})
@@ -270,10 +293,16 @@ func blocked_rects() -> Array[Rect2]:
 	return out
 
 
-## Row height and width of the teammates panel.
+const HEAD_H := 0.042              # the TEAM header's height (screen heights)
+const ROW_H := 0.036               # a member row's height
+
+
+## Size of the team list with `rows` members: as wide as the minimap over it (a little less, clear
+## of SPRINT's touch area), the header and the rows.
 func panel_size(rows: int) -> Vector2:
 	var u := _u()
-	return Vector2(0.24 * u, rows * 0.036 * u + 0.012 * u)
+	var mw := HudLayout.size_px(hud.layout.minimap, size) if hud != null and not hud.layout.is_empty() else 0.27 * u
+	return Vector2(maxf(mw * 0.88, 0.2 * u), (HEAD_H + rows * ROW_H + 0.008) * u)
 
 
 func panel_rect() -> Rect2:
@@ -288,6 +317,8 @@ func panel_rect() -> Rect2:
 	var cands: Array[Rect2] = []
 	var right_side := mr.position.x < vs.x * 0.5
 	var x_beside := mr.end.x + gap if right_side else mr.position.x - gap - ps.x
+	# Under the minimap first (the reference's place), lined up with its outer edge.
+	cands.append(Rect2(Vector2(mr.position.x if right_side else mr.end.x - ps.x, strip_end), ps))
 	cands.append(Rect2(Vector2(x_beside, mr.position.y), ps))
 	var net := hud.get_node_or_null("HudNet") as HudNet
 	if net != null:
@@ -301,7 +332,6 @@ func panel_rect() -> Rect2:
 			var nr := Rect2(lo - Vector2(HudNet.R, HudNet.R) * 1.15, hi - lo + Vector2(HudNet.R * 2.3, HudNet.R * 2.3 + 22.0))
 			cands.append(Rect2(Vector2(nr.end.x + gap if right_side else nr.position.x - gap - ps.x, mr.position.y), ps))
 			cands.append(Rect2(Vector2(x_beside, nr.end.y + 4.0), ps))
-	cands.append(Rect2(Vector2(mr.position.x, strip_end), ps))
 	return free_spot(cands, blocked_rects())
 
 
@@ -432,13 +462,6 @@ func _draw() -> void:
 	_draw_spectating(u)
 
 
-## Blue numbered badge (grey once out): `n` in a disk.
-func _badge(c: Vector2, r: float, n: int, col: Color) -> void:
-	HudDraw.disk(self, c, r + 1.5, Color(0, 0, 0, 0.55))
-	HudDraw.disk(self, c, r, col)
-	HudDraw.text(self, str(n), c + Vector2(0, r * 0.06), int(r * 1.35), Color.WHITE, 1, 0, "number")
-
-
 ## A red cross (knocked).
 func _cross(c: Vector2, s: float, col: Color) -> void:
 	var t := s * 0.34
@@ -451,18 +474,28 @@ func _draw_panel(u: float) -> void:
 	if rows.is_empty():
 		return
 	var pr := panel_rect()
-	draw_rect(pr, Color(0, 0, 0, 0.36))
-	var rh := 0.036 * u
-	var y := pr.position.y + 0.006 * u
+	var hh := HEAD_H * u
+	var rh := ROW_H * u
+	# The header: a dark bar with a small flag and TEAM, a thin yellow line under it.
+	var head := Rect2(pr.position, Vector2(pr.size.x, hh))
+	draw_rect(head, Color(0.04, 0.04, 0.05, 0.72))
+	draw_rect(Rect2(head.position.x, head.end.y - 2.0, head.size.x, 2.0), Color(HudDraw.YELLOW, 0.85))
+	_flag(Vector2(head.position.x + 0.02 * u, head.get_center().y), 0.022 * u, Color.WHITE)
+	HudDraw.text(self, "TEAM", Vector2(head.position.x + 0.042 * u, head.get_center().y), int(0.024 * u), Color.WHITE, 0, 2, "bold")
+	var y := head.end.y + 0.004 * u
 	var fs := int(0.02 * u)
 	for row: Dictionary in rows:
 		var st := String(row.status)
 		var gone := st == "out" or st == "left"
 		var cy := y + rh * 0.5
-		var bc := Vector2(pr.position.x + 0.022 * u, cy)
-		_badge(bc, 0.013 * u, int(row.n), OUT_GREY if gone else HudDraw.BLUE)
-		var x := bc.x + 0.022 * u
-		var room := pr.end.x - x - 0.01 * u
+		draw_rect(Rect2(pr.position.x, y, pr.size.x, rh - 2.0), Color(0, 0, 0, 0.42))
+		# The number box in the member's colour (grey once out).
+		var box := Rect2(pr.position.x + 0.004 * u, y + 0.003 * u, rh - 0.006 * u - 2.0, rh - 0.006 * u - 2.0)
+		draw_rect(box, OUT_GREY if gone else slot_color(int(row.n)))
+		HudDraw.text(self, str(int(row.n)), box.get_center() + Vector2(0, 0.5), int(box.size.y * 0.78), Color(0.05, 0.05, 0.06), 1, 0, "number")
+		var x := box.end.x + 0.008 * u
+		var flag_w := 0.026 * u if bool(row.get("leader", false)) else 0.0
+		var room := pr.end.x - x - 0.008 * u - flag_w
 		var name_col := Color(OUT_GREY, 0.9) if gone else (HudDraw.YELLOW if bool(row.me) else Color.WHITE)
 		var nm := String(row.name).to_upper()
 		var tag := String({"knocked": "KNOCKED", "out": "OUT", "left": "LEFT"}.get(st, ""))
@@ -471,11 +504,13 @@ func _draw_panel(u: float) -> void:
 		var nw := HudDraw.text_width(nm, nfs, "bold")
 		if nw > room - tag_w:
 			nfs = maxi(8, int(nfs * (room - tag_w) / maxf(nw, 1.0)))
-		HudDraw.text(self, nm, Vector2(x, cy - rh * 0.14), nfs, name_col, 0, 2, "bold")
+		HudDraw.text(self, nm, Vector2(x, cy - rh * 0.12), nfs, name_col, 0, 2, "bold")
 		if tag != "":
-			HudDraw.text(self, tag, Vector2(pr.end.x - 0.008 * u, cy - rh * 0.14), int(fs * 0.85),
+			HudDraw.text(self, tag, Vector2(pr.end.x - 0.008 * u - flag_w, cy - rh * 0.12), int(fs * 0.85),
 				KNOCK_RED if st == "knocked" else OUT_GREY, 2, 2, "bold")
-		var bar := Rect2(x, cy + rh * 0.2, room, maxf(3.0, 0.0065 * u))
+		if flag_w > 0.0:
+			_flag(Vector2(pr.end.x - 0.008 * u - flag_w * 0.5, cy), 0.02 * u, LEADER_YELLOW)
+		var bar := Rect2(x, cy + rh * 0.24, room, maxf(2.0, 0.0045 * u))
 		draw_rect(bar, Color(0, 0, 0, 0.5))
 		match st:
 			"up":
@@ -488,12 +523,22 @@ func _draw_panel(u: float) -> void:
 				else:
 					var pulse := 0.75 + 0.25 * sin(_time * 7.0)
 					draw_rect(Rect2(bar.position, Vector2(bar.size.x * float(row.bleed), bar.size.y)), Color(KNOCK_RED, pulse))
-				_cross(bc + Vector2(0.013, -0.013) * u, 0.012 * u, HudDraw.HEAL_GREEN if rv >= 0.0 else KNOCK_RED)
+				_cross(box.end + Vector2(-0.002, -0.002) * u, 0.011 * u, HudDraw.HEAL_GREEN if rv >= 0.0 else KNOCK_RED)
 		y += rh
 
 
-## Numbered blue tags over the teammates who stand (knocked ones get the marker instead); none over
-## the minimap, the weapon panel, the score bar or the teammates panel.
+## A small flag (the leader's mark, the header's icon): a pole and a cloth with a notch, `s` px tall.
+func _flag(c: Vector2, s: float, col: Color) -> void:
+	var x0 := c.x - s * 0.38
+	var top := c.y - s * 0.5
+	draw_rect(Rect2(x0, top, maxf(1.5, s * 0.1), s), col)
+	draw_colored_polygon(PackedVector2Array([Vector2(x0, top), Vector2(x0 + s * 0.78, top), Vector2(x0 + s * 0.6, top + s * 0.25),
+		Vector2(x0 + s * 0.78, top + s * 0.5), Vector2(x0, top + s * 0.5)]), col)
+
+
+## Tags over the teammates who stand (knocked ones get the marker instead): the member's number box in
+## its colour and the name, as the reference's "number and nickname overhead"; none over the minimap,
+## the weapon panel, the score bar or the team list.
 func _draw_tags(u: float) -> void:
 	var p := player()
 	var cam: Camera3D = p.camera if p != null else null
@@ -506,9 +551,10 @@ func _draw_tags(u: float) -> void:
 	for r: Rect2 in HudLayout.weapon_slots(hud.layout.weapons, vs):
 		wp = wp.merge(r)
 	var fixed: Array[Rect2] = [mr, wp, hud.score_rect(), panel_rect()]
+	var watched := spectated()
 	for f: Fighter in members(my_team()):
-		if f == p or status(f) != "up":
-			continue
+		if f == p or f == watched or status(f) != "up":
+			continue                     # (not over the teammate the camera follows: SPECTATING names them)
 		var at: Variant = tag_point(cam, f.global_position + Vector3.UP * TAG_UP, vs)
 		if at == null:
 			continue
@@ -520,11 +566,18 @@ func _draw_tags(u: float) -> void:
 			continue
 		var dist := cam.global_position.distance_to(f.global_position)
 		var k := clampf(1.25 - dist / 40.0, 0.7, 1.15)
-		var r := 0.017 * u * k
-		var tri := PackedVector2Array([c + Vector2(-r * 0.45, r * 0.8), c + Vector2(r * 0.45, r * 0.8), c + Vector2(0, r * 1.45)])
-		draw_colored_polygon(tri, HudDraw.BLUE)
-		_badge(c, r, badge(f), HudDraw.BLUE)
-		HudDraw.text(self, f.display_name.to_upper(), c + Vector2(0, -r - 0.016 * u), int(0.019 * u * k), BLUE_TEXT, 1, 3, "bold")
+		var r := 0.015 * u * k
+		var n := badge(f)
+		var col := slot_color(n)
+		var nm := f.display_name.to_upper()
+		var nfs := int(0.019 * u * k)
+		var nw := HudDraw.text_width(nm, nfs, "bold")
+		var x0 := c.x - (r * 2.0 + 0.006 * u + nw) * 0.5
+		var box := Rect2(x0, c.y - r, r * 2.0, r * 2.0)
+		draw_rect(box.grow(1.0), Color(0, 0, 0, 0.55))
+		draw_rect(box, col)
+		HudDraw.text(self, str(n), box.get_center() + Vector2(0, 0.5), int(r * 1.5), Color(0.05, 0.05, 0.06), 1, 0, "number")
+		HudDraw.text(self, nm, Vector2(box.end.x + 0.006 * u, c.y), nfs, Color(col.lightened(0.35)), 0, 3, "bold")
 
 
 ## A red cross and the distance on every knocked teammate, pinned to the edge when out of view.
@@ -556,7 +609,7 @@ func _draw_markers(vs: Vector2, u: float) -> void:
 		var label := "%d M" % roundi(dist)
 		var ly := c.y + r * 1.6 if c.y < vs.y - r * 3.0 else c.y - r * 1.7
 		HudDraw.text(self, label, Vector2(c.x, ly), int(0.022 * u), Color.WHITE, 1, 3, "bold")
-		HudDraw.text(self, str(badge(f)), Vector2(c.x + r * 1.15, c.y - r * 0.95), int(0.02 * u), BLUE_TEXT, 1, 3, "number")
+		HudDraw.text(self, str(badge(f)), Vector2(c.x + r * 1.15, c.y - r * 0.95), int(0.02 * u), slot_color(badge(f)).lightened(0.3), 1, 3, "number")
 
 
 func _draw_revive_button(u: float) -> void:

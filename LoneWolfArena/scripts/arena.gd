@@ -1437,13 +1437,14 @@ func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: 
 		hud.show_break("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs,
 			0 if winner == null else (1 if winner == player else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
-		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line)
+		hud.show_result("TIME UP", ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line, 0.0)
 	elif winner != player and winner != null and not player.alive:
-		hud.show_center("ELIMINATED", 2.5, UI.BAD, 100, "%s    %s" % [_how_down(player, killer), line])
+		hud.show_result("DEFEAT", "ELIMINATED %s    %s" % [_how_down(player, killer), line])
 	else:
 		_show_match_end()
+	# The kill plays at normal speed (the reference has no slow motion): the kill feed line, the
+	# small badge and the tag over the body, then the break's steps.
 	if not timed_out:
-		Engine.time_scale = 0.35
 		if killer == player and winner == player:
 			hud.kill_banner(bot.display_name, headshot)
 		elif winner == player and not bot.alive:
@@ -1485,15 +1486,16 @@ func _conclude() -> void:
 		player.victory_cam = true
 
 
-## The match's end in the middle of the screen: VICTORY!, DEFEAT or DRAW with the rounds.
+## The match's end on the result band near the top (as a round's end): VICTORY!, DEFEAT or DRAW
+## with the rounds.
 func _show_match_end() -> void:
 	var line := "%d  -  %d" % [int(score.player), int(score.bot)]
 	if _draw:
-		hud.show_center("DRAW", 2.5, Color.WHITE, 100, line)
+		hud.show_result("DRAW", line)
 	elif _winner == player:
-		hud.show_center("VICTORY!", 2.5, UI.ACCENT, 110, line)
+		hud.show_result("VICTORY!", line)
 	else:
-		hud.show_center("DEFEAT", 2.5, UI.BAD, 100, line)
+		hud.show_result("DEFEAT", line)
 
 
 ## Online, the guest: the host's "fin" says the match is over while this phone still waits for a

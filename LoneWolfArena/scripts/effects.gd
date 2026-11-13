@@ -261,19 +261,17 @@ static func shield_break(ctx: Node, pos: Vector3) -> void:
 	_burst(parent, pos + Vector3.UP * 0.8, Vector3.UP, Color(0.85, 0.95, 1.0, 0.3), 14, 1.6, 0.4, 1.0, 0.4)
 
 
-## A fighter eliminated (on every phone, whoever it is): "ELIMINATED" floats up over the body for
-## ELIMINATED_S and fades, over a short burst of yellow and orange shards and a white puff (the
-## game's colours; the bursts follow particle_share like every other).
-const ELIMINATED_S := 2.0
+## A fighter eliminated (on every phone, whoever it is): a small "ELIMINATED" tag over the body for
+## ELIMINATED_S, which fades out, over one short white burst (the reference: a label over the body
+## and a white shatter, no big effect; the burst follows particle_share like every other).
+const ELIMINATED_S := 1.6
 
 
 static func eliminated(ctx: Node, pos: Vector3) -> void:
 	var parent := _scene(ctx)
 	if parent == null:
 		return
-	_burst(parent, pos + Vector3.UP * 1.0, Vector3.UP, Color(1.0, 0.76, 0.055, 1), 18, 4.5, 0.06, 0.8, -6.0)
-	_burst(parent, pos + Vector3.UP * 1.1, Vector3.UP, Color(0.875, 0.447, 0.216, 1), 12, 3.5, 0.05, 0.7, -6.0)
-	_burst(parent, pos + Vector3.UP * 0.9, Vector3.UP, Color(1, 1, 1, 0.28), 6, 1.2, 0.35, 0.8, 0.5)
+	_burst(parent, pos + Vector3.UP * 1.0, Vector3.UP, Color(1, 1, 1, 0.85), 12, 2.6, 0.05, 0.5, -4.0)
 	var l := Label3D.new()
 	l.name = "EliminatedTag"
 	l.text = "ELIMINATED"
@@ -281,21 +279,17 @@ static func eliminated(ctx: Node, pos: Vector3) -> void:
 	l.no_depth_test = true
 	l.fixed_size = true
 	l.pixel_size = 0.0009
-	l.font_size = 40
-	l.outline_size = 12
+	l.font_size = 28
+	l.outline_size = 8
 	l.modulate = Color(1.0, 0.86, 0.3)
 	l.outline_modulate = Color(0.12, 0.05, 0.02, 0.9)
 	l.font = UI.font("italic")
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(l)
-	l.global_position = pos + Vector3.UP * 1.7
-	l.scale = Vector3.ONE * 0.6
+	l.global_position = pos + Vector3.UP * 1.9
 	var tw := l.create_tween()
-	tw.tween_property(l, "scale", Vector3.ONE * 1.1, 0.14).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(l, "scale", Vector3.ONE, 0.1)
-	tw.parallel().tween_property(l, "global_position:y", pos.y + 2.15, ELIMINATED_S - 0.1)
-	tw.parallel().tween_property(l, "modulate:a", 0.0, 0.5).set_delay(ELIMINATED_S - 0.6)
-	tw.parallel().tween_property(l, "outline_modulate:a", 0.0, 0.5).set_delay(ELIMINATED_S - 0.6)
+	tw.tween_property(l, "modulate:a", 0.0, 0.4).set_delay(ELIMINATED_S - 0.45)
+	tw.parallel().tween_property(l, "outline_modulate:a", 0.0, 0.4).set_delay(ELIMINATED_S - 0.45)
 	_free_after(l, ELIMINATED_S + 0.1)
 
 

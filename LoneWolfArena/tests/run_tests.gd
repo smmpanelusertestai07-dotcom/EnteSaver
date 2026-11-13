@@ -450,7 +450,10 @@ func _test_hud_layout() -> void:
 		"crouch": {"o": 0.0}, "scope": {"x": "left", "a": "up"}, "bogus": {}})
 	_check(lay.has("fire_r") and not lay.has("bogus"), "layout keeps only known widgets")
 	_check(lay.fire_r.x == 0.98 and lay.fire_r.y == 0.04, "layout clamps position")
-	_check(is_equal_approx(lay.fire_r.s, minf(HudLayout.DEFAULTS.fire_r.s * HudLayout.SIZE_MAX, 0.45)), "layout clamps size")
+	_check(is_equal_approx(lay.fire_r.s, HudLayout.size_range("fire_r").y), "layout clamps size")
+	var big := HudLayout.resolve({"fire_r": {"s": 0.5}, "jump": {"s": 0.3}, "weapons": {"s": 0.2}})
+	_check(is_equal_approx(big.fire_r.s, 0.45) and is_equal_approx(big.jump.s, 0.3) and is_equal_approx(big.weapons.s, 0.2),
+		"sizes saved with the older (bigger) defaults stay as the player made them")
 	_check(lay.fire_r.o == 1.0 and is_equal_approx(lay.jump.o, 0.12), "layout clamps opacity to 10..100 %")
 	_check(lay.crouch.o == HudLayout.DEFAULTS.crouch.o, "an invisible (0 %) control falls back to the default opacity")
 	_check(lay.scope.x == HudLayout.DEFAULTS.scope.x and lay.scope.a == HudLayout.DEFAULTS.scope.a, "wrongly typed values are ignored")
@@ -495,6 +498,16 @@ func _test_hud_layout() -> void:
 			"three non-overlapping weapon slots on %s" % vs)
 		_check(main.end.y <= slots[0].position.y and screen.encloses(main.merge(slots[2])), "weapon panel: main slot above the small ones, on screen (%s)" % vs)
 	_check(HudLayout.center(def.fire_r, Vector2(1560, 720)).x > 1200.0, "layout scales to wide (19.5:9) screens")
+	# The settings pictures' callouts (SettingsPanel.SPOTS, measured on a 1280x720 picture) ring the
+	# default HUD's buttons.
+	var pic := Vector2(1280, 720)
+	var off_spot := PackedStringArray()
+	for id: String in ["fire_r", "fire_l", "scope", "freelook", "reload", "swap", "sprint", "joystick"]:
+		var c := HudLayout.center(def[id], pic) / pic
+		var sp: Dictionary = SettingsPanel.SPOTS[id]
+		if absf(c.x - float(sp.x)) > 0.004 or absf(c.y - float(sp.y)) > 0.004 or absf(HudLayout.radius(def[id], pic) / pic.y - float(sp.r)) > 0.004:
+			off_spot.append(id)
+	_check(off_spot.is_empty(), "the settings pictures' callouts sit on the default HUD's buttons %s" % off_spot)
 
 
 ## The default HUD's touch areas never overlap (as HUD._widget_at tests them: round buttons to
@@ -534,9 +547,9 @@ func _test_hud_touch_areas() -> void:
 		and is_equal_approx(old.prone.o, 0.5) and old.jump.x == 0.5, "a saved PRONE at its old place moves to the new one, keeping its size")
 	HudLayout.inset = Vector2(64, 0)
 	var vs := Vector2(1560, 720)
-	var shifted := HudLayout.center(def.wall, vs).x - 64.0
+	var shifted := HudLayout.center(def.medkit, vs).x - 64.0      # (a left-anchored widget)
 	HudLayout.inset = Vector2.ZERO
-	var plain := HudLayout.center(def.wall, vs).x
+	var plain := HudLayout.center(def.medkit, vs).x
 	HudLayout.inset = Vector2(64, 30)
 	var inside := true
 	for id: String in HudLayout.DEFAULTS:

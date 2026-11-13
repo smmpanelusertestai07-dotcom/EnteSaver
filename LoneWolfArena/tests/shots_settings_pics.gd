@@ -62,6 +62,7 @@ func run(at: Node) -> int:
 	await at.wait(1.0)
 	if hud.panels.pick_open:
 		hud.panels.close_pick()
+	hud.tips_time = 0.0           # (no first-match hint over the middle of the picture)
 	await at.wait(0.3)
 	var vs: Vector2 = hud.size
 	var lay := HudLayout.current()

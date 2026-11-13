@@ -1,7 +1,7 @@
 class_name HudLayout
 extends RefCounted
 ## Default places of the movable HUD widgets and helpers that put them on any screen.
-## The defaults were measured on a 20:9 phone (the reference layout). A widget is
+## The defaults follow the reference's layout (below). A widget is
 ##   x: centre x as a fraction of the 20:9 reference width,   y: centre y (fraction of height),
 ##   s: size as a fraction of the screen height (button diameter, minimap side, weapon slot height),
 ##   o: opacity 0.1 .. 1,   a: anchor "l" | "c" | "r".
@@ -9,24 +9,23 @@ extends RefCounted
 ## screen heights, so the 20:9 layout keeps its look from 16:9 to 22:9; on screens narrower than
 ## 16:9 (tablets) the whole HUD shrinks to fit. Editor overrides live in Game.hud_layout (saved
 ## JSON, tagged with "_v"; layouts from older versions are ignored).
-## v4: the reference's default layout, measured on a 20:9 recording: fire 0.26 h right of
-## centre, jump and crouch to its right, prone at the top, the wall button over the fire button,
-## medkit and sprint on the left, the weapon panel and its three slots 45 % larger; no left
-## fire, reload, scoreboard or free-look buttons (reload: tap the panel; scores: tap the bar).
-## Later additions (missing from a saved layout, they take their default place): free look and a
-## LEFT FIRE button over the left side (hold to fire with the left thumb; it does not aim).
-## PRONE moved from the reference's place at the top (right of the score bar, centre-anchored)
-## to under the weapon panel, left of SCOPE: on screens narrower than about 18:9 the right-anchored
-## panel slid over the old place, hiding the button and taking its taps (MOVED repairs saved
-## layouts that still have it there). No two default touch areas overlap from 16:9 to 22:9 but the
-## gear's, which sits on the panel's corner on purpose.
+## The defaults (still layout version 5: a saved layout is kept as the player made it, every widget
+## of it) follow the reference's default layout as measured on its 16:9 screen (left-anchored x =
+## frame x * 0.8, right-anchored x = 1 - (1 - frame x) * 0.8 there): the minimap in the top-left
+## corner and the gear in the small column right of it (the column's next places, about (0.185,
+## 0.11) and (0.185, 0.182) of the frame, are kept free for the voice buttons; the ping sits right
+## of the gear, HudNet); the weapon panel smaller in the top-right corner; FIRE smaller and further
+## right, JUMP right of it and SCOPE over it at the right edge, CROUCH in the bottom-right corner with
+## PRONE left of it and the GRENADE further left; the WALL up and left of FIRE; SPRINT and the stick
+## on the left (sprint a little lower than the reference's, clear of the DUO / SQUAD team list
+## under the minimap), the MEDKIT bottom left. The reference's quick reload, quick weapon switch and
+## left fire button are off (or only while aiming) by default (Game.DEFAULT_SETTINGS); when turned on
+## RELOAD and SWITCH sit up and left of the scope, clear of the middle of the screen.
+## Earlier defaults (v4 from a 20:9 recording, then the later additions FREE LOOK, LEFT FIRE,
+## PRONE under the weapon panel and SWITCH beside RELOAD) live on only in saved layouts and MOVED.
+## No two default touch areas overlap from 16:10 to 22:9.
 ## A camera cutout at a short side of the screen (`inset`, set by the HUD from UI.safe_margins)
 ## moves the edge-anchored widgets in by its width.
-## RELOAD (up and to the left of FIRE) and SWITCH (gun <-> fists, right beside RELOAD on its left,
-## where the reference puts its quick weapon switch next to its quick reload) are the reference's
-## quick reload and quick weapon switch buttons; the settings can turn them off, as the left fire
-## button (HUD.button_enabled), and the editor still places them. SWITCH sat left of the weapon
-## panel's small slots before (MOVED).
 
 const VERSION := 5
 const REF_ASPECT := 20.0 / 9.0
@@ -51,24 +50,29 @@ static var inset := Vector2.ZERO
 const ORDER := ["settings", "weapons", "fire_r", "fire_l", "scope", "freelook", "wall", "jump", "crouch", "prone", "sprint",
 	"medkit", "grenade", "reload", "swap", "minimap", "joystick"]
 const DEFAULTS := {
-	"joystick": {"x": 0.18, "y": 0.71, "s": 0.23, "o": 0.8, "a": "l"},
-	"fire_r": {"x": 0.798, "y": 0.68, "s": 0.26, "o": 0.9, "a": "r"},
-	"fire_l": {"x": 0.09, "y": 0.39, "s": 0.15, "o": 0.85, "a": "l"},
-	"scope": {"x": 0.835, "y": 0.4, "s": 0.104, "o": 0.85, "a": "r"},
-	"freelook": {"x": 0.945, "y": 0.375, "s": 0.09, "o": 0.85, "a": "r"},
-	"wall": {"x": 0.0375, "y": 0.53, "s": 0.11, "o": 0.85, "a": "l"},
-	"jump": {"x": 0.906, "y": 0.519, "s": 0.166, "o": 0.85, "a": "r"},
-	"crouch": {"x": 0.922, "y": 0.834, "s": 0.166, "o": 0.85, "a": "r"},
-	"prone": {"x": 0.762, "y": 0.385, "s": 0.104, "o": 0.85, "a": "r"},
-	"sprint": {"x": 0.181, "y": 0.438, "s": 0.131, "o": 0.85, "a": "l"},
-	"medkit": {"x": 0.0375, "y": 0.678, "s": 0.104, "o": 0.85, "a": "l"},
-	"grenade": {"x": 0.678, "y": 0.912, "s": 0.13, "o": 0.85, "a": "c"},
-	"reload": {"x": 0.73, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
-	"swap": {"x": 0.672, "y": 0.52, "s": 0.1, "o": 0.85, "a": "r"},
-	"settings": {"x": 0.9865, "y": 0.035, "s": 0.046, "o": 0.9, "a": "r"},
-	"weapons": {"x": 0.861, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
-	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
+	"joystick": {"x": 0.135, "y": 0.75, "s": 0.23, "o": 0.8, "a": "l"},
+	"fire_r": {"x": 0.8624, "y": 0.687, "s": 0.17, "o": 0.9, "a": "r"},
+	"fire_l": {"x": 0.044, "y": 0.64, "s": 0.13, "o": 0.85, "a": "l"},
+	"scope": {"x": 0.964, "y": 0.53, "s": 0.104, "o": 0.85, "a": "r"},
+	"freelook": {"x": 0.964, "y": 0.4, "s": 0.09, "o": 0.85, "a": "r"},
+	"wall": {"x": 0.7904, "y": 0.757, "s": 0.098, "o": 0.85, "a": "r"},
+	"jump": {"x": 0.964, "y": 0.7, "s": 0.115, "o": 0.85, "a": "r"},
+	"crouch": {"x": 0.964, "y": 0.9, "s": 0.115, "o": 0.85, "a": "r"},
+	"prone": {"x": 0.8952, "y": 0.9, "s": 0.115, "o": 0.85, "a": "r"},
+	"sprint": {"x": 0.136, "y": 0.49, "s": 0.115, "o": 0.85, "a": "l"},
+	"medkit": {"x": 0.1832, "y": 0.897, "s": 0.104, "o": 0.85, "a": "l"},
+	"grenade": {"x": 0.7408, "y": 0.9, "s": 0.1, "o": 0.85, "a": "r"},
+	"reload": {"x": 0.9, "y": 0.47, "s": 0.09, "o": 0.85, "a": "r"},
+	"swap": {"x": 0.848, "y": 0.47, "s": 0.09, "o": 0.85, "a": "r"},
+	"settings": {"x": 0.148, "y": 0.04, "s": 0.06, "o": 0.9, "a": "l"},
+	"weapons": {"x": 0.9184, "y": 0.1535, "s": 0.108, "o": 0.95, "a": "r"},
+	"minimap": {"x": 0.0625, "y": 0.137, "s": 0.27, "o": 0.95, "a": "l"},
 }
+## The default sizes until the defaults followed the reference's 16:9 layout: a saved layout made
+## with them keeps its sizes (the size range a saved widget is held to covers both, size_range).
+const OLD_SIZES := {"joystick": 0.23, "fire_r": 0.26, "fire_l": 0.15, "scope": 0.104, "freelook": 0.09, "wall": 0.11,
+	"jump": 0.166, "crouch": 0.166, "prone": 0.104, "sprint": 0.131, "medkit": 0.104, "grenade": 0.13, "reload": 0.1,
+	"swap": 0.1, "settings": 0.046, "weapons": 0.152, "minimap": 0.27}
 const LABELS := {
 	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
 	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "freelook": "FREE LOOK",
@@ -106,13 +110,22 @@ static func resolve(overrides: Dictionary) -> Dictionary:
 				d.a = String(od.a)
 		d.x = clampf(float(d.x), 0.02, 0.98)
 		d.y = clampf(float(d.y), 0.04, 0.98)
-		d.s = clampf(float(d.s), float(def.s) * SIZE_MIN, minf(float(def.s) * SIZE_MAX, 0.45))
+		var sr := size_range(id)
+		d.s = clampf(float(d.s), sr.x, sr.y)
 		if float(d.o) < OPACITY_MIN:
 			d.o = def.o           # 0 / garbage: an invisible control is never what the player wants
 		d.o = clampf(float(d.o), OPACITY_MIN, 1.0)
 		d.id = id
 		out[id] = d
 	return out
+
+
+## The sizes a saved widget `id` may have: SIZE_MIN .. SIZE_MAX of its default (of the older default
+## too, OLD_SIZES, so a layout saved before keeps its sizes), at most 0.45 of the screen height.
+static func size_range(id: String) -> Vector2:
+	var now := float(DEFAULTS[id].s)
+	var old := float(OLD_SIZES.get(id, now))
+	return Vector2(minf(now, old) * SIZE_MIN, minf(maxf(now, old) * SIZE_MAX, 0.45))
 
 
 ## True when a saved widget still sits exactly at a default place it had in an earlier version.
@@ -236,6 +249,17 @@ static func weapon_repick(w: Dictionary, vs: Vector2) -> Rect2:
 	var row := weapon_slots(w, vs)[0]
 	var size := Vector2(s * 1.25, s * 0.56)
 	return Rect2(Vector2(row.position.x - s * 0.1 - size.x, row.get_center().y - size.y * 0.5), size)
+
+
+## The ping's place (left end, vertical centre) beside the gear `w`, as the reference shows it (a
+## signal icon and the number right of its gear: the frame's (0.278, 0.031) at 16:9): on the gear's
+## inner side, on its row. null when the gear sits in the right half (the ping then goes in the
+## column beside the weapon panel, HudNet).
+static func ping_spot(w: Dictionary, vs: Vector2) -> Variant:
+	var c := center(w, vs)
+	if c.x > vs.x * 0.5:
+		return null
+	return Vector2(c.x + 0.12 * unit(vs), c.y)
 
 
 static func minimap_rect(w: Dictionary, vs: Vector2) -> Rect2:

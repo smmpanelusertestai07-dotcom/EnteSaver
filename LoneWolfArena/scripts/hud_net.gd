@@ -3,7 +3,8 @@ extends Control
 ## The match HUD's network layer (HUD.bind adds it to every match: HudNet.attach). Offline
 ## (TRAINING GROUND, `net` false) it is only the ping chip: the relay's round trip while this
 ## phone is connected to it (Cloud.relay_ping), else a grey "--", with no tag. Online (and LOCAL):
-##  - top right, in the column under the gear beside the weapon panel: the round trip to the other
+##  - beside the gear (top left, right of the minimap's column; top right under it when the player
+##    moved the gear there): the round trip to the other
 ##    phone (NetPing: Cloud.match_ping: the direct round trip while the direct path is up, else
 ##    Cloud.peer_rtt, the relay's Cloud.relay_rtt until the other phone answered), with a small
 ##    DIRECT / RELAY tag under it (how the state travels, NetDirect);
@@ -95,6 +96,12 @@ func button_centers() -> Dictionary:
 	if x0 + pitch.x + R > size.x * 0.5 - 10.0 and mr.position.x > size.x * 0.5:
 		x0 = mr.position.x - GAP - R * 1.15 - pitch.x
 	var y0 := mr.position.y + R + 2.0
+	if hud and not hud.layout.is_empty():
+		# The gear in this column (the reference's place, right of the minimap): the buttons below it.
+		var gear: Dictionary = hud.layout.settings
+		var gc := HudLayout.center(gear, size)
+		if absf(gc.x - x0) < R * 2.0 + pitch.x:
+			y0 = maxf(y0, gc.y + HudLayout.touch_radius(gear, size) * 1.15 + R * 1.15 + 6.0)
 	var out := {}
 	var i := 0
 	for id: String in IDS:
@@ -309,8 +316,9 @@ func _draw() -> void:
 			Color(UI.ACCENT, minf(_note_t * 2.0, 1.0)), 0, 3)
 
 
-## Under the gear, in the column beside the weapon panel (under the panel's right end when the
-## layout leaves no such column).
+## Beside the gear when it sits on the left (the default, the reference's place: HudLayout.ping_spot);
+## a gear moved to the right: under it, in the column beside the weapon panel (under the panel's
+## right end when the layout leaves no such column).
 func _draw_ping() -> void:
 	var vs := size
 	var ms := ping_ms()
@@ -323,6 +331,13 @@ func _draw_ping() -> void:
 	var gear: Dictionary = hud.layout.settings
 	var gc := HudLayout.center(gear, vs)
 	var top := gc.y + HudLayout.radius(gear, vs) + 8.0 if gc.x > pr.end.x else 8.0
+	var spot: Variant = HudLayout.ping_spot(gear, vs)
+	if spot != null:
+		# Beside the gear (the reference's place): the bars and the number, the DIRECT / RELAY tag under.
+		var h := 0.034 * HudLayout.unit(vs)
+		NetPing.draw(self, spot, h, ms, 15)
+		_draw_tag(Vector2((spot as Vector2).x, (spot as Vector2).y + h * 0.5 + 9.0), 0)
+		return
 	if right - pr.end.x >= 34.0:
 		var w := right - pr.end.x - 2.0
 		var box := Rect2(right - w, top, w, 66.0)

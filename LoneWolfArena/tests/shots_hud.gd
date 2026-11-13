@@ -61,8 +61,8 @@ func run(at: Node) -> int:
 	_check(hud.weapon_picking() == hud.panels.pick_choice, "the weapon panel shows the chosen gun dimmed while picking", at)
 	_check(HudDraw.weapon_tex(Weapons.DEFS.lever) != HudDraw.weapon_tex(Weapons.DEFS.sg), "lever and pump shotguns have different silhouettes", at)
 	var main0 := HudLayout.weapon_main(hud.layout.weapons, vs)
-	_check(absf(main0.position.y / vs.y - 0.003) < 0.012 and absf(main0.end.y / vs.y - 0.155) < 0.012,
-		"weapon panel main slot at y 0.003 .. 0.155 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
+	_check(absf(main0.position.y / vs.y - 0.042) < 0.012 and absf(main0.end.y / vs.y - 0.147) < 0.012,
+		"weapon panel main slot at y 0.042 .. 0.147 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
 	await _tap(at, hud.panels.card_rect(1).get_center())
 	await at.wait(0.3)
 	await at.shot("hud_02_pick_smg")
@@ -394,6 +394,8 @@ func run(at: Node) -> int:
 	await at.wait(0.35)
 	await at.shot("hud_15_kill")
 	_check(not b.alive, "the bot is eliminated", at)
+	_check(Engine.time_scale >= 1.0, "the kill plays at normal speed (no slow motion, as the reference)", at)
+	_check(hud.banner_kind() == "kill" and hud.result_title() == "", "the kill shows the small badge, no result band yet", at)
 	_check(arena.find_children("EliminatedTag*", "Label3D", true, false).size() >= 1, "ELIMINATED floats over the bot's body", at)
 	_check(hud.feed_lines == 1 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
 		"the 1 vs 1 kill feed is one line with the gun's silhouette", at)
@@ -411,7 +413,9 @@ func run(at: Node) -> int:
 	await at.wait(0.3)
 	await at.shot("hud_16b_cutout")
 	_check(HudLayout.minimap_rect(hud.layout.minimap, vs).position.x >= 64.0
-		and HudLayout.hit_rect("wall", hud.layout.wall, vs).position.x >= 64.0, "a camera cutout on the left moves the minimap and WALL off it", at)
+		and HudLayout.hit_rect("medkit", hud.layout.medkit, vs).position.x >= 64.0
+		and HudLayout.hit_rect("settings", hud.layout.settings, vs).position.x >= 64.0,
+		"a camera cutout on the left moves the minimap, the gear and the MEDKIT off it", at)
 	UI.margins_for_test = Vector2(-1, -1)
 	hud._update_safe_area()
 	# The ELIMINATED BY card at the bottom left while the player spectates (held up for the picture).

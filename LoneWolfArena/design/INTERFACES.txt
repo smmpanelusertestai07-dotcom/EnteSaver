@@ -112,6 +112,11 @@ listed here. If a part needs something new from the core, add it in its own file
   that does not end the match; the HUD plays RoundRules' break steps on its own clock from this call
   (`break_step()`: "beat", "result", "score", "band"; `break_score(mine)` the plates' numbers) while
   the arena is in Phase.BREAK (BREAK_TIME = RoundRules.BREAK_S, the same on both phones)
+- `show_result(title, sub := "", delay := RoundRules.BREAK_RESULT_AT)`: the match's end (VICTORY! /
+  DEFEAT / DRAW with the rounds) or a deciding TIME UP (delay 0) on the break's result band near the
+  top until the results (`result_title()`: the title while it shows, else ""). No game speed change
+  anywhere in a kill (Engine.time_scale stays 1; only the checks speed matches up) and no camera
+  orbit at a win (`Player.victory_cam` keeps the view where it was)
 - `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id),
   cooldown := {} (gun -> rounds left: greyed, not pickable), strip := [] (per round of the match:
   true when this player picks; the ROUNDS strip))`
@@ -128,7 +133,9 @@ listed here. If a part needs something new from the core, add it in its own file
   its PICKING... state.
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
   (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
-- `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),
+- `kill_banner(victim_name: String, headshot: bool)` (a small still elimination badge with ELIMINATED /
+  HEADSHOT and the name at y 0.17 for KILL_BANNER_TIME (2.3 s) when the player kills, gone once a
+  result band shows),
   `out_banner(victim_name, cause)` (the opponent went down by itself: cause "zone", "fall" or "self"
   in `HUD.OUT_LINES`; no badge, no red X, a line in its place), `banner_kind()` ("", "kill" or the cause),
   `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
@@ -151,8 +158,9 @@ listed here. If a part needs something new from the core, add it in its own file
   default; `HudMinimap.turns()`), north up otherwise; `ally_marks` / `enemy_marks` take that
   transform), `hud_panels.gd` (HudPanels)
 - online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
-  round trip to the other phone under the gear (NetPing), CHAT / MUTE (NetChat) and TALK / SOUND
-  (NetVoice) right of the minimap, the chat feed under the score bar (`feed`, `add_line`, `send`),
+  round trip to the other phone beside the gear (NetPing; `HudLayout.ping_spot(gear, vs)`: right of
+  a gear on the left, the default; under a gear the player moved to the right), CHAT / MUTE (NetChat) and TALK / SOUND
+  (NetVoice) right of the minimap (under the gear when it sits in that column), the chat feed under the score bar (`feed`, `add_line`, `send`),
   the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
   Its buttons take their touches before the HUD (a child's _input runs first). Every other match
   (TRAINING GROUND) gets it too with `net` false (`HudNet.attach(hud, false)`): only the ping chip,
@@ -162,11 +170,14 @@ listed here. If a part needs something new from the core, add it in its own file
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
   screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
   "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
-  (`HudLayout.DEFAULTS`) are the reference phone's places, except PRONE (under the weapon panel,
-  left of SCOPE: the reference's place beside the score bar is under the panel below 18:9); no
-  two default touch areas overlap from 16:10 to 22:9 but the gear's on the panel's corner.
-  RELOAD (`reload`, up and left of FIRE; grey on a full magazine, without reserve or with the fists
-  out) and SWITCH (`swap`, right beside RELOAD on its left, the reference's place:
+  (`HudLayout.DEFAULTS`) are the reference's 16:9 places (STYLE_SPEC section 3: the gear right of the
+  minimap, the weapon panel in the corner, FIRE / JUMP / SCOPE / CROUCH / PRONE / GRENADE / WALL as
+  the reference's; the frame's (0.185, 0.11) and (0.185, 0.182) left free for the voice lane's
+  "speaker" / "mic"); no two default touch areas overlap from 16:10 to 22:9. A saved layout keeps
+  every widget as saved; `size_range(id)` (the clamp of a saved size) covers the default and the
+  older default (`OLD_SIZES`), so sizes saved before keep.
+  RELOAD (`reload`, up and left of SCOPE; grey on a full magazine, without reserve or with the fists
+  out) and SWITCH (`swap`, right beside RELOAD on its left:
   `select_weapon(next_weapon())`, gun -> sidearm -> fists -> gun, showing the next one; a layout saved with it at its old place under the panel takes the new).
   `HUD.button_enabled(id)`: the settings left_fire (2 = OFF), reload_button, switch_button and
   freelook_button turn those buttons off in a match; the editor still places them (label "OFF").
@@ -447,9 +458,9 @@ listed here. If a part needs something new from the core, add it in its own file
   measured the frames and called `Game.finish_auto_graphics(level)`), `Game.stop_auto_graphics()`.
   Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`;
   the bullet holes are one MultiMesh per scene (`Effects.MAX_HOLES`, `hole_count()`).
-  `Effects.eliminated(ctx, pos)` (Fighter.die, on every phone for every fighter): an "ELIMINATED"
-  Label3D (`EliminatedTag`) floats up over the body for `Effects.ELIMINATED_S` (2 s) over a small
-  yellow / orange shard burst (particle_share applies). The arena
+  `Effects.eliminated(ctx, pos)` (Fighter.die, on every phone for every fighter): a small
+  "ELIMINATED" Label3D (`EliminatedTag`, no pop, no rise) over the body for `Effects.ELIMINATED_S`
+  (1.6 s) over one short white burst (particle_share applies). The arena
   sets the graphics up again only when the graphics level or visual effects change (another save,
   such as the gun pick's, keeps the governor's state).
 - Aim settings on `Player`: `sight_of(def)` ("sniper", "2x", "reddot", "none"), `sens_key(def,
@@ -754,8 +765,13 @@ listed here. If a part needs something new from the core, add it in its own file
 - REVIVE: shown while revive_candidate(player) is not null, or while `player.reviving` is set (then
   it reads STOP: a tap calls cancel_revive). A tap calls hud.release_all() first, then start_revive.
   Its place: HudTeam.revive_center() (beside FIRE, the first spot clear of every other control).
-- The panel's place: HudTeam.panel_rect() (right of the minimap, else beside / under HudNet's
-  buttons, else under the zone strip: the first free one). SPECTATING + NEXT: spectate_rects().
+- The team list's place: HudTeam.panel_rect() (under the minimap's zone strip, the reference's place;
+  else right of the minimap, else beside / under HudNet's buttons: the first free one); its rows:
+  `team_rows()` ({n, name, me, leader, status, hp, bleed, revive}); member colours
+  `HudTeam.slot_color(n)` (SLOT_COLORS: 1 cyan, 2 orange, 3 pink, 4 purple; also the tags over the
+  teammates' heads and their minimap dots); the leader's flag: `leader()` (the arena's optional
+  `team_leader(t)`: TeamArena gives the group's leader online (the host, when on that team), else
+  the team's first non-bot). SPECTATING + NEXT: spectate_rects().
   blocked_rects() lists what they keep clear of (the tours check it).
 - HUD calls for the arena (C): add_team_feed(killer, killer_ally, victim, victim_ally, weapon_name,
   weapon_icon, headshot, mine, verb) with verb "KNOCKED" / "REVIVED" / "LEFT" / "" (REVIVED: killer

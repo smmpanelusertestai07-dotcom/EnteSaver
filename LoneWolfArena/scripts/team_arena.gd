@@ -161,6 +161,23 @@ func members(t: int) -> Array[Fighter]:
 	return out
 
 
+## Team `t`'s leader (the flag in the HUD's team list): online the group's leader, who hosts
+## (TeamArenaNet.host_id), when on team `t`; else the first player of `t` who is not a bot (offline
+## the player); else its first member.
+func team_leader(t: int) -> Fighter:
+	var list := members(t)
+	var hid: Variant = get("host_id")
+	var slot_of: Variant = get("_slot_of")
+	if hid is String and slot_of is Dictionary and (slot_of as Dictionary).has(hid):
+		var hf := slot_fighter(int((slot_of as Dictionary)[hid]))
+		if hf != null and hf.team == t:
+			return hf
+	for f: Fighter in list:
+		if not f is Bot:
+			return f
+	return list[0] if not list.is_empty() else null
+
+
 ## "up" | "knocked" | "out" | "left" this round.
 func status_of(f: Fighter) -> String:
 	if f != null and referee.left.has(f.slot):
@@ -665,12 +682,11 @@ func _end_team_round(win_team: int, timed_out: bool) -> void:
 		hud.show_break("DRAW" if win_team < 0 else ("VICTORY" if win_team == my_team else "DEFEAT"), mine, theirs,
 			0 if win_team < 0 else (1 if win_team == my_team else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
-		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if win_team < 0 else ("YOUR TEAM HAS MORE HP" if win_team == my_team
-			else "THE OTHER TEAM HAS MORE HP")) + "    %d  -  %d" % [mine, theirs])
+		hud.show_result("TIME UP", ("DRAW" if win_team < 0 else ("YOUR TEAM HAS MORE HP" if win_team == my_team
+			else "THE OTHER TEAM HAS MORE HP")) + "    %d  -  %d" % [mine, theirs], 0.0)
 	else:
 		_show_match_end()
-	if not timed_out:
-		Engine.time_scale = 0.35
+	# (normal speed: no slow motion on the round's last elimination, as the reference)
 	if win_team == my_team:
 		Audio.play("victory_sting", 0.0)
 	elif win_team >= 0:

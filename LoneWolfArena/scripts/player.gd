@@ -95,6 +95,8 @@ var _col_yaw := 0.0                   # aim yaw of the target's column and the h
 var _col_tol := 0.0
 var _head_yaw := 0.0                  # aim yaw of the target's head (the column's top)
 var _anchor := ""                     # what firing holds since the last drag: "head", "body", "over"
+## The match won: the own character plays its victory pose; the camera stays where it is (no orbit
+## to the front: the reference shows no camera move after the last kill) and the controls stay off.
 var victory_cam := false
 var free_look := false                # eye button held: the camera turns around you, the aim stays
 var _free := Vector2.ZERO             # the free look's camera yaw / pitch offset (radians)
@@ -102,6 +104,7 @@ var body_turn := 0.0                  # drawn body's yaw off the aim (radians; f
 var _turn_aim := INF                  # aim_yaw when body_turn was last updated
 var spectating: Fighter               # eliminated: whose view the camera follows (the killer)
 var _spectate_wait := 0.0             # s left on the own fall before the camera goes to them
+var _watched: Fighter                 # whom the camera followed last frame (a new one: a cut, no sweep)
 ## What this player still carried when eliminated ({"walls", "frags", "medkits"}; {} while alive):
 ## the SPECTATING card shows it.
 var kit_at_death := {}
@@ -109,7 +112,6 @@ var crosshair_on_target := false      # HUD: crosshair turns red
 var _red_target: Fighter              # whom it is red on (a shot then goes to them)
 var _track_dir := Vector3.ZERO        # last camera->target chest direction (for tracking)
 var _track_target: Fighter
-var _victory_yaw := INF
 var _faded := false
 var _hidden_close := false            # the camera is at the head: the own model is hidden
 var _cam_query: PhysicsShapeQueryParameters3D
@@ -207,7 +209,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	recoil_yaw = 0.0
 	shake = 0.0
 	victory_cam = false
-	_victory_yaw = INF
+	_watched = null
 	free_look = false
 	_free = Vector2.ZERO
 	face_aim()
@@ -974,31 +976,33 @@ func _process(delta: float) -> void:
 	recoil_yaw = lerpf(recoil_yaw, 0.0, rec)
 	shake = maxf(shake - delta * 2.5, 0.0)
 	var target_y := eye_height() + 0.02 if alive else 0.6
-	if victory_cam:
-		target_y = 1.25
 	_spectate_wait = maxf(_spectate_wait - delta, 0.0)
 	var watch := spectating_now()
 	if watch:
 		target_y = watch.eye_height() + 0.02
-	_cam_y = lerpf(_cam_y, target_y, 1.0 - exp(-10.0 * delta))
+	# The view goes to the player watched in one cut (the reference's spectate, no sweep across the
+	# map), then follows them smoothly.
+	var cut := watch != null and watch != _watched
+	_watched = watch
+	_cam_y = target_y if cut else lerpf(_cam_y, target_y, 1.0 - exp(-10.0 * delta))
 	if watch:
 		var to := watch.global_position + Vector3.UP * _cam_y
-		rig.global_position = rig.global_position.lerp(to, 1.0 - exp(-8.0 * delta))
+		rig.global_position = to if cut else rig.global_position.lerp(to, 1.0 - exp(-8.0 * delta))
 	else:
 		rig.global_position = drawn_position() + Vector3.UP * _cam_y
 	var sx := (randf() - 0.5) * shake * 0.6
 	var sy := (randf() - 0.5) * shake * 0.6
-	if victory_cam or not alive:
-		# Orbit to the front (victory), look down at the body (eliminated), then follow the killer.
-		if victory_cam and _victory_yaw == INF:
-			_victory_yaw = _pick_victory_yaw()
-		var want_yaw := _victory_yaw if victory_cam else aim_yaw
-		var want_pitch := deg_to_rad(-8.0 if victory_cam else -38.0)
+	if victory_cam:
+		pass                         # (the view stays as it was at the last kill)
+	elif not alive:
+		# Look down at the body (eliminated), then follow the player watched (cut to them).
+		var want_yaw := aim_yaw
+		var want_pitch := deg_to_rad(-38.0)
 		var k := 1.0 - exp(-2.5 * delta)
 		if watch:
 			want_yaw = watch.aim_yaw
 			want_pitch = clampf(watch.aim_pitch * 0.6, deg_to_rad(-25.0), deg_to_rad(15.0)) - deg_to_rad(6.0)
-			k = 1.0 - exp(-6.0 * delta)
+			k = 1.0 if cut else 1.0 - exp(-6.0 * delta)
 		yaw_node.rotation.y = lerp_angle(yaw_node.rotation.y, want_yaw, k)
 		pitch_node.rotation.x = lerpf(pitch_node.rotation.x, want_pitch, k)
 	else:
@@ -1014,13 +1018,11 @@ func _process(delta: float) -> void:
 		dist *= 0.9
 	if not alive:
 		dist = CAM_DIST if watch else 4.5
-	elif victory_cam:
-		dist = 3.2
-	spring.spring_length = lerpf(spring.spring_length, dist, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
+	spring.spring_length = dist if cut else lerpf(spring.spring_length, dist, 1.0 - exp(-(30.0 if scoped else 12.0) * delta))
 	var fov_target := float(w.def.ads_fov) if ads else FOV_HIP
 	_fov = lerpf(_fov, fov_target, 1.0 - exp(-14.0 * delta))
 	camera.fov = _fov
-	var pivot := Vector3.ZERO if (victory_cam or scoped) else (Vector3(0.42, CAM_RAISE * 0.5, 0) if ads else Vector3(CAM_SHOULDER, CAM_RAISE, 0))
+	var pivot := Vector3.ZERO if scoped else (Vector3(0.42, CAM_RAISE * 0.5, 0) if ads else Vector3(CAM_SHOULDER, CAM_RAISE, 0))
 	# Keep the step to the pivot out of walls (the right side against a container, a low roof):
 	# the spring arm only guards the line behind the pivot, not the step to it.
 	var walled := false
@@ -1052,30 +1054,12 @@ func _sweep(from: Vector3, motion: Vector3) -> float:
 	return r[0] if r.size() == 2 else 1.0
 
 
-## Finds an orbit angle with a clear 3 m view of the character (avoids walls).
-func _pick_victory_yaw() -> float:
-	var head := global_position + Vector3.UP * 1.3
-	var best := aim_yaw + PI
-	var best_len := -1.0
-	for off in [PI, PI - 0.9, PI + 0.9, PI * 0.5, -PI * 0.5, 0.0]:
-		var yaw: float = aim_yaw + off
-		var back := Basis(Vector3.UP, yaw) * Vector3(0, 0.45, 1.0).normalized()
-		var res := trace(head, back, 3.4, LAYER_WORLD | LAYER_SHIELD)
-		var free_len := 3.4 if res.is_empty() else head.distance_to(res.position)
-		if free_len >= 3.3:
-			return yaw
-		if free_len > best_len:
-			best_len = free_len
-			best = yaw
-	return best
-
-
 ## The own model: hidden in the scope (a first-person view: head, hair and gun would fill it) and
 ## with the camera pushed to the head (a wall behind and beside it); see-through while the camera
 ## is close, or while the body would cover what the crosshair is on (the right side against a
 ## container pulls the camera in behind the head).
 func _update_fade(scoped := false) -> void:
-	var own_view := alive and not victory_cam          # (dead: the camera is on the fall, then on the killer)
+	var own_view := alive                # (dead: the camera is on the fall, then on the player watched)
 	var cam := camera.global_position
 	var head := head_position()
 	_hidden_close = own_view and cam.distance_to(head) < (HEAD_CLEAR + (0.05 if _hidden_close else 0.0))

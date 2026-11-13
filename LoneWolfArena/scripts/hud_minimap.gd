@@ -14,7 +14,7 @@ extends Control
 ## viewport. It clips its drawing to its own rect; until the render exists (first frames) a dark
 ## floor plan from arena.obstacles stands in, and the HUD editor shows a stand-in plan turned the
 ## way the setting says. The HUD places it from its layout. DUO / SQUAD (the HUD's HudTeam):
-## teammates always, as blue dots with their number (a knocked one in a red ring, one out of the
+## teammates always, as dots in their list colour with their number (a knocked one in a red ring, one out of the
 ## round not at all); every enemy as in the 1 vs 1 (ally_marks, enemy_marks).
 
 const VIEW_M := 28.0                       # metres shown edge to edge
@@ -132,14 +132,14 @@ func _draw() -> void:
 		draw_set_transform(fp, atan2(-d.x, d.y), Vector2(0.6, 1.0))
 		draw_circle(Vector2.ZERO, 4.4, Color(1.0, 0.3, 0.22, 0.85 * o * clampf(float(st.t) / 0.8, 0.0, 1.0)), true, -1.0, true)
 	draw_set_transform(Vector2.ZERO)
-	# Teammates (DUO / SQUAD): numbered blue dots, always.
+	# Teammates (DUO / SQUAD): dots numbered and coloured as the team list's boxes, always.
 	var team: HudTeam = hud.get("team")
 	for m: Dictionary in ally_marks(team, xf):
 		var ap: Vector2 = m.pos
 		if bool(m.knocked):
 			draw_circle(ap, 10.0, Color(0.95, 0.24, 0.2, 0.95 * o), false, 2.5, true)
 		draw_circle(ap, 7.5, Color(0, 0, 0, 0.6 * o), true, -1.0, true)
-		draw_circle(ap, 6.2, Color(HudDraw.BLUE, o), true, -1.0, true)
+		draw_circle(ap, 6.2, Color(HudTeam.slot_color(int(m.n)), o), true, -1.0, true)
 		HudDraw.text(self, str(int(m.n)), ap + Vector2(0, 0.5), 10, Color(1, 1, 1, o), 1, 0, "number")
 	# Enemy shots fired out of sight: small red marks where they were, fading.
 	for sh: Dictionary in hud.shots_heard:

@@ -35,13 +35,16 @@ const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming
 const DMG_LIFE := 0.95
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
-const KILL_BANNER_TIME := 2.8
+## The elimination badge stays through the break's beat only (the result band follows at
+## RoundRules.BREAK_RESULT_AT), small and without a pop, like the reference's streak icon.
+const KILL_BANNER_TIME := 2.3
 const KILL_X_TIME := 0.9
 const SPRINT_PUSH := 1.0           # joystick deflection (in ring radii) that counts as past the ring
 const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint locks (pushing further = run)
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
 const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
+const FEED_Y_SOLO := 0.77          # the 1 vs 1's one line: the reference's place, over the bottom row
 ## An opponent who went down by itself (nobody's kill): what out_banner says took them out.
 const OUT_LINES := {"zone": "CAUGHT IN THE ZONE", "fall": "DOWN FROM A FALL", "self": "HIT BY THEIR OWN FRAG"}
 const OUT_ICONS := {"zone": "v_zone", "fall": "v_skull", "self": "item_grenade"}
@@ -89,6 +92,7 @@ var _hurt_sound_t := 0.0
 var _center := {"text": "", "sub": "", "t": 0.0, "dur": 1.0, "col": Color.WHITE, "size": 96}
 var _round_banner := {"t": 0.0, "round": 1, "area": ""}
 var _break := {}                   # the break between rounds on screen (show_break), "age" in s
+var _result := {}                  # the match's end on the result band (show_result), "age" in s
 var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
 var steps: Array[Dictionary] = []     # enemy footprints for the minimap: {p (x, z), dir, side, t}
@@ -173,6 +177,19 @@ func show_center(text: String, seconds: float, color := Color.WHITE, fsize := 96
 ## sub replaces the AREA line (the reference shows "Match Point!" there).
 func show_round_banner(round_index: int, area: String, sub := "") -> void:
 	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area, "sub": sub}
+
+
+## The match is decided (or a round of it decided by the time-out): `title` (VICTORY / DEFEAT /
+## DRAW / TIME UP) and `sub` on the break's result band near the top, from `delay` s on (the beat:
+## the kill feed and the badge first, as in a break) until the results, instead of big words over
+## the middle of the screen.
+func show_result(title: String, sub := "", delay := RoundRules.BREAK_RESULT_AT) -> void:
+	_result = {"age": -maxf(delay, 0.0), "title": title, "sub": sub}
+
+
+## The title on the result band now ("" while none shows; the checks read it).
+func result_title() -> String:
+	return String(_result.title) if not _result.is_empty() and float(_result.age) >= 0.0 else ""
 
 
 ## A rejoin into a round already running: its ROUND / AREA band is not shown (the next round's is).
@@ -779,6 +796,8 @@ func _process(delta: float) -> void:
 		_break.age = float(_break.age) + real
 		if arena == null or int(arena.get("phase")) != 3:
 			_break = {}                  # (the prep began: the host's "round" may end it early)
+	if not _result.is_empty():
+		_result.age = float(_result.age) + real
 	_kill_banner.t = maxf(float(_kill_banner.t) - real, 0.0)
 	tips_time = maxf(tips_time - real, 0.0)
 	for n in _dmg_numbers:
@@ -961,7 +980,8 @@ func _draw() -> void:
 			_draw_weapon_panel(vs)
 			_draw_controls(vs)
 		_draw_button("settings", vs)
-	_draw_hp_block(vs, u)
+	if player.alive or match_over:
+		_draw_hp_block(vs, u)          # (out of the round: no HP 0/200, the reference hides it)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
 	if team != null:
@@ -969,6 +989,7 @@ func _draw() -> void:
 	_draw_zone_banner(vs, u)
 	_draw_prep(vs, u)
 	_draw_break(vs, u)
+	_draw_match_result(vs, u)
 	_draw_round_banner(vs, u)
 	_draw_kill_banner(vs, u)
 	_draw_spectating(vs, u)
@@ -1509,15 +1530,15 @@ func _draw_damage_numbers(u: float) -> void:
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## The big red X on an eliminated enemy.
+## The red X on an eliminated enemy (a kill marker, short and small).
 func _draw_kill_x(u: float) -> void:
 	if _kill_x_t <= 0.0 or player.camera == null or player.camera.is_position_behind(_kill_x_pos):
 		return
 	var p := player.camera.unproject_position(_kill_x_pos)
 	var age := KILL_X_TIME - _kill_x_t
 	var a := clampf(_kill_x_t / 0.25, 0.0, 1.0)
-	var k := (0.075 * u) * (1.0 + 0.5 * clampf(1.0 - age / 0.12, 0.0, 1.0))
-	var wd := 0.016 * u
+	var k := (0.055 * u) * (1.0 + 0.2 * clampf(1.0 - age / 0.1, 0.0, 1.0))
+	var wd := 0.012 * u
 	for d in [Vector2(1, 1), Vector2(1, -1)]:
 		var v: Vector2 = d.normalized() * k
 		draw_line(p - v, p + v, Color(0, 0, 0, 0.55 * a), wd + 4.0, true)
@@ -1554,7 +1575,7 @@ func _draw_hp_block(vs: Vector2, u: float) -> void:
 	var mx := Fighter.MAX_HP
 	var lim := _bottom_limits(vs, u)
 	var avail := lim.y - lim.x
-	var by := vs.y * 0.968
+	var by := vs.y * 0.948              # (the reference's height, a little over the bottom edge)
 	var bh := maxf(4.0, 0.0105 * u)
 	var label := "HP %d/%d" % [ceili(hp), int(mx)]
 	# Inline like the reference: [helmet][vest] HP 200/200 [bar]. The layout is measured on the
@@ -1621,7 +1642,7 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
 		var tw := HudDraw.parts_width(parts, fs)
-		var y := vs.y * float(FEED_Y[i])
+		var y := vs.y * (FEED_Y_SOLO if feed_lines == 1 else float(FEED_Y[i]))
 		if feed_lines == 1:
 			_draw_feed_line(parts, tw, String(k.get("icon", "")), y, fs, a)
 			continue
@@ -2032,7 +2053,8 @@ func _draw_break(vs: Vector2, u: float) -> void:
 	var age := float(_break.age) if step != "" else 0.0
 	match step:
 		"result":
-			_draw_break_result(vs, u, age - RoundRules.BREAK_RESULT_AT, RoundRules.BREAK_SCORE_AT - age)
+			_draw_result_band(vs, u, String(_break.title), "ROUND %d" % (int(_break.round) - 1), age - RoundRules.BREAK_RESULT_AT,
+				RoundRules.BREAK_SCORE_AT - age)
 		"score":
 			_draw_break_score(vs, u, age - RoundRules.BREAK_SCORE_AT, RoundRules.BREAK_BAND_AT - age)
 		"band":
@@ -2040,12 +2062,18 @@ func _draw_break(vs: Vector2, u: float) -> void:
 				age - RoundRules.BREAK_BAND_AT, RoundRules.BREAK_S - age + 0.3)
 
 
-## VICTORY (yellow) / DEFEAT (grey) / DRAW (white) on a dark band at y 0.15 that fades at both ends,
-## "ROUND n" under the word.
-func _draw_break_result(vs: Vector2, u: float, age: float, left: float) -> void:
+## The match's end on the result band (show_result), until the results cover it.
+func _draw_match_result(vs: Vector2, u: float) -> void:
+	if result_title() == "":
+		return
+	_draw_result_band(vs, u, String(_result.title), String(_result.sub).to_upper(), float(_result.age), 99.0)
+
+
+## VICTORY (yellow) / DEFEAT (grey) / DRAW, TIME UP (white) on a dark band at y 0.15 that fades at
+## both ends, `sub` ("ROUND n", or the match's end line) under the word; it fades in, no pop.
+func _draw_result_band(vs: Vector2, u: float, title: String, sub: String, age: float, left: float) -> void:
 	var a := clampf(age / 0.25, 0.0, 1.0) * clampf(left / 0.35, 0.0, 1.0)
-	var title := String(_break.title)
-	var col: Color = HudDraw.YELLOW if title == "VICTORY" else (Color(0.8, 0.82, 0.85) if title == "DEFEAT" else Color.WHITE)
+	var col: Color = HudDraw.YELLOW if title.begins_with("VICTORY") else (Color(0.8, 0.82, 0.85) if title == "DEFEAT" else Color.WHITE)
 	var cy := vs.y * 0.15
 	var h := 0.12 * u
 	var w := minf(vs.x * 0.7, 1.4 * u)
@@ -2061,14 +2089,14 @@ func _draw_break_result(vs: Vector2, u: float, age: float, left: float) -> void:
 	var line := Color(col, 0.55 * a)
 	draw_line(Vector2(x0 + fade * 0.5, y0), Vector2(x0 + w - fade * 0.5, y0), line, 1.5)
 	draw_line(Vector2(x0 + fade * 0.5, y0 + h), Vector2(x0 + w - fade * 0.5, y0 + h), line, 1.5)
-	var pop := 1.0 + 0.18 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
-	HudDraw.text(self, title, Vector2(vs.x * 0.5, cy - h * 0.1), int(0.075 * u * pop), Color(col, a), 1, 4, "title")
-	HudDraw.text(self, "ROUND %d" % (int(_break.round) - 1), Vector2(vs.x * 0.5, cy + h * 0.34), int(0.024 * u),
-		Color(1, 1, 1, 0.8 * a), 1, 2, "bold")
+	HudDraw.text(self, title, Vector2(vs.x * 0.5, cy - h * 0.1), int(0.075 * u), Color(col, a), 1, 4, "title")
+	if sub != "":
+		HudDraw.text(self, sub, Vector2(vs.x * 0.5, cy + h * 0.34), _fit_fs(sub, int(0.024 * u), w * 0.6),
+			Color(1, 1, 1, 0.8 * a), 1, 2, "bold")
 
 
 ## The dimmed screen with the two score plates mid-screen: yours (blue, left) VS theirs (orange,
-## right), the names under them; the winner's number goes up at the tick with a pop and a flash.
+## right), the names under them; the winner's number goes up at the tick (a short tick, no flash).
 func _draw_break_score(vs: Vector2, u: float, age: float, left: float) -> void:
 	var a := clampf(age / 0.3, 0.0, 1.0) * clampf(left / 0.3, 0.0, 1.0)
 	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.6 * a))
@@ -2089,10 +2117,7 @@ func _draw_break_score(vs: Vector2, u: float, age: float, left: float) -> void:
 		var gained := int(_break.won) == (1 if mine else -1)
 		var pop := 1.0
 		if gained and tick >= 0.0:
-			pop = 1.0 + 0.4 * (1.0 - clampf(tick / 0.35, 0.0, 1.0))
-			var flash := 1.0 - clampf(tick / 0.6, 0.0, 1.0)
-			if flash > 0.0:
-				HudDraw.slanted(self, x0, x0 + pw, cy - ph * 0.5, ph, sl if mine else -sl, Color(1, 1, 1, 0.45 * flash * a))
+			pop = 1.0 + 0.12 * (1.0 - clampf(tick / 0.2, 0.0, 1.0))      # (a short tick, no flash)
 		var nc := Vector2(x0 + pw * 0.5 + (sl if mine else -sl) * 0.5, cy)
 		HudDraw.text(self, str(break_score(mine)), nc, int(0.15 * u * pop), Color(1, 1, 1, a), 1, 4, "number")
 		var nm := String(names[side]).to_upper()
@@ -2112,12 +2137,12 @@ func _their_name() -> String:
 ## Elimination badge (our own emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
 func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var t := float(_kill_banner.t)
-	if t <= 0.0 or break_step() not in ["", "beat"]:
-		return                           # (the break's result band takes over from the badge)
+	if t <= 0.0 or break_step() not in ["", "beat"] or result_title() != "":
+		return                           # (the result band takes over from the badge)
 	var age := KILL_BANNER_TIME - t
-	var a := clampf(age / 0.1, 0.0, 1.0) * clampf(t / 0.45, 0.0, 1.0)
-	var pop := 1.0 + 0.45 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
-	var c := Vector2(vs.x * 0.5, vs.y * 0.19)
+	var a := clampf(age / 0.12, 0.0, 1.0) * clampf(t / 0.35, 0.0, 1.0)
+	var pop := 1.0
+	var c := Vector2(vs.x * 0.5, vs.y * 0.17)
 	var cause := String(_kill_banner.get("cause", ""))
 	if bool(_kill_banner.get("knock", false)):
 		_draw_knock_banner(c, u, a, pop)
@@ -2125,12 +2150,10 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	if cause != "":
 		_draw_out_banner(c, u, a, cause)
 		return
-	var bs := 0.19 * u * pop
+	# Small and still (no glow, no pulse, no pop): a headshot kill only tints the badge red and puts
+	# the head target on it.
+	var bs := 0.12 * u
 	var head := bool(_kill_banner.head)
-	HudDraw.disk(self, c, bs * 0.42, Color(0.9, 0.2, 0.15, (0.32 if head else 0.18) * a * (1.0 - clampf(age / 0.6, 0.0, 1.0))))
-	# A headshot kill gets its own look: a red badge with the head target on it and a red pulse.
-	if head:
-		HudDraw.ring(self, c, bs * (0.45 + 0.35 * clampf(age / 0.5, 0.0, 1.0)), Color(1.0, 0.25, 0.18, 0.7 * a * (1.0 - clampf(age / 0.5, 0.0, 1.0))), maxf(2.0, 0.008 * u))
 	HudDraw.icon(self, HudDraw.tex("badge_elim"), c, Vector2(bs, bs), Color(1.0, 0.62, 0.55, a) if head else Color(1, 1, 1, a))
 	if head:
 		HudDraw.disk(self, c, bs * 0.17, Color(0.55, 0.05, 0.03, 0.9 * a))
@@ -2138,12 +2161,12 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	# One dark plate under the badge holds both lines (HEADSHOT / ELIMINATED, then the name),
 	# so they stay readable over a bright hall or the character's raised arms.
 	var label := "HEADSHOT" if head else "ELIMINATED"
-	var lfs := int(0.036 * u)
+	var lfs := int(0.03 * u)
 	var nm := String(_kill_banner.name).to_upper()
-	var fs := int(0.03 * u)
-	var ty := c.y + 0.19 * u * 0.5 + 0.024 * u
+	var fs := int(0.026 * u)
+	var ty := c.y + bs * 0.5 + 0.022 * u
 	var pw := maxf(HudDraw.text_width(label, lfs, "bold"), HudDraw.text_width(nm, fs, "bold")) + 0.2 * u
-	var plate := Rect2(c.x - pw * 0.5, ty - 0.026 * u, pw, 0.1 * u)
+	var plate := Rect2(c.x - pw * 0.5, ty - 0.024 * u, pw, 0.09 * u)
 	HudDraw.plate(self, plate, 0.72 * a)
 	HudDraw.text(self, label, Vector2(c.x, ty), lfs, Color(HudDraw.FEED_HEAD if head else Color.WHITE, a), 1, 3, "bold")
 	var line_y := ty + 0.026 * u
@@ -2238,7 +2261,7 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	_draw_zone_strip(vs)
 	var fs := int(0.03 * u)
 	var feed := [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]]
-	var feed_c := Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0]))
+	var feed_c := Vector2(vs.x * 0.5, vs.y * FEED_Y_SOLO)
 	var feed_w := HudDraw.text_parts(self, feed, feed_c, fs, 1, 3, "bold", 0.8)
 	_draw_weapon_panel(vs)                    # as in a match: the panel, the buttons, the gear
 	_draw_controls(vs)
