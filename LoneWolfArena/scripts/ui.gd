@@ -591,6 +591,67 @@ static func section(title: String, size := 20) -> HBoxContainer:
 	return h
 
 
+## A small "?" square beside a section title (node "Help"): a tap shows `text` in a tooltip (a dark
+## box with a thin yellow border) under it; a tap anywhere closes it. It stands in for the guide
+## paragraphs the pages had (the reference keeps its pages to the lists and puts help behind "?").
+static func help_button(text: String, size := 36.0) -> Button:
+	var b := Button.new()
+	b.name = "Help"
+	b.text = "?"
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(size, size)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.add_theme_font_override("font", font("heavy"))
+	b.add_theme_font_size_override("font_size", int(size * 0.6))
+	var st := box(Color(0.16, 0.15, 0.17, 0.95), 0, 1, Color(1, 1, 1, 0.25), 0.0)
+	var hv := box(Color(0.22, 0.21, 0.23, 0.95), 0, 1, Color(1, 1, 1, 0.4), 0.0)
+	var pr := box(Color(ACCENT, 0.35), 0, 1, ACCENT, 0.0)
+	b.add_theme_stylebox_override("normal", st)
+	b.add_theme_stylebox_override("hover", hv)
+	b.add_theme_stylebox_override("pressed", pr)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	for c: String in ["font_color", "font_hover_color", "font_pressed_color"]:
+		b.add_theme_color_override(c, TEXT)
+	b.set_meta("help", text)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		show_tooltip(b, text))
+	return b
+
+
+## The tooltip of a "?" (help_button) under `at`, on its own layer over everything; a tap anywhere
+## closes it. Node "HelpTip" (with the text in "HelpTipText").
+static func show_tooltip(at: Control, text: String) -> CanvasLayer:
+	var layer := CanvasLayer.new()
+	layer.name = "HelpTip"
+	layer.layer = 90
+	at.get_tree().root.add_child(layer)
+	var catcher := Control.new()
+	full_rect(catcher)
+	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	catcher.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and (e as InputEventMouseButton).pressed:
+			layer.queue_free())
+	layer.add_child(catcher)
+	var tip := PanelContainer.new()
+	var ts := box(Color(0.05, 0.045, 0.055, 0.96), 0, 1, ACCENT, 14.0)
+	tip.add_theme_stylebox_override("panel", ts)
+	tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l := label(text, 17, TEXT, "semi")
+	l.name = "HelpTipText"
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(420, 0)
+	tip.add_child(l)
+	catcher.add_child(tip)
+	var vs := at.get_viewport_rect().size
+	var r := at.get_global_rect()
+	tip.reset_size()
+	var sz := tip.get_combined_minimum_size()
+	tip.position = Vector2(clampf(r.position.x, 8.0, vs.x - sz.x - 8.0),
+		r.end.y + 6.0 if r.end.y + 6.0 + sz.y < vs.y - 8.0 else maxf(8.0, r.position.y - sz.y - 6.0))
+	return layer
+
+
 static func panel(color := PANEL, radius := 14, border := 1) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", chamfer(color, clampi(radius, 4, 18), border, Color(1, 1, 1, 0.1), 18.0))

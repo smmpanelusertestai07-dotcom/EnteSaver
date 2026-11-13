@@ -230,14 +230,14 @@ func notice(title: String, text: String) -> void:
 ## in big white caps at the lower left, CARGO CAGE and what START plays under it, the size chips,
 ## TRAINING GROUND's opponent chips, the player's numbers ModeStats, the "?" Help_<m> in the top
 ## right corner; the picked card has a 2 px yellow frame); and a bottom row of dark buttons with an
-## icon and a caps label for the other ways to play (ModeWays: ModeWay_room CUSTOM ROOM and
-## ModeWay_local PLAY WITHOUT INTERNET open FRIENDS on those tabs, ModeWay_help HOW TO PLAY opens
+## icon and a caps label for the other ways to play (ModeWays: ModeWay_rooms CUSTOM ROOM and
+## ModeWay_local PLAY WITHOUT INTERNET open those pages of their own, ModeWay_help HOW TO PLAY opens
 ## the help as a page whose X and back come back here). A tap on a card picks its mode, which START
 ## then plays (kept as the setting "mode"), and closes the page; on TRAINING GROUND's card the
 ## chips pick its opponent too (a bot's level, kept as the setting "difficulty", or the target dummy
 ## for this session: Game.practice), which also picks TRAINING GROUND. A group member gets a notice
 ## instead (the leader picks).
-const MODE_WAYS := [["room", "CUSTOM ROOM", "v_friends"], ["local", "PLAY WITHOUT INTERNET", "v_online"],
+const MODE_WAYS := [["rooms", "CUSTOM ROOM", "v_friends"], ["local", "PLAY WITHOUT INTERNET", "v_online"],
 	["help", "HOW TO PLAY", "v_info"]]
 
 

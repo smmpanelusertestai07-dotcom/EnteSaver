@@ -111,8 +111,34 @@ func run(at: Node) -> int:
 	await at.wait(0.6)
 	_check(lobby.dialogs.modal.find_child("OnlineHead", true, false) != null, "PLAYERS lists who is online (status %s)" % cloud.status)
 	await at.shot("l05_players")
+	_check(lobby.dialogs.modal.find_child("Tab_room", true, false) == null and lobby.dialogs.modal.find_child("Tab_local", true, false) == null,
+		"FRIENDS keeps FRIENDS / REQUESTS / PLAYERS (CUSTOM ROOM and PLAY WITHOUT INTERNET are pages of their own)")
+	# CUSTOM ROOM: the public rooms (made-up cards), the ID field, QUICK JOIN and CREATE.
+	var hub := NetRooms.hub()
+	var rooms_was := hub.cards.duplicate(true)
+	var rnow := int(Time.get_unix_time_from_system())
+	for r: Array in [["tour-r-1", "FRIDAY FIGHTS", "NIGHTFOX21", 1, 1, "FIRST TO 5 · HP 200", false, "314159"],
+			["tour-r-2", "SQUAD NIGHT", "EMBER_7", 4, 5, "FIRST TO 4 · ONE GUN", true, "271828"],
+			["tour-r-3", "SNIPERS ONLY", "VEXA", 2, 4, "FIRST TO 4 · HP 100", false, "161803"]]:
+		var rid := String(r[0]).sha256_text().left(32)
+		hub.cards[rid] = {"id": rid, "name": r[1], "host": r[2], "size": r[3], "filled": r[4], "total": 2 * int(r[3]), "rules": r[5],
+			"pw": r[6], "code": r[7], "ts": rnow - hub.cards.size()}
+	lobby.friends.open("rooms")
+	await at.wait(0.8)
+	var rpage := lobby.dialogs.modal
+	_check(rpage != null and rpage.find_child("PublicRoom_314159", true, false) != null and rpage.find_child("RoomsQuick", true, false) != null
+		and rpage.find_child("RoomsCreate", true, false) != null and rpage.find_child("Tab_friends", true, false) == null
+		and (rpage.find_child("PageTitle", true, false) as Label).text == "CUSTOM ROOM", "CUSTOM ROOM lists the public rooms (own page, no FRIENDS tabs)")
+	await at.shot("l06a_rooms")
+	(rpage.find_child("PublicRoom_271828", true, false) as Button).pressed.emit()
+	await at.wait(0.4)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("RoomPinAsk", true, false) != null, "a room with a password asks for it")
+	await at.shot("l06c_room_password")
+	hub.cards = rooms_was
 	lobby.friends.open("room")
 	await at.wait(0.6)
+	_check(lobby.dialogs.modal.find_child("RoomPublic_yes", true, false) != null and lobby.dialogs.modal.find_child("RoomMap", true, false) != null,
+		"CREATE has the PUBLIC switch and the map tile")
 	await at.shot("l06_room")
 	# A RUNNING room (SQUAD, this phone hosts): the ID and password, the places, CLOSE ROOM and START,
 	# all inside the page's height.
@@ -404,7 +430,7 @@ func _check_mode_page(lobby: Lobby) -> void:
 	_check(absf(ra.position.y - rb.position.y) < 1.0 and ra.end.x < rb.position.x and ra.size.y >= 300.0 and rb.end.x <= vs.x
 		and ra.end.y < ways.get_global_rect().position.y and ways.get_global_rect().end.y <= vs.y,
 		"the mode cards stand side by side above the bottom row, on the screen (%s %s)" % [str(ra), str(rb)])
-	for k: String in ["room", "local", "help"]:
+	for k: String in ["rooms", "local", "help"]:
 		var w := ways.find_child("ModeWay_" + k, true, false) as Button
 		_check(w != null and w.size.y >= UI.TOUCH_MIN and w.get_global_rect().end.x <= vs.x, "the bottom row has %s" % k)
 	var ta := a.find_child("ModeTitle", true, false) as Control

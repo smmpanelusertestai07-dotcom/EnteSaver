@@ -81,9 +81,25 @@ static func _room(lf: LobbyFriends, body: VBoxContainer, d: Dictionary) -> void:
 			pin.caret_column = only.length()
 		d.pin = only)
 	body.add_child(_row("PASSWORD", pin))
+	# PUBLIC (default NO: private as before): the room is listed for every player online
+	var pub := HBoxContainer.new()
+	pub.add_theme_constant_override("separation", 18)
+	for o: Array in [[false, "NO (PRIVATE)"], [true, "YES (LISTED)"]]:
+		var on := bool(o[0])
+		var r := radio(String(o[1]), bool(d.get("public", false)) == on)
+		r.name = "RoomPublic_%s" % ("yes" if on else "no")
+		r.pressed.connect(func() -> void:
+			d.public = on
+			lf.redraw_room())
+		pub.add_child(r)
+	body.add_child(_row("PUBLIC", pub, help(lf, "public", "PUBLIC",
+		"YES: every player online sees the room's name, your name and its ID in CUSTOM ROOM while it is open (a password stays yours; with one, they need it to join). NO: only players you give the ID join.")))
+	if bool(d.get("public", false)):
+		pin.placeholder_text = "OPTIONAL"
 	var mode := field("LONE WOLF", false)
 	mode.name = "RoomGameMode"
 	body.add_child(_row("MODE", mode, help(lf, "mode", "MODE", "Custom rooms play LONE WOLF on CARGO CAGE: rounds of one life each, the gun picked as the room's rules say.")))
+	body.add_child(_row("MAP", _map_tile()))
 	var radios := HBoxContainer.new()
 	radios.add_theme_constant_override("separation", 18)
 	for m: Array in [[1, "SOLO (1 VS 1)"], [2, "DUO (2 VS 2)"], [4, "SQUAD (4 VS 4)"]]:
@@ -298,3 +314,21 @@ static func help(lf: LobbyFriends, key: String, title: String, text: String) -> 
 		b.add_theme_stylebox_override(s, st)
 	b.pressed.connect(func() -> void: lf.room_help(title, text))
 	return b
+
+
+## The map: one picture tile (CARGO CAGE, the only map: selected, yellow frame), node RoomMap.
+static func _map_tile() -> Control:
+	var t := Control.new()
+	t.name = "RoomMap"
+	t.custom_minimum_size = Vector2(190, 96)
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pic := UI.texture("mode_lonewolf.jpg")
+	t.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, t.size)
+		if pic:
+			t.draw_texture_rect(pic, r, false)
+		t.draw_rect(Rect2(0, r.end.y - 24, r.size.x, 24), Color(0, 0, 0, 0.62))
+		HudDraw.text(t, "CARGO CAGE", Vector2(r.get_center().x, r.end.y - 12), 15, UI.TEXT, 1, 0, "heavy")
+		t.draw_rect(r.grow(-1.5), UI.ACCENT, false, 3.0)
+		UI.draw_tick_corner(t, r.size, 26.0))
+	return t
