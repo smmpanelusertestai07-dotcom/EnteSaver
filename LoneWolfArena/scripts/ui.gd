@@ -1,20 +1,29 @@
 class_name UI
 extends RefCounted
-## Shared UI kit (original art in a battle-royale menu language): near-black translucent panels,
-## chamfered and slanted shapes, a thin yellow bar before section headers, yellow main buttons
-## with black heavy condensed text, light-grey secondary buttons, yellow outline + tick for the
-## selection, bold condensed caps. Everything is drawn with StyleBoxFlat / polygons (no image
-## skins), so it scales to any screen. Textures (icons, key art) are loaded once and cached.
+## Shared UI kit (original art in a battle-royale menu language): near-black translucent panels
+## with square corners, a small 45-degree cut at the bottom-right of buttons and tabs, a thin
+## yellow bar before section headers, yellow main buttons with black heavy condensed text,
+## light-grey secondary buttons, yellow 2 px frames + tick for the selection, boxed side tabs (the
+## open one yellow with black hazard stripes), bold condensed caps. Everything is drawn with
+## StyleBoxFlat / polygons (no image skins), so it scales to any screen. Textures (icons, key art)
+## are loaded once and cached. The tokens are listed in design/STYLE_SPEC.txt (section 6).
 
-const ACCENT := Color(1.0, 0.76, 0.055)           # main yellow (#FFC20E)
+const ACCENT := Color(0.976, 0.749, 0.024)        # main yellow (#F9BF06)
+const ACCENT_EDGE := Color(0.737, 0.51, 0.0)      # its darker lower edge (#BC8200)
 const GOLD := Color(0.965, 0.71, 0.0)             # victory gold
 const AMBER := Color(0.89, 0.667, 0.16)           # casual mode names
 const BLUE := Color(0.106, 0.569, 0.851)          # own side
 const ORANGE := Color(0.875, 0.447, 0.216)        # enemy side
 const INK := Color(0.07, 0.065, 0.05)             # text on yellow / light buttons
-const PANEL := Color(0.075, 0.07, 0.065, 0.88)    # near-black translucent panels
-const ROW := Color(1, 1, 1, 0.045)                # setting rows on a panel
-const LIGHT := Color(0.851, 0.847, 0.839)         # secondary buttons (#D9D8D6)
+const PANEL := Color(0.067, 0.059, 0.071, 0.9)    # near-black translucent panels (#110F12)
+const ROW := Color(0.13, 0.094, 0.114, 0.62)      # list and setting rows on a page (#21181D, translucent)
+const LIGHT := Color(0.847, 0.847, 0.847)         # secondary buttons (#D8D8D8)
+const TAB_DARK := Color(0.059, 0.031, 0.063, 0.92)  # side tabs and page columns (#0F0810)
+const PAGE_TOP := Color(0.122, 0.094, 0.125)      # full pages: a dark purple-brown ramp (#1F1820 ..
+const PAGE_BOTTOM := Color(0.2, 0.15, 0.27)       # .. #33264A)
+const CHAT_BG := Color(0.086, 0.055, 0.098, 0.97)   # the chat panel (#160E19)
+const BUBBLE := Color(0.078, 0.071, 0.082)        # a chat message bubble (#141215, thin grey border)
+const STATUS_ON := Color(1.0, 0.71, 0.13)         # ONLINE / IN A MATCH in player lists
 const TEXT := Color(0.97, 0.97, 0.96)
 const TEXT_DIM := Color(0.64, 0.64, 0.66)
 const BAD := Color(0.95, 0.30, 0.24)
@@ -160,16 +169,17 @@ static func button(text: String, size := 22, style := "dark", min_size := Vector
 			border = 1
 			border_col = Color(1, 1, 1, 0.3)
 		_:
-			base = Color(0.12, 0.115, 0.11, 0.9)
+			base = Color(0.067, 0.059, 0.071, 0.88)
 			border = 1
+			border_col = Color(1, 1, 1, 0.2)
 	for st in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
 		b.add_theme_color_override(st, fg)
 	b.add_theme_color_override("font_disabled_color", Color(fg, 0.45))
-	var cut := clampi(int(min_size.y * 0.2), 6, 14)
-	var normal := chamfer(base, cut, border, border_col)
+	var cut := clampi(int(min_size.y * 0.16), 6, 11)
+	var normal := chamfer(base, cut, border, border_col, 12.0, ["br"])
 	if style in ["primary", "light"]:
 		normal.border_width_bottom = 3
-		normal.border_color = base.darkened(0.28)
+		normal.border_color = ACCENT_EDGE if style == "primary" else base.darkened(0.3)
 	b.add_theme_stylebox_override("normal", normal)
 	var hover := normal.duplicate() as StyleBoxFlat
 	hover.bg_color = base.lightened(0.08)
@@ -217,17 +227,31 @@ static var margins_for_test := Vector2(-1.0, -1.0)
 ## its offsets follow the cutout now, on a size change and every second (turning the phone over
 ## moves the cutout to the other side without one).
 static func keep_clear_of_cutout(c: Control) -> void:
-	var apply := func() -> void:
-		if c.is_inside_tree():
+	_follow_cutout(c, func() -> void:
+		if is_instance_valid(c) and c.is_inside_tree():
 			var m := safe_margins(c.get_viewport())
 			c.offset_left = m.x
-			c.offset_right = -m.y
+			c.offset_right = -m.y)
+
+
+## The same for a panel whose background runs to the screen's edge: the MarginContainer `m`
+## (inside the panel) pads its content by the cutout on the sides it touches (`left`, `right`).
+static func pad_clear_of_cutout(m: MarginContainer, left := true, right := false) -> void:
+	_follow_cutout(m, func() -> void:
+		if is_instance_valid(m) and m.is_inside_tree():
+			var cut := safe_margins(m.get_viewport())
+			m.add_theme_constant_override("margin_left", int(ceilf(cut.x)) if left else 0)
+			m.add_theme_constant_override("margin_right", int(ceilf(cut.y)) if right else 0))
+
+
+static func _follow_cutout(c: Control, apply: Callable) -> void:
 	var t := Timer.new()
 	t.wait_time = 1.0
 	t.autostart = true
 	t.timeout.connect(apply)
 	c.add_child(t)
 	c.resized.connect(apply, CONNECT_DEFERRED)
+	apply.call()                 # at once when already in the tree (no frame under the cutout)
 	apply.call_deferred()
 
 
@@ -278,17 +302,19 @@ static func _draw_hero(b: Button) -> void:
 	elif b.button_pressed or b.is_pressed():
 		top = top.darkened(0.12)
 		bottom = bottom.darkened(0.12)
-	var pts := chamfer_points(r, cut, ["tl", "br"])
+	var pts := hero_points(r, cut)
 	var cols := PackedColorArray()
 	for p in pts:
 		cols.append(top.lerp(bottom, p.y / maxf(r.size.y, 1.0)))
 	b.draw_polygon(pts, cols)
 	# darker lower lip
-	var lip := Rect2(r.position.x, r.end.y - 4.0, r.size.x - cut, 4.0)
-	b.draw_rect(lip, Color(0, 0, 0, 0.12))
+	var lip := PackedVector2Array([Vector2(0, r.end.y), Vector2(r.size.y * 0.016, r.end.y - 4.0),
+		Vector2(r.size.x - cut + 4.0, r.end.y - 4.0), Vector2(r.size.x - cut, r.end.y)])
+	b.draw_colored_polygon(lip, Color(0, 0, 0, 0.14) if style != "primary" else Color(ACCENT_EDGE, 0.55))
 	# glossy diagonal highlight across the upper-left
-	var g := PackedVector2Array([Vector2(cut, 0), Vector2(r.size.x * 0.52, 0), Vector2(r.size.x * 0.40, r.size.y * 0.48),
-		Vector2(0, r.size.y * 0.48), Vector2(0, cut)])
+	var k := r.size.y * 0.2
+	var g := PackedVector2Array([Vector2(k, 0), Vector2(r.size.x * 0.52, 0), Vector2(r.size.x * 0.40, r.size.y * 0.48),
+		Vector2(k * 0.52, r.size.y * 0.48)])
 	b.draw_colored_polygon(g, Color(1, 1, 1, 0.16 if style != "dark" else 0.05))
 	# chevrons on the right
 	var ink := Color(0, 0, 0, 0.16) if style != "dark" else Color(1, 1, 1, 0.12)
@@ -311,6 +337,14 @@ static func _draw_hero(b: Button) -> void:
 	var outline := pts.duplicate()
 	outline.append(pts[0])
 	b.draw_polyline(outline, Color(0, 0, 0, 0.35) if style != "dark" else Color(1, 1, 1, 0.25), 1.5, true)
+
+
+## The big CTA's outline: the left edge slanted (its foot a fifth of the height in), the
+## bottom-right corner cut.
+static func hero_points(r: Rect2, cut: float) -> PackedVector2Array:
+	var k := r.size.y * 0.2
+	return PackedVector2Array([Vector2(r.position.x + k, r.position.y), Vector2(r.end.x, r.position.y),
+		Vector2(r.end.x, r.end.y - cut), Vector2(r.end.x - cut, r.end.y), Vector2(r.position.x, r.end.y)])
 
 
 ## Corner points of a chamfered rectangle (clockwise from the top-left).
@@ -659,9 +693,9 @@ static func close_button(size := 52.0) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(size, size)
 	b.focus_mode = Control.FOCUS_NONE
-	var st := chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.2), 0.0, ["bl"])
-	var hv := chamfer(Color(1, 1, 1, 0.12), 8, 1, Color(1, 1, 1, 0.35), 0.0, ["bl"])
-	var pr := chamfer(Color(ACCENT, 0.4), 8, 1, ACCENT, 0.0, ["bl"])
+	var st := box(Color(0.05, 0.04, 0.055, 0.82), 0, 1, Color(1, 1, 1, 0.2), 0.0)
+	var hv := box(Color(0.16, 0.15, 0.17, 0.9), 0, 1, Color(1, 1, 1, 0.35), 0.0)
+	var pr := box(Color(ACCENT, 0.4), 0, 1, ACCENT, 0.0)
 	b.add_theme_stylebox_override("normal", st)
 	b.add_theme_stylebox_override("hover", hv)
 	b.add_theme_stylebox_override("pressed", pr)
@@ -669,8 +703,11 @@ static func close_button(size := 52.0) -> Button:
 	b.draw.connect(func() -> void:
 		var c := b.size * 0.5
 		var r := b.size.x * 0.22
-		b.draw_line(c - Vector2(r, r), c + Vector2(r, r), TEXT, 3.0, true)
-		b.draw_line(c + Vector2(-r, r), c + Vector2(r, -r), TEXT, 3.0, true))
+		b.draw_line(c - Vector2(r, r), c + Vector2(r, r), TEXT, 2.5, true)
+		b.draw_line(c + Vector2(-r, r), c + Vector2(r, -r), TEXT, 2.5, true)
+		# the yellow diagonal accent across the top-right corner
+		var k := b.size.x * 0.24
+		b.draw_colored_polygon(PackedVector2Array([Vector2(b.size.x - k, 0), Vector2(b.size.x, 0), Vector2(b.size.x, k)]), ACCENT))
 	b.pressed.connect(func() -> void: Audio.play("ui_back", -4.0))
 	return b
 
@@ -744,10 +781,11 @@ static func popup_header(title: String, size := 26, height := 56.0) -> HBoxConta
 	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	strip.draw.connect(func() -> void:
 		var s := strip.size
-		strip.draw_rect(Rect2(Vector2.ZERO, s), Color(0.925, 0.925, 0.915))
+		strip.draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(s.x, 0), Vector2(s.x, s.y), Vector2(0, s.y)]),
+			PackedColorArray([Color(0.945, 0.945, 0.945), Color(0.945, 0.945, 0.945), Color(0.82, 0.82, 0.82), Color(0.82, 0.82, 0.82)]))
 		var x0 := s.x * 0.62
 		strip.draw_colored_polygon(PackedVector2Array([Vector2(x0 + s.y, 0), Vector2(s.x, 0), Vector2(s.x, s.y - 6),
-			Vector2(x0, s.y - 6)]), Color(0.80, 0.80, 0.79))
+			Vector2(x0, s.y - 6)]), Color(0.76, 0.76, 0.76, 0.6))
 		strip.draw_line(Vector2(s.x - 54, 3), Vector2(s.x - 14, s.y - 9), Color(0.55, 0.55, 0.54), 1.0, true)
 		draw_hazard(strip, Rect2(0, s.y - 6, s.x * 0.74, 6), 5.0, ACCENT, Color(0.09, 0.08, 0.06)))
 	h.add_child(strip)
@@ -762,7 +800,7 @@ static func popup_header(title: String, size := 26, height := 56.0) -> HBoxConta
 	close.name = "Close"
 	close.custom_minimum_size = Vector2(height + 4, height)
 	close.focus_mode = Control.FOCUS_NONE
-	var st := box(Color(0.10, 0.095, 0.09), 0, 0, Color.TRANSPARENT, 0.0)
+	var st := box(Color(0.09, 0.08, 0.1), 0, 0, Color.TRANSPARENT, 0.0)
 	var pr := box(Color(ACCENT, 0.45), 0, 0, Color.TRANSPARENT, 0.0)
 	close.add_theme_stylebox_override("normal", st)
 	close.add_theme_stylebox_override("hover", box(Color(0.18, 0.17, 0.16), 0, 0, Color.TRANSPARENT, 0.0))
@@ -785,7 +823,7 @@ static func popup_header(title: String, size := 26, height := 56.0) -> HBoxConta
 ## the accent corner mark bottom-right. Add the content to the returned panel.
 static func popup_body() -> PanelContainer:
 	var body := PanelContainer.new()
-	var st := box(Color(0.075, 0.072, 0.068, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
+	var st := box(Color(0.094, 0.082, 0.11, 0.97), 0, 0, Color.TRANSPARENT, 26.0)
 	st.border_width_left = 1
 	st.border_width_right = 1
 	st.border_width_bottom = 1
@@ -864,3 +902,146 @@ static func gradient_rect(stops: Array, horizontal := false) -> TextureRect:
 	t.stretch_mode = TextureRect.STRETCH_SCALE
 	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return t
+
+
+## A boxed side tab of a full page (FRIENDS, PROFILE): a dark box with a light lower edge; the
+## open one solid yellow with dark text, black hazard stripes down its left edge and a cut corner.
+## Call it again with `on` to restyle (style_side_tab).
+static func side_tab(text: String, on: bool, size := 22, min_size := Vector2(200, 64)) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.custom_minimum_size = min_size
+	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	b.add_theme_font_override("font", font("heavy"))
+	b.add_theme_font_size_override("font_size", size)
+	b.draw.connect(func() -> void:
+		if b.has_meta("on") and bool(b.get_meta("on")):
+			draw_tab_selected(b, b.size))
+	style_side_tab(b, on)
+	b.pressed.connect(func() -> void: Audio.play("ui_select", -6.0))
+	return b
+
+
+static func style_side_tab(b: Button, on: bool) -> void:
+	b.set_meta("on", on)
+	var base := ACCENT if on else TAB_DARK
+	var st := chamfer(base, 10, 0, Color.TRANSPARENT, 0.0, ["br"])
+	st.content_margin_left = 22
+	st.content_margin_right = 10
+	if not on:
+		st.border_width_bottom = 2
+		st.border_color = Color(1, 1, 1, 0.16)
+	var hover := st.duplicate() as StyleBoxFlat
+	hover.bg_color = base.lightened(0.08) if on else Color(0.16, 0.13, 0.17, 0.95)
+	for state: String in ["normal", "pressed", "hover_pressed", "disabled"]:
+		b.add_theme_stylebox_override(state, st)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var fg := INK if on else TEXT
+	for c: String in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(c, fg)
+	b.queue_redraw()
+
+
+## A tab along the top of a panel (the chat's channels): the open one a light tile with dark text
+## and a hazard stripe down its right edge; the others plain white caps on the panel.
+static func top_tab(text: String, on: bool, size := 22, min_size := Vector2(150, 56)) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = min_size
+	b.add_theme_font_override("font", font("heavy"))
+	b.add_theme_font_size_override("font_size", size)
+	var st := box(Color(0.92, 0.92, 0.92) if on else Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 12.0)
+	var hv := st.duplicate() as StyleBoxFlat
+	if not on:
+		hv.bg_color = Color(1, 1, 1, 0.08)
+	for state: String in ["normal", "pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(state, st)
+	b.add_theme_stylebox_override("hover", hv)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var fg := INK if on else TEXT
+	for c: String in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(c, fg)
+	if on:
+		b.draw.connect(func() -> void:
+			draw_hazard(b, Rect2(b.size.x - 8, 0, 8, b.size.y), 4.0, Color(INK, 0.9), ACCENT))
+	b.pressed.connect(func() -> void: Audio.play("ui_select", -6.0))
+	return b
+
+
+## A yellow underlined link ending in ">>" (ADD FRIEND >>): a flat button on a 56 px touch strip.
+static func link_button(text: String, size := 20) -> Button:
+	var b := Button.new()
+	b.text = text + " >>"
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, TOUCH_MIN)
+	b.add_theme_font_override("font", font("bold"))
+	b.add_theme_font_size_override("font_size", size)
+	for state: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	for c: String in ["font_color", "font_hover_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(c, ACCENT)
+	b.add_theme_color_override("font_pressed_color", ACCENT.lightened(0.3))
+	b.draw.connect(func() -> void:
+		var w := font("bold").get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		var x0 := (b.size.x - w) * 0.5
+		b.draw_line(Vector2(x0, b.size.y * 0.5 + size * 0.62), Vector2(x0 + w, b.size.y * 0.5 + size * 0.62), ACCENT, 1.5))
+	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
+	return b
+
+
+## An empty list's look: a small grey block of hatched stripes, the grey caps line under it and,
+## when `link_text` is set, a yellow link (its Button is the box's "link" meta).
+static func empty_state(text: String, link_text := "") -> VBoxContainer:
+	var v := VBoxContainer.new()
+	v.name = "EmptyState"
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", 10)
+	var mark := Control.new()
+	mark.custom_minimum_size = Vector2(0, 54)
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.draw.connect(func() -> void:
+		var r := Rect2(mark.size.x * 0.5 - 34, 4, 68, 46)
+		draw_hazard(mark, r, 6.0, Color(1, 1, 1, 0.16), Color(1, 1, 1, 0.05))
+		mark.draw_rect(r, Color(1, 1, 1, 0.22), false, 1.5))
+	v.add_child(mark)
+	var l := label(text, 20, TEXT_DIM, "bold")
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(l)
+	if link_text != "":
+		var b := link_button(link_text)
+		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		v.add_child(b)
+		v.set_meta("link", b)
+	return v
+
+
+## A full page's backdrop: the dark purple-brown ramp with a soft warm glow up right.
+static func draw_page_bg(ci: CanvasItem, s: Vector2) -> void:
+	ci.draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(s.x, 0), s, Vector2(0, s.y)]),
+		PackedColorArray([PAGE_TOP, PAGE_TOP.lerp(PAGE_BOTTOM, 0.4), PAGE_BOTTOM, PAGE_TOP.lerp(PAGE_BOTTOM, 0.6)]))
+	ci.draw_texture_rect(radial_glow(Color(0.85, 0.45, 0.25, 0.14)), Rect2(s.x * 0.45, -s.y * 0.35, s.x * 0.7, s.y * 0.9), false)
+
+
+## The search button beside a search box: a white square with a dark magnifier (the reference's
+## search button shape, our own drawing).
+static func search_button(size := 52.0) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(size, size)
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", box(Color(0.92, 0.92, 0.92), 0, 0, Color.TRANSPARENT, 0.0))
+	b.add_theme_stylebox_override("hover", box(Color.WHITE, 0, 0, Color.TRANSPARENT, 0.0))
+	b.add_theme_stylebox_override("pressed", box(ACCENT, 0, 0, Color.TRANSPARENT, 0.0))
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var c := b.size * 0.5 - Vector2(3, 3)
+		var r := b.size.y * 0.2
+		b.draw_arc(c, r, 0.0, TAU, 28, INK, 3.0, true)
+		var d := Vector2(1, 1).normalized()
+		b.draw_line(c + d * (r + 1.0), c + d * (r + b.size.y * 0.2), INK, 4.0, true))
+	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
+	return b

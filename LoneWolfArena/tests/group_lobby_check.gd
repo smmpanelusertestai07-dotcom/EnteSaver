@@ -178,13 +178,14 @@ func _leader(lobby: Lobby) -> void:
 	var plus := lobby.find_child("PodiumInvite", true, false) as Control
 	if plus == null or plus.is_visible_in_tree():
 		_fail("the podium's + plate shows in a full group")
-	var bottom := lobby.find_child("BottomBar", true, false) as Control
+	# (the chat strip sits on the bottom bar: the GROUP bar ends above both)
+	var bottom := lobby.find_child("ChatStrip", true, false) as Control
 	var bar_end := 0.0
 	for c: Node in bar.get_children():
 		if c is Control and (c as Control).visible and not c.is_queued_for_deletion():
 			bar_end = maxf(bar_end, (c as Control).get_global_rect().end.y)
 	if bottom == null or bar_end > bottom.get_global_rect().position.y:
-		_fail("the GROUP bar of 4 runs into the bottom bar (ends at %.0f)" % bar_end)
+		_fail("the GROUP bar of 4 runs into the chat strip over the bottom bar (ends at %.0f)" % bar_end)
 	var code_row := bar.find_child("GroupCodeRow", true, false) as Control
 	if code_row == null or _text(code_row, "GroupCode").length() != 12:
 		_fail("the leader's GROUP bar has no 10-digit code (%s)" % (_text(code_row, "GroupCode") if code_row else "none"))

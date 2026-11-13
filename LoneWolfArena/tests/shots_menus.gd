@@ -101,8 +101,15 @@ func run(at: Node) -> int:
 	var bar := lobby.find_child("BottomBar", true, false) as Control
 	var ward := lobby.find_child("BundlesButton", true, false) as Button
 	var online_btn := lobby.find_child("OnlineButton", true, false) as Button
-	_check(bar != null and ward != null and online_btn != null and ward.text == "WARDROBE" and online_btn.text == "ONLINE 1 VS 1"
-		and bar.is_ancestor_of(ward) and bar.is_ancestor_of(online_btn), "the bottom bar: WARDROBE and ONLINE 1 VS 1")
+	var prof_btn := lobby.find_child("ProfileButton", true, false) as Button
+	_check(bar != null and ward != null and online_btn != null and prof_btn != null and ward.text == "WARDROBE" and online_btn.text == "ONLINE 1 VS 1"
+		and prof_btn.text == "PROFILE" and bar.is_ancestor_of(ward) and bar.is_ancestor_of(online_btn) and bar.is_ancestor_of(prof_btn),
+		"the bottom bar: WARDROBE, PROFILE and ONLINE 1 VS 1")
+	var strip := lobby.find_child("ChatStrip", true, false) as Control
+	var add_btn := lobby.find_child("AddFriendButton", true, false) as Control
+	_check(strip != null and bar != null and strip.get_global_rect().end.y <= bar.get_global_rect().position.y
+		and add_btn != null and add_btn.get_global_rect().position.x > get_viewport().get_visible_rect().size.x * 0.9,
+		"the chat strip sits on the bottom bar, ADD on the right edge")
 	var vs0 := get_viewport().get_visible_rect().size
 	_check(bar != null and bar.get_global_rect().position.x < vs0.x * 0.05 and bar.get_global_rect().end.y > vs0.y * 0.9
 		and bar.get_global_rect().end.x < vs0.x * 0.5, "the bar sits bottom-left")
@@ -118,7 +125,7 @@ func run(at: Node) -> int:
 		"no left menu, stats chips, outfit or version text, no name plate: the name only in the player card")
 	var lum := await _caption_lum(ward)
 	_check(lum >= 230.0, "the bar's captions are drawn bright (WARDROBE max lum %.0f)" % lum)
-	for c: Control in [ward, online_btn, pals, gear]:
+	for c: Control in [ward, prof_btn, online_btn, pals, gear, strip, add_btn]:
 		_check(c.size.y >= UI.TOUCH_MIN and c.size.x >= UI.TOUCH_MIN, "%s is a full touch target" % c.name)
 	# Drag on the character turns it.
 	var model := lobby.get("model") as Node3D
