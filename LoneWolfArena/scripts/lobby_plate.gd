@@ -95,7 +95,7 @@ func place() -> bool:
 ## The plate's width for its name: the level square, the flag, the name and the glyph.
 func _fit() -> void:
 	var w := 3.0 + (SIZE.y - 6.0) + 6.0 + (20.0 if leader else 0.0) + HudDraw.text_width(player_name, 18, "heavy") \
-		+ (LEAVE_W if can_leave else 10.0)
+		+ (LEAVE_W if can_leave else 8.0) + 6.0
 	size = Vector2(clampf(ceilf(w), 96.0, SIZE.x), SIZE.y)
 
 
