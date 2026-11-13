@@ -541,9 +541,9 @@ func _tour_modes(lobby: Node) -> void:
 	await _settle(0.5)
 	# (The TEAM bar became LONE WOLF's GROUP bar in 1.5: TRAINING GROUND's DUO plays with bots and
 	# shows no group bar; tests/group_lobby_check.gd checks the bar.)
-	var group_bar := lobby.find_child("GroupBar", true, false) as Control
+	var group_bar := lobby.find_child("TeamBar", true, false) as Control
 	_check(Game.team_size == 2 and _label_text(card, "ModeFormat") == "DUO  ·  BOT: NORMAL" and group_bar != null
-		and not group_bar.is_visible_in_tree(), "TRAINING DUO: the mode card says so, no GROUP bar (bot teammates)")
+		and not group_bar.is_visible_in_tree(), "TRAINING DUO: the mode card says so, no TEAM bar (bot teammates)")
 	await _at.shot("m02f_lobby_duo")
 	# The team-size box from the figure at the card's right end: DUO lit; SOLO there picks SOLO.
 	await _tap(card.find_child("SizeBoxButton", true, false) as Control)

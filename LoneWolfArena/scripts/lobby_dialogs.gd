@@ -783,10 +783,11 @@ func _size_tile(m: String, n: int, may := true) -> Button:
 	var lit := n == Game.team_size
 	b.draw.connect(func() -> void:
 		var sz := b.size
-		b.draw_rect(Rect2(Vector2.ZERO, sz), Color(1, 1, 1, 0.1) if b.is_pressed() else Color(0, 0, 0, 0.5))
+		var a := 1.0 if may else 0.5          # a member's tiles: read-only, dimmed like the tick rows
+		b.draw_rect(Rect2(Vector2.ZERO, sz), Color(1, 1, 1, 0.1 * a) if b.is_pressed() else Color(0, 0, 0, 0.5 * a))
 		# the figures: one for SOLO, two for DUO, four (two rows deep) for SQUAD
 		var fig := HudDraw.tex("v_player")
-		var ink := UI.ACCENT if lit else Color(1, 1, 1, 0.9)
+		var ink := Color(UI.ACCENT if lit else Color(1, 1, 1, 0.9), a * (UI.ACCENT.a if lit else 0.9))
 		var spots: Array = [[Vector2(0, 0), 1.0]]
 		if n == 2:
 			spots = [[Vector2(-11, 0), 1.0], [Vector2(11, 0), 1.0]]
@@ -794,17 +795,17 @@ func _size_tile(m: String, n: int, may := true) -> Button:
 			spots = [[Vector2(-17, -5), 0.8], [Vector2(17, -5), 0.8], [Vector2(-7, 2), 0.95], [Vector2(9, 2), 0.95]]
 		for sp: Array in spots:
 			HudDraw.icon(b, fig, Vector2(sz.x * 0.5, sz.y * 0.32) + (sp[0] as Vector2), Vector2(34, 34) * float(sp[1]), ink)
-		HudDraw.text(b, String(words[0]), Vector2(sz.x * 0.5, sz.y * 0.66), 19, UI.ACCENT if lit else UI.TEXT, 1, 0, "heavy")
+		HudDraw.text(b, String(words[0]), Vector2(sz.x * 0.5, sz.y * 0.66), 19, Color(UI.ACCENT if lit else UI.TEXT, a), 1, 0, "heavy")
 		var sub := String(words[1])
 		var fs := 12
 		while fs > 9 and HudDraw.text_width(sub, fs, "bold") > sz.x - 10.0:
 			fs -= 1
-		HudDraw.text(b, sub, Vector2(sz.x * 0.5, sz.y * 0.86), fs, UI.TEXT_DIM, 1, 0, "bold")
+		HudDraw.text(b, sub, Vector2(sz.x * 0.5, sz.y * 0.86), fs, Color(UI.TEXT_DIM, UI.TEXT_DIM.a * a), 1, 0, "bold")
 		if lit:
-			b.draw_rect(Rect2(Vector2(1.5, 1.5), sz - Vector2(3, 3)), UI.ACCENT, false, 3.0)
+			b.draw_rect(Rect2(Vector2(1.5, 1.5), sz - Vector2(3, 3)), Color(UI.ACCENT, a), false, 3.0)
 			UI.draw_tick_corner(b, sz, 26.0)
 		else:
-			b.draw_rect(Rect2(Vector2(0.5, 0.5), sz - Vector2(1, 1)), Color(1, 1, 1, 0.18), false, 1.0))
+			b.draw_rect(Rect2(Vector2(0.5, 0.5), sz - Vector2(1, 1)), Color(1, 1, 1, 0.18 * a), false, 1.0))
 	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
 		b.connect(sig, b.queue_redraw)
 	b.pressed.connect(func() -> void:
