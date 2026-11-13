@@ -68,6 +68,7 @@ signal directory_changed               # a player card came in (the ALL PLAYERS 
 signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
 signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk audio (a NetVoice frame)
 signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
+signal group_chat_changed               # a TEAM / ROOM chat message came in or went out (NetChat.group_*)
 signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching player's "seek" (NetMatch)
 ## GROUPS and all-human team matches (design/GROUPS.txt section 3; the lobby uses only these):
 signal group_changed                   # members, leader, sides, status or search progress changed
@@ -168,6 +169,7 @@ var directory := {}
 var room_code := ""            # custom room this phone hosts: 6 digits ("" = none)
 var room_pin := ""             # its password (digits)
 var room_rules := {}
+var _gchat_ms := 0             # when this phone last sent a TEAM / ROOM chat line
 var joined_rules := {}         # the rules of the room this phone joined (its host's roster: RoomRules.text)
 var room_guest := {}           # {"id", "name"}: who joined it with the right password
 var join_state := ""           # custom room this phone joins: "", "asking", "in", "wrong", "full", "none"
@@ -2241,6 +2243,43 @@ func send_friend_chat(id: String, text: String) -> String:
 	return ""
 
 
+## TEAM / ROOM chat: a line to every member of this phone's group (a custom room is one too) over
+## the group room's own end-to-end encryption ("gchat" {x: text, ts}); "" when it went, else why not
+## ("NO GROUP", "OFFLINE", "EMPTY", "WAIT": one a second). Builds before this one ignore "gchat".
+func send_group_chat(text: String) -> String:
+	if _grp.is_empty() or bool(_grp.get("joining", false)):
+		return "NO GROUP"
+	if not _connected:
+		return "OFFLINE"
+	var line := NetChat.clean(text, NetChat.FRIEND_MAX)
+	if line == "":
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _gchat_ms > 0 and now - _gchat_ms < NetChat.FRIEND_RATE_MS:
+		return "WAIT"
+	_gchat_ms = now
+	var ts := int(Time.get_unix_time_from_system())
+	_group_send({"k": "gchat", "x": line, "ts": ts})
+	NetChat.group_add(String(_grp.gid), ts, true, String(Game.profile.name), line)
+	group_chat_changed.emit()
+	return ""
+
+
+## A member's "gchat": cleaned again, at most one a second from each member (the rest dropped).
+func _on_gchat(f: String, d: Dictionary) -> void:
+	if typeof(d.get("x")) != TYPE_STRING or String(d.x).length() > NetChat.FRIEND_MAX * 4:
+		return
+	var line := NetChat.clean(String(d.x), NetChat.FRIEND_MAX)
+	if line == "" or not _bucket("gc" + f, 1.0, 3.0):
+		return
+	var who := "PLAYER"
+	for m: Dictionary in group.members:
+		if String(m.id) == f:
+			who = String(m.get("name", "PLAYER"))
+	NetChat.group_add(String(_grp.gid), int(Time.get_unix_time_from_system()), false, who, line)
+	group_chat_changed.emit()
+
+
 ## A friend's public key: from the lobby, their player card or their last message.
 func friend_key(id: String) -> String:
 	if peers.has(id):
@@ -3874,6 +3913,8 @@ func _on_group(payload: PackedByteArray) -> void:
 		"gslot":
 			if leader == my_id and in_room():
 				_on_gslot(f, d)
+		"gchat":
+			_on_gchat(f, d)
 
 
 ## The room's host: a player taps an empty place ("gslot" {"t": team, "s": the roster slot}); a

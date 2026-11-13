@@ -837,14 +837,16 @@ func _build_chat_strip(root: Control) -> void:
 		for i in 3:
 			strip.draw_circle(b.position + Vector2(8 + i * 7, b.size.y * 0.5), 2.2, UI.INK)
 		strip.draw_rect(Rect2(58, strip.size.y * 0.5 - 12, 2, 24), Color(1, 1, 1, 0.5))
-		var n := NetChat.unread_total()
+		var n := NetChat.unread_total() + _group_unread()
 		if n > 0:
 			strip.draw_circle(r.position + Vector2(48, 4), 9.0, UI.BAD)
 			strip.draw_string(UI.font("bold"), r.position + Vector2(39, 9), str(mini(n, 9)), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE))
 	strip.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
 		var who := chat_ticker_friend()
-		if who == "":
+		if Game.cloud and Game.cloud.in_group():
+			LobbyNet.open_group(self)          # in a team (or a room): its chat first, as the reference's
+		elif who == "":
 			_open_friends("friends")
 		else:
 			LobbyNet.open(self, who, String(Game.profile.friends[who].name), ""))
@@ -887,12 +889,27 @@ func _refresh_chat_strip() -> void:
 			var m: Array = msgs.back()
 			text = "[FRIEND] %s: %s" % [String(Game.profile.name) if bool(m[1]) else String(Game.profile.friends[who].name),
 				NetChat.first_words(String(m[2]), 40)]
-	var key := text + "|" + str(NetChat.unread_total())
+	if Game.cloud and Game.cloud.in_group():
+		# In a team (or a custom room): its newest line, or how to start one.
+		var gm := NetChat.group_messages(String(Game.cloud.group.get("gid", "")))
+		var tag := LobbyNet.group_title()
+		text = "[%s] TAP TO CHAT WITH YOUR %s" % [tag, tag]
+		if not gm.is_empty():
+			var g: Array = gm.back()
+			text = "[%s] %s: %s" % [tag, String(g[2]), NetChat.first_words(String(g[3]), 40)]
+	var key := text + "|" + str(NetChat.unread_total() + _group_unread())
 	if key == _chat_shown:
 		return
 	_chat_shown = key
 	(strip.get_node("ChatTicker") as Label).text = text
 	strip.queue_redraw()
+
+
+## The TEAM / ROOM chat's unread lines (0 out of a group).
+func _group_unread() -> int:
+	if Game.cloud == null or not Game.cloud.in_group():
+		return 0
+	return NetChat.group_unread(String(Game.cloud.group.get("gid", "")))
 
 
 ## ADD (right side, as the reference's add-friend button): a person with a plus over its caption;

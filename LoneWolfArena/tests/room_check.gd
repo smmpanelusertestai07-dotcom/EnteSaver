@@ -3,7 +3,7 @@ extends Node
 ## tools/qa/run_checks.sh). The guest (LW_NET_ROLE=guest) asks the host to be friends and the host
 ## accepts; each phone lists the other's signed player card (v2: picture, banner, level and
 ## signature, kept by the broker) and sees a new banner arrive once the other phone changes it;
-## the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
+## the host opens room 424242 (ROOM chat: the guest says hi, the host answers) with password 4821 and rules (first to 1, unlimited walls
 ## and ammo, and this build's RoomRules off their defaults: HP 100, speed 125%, jump 150%, one gun
 ## the whole match (the sniper), no aim assist, a room name); the guest tries a wrong password (refused), then the right one; the host sees it in
 ## the room and starts; both play the match with the room's rules (the host's walls never run out)
@@ -93,6 +93,13 @@ func run(autotest: Node) -> int:
 			return _done("nobody joined the room")
 		if String(cloud.room_guest.id) != other:
 			_fail("the wrong player joined the room")
+		# ROOM chat (the room's group, end to end encrypted with its key): the guest's line arrives
+		# with its name, the host answers.
+		if not await _until(func() -> bool: return _room_lines(cloud, false).size() > 0, 20.0):
+			_fail("the guest's ROOM chat line never arrived")
+		else:
+			at.log_line("room chat here: %s" % str(_room_lines(cloud, false)))
+		await _say(cloud, "welcome in")
 		await at.wait(1.0)
 		if not cloud.start_room_match():
 			return _done("the room's match did not start")
@@ -109,6 +116,11 @@ func run(autotest: Node) -> int:
 			_fail("the room's rules never reached the joiner before the start (%s)" % str(cloud.room_rules_now()))
 		elif String(cloud.room_rules_now().name) != "CHECK ROOM":
 			_fail("the room's name did not come with its rules")
+		await _say(cloud, "hi host")
+		if not await _until(func() -> bool: return _room_lines(cloud, false).any(func(m: Array) -> bool: return String(m[3]) == "WELCOME IN"), 15.0):
+			_fail("the host's ROOM chat answer never arrived")
+		else:
+			at.log_line("room chat here: %s" % str(_room_lines(cloud, false)))
 	if not await _until(func() -> bool: return started[0], 30.0):
 		return _done("no session")
 	if not await _until(func() -> bool: return get_tree().current_scene != null and get_tree().current_scene.name == "Arena", 30.0):
@@ -162,6 +174,22 @@ func run(autotest: Node) -> int:
 		_fail("guest should lose")
 	await at.wait(1.0)
 	return _done("")
+
+
+## The ROOM chat's lines here (mine or theirs).
+func _room_lines(cloud: Cloud, mine: bool) -> Array:
+	return NetChat.group_messages(String(cloud.group.get("gid", ""))).filter(func(m: Array) -> bool: return bool(m[1]) == mine)
+
+
+## Sends a ROOM chat line (again while the room is still being joined or a second has not passed).
+func _say(cloud: Cloud, text: String) -> void:
+	var why := "?"
+	for _i in 20:
+		why = cloud.send_group_chat(text)
+		if why == "":
+			return
+		await at.wait(0.5)
+	_fail("the ROOM chat line could not be sent (%s)" % why)
 
 
 ## Waits (game time) until cond() is true or `seconds` pass; returns whether it came true.
