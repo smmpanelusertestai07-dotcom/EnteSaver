@@ -395,6 +395,12 @@ func run(at: Node) -> int:
 		var rs := await _results_scene(r)
 		await _settle(2.8)
 		await at.shot("m16_results_%s" % String(r.kind))
+		_check(_find_label(rs, String(r.mode)) != null, "the results name the mode %s (%s)" % [r.mode, r.kind])
+		# Page 2 (the tables, EnemyRow among them): CONTINUE turns to it (results in two pages).
+		await _tap(rs.find_child("Continue", true, false) as Control)
+		await _settle(0.5)
+		_check(rs.page == 2, "CONTINUE turns the results to their tables (%s)" % r.kind)
+		await at.shot("m16b_results_%s_tables" % String(r.kind))
 		if String(r.kind) == "online":
 			_check(rs.find_child("Rematch", true, false) != null and rs.find_child("AddFriend", true, false) != null
 				and rs.find_child("PlayAgain", true, false) == null and rs.find_child("Lobby", true, false) != null,
@@ -402,10 +408,11 @@ func run(at: Node) -> int:
 		else:
 			_check(rs.find_child("PlayAgain", true, false) != null and rs.find_child("Lobby", true, false) != null, "results buttons PlayAgain + Lobby (%s)" % r.kind)
 		_check(rs.find_child("EnemyRow", true, false) != null, "the opponent's row comes from the scoreboard (%s)" % r.kind)
-		_check(_find_label(rs, String(r.mode)) != null, "the results name the mode %s (%s)" % [r.mode, r.kind])
 		if String(r.kind) == "online":
-			_check(_find_label(rs.find_child("EnemyRow", true, false), "ONLINE") != null and not _texts(rs).contains("BOT"),
-				"an online opponent is ONLINE, never a BOT level")
+			# (on page 2, where EnemyRow is: _find_label wants it shown)
+			var bot_words := Array(_texts(rs).split("|")).filter(func(w: String) -> bool: return w.contains("BOT"))
+			_check(_find_label(rs.find_child("EnemyRow", true, false), "ONLINE") != null and bot_words.is_empty(),
+				"an online opponent is ONLINE, never a BOT level %s" % str(bot_words))
 	# LOBBY tap, back on results, PLAY AGAIN tap.
 	var rs2 := await _results_scene(_sample("defeat"))
 	await _settle(0.6)
