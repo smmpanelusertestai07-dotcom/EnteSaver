@@ -438,7 +438,7 @@ func _start_prep() -> void:
 		pick_note = "WEAPON: " + String(Weapons.DEFS[forced].name)
 	else:
 		hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
-	if round_index == 1 and int(Game.profile.matches) < 3:
+	if round_index == 1 and int(Game.profile.matches) < 1:      # (the profile's first match only)
 		hud.tips_time = 9.0
 	Game.mark("prep started")
 

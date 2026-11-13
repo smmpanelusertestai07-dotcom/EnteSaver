@@ -987,7 +987,7 @@ func _start_prep() -> void:
 				_bot_pick_t = _rng.randf_range(2.5, 5.0)      # (long enough to see the panel it watches)
 	else:
 		pick_note = "WEAPON: " + String(player.gun().def.name)
-	if round_index == 1 and int(Game.profile.matches) < 3:
+	if round_index == 1 and int(Game.profile.matches) < 1:      # (the profile's first match only)
 		hud.tips_time = 9.0
 	Game.mark("prep started")
 

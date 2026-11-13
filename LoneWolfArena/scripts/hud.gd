@@ -41,6 +41,8 @@ const ROUND_BANNER_TIME := 1.9
 ## RoundRules.BREAK_RESULT_AT), small and without a pop, like the reference's streak icon.
 const KILL_BANNER_TIME := 2.3
 const KILL_X_TIME := 0.9
+## The first match's tips (our words): small yellow labels under the buttons they name.
+const TIPS := [["joystick", "MOVE"], ["fire_r", "HOLD TO FIRE · DRAG TO AIM"], ["wall", "TAP: SHIELD WALL"]]
 const SPRINT_PUSH := 1.0           # joystick deflection (in ring radii) that counts as past the ring
 const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint locks (pushing further = run)
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
@@ -2389,14 +2391,17 @@ func _draw_tips(vs: Vector2, u: float) -> void:
 	if tips_time <= 0.0 or panels.pick_open or match_over:
 		return
 	var a := clampf(tips_time, 0.0, 1.0)
-	var fs := int(0.027 * u)
-	var l1 := "LEFT SIDE: MOVE  ·  RIGHT SIDE: DRAG TO AIM"
-	var l2 := "HOLD FIRE AND DRAG IT TO AIM WHILE SHOOTING"
-	var w := maxf(HudDraw.text_width(l1, fs), HudDraw.text_width(l2, fs)) + 0.08 * u
-	var r := Rect2(vs.x * 0.5 - w * 0.5, vs.y * 0.6, w, 0.1 * u)
-	draw_rect(r, Color(0, 0, 0, 0.5 * a))
-	HudDraw.text(self, l1, Vector2(vs.x * 0.5, r.position.y + r.size.y * 0.3), fs, Color(1, 1, 1, a), 1, 0, "bold")
-	HudDraw.text(self, l2, Vector2(vs.x * 0.5, r.position.y + r.size.y * 0.72), fs, Color(HudDraw.YELLOW, a), 1, 0, "bold")
+	for tip: Array in TIPS:
+		var id := String(tip[0])
+		if not layout.has(id):
+			continue
+		var w: Dictionary = layout[id]
+		var c := HudLayout.center(w, vs)
+		var r := HudLayout.radius(w, vs)
+		var at := c + Vector2(0, r + 0.022 * u)
+		if at.y > vs.y - 0.02 * u:
+			at = c - Vector2(0, r + 0.022 * u)
+		HudDraw.text(self, String(tip[1]), at, int(0.02 * u), Color(HudDraw.YELLOW, a), 1, 3, "bold")
 
 
 # ---------------------------------------------------------------- editor preview
