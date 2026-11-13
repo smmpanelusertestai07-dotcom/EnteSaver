@@ -498,6 +498,16 @@ func _test_hud_layout() -> void:
 			"three non-overlapping weapon slots on %s" % vs)
 		_check(main.end.y <= slots[0].position.y and screen.encloses(main.merge(slots[2])), "weapon panel: main slot above the small ones, on screen (%s)" % vs)
 	_check(HudLayout.center(def.fire_r, Vector2(1560, 720)).x > 1200.0, "layout scales to wide (19.5:9) screens")
+	# The settings pictures' callouts (SettingsPanel.SPOTS, measured on a 1280x720 picture) ring the
+	# default HUD's buttons.
+	var pic := Vector2(1280, 720)
+	var off_spot := PackedStringArray()
+	for id: String in ["fire_r", "fire_l", "scope", "freelook", "reload", "swap", "sprint", "joystick"]:
+		var c := HudLayout.center(def[id], pic) / pic
+		var sp: Dictionary = SettingsPanel.SPOTS[id]
+		if absf(c.x - float(sp.x)) > 0.004 or absf(c.y - float(sp.y)) > 0.004 or absf(HudLayout.radius(def[id], pic) / pic.y - float(sp.r)) > 0.004:
+			off_spot.append(id)
+	_check(off_spot.is_empty(), "the settings pictures' callouts sit on the default HUD's buttons %s" % off_spot)
 
 
 ## The default HUD's touch areas never overlap (as HUD._widget_at tests them: round buttons to

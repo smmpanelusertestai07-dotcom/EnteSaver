@@ -394,6 +394,8 @@ func run(at: Node) -> int:
 	await at.wait(0.35)
 	await at.shot("hud_15_kill")
 	_check(not b.alive, "the bot is eliminated", at)
+	_check(Engine.time_scale >= 1.0, "the kill plays at normal speed (no slow motion, as the reference)", at)
+	_check(hud.banner_kind() == "kill" and hud.result_title() == "", "the kill shows the small badge, no result band yet", at)
 	_check(arena.find_children("EliminatedTag*", "Label3D", true, false).size() >= 1, "ELIMINATED floats over the bot's body", at)
 	_check(hud.feed_lines == 1 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
 		"the 1 vs 1 kill feed is one line with the gun's silhouette", at)
@@ -411,7 +413,9 @@ func run(at: Node) -> int:
 	await at.wait(0.3)
 	await at.shot("hud_16b_cutout")
 	_check(HudLayout.minimap_rect(hud.layout.minimap, vs).position.x >= 64.0
-		and HudLayout.hit_rect("wall", hud.layout.wall, vs).position.x >= 64.0, "a camera cutout on the left moves the minimap and WALL off it", at)
+		and HudLayout.hit_rect("medkit", hud.layout.medkit, vs).position.x >= 64.0
+		and HudLayout.hit_rect("settings", hud.layout.settings, vs).position.x >= 64.0,
+		"a camera cutout on the left moves the minimap, the gear and the MEDKIT off it", at)
 	UI.margins_for_test = Vector2(-1, -1)
 	hud._update_safe_area()
 	# The ELIMINATED BY card at the bottom left while the player spectates (held up for the picture).
