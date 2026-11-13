@@ -289,6 +289,9 @@ func face_aim() -> void:
 		model.rotation.y = 0.0
 		if model.aim_mod:
 			model.aim_mod.twist = 0.0
+		if model.is_inside_tree():
+			model.set_aim(aim_pitch, aim_forward())
+			model.place_gun()    # (a shot this frame leaves from the muzzle on the crosshair)
 
 
 ## Each frame: while the body holds, the aim's turn since the last frame goes into body_turn (the
@@ -934,8 +937,11 @@ func _physics_process(delta: float) -> void:
 	_tick_to = global_position
 	if alive and model != null and absf(body_turn) > 0.01:
 		# A body turned away from the aim does not bend its chest after it (it would bend backwards
-		# with the camera in front): the bend fades out with the turn.
-		model.set_aim(aim_pitch * maxf(cos(body_turn), 0.0), aim_forward())
+		# with the camera in front): the bend fades out with the turn. Its gun points the way the
+		# drawn body faces (along the camera it would stick out sideways or through the chest);
+		# face_aim puts it back on the crosshair before a shot.
+		var pitch := aim_pitch * maxf(cos(body_turn), 0.0)
+		model.set_aim(pitch, -(Basis(Vector3.UP, drawn_yaw()) * Basis(Vector3.RIGHT, pitch)).z)
 
 
 ## Where the body is drawn this frame: at more frames than ticks a second, between the last tick's

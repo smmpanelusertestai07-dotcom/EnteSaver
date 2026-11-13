@@ -950,6 +950,12 @@ func _hand_xf() -> Transform3D:
 	return skeleton.global_transform * skeleton.get_bone_global_pose(bone_idx["hand_r"])
 
 
+## Puts the gun at the hand along the aim now (not at the next skeleton update), e.g. after the
+## body turned to the crosshair in this frame.
+func place_gun() -> void:
+	_on_skeleton_updated()
+
+
 func _on_skeleton_updated() -> void:
 	if not is_inside_tree() or weapon_node == null or not weapon_node.top_level:
 		return

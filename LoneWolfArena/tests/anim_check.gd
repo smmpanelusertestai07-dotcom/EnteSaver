@@ -326,11 +326,16 @@ func _check_free_look(arena: Node, p: Player) -> void:
 	_expect(absf(wrapf(p.aim_yaw - aim0 - PI, -PI, PI)) < 0.05, "standing: the drag turned the camera and aim 180 degrees")
 	_expect(_model_fwd(p).dot(body0) > 0.99, "standing: the body kept its facing (%.2f)" % _model_fwd(p).dot(body0))
 	_expect(_flat(cam_fwd).dot(_model_fwd(p)) < -0.95, "standing: the camera looks at the character's face")
+	var gun: Node3D = p.model.weapon_node
+	var has_gun := gun != null and gun.top_level
+	_expect(not has_gun or _flat(-gun.global_basis.z).dot(_model_fwd(p)) > 0.95,
+		"standing: the held body's gun points where the body faces, not along the camera")
 	await at.wait(1.5)
 	_expect(_model_fwd(p).dot(body0) > 0.99, "standing: the body does not turn back by itself")
 	var ammo := p.weapon().ammo
 	p.set_firing(true)
 	_expect(absf(p.body_turn) < 0.001 and _model_fwd(p).dot(_flat(p.aim_forward())) > 0.99, "FIRE turns the body to the crosshair at once")
+	_expect(not has_gun or (-gun.global_basis.z).dot(p.aim_forward()) > 0.99, "and its gun along the crosshair at once")
 	_expect(_flat(-p.camera.global_basis.z).dot(_flat(cam_fwd)) > 0.99, "FIRE keeps the camera where it was")
 	await at.wait(0.3)
 	p.set_firing(false)

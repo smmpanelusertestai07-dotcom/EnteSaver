@@ -220,8 +220,10 @@ listed here. If a part needs something new from the core, add it in its own file
   `BODY_HOLD_SPEED`, not firing, aiming, sprinting, throwing or holding an item) the drawn body keeps
   its facing and `body_turn` (= drawn yaw - aim yaw, also `model.rotation.y`) takes the turn, so
   the camera goes round to the character's face; the head looks toward the aim up to
-  `HEAD_FOLLOW` (`AimSpineModifier.twist`). `face_aim()` zeroes it at once (FIRE, SCOPE, an item in
-  hand, a new round: the shots leave along the crosshair, the camera stays); moving eases it to 0
+  `HEAD_FOLLOW` (`AimSpineModifier.twist`); the held body's gun (`model.set_aim` direction) points
+  the way the drawn body faces, not along the camera. `face_aim()` zeroes it at once and puts the
+  gun on the crosshair (`model.place_gun()`) (FIRE, SCOPE, an item in hand, a new round: the shots
+  leave along the crosshair from that muzzle, the camera stays); moving eases it to 0
   at `BODY_TURN_RATE`. The hit zones follow the drawn bones. `Fighter.drawn_yaw()` (the player's:
   aim + body_turn) is what locomotion plays against. Online the other phone sees the body face
   the aim (body_turn is not sent). The eye button (`freelook_button`, off by default:
