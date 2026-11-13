@@ -26,6 +26,10 @@ var _pad_shown: Label
 var _pad_state: Label
 var _pad_digits := ""
 var _pad_asked := false
+var _scroll: ScrollContainer
+var _sig := ""                           # what the rows show now (_signature): a change refills them
+var _refill_due := false
+const ONLINE_MAX := 5                    # PLAYERS ONLINE rows under the friends
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -171,8 +175,16 @@ func open(tab := "") -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 6)
 	sc.add_child(_list)
+	_scroll = sc
+	_sig = _signature()
 	_fill()
 	UI.drag_scroll(sc, _list)
+	# The rows follow the players: who is online, the friends, player cards (pictures), the group.
+	var cloud := Game.cloud_service()
+	for sig: Signal in [cloud.peers_changed, cloud.directory_changed, cloud.friends_changed, cloud.group_changed]:
+		if not sig.is_connected(_on_changed):
+			sig.connect(_on_changed)
+	modal.tree_exiting.connect(_unlisten)
 	frame.offset_left = 40.0
 	frame.offset_right = 40.0
 	var tw := modal.create_tween().set_parallel()
@@ -180,8 +192,81 @@ func open(tab := "") -> void:
 		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 
 
+func _unlisten() -> void:
+	var cloud := Game.cloud_service()
+	for sig: Signal in [cloud.peers_changed, cloud.directory_changed, cloud.friends_changed, cloud.group_changed]:
+		if sig.is_connected(_on_changed):
+			sig.disconnect(_on_changed)
+	_list = null
+	_scroll = null
+
+
+func _on_changed() -> void:
+	if not _refill_due:
+		_refill_due = true
+		refresh.call_deferred()
+
+
+## The open panel's rows again, where the list was scrolled to; nothing is rebuilt while what they
+## show (_signature) is the same.
+func refresh() -> void:
+	_refill_due = false
+	if _list == null or not is_instance_valid(_list) or not _list.is_inside_tree():
+		return
+	var sig := _signature()
+	if sig == _sig:
+		return
+	_sig = sig
+	var keep := _scroll.scroll_vertical if _scroll and is_instance_valid(_scroll) else 0
+	for c in _list.get_children():
+		_list.remove_child(c)
+		c.queue_free()
+	_fill()
+	rebuilds += 1
+	if _scroll and is_instance_valid(_scroll):
+		(func() -> void:
+			if _scroll and is_instance_valid(_scroll):
+				_scroll.scroll_vertical = keep).call_deferred()
+
+
+var rebuilds := 0                        # times the open panel's rows were made again (tests)
+
+
+## What the rows show: the players listed, each with online / in a match / in the group, picture,
+## level and friend-request state, plus whether this player may invite.
+func _signature() -> String:
+	var cloud := Game.cloud_service()
+	var out := [_tab, _query, LobbyTeam.is_leader(), LobbyTeam.members().size()]
+	var mates := LobbyTeam.members().map(func(m: Dictionary) -> String: return String(m.id))
+	var ids: Array = Game.profile.friends.keys() if _tab == "friends" else Game.profile.get("recent", []).map(
+		func(r: Variant) -> String: return String((r as Dictionary).get("id", "")) if r is Dictionary else "")
+	if _tab == "friends":
+		ids = ids + online_players(cloud)
+	for id: String in ids:
+		var card: Dictionary = cloud.directory.get(id, {})
+		var on := cloud.peers.has(id)
+		out.append([id, Game.is_blocked(id), Game.is_friend(id), on, on and cloud.peer_in_match(id), mates.has(id), String(card.get("avatar", "")),
+			int(card.get("level", 0)), cloud.friend_asked(id),
+			String((cloud.peers.get(id, {}) as Dictionary).get("name", "")) if not Game.is_friend(id) else String(Game.profile.friends[id].name)])
+	return JSON.stringify(out)
+
+
+## PLAYERS ONLINE: up to ONLINE_MAX players online now who are not friends, not blocked and not this
+## player (by name).
+func online_players(cloud: Cloud) -> Array:
+	var out: Array = []
+	for id: String in cloud.peers:
+		if id == cloud.my_id or id == "" or Game.is_friend(id) or Game.is_blocked(id):
+			continue
+		out.append(id)
+	out.sort_custom(func(a: String, b: String) -> bool:
+		return String((cloud.peers[a] as Dictionary).get("name", "")) < String((cloud.peers[b] as Dictionary).get("name", "")))
+	return out.slice(0, ONLINE_MAX)
+
+
 ## The rows: FRIENDS (online first, never blocked ones) or RECENT (the players last met, newest
-## first), filtered by the search.
+## first), filtered by the search; under the friends PLAYERS ONLINE (online_players, each with ADD
+## FRIEND; a tap opens the player's card), hidden when there is none.
 func _fill() -> void:
 	var cloud := Game.cloud_service()
 	var ids: Array = []
@@ -219,6 +304,25 @@ func _fill() -> void:
 			add.name = "SocialAddFriends"
 			add.pressed.connect(func() -> void: lobby.friends.open("online"))
 			_list.add_child(add)
+	if _tab != "friends" or _query != "":
+		return
+	var others := online_players(cloud)
+	if others.is_empty():
+		return
+	var head := UI.label("PLAYERS ONLINE", 15, UI.TEXT_DIM, "bold")
+	head.name = "SocialOnlineHead"
+	_list.add_child(head)
+	for id: String in others:
+		var who := String((cloud.peers[id] as Dictionary).get("name", "PLAYER"))
+		var row := _row(cloud, id, who if who != "" else "PLAYER")
+		row.name = "SocialOnline_" + Cloud.friend_code(id)
+		# (a tap on the row opens the player's card)
+		row.mouse_filter = Control.MOUSE_FILTER_STOP
+		row.gui_input.connect(func(e: InputEvent) -> void:
+			if (e is InputEventMouseButton and (e as InputEventMouseButton).pressed and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT) \
+					or (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed):
+				lobby.profile_ui.open_player(id))
+		_list.add_child(row)
 
 
 ## One player: picture, name, where they are, and the invite "+".

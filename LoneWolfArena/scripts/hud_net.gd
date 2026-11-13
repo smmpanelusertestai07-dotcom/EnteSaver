@@ -41,6 +41,10 @@ var _note_t := 0.0
 var _time := 0.0
 var _field: LineEdit
 var _panel_note: Label
+## The chat's channel in a DUO / SQUAD with human teammates (team_tabs): "team" (the default: only
+## the own team reads it) or "all"; a 1 vs 1 has only "all".
+var channel := "all"
+var _tabs: Dictionary = {}       # "team" / "all" -> the panel's tab Button
 ## An online (or LOCAL) match: chat, voice and the other phone's round trip; false: the ping only.
 var net := true
 
@@ -60,7 +64,8 @@ func _ready() -> void:
 	var cloud := Game.session
 	if cloud == null or not net:
 		return
-	cloud.chat_received.connect(_on_chat)
+	cloud.chat_from.connect(_on_chat_from)
+	channel = "team" if team_tabs() else "all"
 	voice = NetVoice.hub()
 	voice.mic_refused.connect(_on_mic_refused)
 
@@ -68,8 +73,8 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	var cloud := Game.session
 	if cloud and net:
-		if cloud.chat_received.is_connected(_on_chat):
-			cloud.chat_received.disconnect(_on_chat)
+		if cloud.chat_from.is_connected(_on_chat_from):
+			cloud.chat_from.disconnect(_on_chat_from)
 	if voice and is_instance_valid(voice):
 		voice.ptt_held = false
 		if voice.mic_refused.is_connected(_on_mic_refused):
@@ -227,15 +232,46 @@ func _say(text: String) -> void:
 
 # ---------------------------------------------------------------- chat
 
-func _on_chat(text: String) -> void:
-	if feed_muted:
+## Whether the chat has TEAM and ALL: a DUO / SQUAD match with human teammates (Cloud.voice_mates:
+## an all-human match's own side, or the two-phone co-op's other phone).
+func team_tabs() -> bool:
+	var s: Cloud = Game.session
+	return net and s != null and s.in_session and s.voice_mates() > 0
+
+
+## A match chat line with its sender (Cloud.chat_from): never from a muted or blocked player, nor
+## while the feed is muted. A teammate's line carries its number (the team list's colour), an
+## enemy's (ALL) the enemy orange and a small ALL tag.
+func _on_chat_from(text: String, from_id: String, team_only: bool) -> void:
+	if feed_muted or NetVoice.is_muted(from_id) or Game.is_blocked(from_id):
 		return
-	add_line(String(Game.session.opponent.get("name", "PLAYER")) if Game.session else "PLAYER", text, false)
+	var s: Cloud = Game.session
+	var who := "PLAYER"
+	var num := 0
+	var mate := s != null and s.voice_mate(from_id)
+	if s != null and s.session_multi:
+		var mine_team := -1
+		for e: Dictionary in s.session_roster:
+			if String(e.get("id", "")) == s.my_id:
+				mine_team = int(e.get("team", -1))
+		var n := 0
+		for e: Dictionary in s.session_roster:
+			if int(e.get("team", -2)) == mine_team:
+				n += 1
+				if String(e.get("id", "")) == from_id:
+					num = n
+			if String(e.get("id", "")) == from_id:
+				who = String(e.get("name", who))
+	elif s != null:
+		who = String(s.opponent.get("name", who))
+		num = 2 if mate else 0
+	add_line(who, text, false, num if mate else 0, not team_only and team_tabs())
 	Audio.play("ui_click", -6.0)
 
 
-func add_line(who: String, text: String, mine: bool) -> void:
-	feed.append({"who": who, "text": text, "mine": mine, "t": _time})
+## A feed line: `num` the teammate's number (0: none), `all` an ALL line from the other team (tagged).
+func add_line(who: String, text: String, mine: bool, num := 0, all := false) -> void:
+	feed.append({"who": who, "text": text, "mine": mine, "t": _time, "num": num, "all": all})
 	while feed.size() > FEED_LINES:
 		feed.pop_front()
 
@@ -243,13 +279,13 @@ func add_line(who: String, text: String, mine: bool) -> void:
 ## Sends a line (a quick message or the text field's): shown in the feed as YOU, else the panel
 ## says why not (too soon, chat off).
 func send(text: String) -> bool:
-	var why := Game.session.send_chat(text) if Game.session else "OFF"
+	var why := Game.session.send_chat(text, team_tabs() and channel == "team") if Game.session else "OFF"
 	if why == "":
 		add_line("YOU", NetChat.clean(text, NetChat.MATCH_MAX), true)
 		close_panel()
 		return true
 	if _panel_note and is_instance_valid(_panel_note):
-		_panel_note.text = {"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "EMPTY": "TYPE A MESSAGE FIRST"}.get(why,
+		_panel_note.text = {"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "EMPTY": "TYPE A MESSAGE FIRST", "NO TEAM": "NO TEAMMATE TO READ IT"}.get(why,
 			"CHAT IS OFF")
 	return false
 
@@ -269,13 +305,26 @@ func open_panel() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 8)
 	panel.add_child(v)
+	_tabs = {}
+	if team_tabs():
+		# TEAM first (the default), then ALL: where the next line goes.
+		var tabs := HBoxContainer.new()
+		tabs.name = "ChatTabs"
+		tabs.add_theme_constant_override("separation", 6)
+		v.add_child(tabs)
+		for ch: String in ["team", "all"]:
+			var tb := UI.button(ch.to_upper(), 17, "primary" if channel == ch else "dark", Vector2(110, 40))
+			tb.name = "Tab_" + ch
+			tb.pressed.connect(func() -> void: set_channel(ch))
+			tabs.add_child(tb)
+			_tabs[ch] = tb
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 8)
 	v.add_child(top)
 	_field = LineEdit.new()
 	_field.name = "ChatField"
 	_field.max_length = NetChat.MATCH_MAX
-	_field.placeholder_text = "TYPE A MESSAGE"
+	_field.placeholder_text = "TYPE A MESSAGE" if _tabs.is_empty() else ("MESSAGE TO YOUR TEAM" if channel == "team" else "MESSAGE TO EVERYONE")
 	_field.custom_minimum_size = Vector2(300, 52)
 	_field.virtual_keyboard_enabled = true
 	_field.add_theme_font_override("font", UI.font("bold"))
@@ -303,6 +352,31 @@ func open_panel() -> void:
 		b.name = "Quick_%d" % i
 		b.pressed.connect(func() -> void: send(q))
 		grid.add_child(b)
+
+
+## TEAM or ALL for the next line (the panel's tabs).
+func set_channel(ch: String) -> void:
+	if not ch in ["team", "all"] or (ch == "team" and not team_tabs()):
+		return
+	channel = ch
+	for k: String in _tabs:
+		var b: Button = _tabs[k]
+		if is_instance_valid(b):
+			_restyle(b, "primary" if k == ch else "dark")
+	if _field and is_instance_valid(_field):
+		_field.placeholder_text = "MESSAGE TO YOUR TEAM" if ch == "team" else "MESSAGE TO EVERYONE"
+
+
+## A button takes another UI.button style (its boxes and text colours).
+static func _restyle(b: Button, style: String) -> void:
+	var tmp := UI.button(b.text, 17, style, b.custom_minimum_size)
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
+		b.add_theme_stylebox_override(st, tmp.get_theme_stylebox(st))
+	for st: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(st, tmp.get_theme_color(st))
+	b.add_theme_font_override("font", tmp.get_theme_font("font"))
+	b.add_theme_font_size_override("font_size", tmp.get_theme_font_size("font_size"))
+	tmp.free()
 
 
 func close_panel() -> void:
@@ -492,17 +566,31 @@ func _draw_feed() -> void:
 		if age > FEED_S:
 			continue
 		var a := clampf(FEED_S - age, 0.0, 1.0)
+		var num := int(e.get("num", 0))
+		var tag := "ALL" if bool(e.get("all", false)) else ""
+		# [n] (the teammate's number box) or a small ALL tag, then NAME: and the line
+		var lead := 0.0 if num == 0 and tag == "" else (24.0 if num > 0 else HudDraw.text_width(tag, 11) + 10.0) + 6.0
 		var who := String(e.who) + ": "
-		var lines := wrap_words(String(e.text), 16, sr.size.x - 24.0 - HudDraw.text_width(who, 16))
+		var who_w := lead + HudDraw.text_width(who, 16)
+		var lines := wrap_words(String(e.text), 16, sr.size.x - 24.0 - who_w)
 		var h := 24.0 * lines.size()
-		var w := HudDraw.text_width(who, 16)
+		var w := who_w
 		for l: String in lines:
-			w = maxf(w, HudDraw.text_width(who, 16) + HudDraw.text_width(l, 16, "semi"))
+			w = maxf(w, who_w + HudDraw.text_width(l, 16, "semi"))
 		var box := Rect2(sr.get_center().x - w * 0.5 - 10.0, y - 2.0, w + 20.0, h + 4.0)
 		draw_rect(box, Color(0, 0, 0, 0.45 * a))
-		HudDraw.text(self, who, Vector2(box.position.x + 10.0, y + 11.0), 16, Color(UI.BLUE if bool(e.mine) else UI.ORANGE, a), 0, 2)
+		var x := box.position.x + 10.0
+		if num > 0:
+			draw_rect(Rect2(x, y + 1.0, 22.0, 20.0), Color(HudTeam.slot_color(num), a))
+			HudDraw.text(self, str(num), Vector2(x + 11.0, y + 11.0), 14, Color(0.05, 0.05, 0.06, a), 1, 0, "bold")
+		elif tag != "":
+			var tw := HudDraw.text_width(tag, 11) + 10.0
+			draw_rect(Rect2(x, y + 3.0, tw, 16.0), Color(UI.ORANGE, 0.85 * a))
+			HudDraw.text(self, tag, Vector2(x + tw * 0.5, y + 11.0), 11, Color(0.05, 0.05, 0.06, a), 1, 0, "bold")
+		var ink: Color = UI.BLUE if bool(e.mine) else (HudTeam.slot_color(num) if num > 0 else UI.ORANGE)
+		HudDraw.text(self, who, Vector2(x + lead, y + 11.0), 16, Color(ink, a), 0, 2)
 		for i in lines.size():
-			HudDraw.text(self, lines[i], Vector2(box.position.x + 10.0 + HudDraw.text_width(who, 16), y + 11.0 + 24.0 * i), 16,
+			HudDraw.text(self, lines[i], Vector2(box.position.x + 10.0 + who_w, y + 11.0 + 24.0 * i), 16,
 				Color(UI.TEXT, a), 0, 2, "semi")
 		y += h + 8.0
 
