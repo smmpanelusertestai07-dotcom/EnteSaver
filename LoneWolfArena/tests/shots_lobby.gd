@@ -258,6 +258,9 @@ func run(at: Node) -> int:
 	lobby.dialogs.close_modal()
 	lobby.dialogs.open_size_box()
 	await at.wait(0.4)
+	await at.wait(0.1)
+	var add_b := lobby.find_child("AddFriendButton", true, false) as Control
+	_check(add_b != null and not add_b.visible, "the team-size box hides ADD under it")
 	await at.shot("l11_size_box")
 	lobby.dialogs.close_size_box()
 	# LONE WOLF: the GROUP bar.

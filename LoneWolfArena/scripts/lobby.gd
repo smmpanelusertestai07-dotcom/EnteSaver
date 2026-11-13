@@ -127,6 +127,8 @@ var _member_slot := {}
 ## The 2D name plates (scripts/lobby_plate.gd): the hero's and, by member id, the members'.
 var _hero_plate: LobbyPlate
 var _member_plates := {}
+## ADD (AddFriendButton): hidden while the team-size box covers its place.
+var _add_btn: Button
 var _group_gid := ""
 ## In START's place for a member: WAITING FOR <LEADER> TO START (or the group's search).
 var _wait_leader: PanelContainer
@@ -979,6 +981,7 @@ func _build_add_button(root: Control) -> void:
 		Audio.play("ui_click", -4.0)
 		_open_friends("online"))
 	root.add_child(b)
+	_add_btn = b
 
 
 ## One button of the bottom bar: the glyph and the caption, white, accent while pressed.
@@ -1707,6 +1710,8 @@ func _process(delta: float) -> void:
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
 	_place_plates()
+	if _add_btn:
+		_add_btn.visible = dialogs.size_box == null
 	_gate_t -= delta
 	if _gate_t <= 0.0:
 		_gate_t = 0.25
