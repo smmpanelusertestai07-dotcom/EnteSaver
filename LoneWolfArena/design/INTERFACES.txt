@@ -596,7 +596,8 @@ listed here. If a part needs something new from the core, add it in its own file
 - Online extras: ping `NetPing` (a wifi mark + a plain number, white < GOOD_MS, yellow < FAIR_MS,
   red, grey "--"; `NetPing.lobby_chip()` "PingChip", the last item of the lobby top bar's right
   group, after the gear: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
-  `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S`; `Cloud.match_ping()` is the
+  `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S` (an all-human match: members
+  ping the host and the host the members, answers "po" carry "to" = whose ping); `Cloud.match_ping()` is the
   direct round trip while the direct path is up, and HudNet's tag says DIRECT or RELAY). Direct path
   `NetDirect` (scripts/net_direct.gd, setting direct_connect, last row of the ONLINE tab; it sends
   to the best address the other phone answered from: `NetDirect.path_rank`, same network > IPv6 >

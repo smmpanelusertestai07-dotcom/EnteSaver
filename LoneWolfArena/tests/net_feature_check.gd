@@ -108,6 +108,39 @@ func _ping() -> void:
 	_check(b.peer_rtt == -1, "a session's end forgets the opponent's round trip")
 	a.free()
 	b.free()
+	_multi_ping()
+
+
+## An all-human match: the host times its pings by the members' answers, a member only answers the
+## host and takes only the host's answer meant for it ("to"; a "po" without it, from a 1.8 host,
+## still counts).
+func _multi_ping() -> void:
+	var p := _pair()
+	var host: Cloud = p[0]
+	var mem: Cloud = p[1]
+	var other := "c".repeat(32)
+	for c: Cloud in [host, mem]:
+		c.session_multi = true
+		c.session_host_id = host.my_id
+		c._multi = {"ids": {host.my_id: 0, mem.my_id: 1, other: 2}, "seq": {}, "heard": {}, "live": {}, "ka": {}, "joined": {},
+			"left": {}, "state_t": {}, "t0": 0}
+	host.is_host = true
+	var listen := func(_k: String, _d: Array, _f: String) -> void: pass
+	host.event_from.connect(listen)
+	mem.event_from.connect(listen)
+	host._peer_pings = {3: Time.get_ticks_msec() - 80}
+	host._on_room(mem._room_packet({"k": "po", "i": 3, "to": host.my_id}))
+	_check(host.peer_rtt >= 80 and host.peer_rtt < 120, "a team match's host times its ping by a member's answer (%d ms)" % host.peer_rtt)
+	mem._peer_pings = {5: Time.get_ticks_msec() - 60}
+	mem._on_room(host._room_packet({"k": "po", "i": 5, "to": other}))
+	_check(mem.peer_rtt == -1 and mem._peer_pings.has(5), "a member does not take the host's answer to another member")
+	mem._on_room(host._room_packet({"k": "po", "i": 5}))
+	_check(mem.peer_rtt >= 60 and mem.peer_rtt < 100, "a member takes the host's answer (%d ms)" % mem.peer_rtt)
+	mem._pong_budget = 2.0
+	mem._on_room(host._room_packet({"k": "pi", "i": 9}))
+	_check(is_equal_approx(mem._pong_budget, 1.0), "a member answers the host's ping")
+	host.free()
+	mem.free()
 
 
 func _state() -> void:
