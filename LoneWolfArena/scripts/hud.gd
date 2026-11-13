@@ -29,7 +29,7 @@ const GLYPH_SCALE := {
 	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56, "reload": 0.4, "swap": 0.5,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
-	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sidearm", "weapon_sniper", "v_skull"]
+	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sidearm", "weapon_sniper", "v_skull", "v_splat"]
 const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
 const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming, 2 off
 const DMG_LIFE := 0.7
@@ -1517,7 +1517,28 @@ func _draw_vignette(vs: Vector2) -> void:
 	if vig > 0.01:
 		_edge_glow(vs, Color(0.85, 0.04, 0.04, vig), vs.y * 0.24)
 	if _zone_hurt > 0.0:
-		_edge_glow(vs, Color(0.55, 0.15, 0.85, 0.22 * clampf(_zone_hurt / 0.3, 0.0, 1.0)), vs.y * 0.16)
+		_draw_zone_splats(vs, clampf(_zone_hurt / 0.6, 0.0, 1.0))
+
+
+## Zone damage (round 8, like the reference): red splats round the four screen edges (our own splat
+## sprite, v_splat) over a faint red edge glow; they fade in the 0.6 s after the last zone hit.
+const ZONE_SPLATS := [
+	[0.06, 0.1, 0.2, 0.3], [0.32, 0.02, 0.14, 1.9], [0.7, 0.03, 0.16, 4.0], [0.95, 0.12, 0.19, 2.6],
+	[0.02, 0.5, 0.17, 5.1], [0.98, 0.55, 0.16, 0.9], [0.08, 0.93, 0.19, 3.3], [0.4, 0.99, 0.13, 5.8],
+	[0.63, 0.98, 0.15, 1.2], [0.93, 0.92, 0.2, 2.2],
+]
+func _draw_zone_splats(vs: Vector2, a: float) -> void:
+	_edge_glow(vs, Color(0.8, 0.05, 0.04, 0.16 * a), vs.y * 0.12)
+	var t := HudDraw.tex("v_splat")
+	if t == null:
+		return
+	var u := HudLayout.unit(vs)
+	for sp: Array in ZONE_SPLATS:
+		var c := Vector2(float(sp[0]) * vs.x, float(sp[1]) * vs.y)
+		var sz := float(sp[2]) * u * (1.0 + 0.06 * sin(_time * 3.0 + float(sp[3])))
+		draw_set_transform(c, float(sp[3]))
+		HudDraw.icon(self, t, Vector2.ZERO, Vector2(sz, sz), Color(0.78, 0.04, 0.03, 0.62 * a))
+	draw_set_transform(Vector2.ZERO)
 
 
 func _edge_glow(vs: Vector2, col: Color, t: float) -> void:

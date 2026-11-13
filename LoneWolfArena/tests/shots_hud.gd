@@ -381,6 +381,14 @@ func run(at: Node) -> int:
 	p.damaged.emit(9.0, p.global_position + p.global_basis.x * 6.0, false, b)
 	await at.wait(0.25)
 	await at.shot("hud_14_low_hp")
+	# Zone damage: red splats round the edges (round 8), held still for the picture.
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	hud._zone_hurt = 0.6
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	await at.shot("hud_14b_zone_splats")
+	hud._zone_hurt = 0.0
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# Elimination: sniper headshot (hold fire = scope in, release = shot).
 	p.hp = 150.0
 	b.hp = 120.0
