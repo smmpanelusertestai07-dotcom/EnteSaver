@@ -21,6 +21,8 @@ const DIFF := [
 ## now (Arena.zone_at). The circles of stage 2 are nested, so a spot inside that one stays inside
 ## the zone meanwhile; the bot starts heading in that long before the closing begins.
 const ZONE_MARGIN := 2.5
+## EASY / NORMAL: how far over the chest point a chest-aimed shot may stray (under the head box).
+const HEAD_CLEAR_M := 0.12
 const ZONE_AHEAD_S := 8.0
 ## Where the zone is going is this small (m): the bot walks straight to its centre and stands there.
 const ZONE_HOLD_R := 3.0
@@ -155,6 +157,11 @@ func _perceive() -> void:
 			reaction = float(p.reaction) * rng.randf_range(0.8, 1.25)
 			track_time = 0.0
 			aim_head = rng.randf() < float(p.head)
+			# A first sight of a player who has not fired yet: a moment more before the first shot
+			# (NORMAL 0.6-0.9 s, EASY longer; HARD as before), so an idle newcomer is not dropped at GO.
+			if difficulty < 2 and _now() - target.last_shot_time > 3.0:
+				var lo := 0.6 if difficulty == 1 else 0.9
+				reaction = maxf(reaction, rng.randf_range(lo, lo + 0.3))
 
 
 func hear(pos: Vector3, loudness: float) -> void:
@@ -433,6 +440,10 @@ func _aim_and_shoot(delta: float) -> void:
 		var err_m := tan(deg_to_rad(err_deg)) * dist
 		aim_err = aim_err.lerp(Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.6, 0.8), rng.randf_range(-1, 1)).normalized() * err_m * rng.randf(), 0.6)
 	var goal := aim_point + aim_err
+	if difficulty < 2 and not aim_head:
+		# EASY / NORMAL aiming at the chest: the spread stays under the neck, so headshots come
+		# only from the few bursts aimed at the head (p.head), at most about a quarter of hits.
+		goal.y = minf(goal.y, aim_point.y + HEAD_CLEAR_M)
 	var facing_ok := _face_point(goal, delta, 1.0)
 	if reaction > 0.0 or not facing_ok:
 		return

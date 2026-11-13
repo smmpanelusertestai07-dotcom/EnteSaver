@@ -99,6 +99,8 @@ var _starting := false            # both want it: a fresh challenge is on its wa
 var _loading := false             # the rematch's match is loading
 var _invite_ms := 0               # when this phone sends the fresh challenge (0: not now)
 var _await_ms := 0                # until when this phone waits for the other's (0: not waiting)
+const REMATCH_GREY_MS := 5000     # an opponent who left: REMATCH greys out this long after the results open
+var _grey_at_ms := 0
 
 
 func setup(result: Dictionary) -> void:
@@ -232,20 +234,21 @@ func _build() -> void:
 	add_child(head)
 	head.add_child(UI.shadowed(UI.label(String(r.get("mode", Game.mode_name(String(r.get("mode_id", ""))))).to_upper(), 36, UI.TEXT, "heavy")))
 	head.add_child(UI.shadowed(UI.label(String(r.get("map", "CARGO CAGE")).to_upper(), 28, Color(0.72, 0.72, 0.74), "heavy")))
-	var sub := UI.label("VS %s  ·  %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper(),
-		String(r.get("weapon", "")).to_upper()], 16, UI.TEXT_DIM, "bold")
+	# (mode, map and the opponent only: a match of several picks has no one gun to name)
+	var sub := UI.outlined(UI.label("VS %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper()],
+		16, UI.TEXT, "bold"), 4)          # (outlined: readable over page 1's bright stage)
 	head.add_child(UI.spacer(8))
 	head.add_child(sub)
 	# ---- page 1: the character, the medal and the big title with its line, the player's plate.
 	_build_hero_view()
 	_medal = Control.new()
 	_medal.name = "Medal"
-	_medal.anchor_left = 0.72
-	_medal.anchor_right = 0.72
+	_medal.anchor_left = 0.85
+	_medal.anchor_right = 0.85
 	_medal.offset_left = -190
 	_medal.offset_right = 190
-	_medal.offset_top = 6
-	_medal.offset_bottom = 176
+	_medal.offset_top = 70
+	_medal.offset_bottom = 240
 	_medal.pivot_offset = Vector2(190, 85)
 	_medal.scale = Vector2.ONE * MEDAL_SCALE
 	_medal.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -253,24 +256,24 @@ func _build() -> void:
 	if _kind == "defeat":
 		_medal.material = _desaturate()
 	_page1.add_child(_medal)
-	var title := UI.shadowed(UI.outlined(UI.label(_title_text(), 94, Color.WHITE, "italic"), 11, Color(0.06, 0.04, 0.02, 0.95)), Vector2(0, 6), Color(0, 0, 0, 0.45))
+	var title := UI.shadowed(UI.outlined(UI.label(_title_text(), 80, Color.WHITE, "italic"), 11, Color(0.06, 0.04, 0.02, 0.95)), Vector2(0, 6), Color(0, 0, 0, 0.45))
 	title.name = "Title"
-	title.anchor_left = 0.46
-	title.anchor_right = 0.98
-	title.offset_top = 118
-	title.offset_bottom = 236
+	title.anchor_left = 0.25
+	title.anchor_right = 0.75
+	title.offset_top = 52
+	title.offset_bottom = 148
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title.material = Loading.gradient_text_material(pal[0], pal[1], 118.0)
 	title.pivot_offset = Vector2(0, 59)
-	UI.center_italic(title, 94)
+	UI.center_italic(title, 80)
 	_page1.add_child(title)
 	var line := UI.outlined(UI.label(tagline(_kind, _seed()), 22, Color(pal[0]).lerp(Color.WHITE, 0.4), "bold"), 4)
 	line.name = "Tagline"
-	line.anchor_left = 0.46
-	line.anchor_right = 0.98
-	line.offset_top = 236
-	line.offset_bottom = 266
+	line.anchor_left = 0.25
+	line.anchor_right = 0.75
+	line.offset_top = 140
+	line.offset_bottom = 168
 	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_page1.add_child(line)
 	var note := ""
@@ -281,10 +284,10 @@ func _build() -> void:
 	if note != "":
 		var why := UI.outlined(UI.label(note, 17, Color(1, 0.6, 0.55) if _kind == "invalid" else Color(1.0, 0.86, 0.45), "bold"), 4)
 		why.name = "InvalidNote" if _kind == "invalid" else "OpponentLeft"
-		why.anchor_left = 0.46
-		why.anchor_right = 0.98
-		why.offset_top = 268
-		why.offset_bottom = 292
+		why.anchor_left = 0.25
+		why.anchor_right = 0.75
+		why.offset_top = 168
+		why.offset_bottom = 192
 		why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		UI.ellipsis(why)
 		_page1.add_child(why)
@@ -392,9 +395,11 @@ func _am_host() -> bool:
 func _build_hero_view() -> void:
 	# The arena fades back behind page 1 (its own fighter must not read as a second character); a soft
 	# glow in the result's colour stands behind ours.
-	var dim := ColorRect.new()
+	# Round 8: a bright stage of our own behind the hero (a lit hall: pale walls over a warm floor),
+	# not the dimmed arena.
+	var dim := UI.gradient_rect([[0.0, Color(0.56, 0.6, 0.66, 0.97)], [0.55, Color(0.78, 0.8, 0.84, 0.97)],
+		[0.56, Color(0.5, 0.48, 0.44, 0.97)], [1.0, Color(0.3, 0.29, 0.28, 0.97)]])
 	dim.name = "HeroBackdrop"
-	dim.color = Color(0.015, 0.02, 0.045, 0.62)
 	UI.full_rect(dim)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_page1.add_child(dim)
@@ -409,18 +414,18 @@ func _build_hero_view() -> void:
 	var halo := TextureRect.new()
 	halo.texture = gt
 	halo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	halo.anchor_left = 0.02
-	halo.anchor_right = 0.50
-	halo.anchor_top = 0.06
-	halo.anchor_bottom = 0.96
+	halo.anchor_left = 0.26
+	halo.anchor_right = 0.74
+	halo.anchor_top = 0.12
+	halo.anchor_bottom = 0.98
 	halo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_page1.add_child(halo)
 	var box := SubViewportContainer.new()
 	box.name = "HeroView"
-	box.anchor_left = 0.07
-	box.anchor_right = 0.45
-	box.anchor_top = 0.09
-	box.anchor_bottom = 0.84
+	box.anchor_left = 0.3
+	box.anchor_right = 0.7
+	box.anchor_top = 0.2
+	box.anchor_bottom = 0.99
 	box.stretch = true
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_page1.add_child(box)
@@ -434,17 +439,17 @@ func _build_hero_view() -> void:
 	env.background_mode = Environment.BG_CLEAR_COLOR
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.62, 0.66, 0.74)
-	env.ambient_light_energy = 0.42
+	env.ambient_light_energy = 0.8
 	var we := WorldEnvironment.new()
 	we.environment = env
 	vp.add_child(we)
 	var cam := Camera3D.new()
 	cam.fov = 36.0
 	vp.add_child(cam)
-	cam.look_at_from_position(Vector3(0, 1.05, 3.6), Vector3(0, 0.98, 0))
+	cam.look_at_from_position(Vector3(0, 1.0, 3.9), Vector3(0, 0.92, 0))
 	cam.current = true
 	var key := DirectionalLight3D.new()
-	key.light_energy = 0.95
+	key.light_energy = 1.25
 	key.light_color = Color(1.0, 0.93, 0.84)
 	vp.add_child(key)
 	key.look_at_from_position(Vector3(2.0, 3.0, 3.0), Vector3(0, 1, 0))
@@ -471,7 +476,7 @@ func _build_hero_view() -> void:
 	var model := CharacterModel.new()
 	model.name = "HeroModel"
 	vp.add_child(model)
-	model.rotation.y = PI - 0.3              # (faces the camera a little turned, as on the lobby podium)
+	model.rotation.y = PI - 0.15             # (faces the camera, a little turned)
 	model.setup(String(Game.profile.get("bundle", "default")), false)
 	if _kind == "victory":
 		model.play_victory("victory_pose")
@@ -484,38 +489,40 @@ func _hero_plate() -> Control:
 	var r := _result
 	var plate := PanelContainer.new()
 	plate.name = "HeroPlate"
-	plate.anchor_left = 0.54
-	plate.anchor_right = 0.90
-	plate.offset_top = 312
-	plate.offset_bottom = 460
-	var st := UI.chamfer(Color(0.03, 0.05, 0.08, 0.78), 14, 0, Color.TRANSPARENT, 14.0, ["tl", "br"])
+	# Over the hero's chest (round 8, like the reference): x 0.42-0.58, y 0.57-0.67.
+	plate.anchor_left = 0.42
+	plate.anchor_right = 0.58
+	plate.anchor_top = 0.57
+	plate.anchor_bottom = 0.67
+	plate.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	var st := UI.chamfer(Color(0.03, 0.05, 0.08, 0.82), 8, 0, Color.TRANSPARENT, 8.0, ["tl", "br"])
 	plate.add_theme_stylebox_override("panel", st)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", 0)
 	plate.add_child(v)
 	var top := HBoxContainer.new()
 	v.add_child(top)
-	var nm := UI.ellipsis(UI.label(String(Game.profile.get("name", "PLAYER")).to_upper(), 30, UI.TEXT, "heavy"))
+	var nm := UI.ellipsis(UI.label(String(Game.profile.get("name", "PLAYER")).to_upper(), 16, UI.TEXT, "heavy"))
 	nm.name = "HeroName"
 	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(nm)
-	var lv := UI.label("LV %d" % Game.level(), 18, UI.ACCENT, "bold")
+	var lv := UI.label("LV %d" % Game.level(), 12, UI.ACCENT, "bold")
 	lv.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top.add_child(lv)
 	var bar := ColorRect.new()
 	bar.color = Color(UI.BLUE, 0.85)
-	bar.custom_minimum_size = Vector2(0, 3)
+	bar.custom_minimum_size = Vector2(0, 2)
 	v.add_child(bar)
 	var cells := HBoxContainer.new()
-	cells.add_theme_constant_override("separation", 12)
+	cells.add_theme_constant_override("separation", 6)
 	v.add_child(cells)
 	for c: Array in [["ELIMINATIONS", int(r.get("kills", 0)), "HeroKills"], ["DAMAGE", int(r.get("damage", 0)), "HeroDamage"]]:
 		var cell := VBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.add_theme_constant_override("separation", -4)
 		cells.add_child(cell)
-		cell.add_child(UI.label(String(c[0]), 15, UI.TEXT_DIM, "bold"))
-		var n := UI.label(str(c[1]), 46, UI.TEXT, "number")
+		cell.add_child(UI.label(String(c[0]), 10, UI.TEXT_DIM, "bold"))
+		var n := UI.label(str(c[1]), 22, UI.TEXT, "number")
 		n.name = String(c[2])
 		cell.add_child(n)
 	return plate
@@ -690,6 +697,8 @@ func _stat_row(node_name: String, who_name: String, sub: String, values: Array, 
 		if not own:
 			a.modulate = Color(1.0, 0.62, 0.48)
 		who.add_child(a)
+	if sub == "LEFT":
+		who.add_child(left_mark())
 	var nv := VBoxContainer.new()
 	nv.alignment = BoxContainer.ALIGNMENT_CENTER
 	nv.add_theme_constant_override("separation", -4)
@@ -770,6 +779,17 @@ func _build_team_tables() -> void:
 			col.add_child(UI.label("NO PLAYERS", 15, UI.TEXT_DIM, "bold"))
 
 
+## Page 2 (round 8): a small red LEFT mark in front of the row of a player who left the match.
+static func left_mark() -> Control:
+	var l := UI.label("LEFT", 11, Color.WHITE, "bold")
+	l.name = "LeftMark"
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", UI.box(Color(0.82, 0.12, 0.1, 0.95), 0, 0, Color.TRANSPARENT, 3.0))
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	p.add_child(l)
+	return p
+
+
 ## One row of a team table: name (+ a small line under it) then the values, each in its own cell.
 func _team_cells(node_name: String, who: String, sub: String, values: Array, bg: Color, ink: Color, fs: int, h: int) -> Control:
 	var row := PanelContainer.new()
@@ -779,6 +799,8 @@ func _team_cells(node_name: String, who: String, sub: String, values: Array, bg:
 	var rh := HBoxContainer.new()
 	rh.add_theme_constant_override("separation", 0)
 	row.add_child(rh)
+	if sub == "LEFT":
+		rh.add_child(left_mark())
 	var nv := VBoxContainer.new()
 	nv.alignment = BoxContainer.ALIGNMENT_CENTER
 	nv.add_theme_constant_override("separation", -4)
@@ -1004,7 +1026,11 @@ func _build_online() -> void:
 	_rematch.pressed.connect(_on_rematch)
 	add_child(_rematch)
 	if bool(_result.get("opponent_left", false)):
+		# Round 8, like the reference: the button keeps its yellow a moment (it cannot be taken),
+		# then greys out with OPPONENT LEFT over it (_step_rematch, REMATCH_GREY_MS).
 		_set_rematch(_caption(), false)
+		_rematch.modulate.a = 1.0
+		_grey_at_ms = Time.get_ticks_msec() + REMATCH_GREY_MS
 		_say("%s LEFT: NO REMATCH" % _name(), UI.TEXT_DIM)
 	if not _coop_again() and not Game.is_friend(_peer_id) and not Game.is_blocked(_peer_id):
 		var asked := Game.cloud_service().friend_asked(_peer_id)
@@ -1390,6 +1416,11 @@ func _on_add_friend() -> void:
 
 func _step_rematch() -> void:
 	var now := Time.get_ticks_msec()
+	if _grey_at_ms > 0 and now >= _grey_at_ms:
+		_grey_at_ms = 0
+		if _rematch:
+			_rematch.modulate = Color(0.55, 0.55, 0.58, 0.85)
+		_say("OPPONENT LEFT", UI.TEXT_DIM)
 	if _invite_ms > 0 and now >= _invite_ms:
 		_invite_ms = 0
 		_send_challenge()

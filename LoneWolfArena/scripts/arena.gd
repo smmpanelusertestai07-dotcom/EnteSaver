@@ -165,8 +165,8 @@ func _ready() -> void:
 	map_rect = map.map_rect
 	map_name = map.map_name
 	zone_center = map.zone_center
-	zone_start_radius = map.zone_start_radius
 	online = Game.online and Game.session != null and Game.session.in_session
+	zone_start_radius = RoundRules.zone_start_for(map_rect, map.zone_start_radius, online)   # (online: the 1.9.x start, alike on both phones)
 	practice = Game.practice and not online
 	mode = "lonewolf" if online else "training"
 	mode_name = Game.mode_name(mode) + (" · LOCAL" if online and Game.local_match() else "")   # PLAY WITHOUT INTERNET
@@ -876,6 +876,7 @@ func apply_graphics() -> void:
 	var g := int(Game.settings.graphics)
 	if hud:
 		hud.reload_layout()
+	apply_outlines()
 	var wanted := [g, bool(Game.settings.visual_effects)]
 	if wanted == _graphics_on:
 		return
@@ -893,6 +894,19 @@ func apply_graphics() -> void:
 	Effects.configure(g, bool(Game.settings.visual_effects))
 	if map:
 		map.apply_quality(g)
+
+
+## ENEMY OUTLINE (setting enemy_outline): the red outline on every fighter of the other side.
+func apply_outlines() -> void:
+	var on := bool(Game.settings.get("enemy_outline", true))
+	for f: Fighter in fighters:
+		if is_instance_valid(f) and f.model != null:
+			f.model.set_outline(on and is_enemy(f))
+
+
+## Whether `f` is on the other side from the player (the 1 vs 1: the other fighter).
+func is_enemy(f: Fighter) -> bool:
+	return f != player
 
 
 # ---------------------------------------------------------------- match flow
@@ -973,7 +987,7 @@ func _start_prep() -> void:
 				_bot_pick_t = _rng.randf_range(2.5, 5.0)      # (long enough to see the panel it watches)
 	else:
 		pick_note = "WEAPON: " + String(player.gun().def.name)
-	if round_index == 1 and int(Game.profile.matches) < 3:
+	if round_index == 1 and int(Game.profile.matches) < 1:      # (the profile's first match only)
 		hud.tips_time = 9.0
 	Game.mark("prep started")
 
@@ -1333,7 +1347,7 @@ func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	if cause == "left":
 		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "LEFT")
 	elif cause == "zone" or cause == "fall":
-		hud.add_kill_feed(cause.to_upper(), victim.display_name, "", "", false, false)      # (no gun to name)
+		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "ELIMINATED")      # (nobody's kill: no killer)
 	elif cause == "self":
 		hud.add_kill_feed(victim.display_name, victim.display_name, "FRAG", "item_grenade", false, false)
 	else:
@@ -1613,7 +1627,9 @@ func session_up() -> bool:
 
 ## Seconds from the match's end (phase END) to its results.
 func results_delay() -> float:
-	return RESULTS_DELAY_VOID_S if _invalid else RESULTS_DELAY_S
+	if _invalid:
+		return RESULTS_DELAY_VOID_S
+	return RoundRules.results_at(hud != null and hud.result_won())
 
 
 func _on_tampered(reason: String) -> void:

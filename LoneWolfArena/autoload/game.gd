@@ -31,7 +31,7 @@ const TEAMS_ONLINE := true
 ## room sets its own (see rounds_to_win()).
 const ROUNDS_TO_WIN := 5
 
-const SETTINGS_VERSION := 7
+const SETTINGS_VERSION := 8
 const DEFAULT_SETTINGS := {
 	"settings_version": SETTINGS_VERSION,
 	"mode": DEFAULT_MODE,
@@ -53,7 +53,7 @@ const DEFAULT_SETTINGS := {
 	"vibrate_shooting": false,
 	"vibration": true,
 	"aim_precision": 0,           # aim assist: 0 always, 1 not while aiming down a sight, 2 never (Player.assist_allowed)
-	"left_fire": 0,               # the left fire button: 0 always, 1 only while aiming, 2 off (HUD.LEFT_FIRE_OFF)
+	"left_fire": 1,               # the left fire button: 0 always, 1 only while aiming (default, v8), 2 off (HUD.LEFT_FIRE_OFF)
 	"reload_button": true,        # the RELOAD button up and left of FIRE (HUD)
 	"switch_button": true,        # the SWITCH button left of the weapon panel: gun <-> fists
 	"reload_on_crosshair": true,  # the reload's progress ring on the crosshair
@@ -81,7 +81,18 @@ const DEFAULT_SETTINGS := {
 	"team_fill": true,            # the TEAM panel's FILL EMPTY PLACES: a DUO / SQUAD START finds players for the empty places
 	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
 	"direct_connect": true,       # DIRECT CONNECTION: the match state straight to the other phone (NetDirect)
+	# Round 8, the match (SETTINGS > IN-MATCH > CONTROLS / INFORMATION)
+	"wall_quick": true,           # QUICK WALL: one tap on WALL places the shield wall at once (Player.use_shield)
+	"hit_ring": true,             # HIT MARKER: the orange ring bloom (true) or the short ticks (false)
+	"enemy_outline": true,        # ENEMY OUTLINE: a thin red outline on the other side's fighters (CharacterModel)
+	"gunshot_alerts": true,       # GUNSHOT ALERTS: marks toward unseen shooters within 60 m (HUD)
+	"kill_badges": true,          # KILL STREAK BADGES: the elimination badge and streak words (HUD)
+	"damage_numbers": true,       # DAMAGE NUMBERS (fixed on until v8)
+	"dynamic_crosshair": true,    # CROSSHAIR DYNAMIC (widens with the spread) / FIXED (fixed on until v8)
 }
+## Round 8's on / off settings (checked like BOOL_SETTINGS).
+const BOOL_SETTINGS_R8 := ["wall_quick", "hit_ring", "enemy_outline", "gunshot_alerts", "kill_badges", "damage_numbers",
+	"dynamic_crosshair"]
 ## The values of the setting challenges_from (SettingsOnline shows them in this order).
 const CHALLENGES_EVERYONE := 0
 const CHALLENGES_FRIENDS := 1
@@ -93,7 +104,7 @@ const CHALLENGES_NOBODY := 2
 ## turn show_fps on in memory) and a drag that starts on FIRE turns at the view's own sensitivity
 ## (sens_fire 100 %, Player).
 const FIXED_SETTINGS := {
-	"damage_numbers": true, "dynamic_crosshair": true, "show_fps": false, "sens_fire": 100,
+	"show_fps": false, "sens_fire": 100,
 }
 ## Settings that FIXED_SETTINGS held until version 4, whatever the file said: a file from then
 ## has no say in them, they start from their defaults (what version 4 played with).
@@ -391,6 +402,17 @@ func _migrate_settings(saved: Dictionary) -> void:
 		# always north up and never a choice, so every older file starts on the new default
 		# (SETTINGS > DISPLAY > MINIMAP sets NORTH UP back).
 		saved.erase("minimap_turns")
+	if int(version) < 8:
+		# v8: the left fire button shows only while aiming, as the reference ships it. A file that
+		# still has the old default (0, always) never changed it, so it moves to the new default;
+		# a player who had picked OFF keeps it.
+		var lf: Variant = saved.get("left_fire")
+		if (lf is int or lf is float) and int(lf) == 0:
+			saved["left_fire"] = 1
+		# Damage numbers and the dynamic crosshair were fixed on until now: an older file has no
+		# say in them (they start on, INFORMATION turns them off).
+		saved.erase("damage_numbers")
+		saved.erase("dynamic_crosshair")
 
 
 ## Every setting as on a new install (DELETE MY DATA): the defaults, the fixed behaviour, AUTO
@@ -407,7 +429,7 @@ func _sanitize_settings() -> void:
 	for k in SETTING_RANGES:
 		var r: Array = SETTING_RANGES[k]
 		settings[k] = clampi(int(settings[k]), int(r[0]), int(r[1]))
-	for k in BOOL_SETTINGS:
+	for k in BOOL_SETTINGS + BOOL_SETTINGS_R8:
 		if not settings.get(k) is bool:
 			settings[k] = DEFAULT_SETTINGS[k]
 	if not int(settings.fps) in FPS_OPTIONS:

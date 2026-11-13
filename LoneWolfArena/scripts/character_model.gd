@@ -372,6 +372,91 @@ func _fix_materials(mi: MeshInstance3D) -> void:
 			mi.set_surface_override_material(s, sm)
 
 
+## ENEMY OUTLINE (round 8): an inverted hull drawn after each outer body surface (next_pass) in
+## red: unshaded, front faces culled, pushed out along the normals a few mm and at least about
+## 1 px on screen, so a dark outfit on a dark container still reads. Only the skin (Body_*) and
+## outfit (Outfit_*) meshes get it, never the eyes, brows, lashes, hair or any alpha-cut surface
+## (OUTLINE_SKIP). Its depth is pushed back depth_back_m (screen position unchanged), so the
+## hull shows only against what lies well behind the fighter: never through its own face, fingers
+## or clothes. The arena turns it on for the other side's fighters only (never teammates, never
+## the lobby or the results).
+const OUTLINE_SHADER := """
+shader_type spatial;
+render_mode unshaded, cull_front, shadows_disabled, depth_draw_opaque, fog_disabled;
+uniform vec4 color : source_color = vec4(0.95, 0.12, 0.1, 1.0);
+uniform float grow_m = 0.0025;
+uniform float min_px = 1.0;
+uniform float depth_back_m = 0.12;
+void vertex() {
+	VERTEX += NORMAL * grow_m;
+	vec4 view = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
+	vec4 clip = PROJECTION_MATRIX * view;
+	vec3 n = mat3(MODELVIEW_MATRIX) * NORMAL;
+	vec2 dir = (PROJECTION_MATRIX * vec4(n, 0.0)).xy;
+	if (length(dir) > 0.0001) {
+		clip.xy += normalize(dir) * min_px * (VIEWPORT_SIZE.y / 720.0) * 2.0 / VIEWPORT_SIZE * clip.w;
+	}
+	// Depth as if the hull sat depth_back_m further away (x/y unchanged): it loses to the
+	// fighter's own nearby surfaces and wins only against the background.
+	vec4 back = PROJECTION_MATRIX * vec4(view.xy, view.z - depth_back_m, 1.0);
+	clip.z = back.z / back.w * clip.w;
+	POSITION = clip;
+}
+void fragment() {
+	ALBEDO = color.rgb;
+}
+"""
+static var _outline_mat: ShaderMaterial
+var outlined := false
+
+
+static func outline_material() -> ShaderMaterial:
+	if _outline_mat == null:
+		var sh := Shader.new()
+		sh.code = OUTLINE_SHADER
+		_outline_mat = ShaderMaterial.new()
+		_outline_mat.shader = sh
+		_outline_mat.render_priority = -1
+	return _outline_mat
+
+
+## Meshes that never carry the outline (small inner parts and alpha-cut cards: a hull round them
+## would ring the eyes or paint the brows red).
+const OUTLINE_SKIP := ["Eyes", "Eyebrows", "Eyelashes", "Hair", "Teeth", "Tongue"]
+
+
+## True for a mesh that forms the fighter's outer silhouette (skin or outfit) and may be outlined.
+static func outline_mesh_ok(mesh_name: String) -> bool:
+	for k: String in OUTLINE_SKIP:
+		if mesh_name.begins_with(k):
+			return false
+	return mesh_name.begins_with("Body_") or mesh_name.begins_with("Outfit_")
+
+
+## Turns the enemy outline on or off on the outer body surfaces (weapons, kit, eyes, brows, lashes,
+## hair and alpha-cut surfaces stay plain).
+func set_outline(on: bool) -> void:
+	if on == outlined:
+		return
+	outlined = on
+	var mat: Material = outline_material() if on else null
+	for n in meshes:
+		var mi: MeshInstance3D = meshes[n]
+		if mi == null or mi.mesh == null:
+			continue
+		var ok := outline_mesh_ok(String(n))
+		for i in mi.mesh.get_surface_count():
+			var m := mi.get_surface_override_material(i)
+			if m is BaseMaterial3D:
+				var bm := m as BaseMaterial3D
+				bm.next_pass = mat if ok and bm.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED else null
+	if fallback:
+		for c in find_children("*", "MeshInstance3D", true, false):
+			var fm := (c as MeshInstance3D).material_override
+			if fm is BaseMaterial3D and c != weapon_node and not (weapon_node != null and weapon_node.is_ancestor_of(c)):
+				(fm as BaseMaterial3D).next_pass = mat
+
+
 func _anim_node(a_name: String) -> AnimationNodeAnimation:
 	var n := AnimationNodeAnimation.new()
 	n.animation = StringName(a_name if anim.has_animation(a_name) else "idle")

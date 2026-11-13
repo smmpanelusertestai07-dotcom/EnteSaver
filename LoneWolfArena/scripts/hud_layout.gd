@@ -18,9 +18,9 @@ extends RefCounted
 ## right, JUMP right of it and SCOPE over it at the right edge, CROUCH in the bottom-right corner with
 ## PRONE left of it and the GRENADE further left; the WALL up and left of FIRE; SPRINT and the stick
 ## on the left (sprint a little lower than the reference's, clear of the DUO / SQUAD team list
-## under the minimap), the MEDKIT bottom left. The reference's quick reload, quick weapon switch and
-## left fire button are off (or only while aiming) by default (Game.DEFAULT_SETTINGS); when turned on
-## RELOAD and SWITCH sit up and left of the scope, clear of the middle of the screen.
+## under the minimap), the MEDKIT bottom left. The left fire button shows only while aiming by default
+## (Game.DEFAULT_SETTINGS, settings v8, as the reference ships it); RELOAD and SWITCH are on by
+## default (the owner's choice) and sit up and left of the scope, clear of the middle of the screen.
 ## Earlier defaults (v4 from a 20:9 recording, then the later additions FREE LOOK, LEFT FIRE,
 ## PRONE under the weapon panel and SWITCH beside RELOAD) live on only in saved layouts and MOVED.
 ## No two default touch areas overlap from 16:10 to 22:9.

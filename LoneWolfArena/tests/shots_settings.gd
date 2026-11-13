@@ -19,7 +19,7 @@ func run(at: Node) -> int:
 	if sp == null:
 		return _fails
 	var vs := sp.get_viewport_rect().size
-	for page in [6, 2, 1, 7, 0, 3, 4, 5]:
+	for page in [6, 2, 1, 7, 8, 0, 3, 4, 5]:
 		sp._show_tab(page)
 		await at.wait(0.5)
 		var tab_name := String(SettingsPanel.TABS[page]).to_lower()

@@ -438,7 +438,7 @@ func _start_prep() -> void:
 		pick_note = "WEAPON: " + String(Weapons.DEFS[forced].name)
 	else:
 		hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
-	if round_index == 1 and int(Game.profile.matches) < 3:
+	if round_index == 1 and int(Game.profile.matches) < 1:      # (the profile's first match only)
 		hud.tips_time = 9.0
 	Game.mark("prep started")
 
@@ -1052,3 +1052,8 @@ func net_wall_by(_f: Fighter, _pos: Vector3, _fwd: Vector3) -> void:
 ## lands on a fighter the other phone runs: the other phone applies it.
 func net_hit_by(_target: Fighter, _attacker: Fighter, _amount: float, _zone: String, _from_pos: Vector3) -> void:
 	pass
+
+
+## DUO / SQUAD: the other team's fighters get the enemy outline (never a teammate).
+func is_enemy(f: Fighter) -> bool:
+	return player != null and f != null and f.team != player.team

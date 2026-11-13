@@ -121,7 +121,7 @@ func run(at: Node) -> int:
 	_check(p.crosshair_on_target, "crosshair turns red on the bot", at)
 	# MINIMAP: the bot in sight is a red arrowhead pointing where it faces; shots fired out of sight
 	# leave fading red marks where they were (never its live position).
-	var mm_k := hud.minimap.size.x / HudMinimap.VIEW_M
+	var mm_k := hud.minimap.size.x / HudMinimap.view_m(arena.get("map_rect"))
 	var marks := HudMinimap.enemy_marks(arena.get("fighters"), p, null, hud.seen, Transform2D(0.0, Vector2(mm_k, mm_k), 0.0, Vector2.ZERO))
 	_check(marks.size() == 1 and (marks[0].dir as Vector2).is_equal_approx(Vector2(-sin(b.aim_yaw), -cos(b.aim_yaw))),
 		"the minimap draws the bot in sight as an arrowhead facing its way", at)
@@ -182,21 +182,20 @@ func run(at: Node) -> int:
 	var hits0 := int(p.stats.hits)
 	var gd: Dictionary = p.gun().def
 	var one_shot := b.hit_points(float(gd.damage) * Weapons.zone_mult(gd, "head") * Weapons.pen_mult(gd, "head"), "head") * int(gd.pellets)
-	var single := true
+	var most := 0
 	_touch(at, 5, fire_c, true)
 	for i in 9:
 		b.hp = maxf(b.hp, 150.0)      # keep the bot standing for the rest of the tour
 		_aim_at(p, b.chest_position() + Vector3(0, 0.05 * sin(i), 0))
 		_drag(at, 5, fire_c + Vector2(1, 0), Vector2(1, 0))
 		await at.wait(0.06)
-		for n: Dictionary in hud._dmg_numbers:
-			single = single and float(n.amount) <= one_shot + 0.01
+		most = maxi(most, hud._dmg_numbers.size())
 	await at.shot("hud_06_firing")
 	var burst_hits := int(p.stats.hits) - hits0
-	# A spray never adds its hits up into one bigger number (what each hit really takes is the
-	# unit tests' check, Fighter.land_hits).
-	_check(single, "every damage number is one shot's (%d hits, none above %d)" % [burst_hits, roundi(one_shot)], at)
-	_check(_numbers_apart(hud, p, vs), "damage numbers never cover each other", at)
+	# A spray adds its hits up into one number per burst (round 8, like the reference: what each
+	# hit really takes is the unit tests' check, Fighter.land_hits), hung up-left of the head.
+	_check(burst_hits <= 1 or most <= 3, "a burst of %d hits shows at most 3 numbers (got %d; one shot %d)" % [burst_hits, most, roundi(one_shot)], at)
+	_check(_numbers_near_head(hud, p, vs), "damage numbers hang by the target's head", at)
 	_touch(at, 5, fire_c, false)
 	await at.wait(0.3)
 	b.hp = maxf(b.hp, 150.0)
@@ -205,17 +204,16 @@ func run(at: Node) -> int:
 	# The HUD is held still for the picture (at 1-3 FPS a frame can outlast a number's life).
 	hud.process_mode = Node.PROCESS_MODE_DISABLED
 	hud._dmg_numbers.clear()
-	# Two quick body hits show two numbers (never one that reads as a single bigger hit); the
-	# headshot shows its own.
+	# Quick hits on one target add up into one number (a headshot among them turns it warm).
 	for hit: Array in [[b, 22.0, false], [b, 22.0, false], [b, 41.0, true]]:
 		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
 	var nums: Array = hud._dmg_numbers
-	_check(nums.size() == 3 and is_equal_approx(float(nums[0].amount), 22.0) and is_equal_approx(float(nums[1].amount), 22.0)
-		and bool(nums[2].head), "two quick body hits show 22 and 22, the headshot its own number", at)
+	_check(nums.size() == 1 and is_equal_approx(float(nums[0].amount), 85.0) and bool(nums[0].head),
+		"three quick hits on one target read as one number 85, marked head", at)
 	hud._dmg_numbers.clear()
 	for hit: Array in [[b, 22.0, false], [b, 41.0, true], [null, 22.0, false]]:
 		hud._add_damage_number(hit[0], hit[1], hit[2], b.chest_position())
-	_check(hud._dmg_numbers.size() == 3 and _numbers_apart(hud, p, vs), "separate damage numbers line up side by side", at)
+	_check(hud._dmg_numbers.size() == 2 and _numbers_near_head(hud, p, vs), "a hit with no target keeps its own number", at)
 	hud.queue_redraw()
 	await at.get_tree().process_frame
 	hud.queue_redraw()
@@ -383,6 +381,21 @@ func run(at: Node) -> int:
 	p.damaged.emit(9.0, p.global_position + p.global_basis.x * 6.0, false, b)
 	await at.wait(0.25)
 	await at.shot("hud_14_low_hp")
+	# Zone damage: red splats round the edges (round 8), held still for the picture.
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	hud._zone_hurt = 0.6
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	await at.shot("hud_14b_zone_splats")
+	hud._zone_hurt = 0.0
+	# Gunshot alerts: shots off screen to the right (close) and behind (far, fainter).
+	hud._gun_alerts = [{"who": b, "pos": p.global_position + p.camera.global_basis.x * 12.0, "dist": 12.0, "t": 1.0},
+		{"who": null, "pos": p.global_position + p.camera.global_basis.z * 40.0, "dist": 40.0, "t": 1.0}]
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	await at.shot("hud_14c_gunshot_alerts")
+	hud._gun_alerts.clear()
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# Elimination: sniper headshot (hold fire = scope in, release = shot).
 	p.hp = 150.0
 	b.hp = 120.0
@@ -397,10 +410,12 @@ func run(at: Node) -> int:
 	_check(Engine.time_scale >= 1.0, "the kill plays at normal speed (no slow motion, as the reference)", at)
 	_check(hud.banner_kind() == "kill" and hud.result_title() == "", "the kill shows the small badge, no result band yet", at)
 	_check(arena.find_children("EliminatedTag*", "Label3D", true, false).size() >= 1, "ELIMINATED floats over the bot's body", at)
-	_check(hud.feed_lines == 1 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
-		"the 1 vs 1 kill feed is one line with the gun's silhouette", at)
-	hud.add_kill_feed("ZONE", "BOT", "", "", false, false)
-	_check(hud._kill_feed.size() == 1 and String(hud._kill_feed[0].killer) == "ZONE", "a new kill feed line replaces the old one", at)
+	_check(hud.feed_lines == 2 and hud._kill_feed.size() == 1 and String(hud._kill_feed[0].icon) != "",
+		"the 1 vs 1 kill feed shows the line with the gun's silhouette", at)
+	hud.add_kill_feed("BOT", "", "", "", false, false, "ELIMINATED")
+	hud.add_kill_feed("BOT", "", "", "", false, false, "LEFT")
+	_check(hud._kill_feed.size() == 2 and String(hud._kill_feed[0].verb) == "LEFT", "the 1 vs 1 kill feed keeps two lines, the newest first", at)
+	hud._kill_feed.pop_front()
 	hud._kill_feed.pop_front()
 	hud.add_kill_feed(p.display_name, b.display_name, String(p.weapon().def.name), String(p.weapon().def.icon), true, true)
 	_check(int(arena.get("phase")) == 3 and hud.break_step() != "", "the round's end starts the break between rounds", at)
@@ -481,6 +496,20 @@ func run(at: Node) -> int:
 	await at.wait(0.3)
 	_check(float(hud._round_banner.t) <= 0.0, "nothing covers the fight when round 2 starts (its band closed the break)", at)
 	await at.shot("hud_16j_round2_go")
+	# The match's end (staged on the HUD, round 8): a win's band, the big VICTORY!, the band at the
+	# top with the score under it; a loss's DEFEAT band.
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	for st: Array in [["VICTORY!", 0.4, "band", "hud_16k_victory_band"], ["VICTORY!", 1.4, "word", "hud_16l_victory_word"],
+			["VICTORY!", 2.9, "top", "hud_16m_victory_top"], ["DEFEAT", 0.5, "band", "hud_16n_defeat_band"]]:
+		hud._result = {"age": float(st[1]), "title": String(st[0]), "sub": "2  -  1"}
+		var step := RoundRules.match_end_step(float(st[1]) + RoundRules.MATCH_BAND_AT, hud.result_won())
+		_check(step == String(st[2]), "%s %.1f s after its band: %s (got %s)" % [st[0], st[1], st[2], step], at)
+		hud.queue_redraw()
+		await at.get_tree().process_frame
+		hud.queue_redraw()
+		await at.shot(String(st[3]))
+	hud._result = {}
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# HUD editor.
 	Game.goto_hud_editor()
 	await at.wait(1.2)
@@ -517,17 +546,14 @@ func run(at: Node) -> int:
 	return 1 if _fails > 0 else 0
 
 
-## True when no two damage numbers on screen overlap.
-func _numbers_apart(hud: HUD, p: Player, vs: Vector2) -> bool:
+## True when every damage number on screen sits within 0.1u of its target's head point.
+func _numbers_near_head(hud: HUD, p: Player, vs: Vector2) -> bool:
 	var u := HudLayout.unit(vs)
-	var rects: Array[Rect2] = []
 	for n: Dictionary in hud._dmg_numbers:
-		if float(n.t) < HUD.DMG_LIFE - 0.1 and not p.camera.is_position_behind(n.pos):
-			var r: Rect2 = hud._dmg_rect(n, u).grow(0.01 * u)     # a clear gap: 48 and 32 never read as 4832
-			for o in rects:
-				if o.intersects(r):
-					return false
-			rects.append(r)
+		if n.target is Fighter and not p.camera.is_position_behind(hud._dmg_anchor3(n)):
+			var head := p.camera.unproject_position(hud._dmg_anchor3(n))
+			if hud._dmg_point(n, u).distance_to(head) > 0.1 * u:
+				return false
 	return true
 
 

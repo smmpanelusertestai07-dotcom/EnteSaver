@@ -24,6 +24,8 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._stage_clock()
 	me._zone_over_time()
+	me._zone_start()
+	me._match_end()
 	me._break_steps()
 	me._cooldown()
 	me._pick_panel()
@@ -198,3 +200,43 @@ func _kit() -> void:
 	f.set_loadout("smg")
 	_check(not f.awaiting_pick and f.current == 0 and f.gun().id == "smg", "the pick equips its gun")
 	f.free()
+
+
+## Round 8: the zone starts outside the walls (0.58 x the map's diagonal) and comes onto the
+## whole-arena minimap (its view: the long side + 5 %) a while into stage 2, not at its first second.
+func _zone_start() -> void:
+	var mr := Rect2(-27.6, -15.6, 55.2, 31.2)
+	var r0 := RoundRules.zone_start_for(mr, 47.0)
+	_check(is_equal_approx(r0, 0.58 * mr.size.length()), "the zone starts at 0.58 x the map's diagonal (%.1f m)" % r0)
+	_check(r0 > mr.size.length() * 0.5, "the starting circle lies outside the walls' corners")
+	var half_view := HudMinimap.view_m(mr) * 0.5
+	var enter := -1.0
+	for i in 900:
+		var el := RoundRules.STAGE1_S + i * 0.1
+		if RoundRules.zone_radius_at(el, r0, RoundRules.STAGE2_S) < half_view:
+			enter = i * 0.1
+			break
+	_check(enter >= 5.0 and enter <= 40.0, "the circle reaches the minimap's sides %.0f s into stage 2" % enter)
+	_check(RoundRules.zone_start_for(Rect2(), 47.0) == 47.0, "a map without a rect keeps its own start")
+	_check(RoundRules.zone_start_for(mr, MapBuilder.ZONE_START_R, true) == MapBuilder.ZONE_START_R,
+		"online the zone starts at the map's own radius (what a 1.9.x phone uses: both phones draw the same circle)")
+
+
+## Round 8: the match's end in steps; a win's VICTORY! sequence before the results, a loss's
+## results 1-2 s after its band.
+func _match_end() -> void:
+	var seq := []
+	for i in 80:
+		var st := RoundRules.match_end_step(i * 0.1, true)
+		if seq.is_empty() or seq[-1] != st:
+			seq.append(st)
+	_check(seq == ["beat", "band", "word", "top", "results"], "a win: beat, band, VICTORY!, band at the top, results (%s)" % [seq])
+	_check(is_equal_approx(RoundRules.VICTORY_WORD_S, 1.5) and RoundRules.RESULTS_WIN_AT > RoundRules.VICTORY_TOP_AT, "the big word stays 1.5 s, then the band at the top")
+	var lost := []
+	for i in 80:
+		var st := RoundRules.match_end_step(i * 0.1, false)
+		if lost.is_empty() or lost[-1] != st:
+			lost.append(st)
+	_check(lost == ["beat", "band", "results"], "a loss: beat, the DEFEAT band, results (%s)" % [lost])
+	var after := RoundRules.results_at(false) - RoundRules.MATCH_BAND_AT
+	_check(after >= 1.0 and after <= 2.0, "a loss's results come 1-2 s after its band")

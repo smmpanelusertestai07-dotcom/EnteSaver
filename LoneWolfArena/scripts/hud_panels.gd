@@ -153,6 +153,16 @@ func close_board() -> void:
 	visible = pick_open
 
 
+## The seconds the pick's ring shows: the prep clock's (arena.prep_left, what the top clock reads,
+## rounded the same way) while the arena is in its prep, else the panel's own pick_left.
+func ring_seconds() -> float:
+	if arena != null and int(arena.get("phase")) == 0:
+		var pl: Variant = arena.get("prep_left")
+		if pl is float or pl is int:
+			return minf(float(pl), pick_total)
+	return pick_left
+
+
 ## delta: game time (the pick timer follows the prep clock); real: unscaled time for animation.
 func tick(delta: float, real: float) -> void:
 	_anim += real
@@ -363,9 +373,10 @@ func _draw_pick() -> void:
 	var cr := 0.03 * u
 	HudDraw.disk(self, cc, cr, Color(0, 0, 0, 0.5 * a))
 	HudDraw.ring(self, cc, cr, Color(1, 1, 1, 0.18 * a), 3.0)
-	var urgent := pick_left <= 3.0
-	HudDraw.ring(self, cc, cr, Color(HudDraw.RED if urgent else HudDraw.YELLOW, a), 3.0, pick_left / pick_total)
-	HudDraw.text(self, str(ceili(pick_left)), cc, int(0.034 * u), Color(HudDraw.RED if urgent else Color.WHITE, a), 1, 0, "number")
+	var shown := ring_seconds()
+	var urgent := shown <= 3.0
+	HudDraw.ring(self, cc, cr, Color(HudDraw.RED if urgent else HudDraw.YELLOW, a), 3.0, clampf(shown / pick_total, 0.0, 1.0))
+	HudDraw.text(self, str(maxi(ceili(shown - 0.001), 0)), cc, int(0.034 * u), Color(HudDraw.RED if urgent else Color.WHITE, a), 1, 0, "number")
 	var pressed := _flash == "select" and _flash_t > 0.0
 	var bc := HudDraw.YELLOW.darkened(0.15) if pressed else HudDraw.YELLOW
 	if watch:

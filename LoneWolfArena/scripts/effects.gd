@@ -17,6 +17,12 @@ static var _hole_mat: StandardMaterial3D
 static var muzzle_tex: Texture2D
 static var glow_tex: Texture2D
 static var lights_enabled := true
+## The player's hit splash (round 8): a few red splat sprites reused in turn, never made per hit.
+const SPLASH_POOL := 4
+const SPLASH_LIFE := 0.25
+static var _splash: Array[Sprite3D] = []
+static var _splash_next := 0
+static var splash_tex: Texture2D
 ## Share of each burst's particles that are made (they are CPU-simulated), see configure().
 static var particle_share := 1.0
 
@@ -83,6 +89,8 @@ static func load_textures() -> void:
 		muzzle_tex = load("res://assets/textures/muzzle_flash.png")
 	if glow_tex == null and ResourceLoader.exists("res://assets/textures/glow.png"):
 		glow_tex = load("res://assets/textures/glow.png")
+	if splash_tex == null and ResourceLoader.exists("res://assets/ui/icons/v_splat.png"):
+		splash_tex = load("res://assets/ui/icons/v_splat.png")
 
 
 static func tracer(ctx: Node, from: Vector3, to: Vector3) -> void:
@@ -169,6 +177,42 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 	_hole_next = (_hole_next + 1) % MAX_HOLES
 
 
+## The bullet's impact sound by what it hit (round 8): metal (containers, barrels, the forklift),
+## wood (crates, pallets) or concrete (walls, floor, anything else): a group "metal" / "wood" on
+## the collider or its parent first, else its name. At most one every IMPACT_GAP_MS.
+const IMPACT_GAP_MS := 70
+static var _impact_ms := 0
+static func impact_kind(col: Object) -> String:
+	var n := col as Node
+	if n == null:
+		return "concrete"
+	for node: Node in [n, n.get_parent()]:
+		if node == null:
+			continue
+		if node.is_in_group("metal"):
+			return "metal"
+		if node.is_in_group("wood"):
+			return "wood"
+		var nm := String(node.name).to_lower()
+		for k: String in ["container", "barrel", "tank", "fork", "metal", "cabinet", "rail", "truss", "shelf"]:
+			if k in nm:
+				return "metal"
+		for k: String in ["crate", "pallet", "wood", "box", "plank"]:
+			if k in nm:
+				return "wood"
+	return "concrete"
+
+
+static func impact_sound(ctx: Node, pos: Vector3, col: Object) -> void:
+	if ctx == null or not ctx.is_inside_tree():
+		return
+	var now := Time.get_ticks_msec()
+	if now - _impact_ms < IMPACT_GAP_MS:
+		return
+	_impact_ms = now
+	Audio.play_at("impact_" + impact_kind(col), pos, -8.0, randf_range(0.92, 1.08), 40.0)
+
+
 ## Every bullet hole of the scene is an instance of one MultiMesh (one draw call, not one each): a
 ## ring of MAX_HOLES, the oldest overwritten; a hole goes after HOLE_LIFE_S (a timer clears it).
 static func _hole_layer(parent: Node) -> MultiMeshInstance3D:
@@ -244,6 +288,49 @@ static func hit_spark(ctx: Node, pos: Vector3, normal: Vector3, headshot: bool) 
 		return
 	var c := Color(1.0, 0.25, 0.2, 1) if not headshot else Color(1.0, 0.9, 0.3, 1)
 	_burst(parent, pos, normal, c, 10 if headshot else 6, 3.5, 0.03, 0.25)
+	if ctx is Player:
+		hit_splash(ctx, pos, headshot)
+
+
+## The player's hit: a small red splash where the bullet landed (own splat sprite, from a pool of
+## SPLASH_POOL, grows and fades in SPLASH_LIFE s; drawn over the body so it reads at range).
+static func hit_splash(ctx: Node, pos: Vector3, headshot := false) -> void:
+	var parent := _scene(ctx)
+	if parent == null:
+		return
+	load_textures()
+	if splash_tex == null:
+		return
+	var live: Array[Sprite3D] = []
+	for old in _splash:
+		if is_instance_valid(old) and old.get_parent() == parent:
+			live.append(old)
+	_splash = live
+	var sp: Sprite3D
+	if _splash.size() < SPLASH_POOL:
+		sp = Sprite3D.new()
+		sp.texture = splash_tex
+		sp.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sp.shaded = false
+		sp.no_depth_test = true
+		sp.render_priority = 2
+		sp.pixel_size = 0.3 / float(splash_tex.get_width())
+		sp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		parent.add_child(sp)
+		_splash.append(sp)
+	else:
+		sp = _splash[_splash_next % _splash.size()]
+		_splash_next += 1
+	sp.global_position = pos
+	sp.rotation.z = randf() * TAU
+	sp.visible = true
+	var k := 1.25 if headshot else 1.0
+	sp.scale = Vector3.ONE * 0.5 * k
+	sp.modulate = Color(1.0, 0.12, 0.08, 0.95) if headshot else Color(0.92, 0.1, 0.08, 0.9)
+	var tw := sp.create_tween().set_parallel()
+	tw.tween_property(sp, "scale", Vector3.ONE * 1.15 * k, SPLASH_LIFE).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(sp, "modulate:a", 0.0, SPLASH_LIFE).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(sp.hide)
 
 
 static func shield_hit(ctx: Node, pos: Vector3, normal: Vector3) -> void:
@@ -351,6 +438,7 @@ static func warm_up(ctx: Node) -> void:
 	impact(ctx, p, Vector3.UP)
 	hit_spark(ctx, p, Vector3.UP, false)
 	hit_spark(ctx, p, Vector3.UP, true)
+	hit_splash(ctx, p)
 	shield_hit(ctx, p, Vector3.UP)
 	shield_break(ctx, p)
 	shield_form(ctx, Transform3D(Basis(), p))

@@ -52,6 +52,19 @@ static func zone_t(elapsed: float, stage2: float) -> float:
 	return clampf((elapsed - STAGE1_S) / maxf(stage2, 0.01), 0.0, 1.0)
 
 
+## The zone's starting radius on a map (round 8): outside the walls, 0.58 x the diagonal of
+## map_rect, so the circle comes onto the whole-arena minimap some way into stage 2; `fallback`
+## (the map's own, MapBuilder.ZONE_START_R) for a map without a rect, and ONLINE (cloud or local):
+## each phone works the zone out itself and the session carries no app version, so a 1.9.x phone
+## (fallback) and this build must agree; the new start goes online only once both phones can say
+## they have it (a protocol field), until then training alone uses it.
+const ZONE_START_DIAG := 0.58
+static func zone_start_for(map_rect: Rect2, fallback: float, online := false) -> float:
+	if online or not map_rect.has_area():
+		return fallback
+	return ZONE_START_DIAG * map_rect.size.length()
+
+
 ## The zone's radius at `elapsed`: `start` (the whole hall) through stage 1, then evenly down to
 ## ZONE_FINAL_R at the end of stage 2.
 static func zone_radius_at(elapsed: float, start: float, stage2: float) -> float:
@@ -69,6 +82,37 @@ static func zone_next(elapsed: float, stage2: float) -> float:
 	if elapsed < STAGE1_S:
 		return STAGE1_S - elapsed
 	return maxf(STAGE1_S + stage2 - elapsed, 0.0)
+
+
+## THE MATCH'S END (round 8), `t` s after the deciding round: the beat (the kill), the result band
+## at y 0.15 from MATCH_BAND_AT; a win then turns it into a big glowing gold VICTORY! across the
+## middle (VICTORY_WORD_AT, VICTORY_WORD_S long) and moves the band to the top with the score band
+## under it (VICTORY_TOP_AT) until the results open (RESULTS_WIN_AT); a loss or a draw keeps the
+## band and opens the results RESULTS_LOSS_AFTER s after it came.
+const MATCH_BAND_AT := 2.5
+const VICTORY_WORD_AT := 3.3
+const VICTORY_WORD_S := 1.5
+const VICTORY_TOP_AT := VICTORY_WORD_AT + VICTORY_WORD_S
+const RESULTS_WIN_AT := 6.0
+const RESULTS_LOSS_AFTER := 1.6
+
+
+## When the results open after the match's last round (s): a win after its VICTORY! sequence, a
+## loss or a draw 1-2 s after its band.
+static func results_at(won: bool) -> float:
+	return RESULTS_WIN_AT if won else MATCH_BAND_AT + RESULTS_LOSS_AFTER
+
+
+## The match end's step `t` s after the deciding round: "beat", "band", (a win:) "word", "top",
+## then "results".
+static func match_end_step(t: float, won: bool) -> String:
+	if t >= results_at(won):
+		return "results"
+	if t < MATCH_BAND_AT:
+		return "beat"
+	if not won or t < VICTORY_WORD_AT:
+		return "band"
+	return "word" if t < VICTORY_TOP_AT else "top"
 
 
 ## The step of the break `t` s after the round was decided: "beat", "result", "score", "band",

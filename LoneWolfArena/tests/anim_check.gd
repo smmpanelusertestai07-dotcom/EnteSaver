@@ -419,6 +419,16 @@ func _check_throw() -> void:
 ## The wall and grenade buttons only take the item in hand; FIRE uses it when let go, the same
 ## button again or a weapon puts it away, and a hand with an item never shoots.
 func _check_items_in_hand(p: Player) -> void:
+	# QUICK WALL (the default since round 8): one tap places the wall at once, the gun stays.
+	p.shields = 1
+	var walls0 := _walls()
+	var gun := p.current
+	p.use_shield()
+	await get_tree().process_frame
+	_expect(p.ready_item == "" and p.shields == 0 and _walls() == walls0 + 1 and p.current == gun, "QUICK WALL: one tap places the wall, the gun stays in hand")
+	# QUICK WALL off: the wall button takes the wall in hand, FIRE places it.
+	var quick: Variant = Game.settings.get("wall_quick", true)
+	Game.settings.wall_quick = false
 	p.shields = 2
 	p.grenades = 1
 	var walls := get_tree().get_nodes_in_group("shield_walls").size()
@@ -435,6 +445,7 @@ func _check_items_in_hand(p: Player) -> void:
 	p.use_shield()
 	p.use_shield()
 	_expect(p.ready_item == "" and p.shields == 1, "the wall button again puts it away")
+	Game.settings.wall_quick = quick
 	p.use_grenade()
 	p.select_weapon(p.current)
 	_expect(p.ready_item == "" and p.grenades == 1, "a weapon puts the grenade away")

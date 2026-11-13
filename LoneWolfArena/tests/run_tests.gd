@@ -15,6 +15,7 @@ const TeamHudUnit := preload("res://tests/team_hud_unit.gd")       # DUO / SQUAD
 const TeamRulesUnit := preload("res://tests/team_rules_unit.gd")   # DUO / SQUAD: WP-C fills it
 const TeamNetUnit := preload("res://tests/team_net_unit.gd")       # DUO / SQUAD: WP-N fills it
 const GroupLobbyUnit := preload("res://tests/group_lobby_unit.gd") # GROUPS: the lobby (UI)
+const HudFeedbackUnit := preload("res://tests/hud_feedback_unit.gd") # round 8: the match feedback
 
 var _fails := 0
 var _passes := 0
@@ -108,6 +109,7 @@ func _ready() -> void:
 	TeamNetUnit.run(self)         # DUO / SQUAD between two phones (tests/team_net_unit.gd)
 	GroupLobbyUnit.run(self)      # GROUPS in the lobby: bar, START gating, podium, texts (tests/group_lobby_unit.gd)
 	preload("res://tests/menus_unit.gd").run(self)   # out of the match, round 8 (tests/menus_unit.gd)
+	HudFeedbackUnit.run(self)     # round 8: death card, damage numbers, minimap, feed, wall, migration (tests/hud_feedback_unit.gd)
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -669,27 +671,27 @@ func _test_minimap() -> void:
 		var me := xf * pp
 		var ahead := xf * (pp + fwd * 5.0)
 		var to_right := xf * (pp + right * 5.0)
-		ok_mid = ok_mid and me.distance_to(c) < 0.01
-		ok_ahead = ok_ahead and ahead.y < me.y - 40.0 and absf(ahead.x - me.x) < 0.01
-		ok_right = ok_right and to_right.x > me.x + 40.0 and absf(to_right.y - me.y) < 0.01
-		ok_len = ok_len and is_equal_approx((ahead - me).length(), 5.0 * side / HudMinimap.VIEW_M)
+		ok_mid = ok_mid and (xf * mr.get_center()).distance_to(c) < 0.01
+		ok_ahead = ok_ahead and ahead.y < me.y - 25.0 and absf(ahead.x - me.x) < 0.01
+		ok_right = ok_right and to_right.x > me.x + 25.0 and absf(to_right.y - me.y) < 0.01
+		ok_len = ok_len and is_equal_approx((ahead - me).length(), 5.0 * side / HudMinimap.view_m(mr))
 		ok_ahead = ok_ahead and HudMinimap.view_dir(xf, fwd).is_equal_approx(Vector2(0, -1))
-	_check(ok_mid, "a turned minimap keeps the player in its middle")
+	_check(ok_mid, "a turned minimap shows the whole map round its centre (round 8)")
 	_check(ok_ahead, "turned with the view: a point ahead of the player is drawn straight above it, its arrow points up")
 	_check(ok_right, "turned with the view: a point to the player's right is drawn to its right")
-	_check(ok_len, "turning keeps the scale (VIEW_M metres edge to edge)")
+	_check(ok_len, "turning keeps the scale (view_m metres edge to edge)")
 	# North up: north (-Z) is up whatever way the player faces; the window stops at the map's edge.
 	var n_yaw := 1.2
 	var n_pp := Vector2(-20, 0)
 	var n_xf := HudMinimap.view_xform(n_pp, n_yaw, side, mr, false)
 	_check(HudMinimap.view_dir(n_xf, Vector2(0, -1)).is_equal_approx(Vector2(0, -1))
 		and (n_xf * Vector2(n_pp.x + 1, n_pp.y)).x > (n_xf * n_pp).x, "north up: north is up and east is right")
-	_check((n_xf * mr.position).x > -0.01 and (n_xf * mr.position).x < 0.01 and (n_xf * n_pp).x < c.x,
-		"north up: near the map's west edge the window stops there and the player is drawn left of the middle")
+	_check((n_xf * mr.position).x > 0.0 and (n_xf * mr.end).x < side and (n_xf * n_pp).x < c.x,
+		"north up: the whole map fits and the player near the west edge is drawn left of the middle")
 	var n_dir := HudMinimap.view_dir(n_xf, Vector2(-sin(n_yaw), -cos(n_yaw)))
 	_check(n_dir.is_equal_approx(Vector2(-sin(n_yaw), -cos(n_yaw))), "north up: the player's arrow turns instead")
 	var wr := HudMinimap.view_world_rect(HudMinimap.view_xform(Vector2.ZERO, PI / 4.0, side, mr, true), side)
-	_near(wr.size.x, HudMinimap.VIEW_M * sqrt(2.0), "a turned map at 45 degrees shows the window's diagonal", 0.01)
+	_near(wr.size.x, HudMinimap.view_m(mr) * sqrt(2.0), "a turned map at 45 degrees shows the window's diagonal", 0.01)
 	# Marks go through the same transform: an enemy ahead is drawn above, facing as drawn.
 	var foe := Fighter.new()
 	var me_f := Fighter.new()
@@ -702,7 +704,8 @@ func _test_minimap() -> void:
 	foe.position = me_f.position + Vector3(-sin(0.7), 0, -cos(0.7)) * 6.0
 	var xf2 := HudMinimap.view_xform(Vector2(2, 3), 0.7, side, mr, true)
 	var marks := HudMinimap.enemy_marks([foe, me_f], me_f, null, {foe: true}, xf2)
-	_check(marks.size() == 1 and (marks[0].pos as Vector2).y < c.y - 40.0 and absf((marks[0].pos as Vector2).x - c.x) < 0.01
+	var me2 := xf2 * Vector2(2, 3)
+	_check(marks.size() == 1 and (marks[0].pos as Vector2).y < me2.y - 30.0 and absf((marks[0].pos as Vector2).x - me2.x) < 0.01
 		and (marks[0].dir as Vector2).is_equal_approx(Vector2(0, -1)), "an enemy ahead, facing the same way, is drawn above the player pointing up")
 	foe.free()
 	me_f.free()
@@ -748,18 +751,19 @@ func _test_minimap() -> void:
 func _test_settings_v6() -> void:
 	var saved := Game.settings.duplicate(true)
 	var d: Dictionary = Game.DEFAULT_SETTINGS
-	_check(Game.SETTINGS_VERSION == 7 and d.settings_version == 7, "settings version 7 (version 7 added the minimap's turning, _test_minimap)")
+	_check(Game.SETTINGS_VERSION == 8 and d.settings_version == 8, "settings version 8 (version 8: LEFT FIRE while aiming, tests/hud_feedback_unit.gd)")
 	_check(d.mode == "training" and d.graphics_auto == true and d.graphics == 1 and d.fps == 60 and d.sens_general == 100
 		and d.sens_reddot == 100 and d.sens_2x == 100 and d.sens_sniper == 71 and d.sens_freelook == 100 and d.difficulty == 1
 		and d.vol_sfx == 90 and d.vol_music == 45 and d.vol_voice == 80 and d.last_pick == "ar", "the settings kept keep their defaults")
 	_check(d.dynamic_joystick == true and d.freelook_button == false, "the reference's defaults: the joystick follows the thumb, no free look button")
-	_check(d.left_fire == 0 and d.reload_button == true and d.switch_button == true, "the owner's: LEFT FIRE always, RELOAD and SWITCH on")
+	_check(d.left_fire == 1 and d.reload_button == true and d.switch_button == true, "LEFT FIRE while aiming (v8, the reference's), the owner's RELOAD and SWITCH on")
 	_check(d.vibrate_footsteps == true and d.vibrate_damage == false and d.vibrate_shooting == false and d.vibration == true,
 		"vibration as the reference's rows: enemy footsteps on, taking damage and shooting off, out of a match on")
 	for k in ["show_fps", "crosshair_color", "crosshair_size", "sens_fire", "vol_master"]:
 		_check(not d.has(k) and not Game.SETTING_RANGES.has(k) and not (k in Game.BOOL_SETTINGS), "%s is no longer a setting" % k)
-	_check(Game.FIXED_SETTINGS.show_fps == false and Game.FIXED_SETTINGS.sens_fire == 100 and Game.FIXED_SETTINGS.has("damage_numbers")
-		and Game.FIXED_SETTINGS.has("dynamic_crosshair"), "no FPS counter, FIRE drags at the view's own sensitivity: fixed")
+	_check(Game.FIXED_SETTINGS.show_fps == false and Game.FIXED_SETTINGS.sens_fire == 100 and not Game.FIXED_SETTINGS.has("damage_numbers")
+		and not Game.FIXED_SETTINGS.has("dynamic_crosshair") and d.damage_numbers == true and d.dynamic_crosshair == true,
+		"no FPS counter, FIRE drags at the view's own sensitivity: fixed; damage numbers and the dynamic crosshair are settings (v8, on)")
 	_check(Game.crosshair_color() == Color.WHITE and is_equal_approx(Game.crosshair_scale(), Game.CROSSHAIR_SCALE),
 		"the crosshair is white at its standard size")
 	_near(Game.CROSSHAIR_SCALE, lerpf(0.75, 1.35, 0.5), "the crosshair keeps the size the HUD drew before")
@@ -906,7 +910,7 @@ func _test_sensitivity_per_sight() -> void:
 ## Aim precision, the left fire button and visual effects: defaults, sanitising and what they switch.
 func _test_controls_settings() -> void:
 	var d: Dictionary = Game.DEFAULT_SETTINGS
-	_check(d.aim_precision == 0 and d.left_fire == 0 and d.visual_effects == true, "aim assist, the left fire button and the effects start as before")
+	_check(d.aim_precision == 0 and d.left_fire == 1 and d.visual_effects == true, "aim assist and the effects start as before, the left fire button while aiming (v8)")
 	_check(Player.assist_allowed(0, false) and Player.assist_allowed(0, true), "ASSISTED: the assist works from the hip and while aiming")
 	_check(Player.assist_allowed(1, false) and not Player.assist_allowed(1, true), "MANUAL IN SCOPE: assisted from the hip only")
 	_check(not Player.assist_allowed(2, false) and not Player.assist_allowed(2, true), "FULL MANUAL: no assist")
@@ -994,9 +998,9 @@ func _test_settings_panel() -> void:
 	_check(shown.keys().all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k))
 		and SettingsPanel.NOT_SHOWN.all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k) and not shown.has(k)),
 		"the tabs and the not-shown list name real settings")
-	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION"]
+	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION", "INFORMATION"]
 		and SettingsPanel.MENU.map(func(m: Array) -> String: return String(m[0])) == ["IN-MATCH", "DISPLAY", "SOUND", "ONLINE", "ACCOUNT"]
-		and SettingsPanel.MENU[0][1] == [6, 2, 1, 7], "the tabs: IN-MATCH (HUD, CONTROLS, SENSITIVITY, VIBRATION), DISPLAY, SOUND, ONLINE, ACCOUNT")
+		and SettingsPanel.MENU[0][1] == [6, 2, 1, 7, 8], "the tabs: IN-MATCH (HUD, CONTROLS, SENSITIVITY, VIBRATION, INFORMATION), DISPLAY, SOUND, ONLINE, ACCOUNT")
 	var pages := []
 	for m: Array in SettingsPanel.MENU:
 		pages.append_array(m[1])
@@ -1116,9 +1120,9 @@ func _test_settings_panel() -> void:
 	_check(panel.find_child("CrosshairColor", true, false) == null and panel.find_child("CrosshairSize", true, false) == null
 		and panel.find_child("CrosshairPreview", true, false) == null and panel.find_child("AimPrecision", true, false) != null
 		and panel.find_child("LeftFire", true, false) != null, "CONTROLS: aim precision and the left fire button, no crosshair colour or size")
-	Game.settings.merge({"dynamic_joystick": false, "left_fire": 1, "vibrate_damage": true, "freelook_button": true}, true)
+	Game.settings.merge({"dynamic_joystick": false, "left_fire": 0, "vibrate_damage": true, "freelook_button": true}, true)
 	panel._reset_tab()
-	_check(Game.settings.dynamic_joystick == true and Game.settings.aim_precision == 0 and Game.settings.left_fire == 0
+	_check(Game.settings.dynamic_joystick == true and Game.settings.aim_precision == 0 and Game.settings.left_fire == 1
 		and Game.settings.vibrate_damage == true and Game.settings.freelook_button == false,
 		"RESET on CONTROLS restores the joystick, aim precision, left fire and free look (not VIBRATION's rows)")
 	panel._show_tab(7)
