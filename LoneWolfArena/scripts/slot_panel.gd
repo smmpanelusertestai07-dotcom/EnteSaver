@@ -127,9 +127,12 @@ static func rules_strip(rules: Dictionary, team: bool) -> Control:
 		box.add_child(nm)
 	var n := 0
 	for t: String in RoomRules.summary(s, team):
-		var tag := UI.label(t, 14, UI.INK if n == 0 else UI.TEXT, "heavy")
+		var tag := UI.label(t, 17, UI.INK if n == 0 else UI.TEXT, "heavy")      # (readable on a phone: 17 px, roomy)
 		tag.name = "RuleTag_%d" % n
-		tag.add_theme_stylebox_override("normal", UI.chamfer(UI.ACCENT if n == 0 else Color(1, 1, 1, 0.12), 4, 0, Color.TRANSPARENT, 8.0, ["br"]))
+		var ts := UI.chamfer(UI.ACCENT if n == 0 else Color(1, 1, 1, 0.12), 5, 0, Color.TRANSPARENT, 12.0, ["br"])
+		ts.content_margin_top = 5
+		ts.content_margin_bottom = 5
+		tag.add_theme_stylebox_override("normal", ts)
 		tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		box.add_child(tag)
 		n += 1
