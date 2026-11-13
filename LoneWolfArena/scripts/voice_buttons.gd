@@ -110,7 +110,7 @@ static func open_popup(host: Control, kind: String, at: Vector2, in_match: bool)
 	host.add_child(catcher)
 	var box := PanelContainer.new()
 	box.name = "MicModeBox" if kind == "mic" else "SpeakerBox"
-	box.add_theme_stylebox_override("panel", UI.box(Color(0.03, 0.03, 0.035, 0.86), 6, 0, Color(0, 0, 0, 0), 10.0))
+	box.add_theme_stylebox_override("panel", UI.box(Color(0.03, 0.03, 0.035, 0.95), 6, 0, Color(0, 0, 0, 0), 10.0))
 	catcher.add_child(box)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)
