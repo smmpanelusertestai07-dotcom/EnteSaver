@@ -333,18 +333,9 @@ func open(start_tab := "career") -> void:
 		[1.0, Color(0.075, 0.058, 0.045, 0.95)]], true)
 	UI.full_rect(shade)
 	layer.add_child(shade)
-	var head := UI.section("PROFILE", 30)
-	head.position = Vector2(MARGIN, 22)
-	layer.add_child(head)
-	var close_b := UI.button("CLOSE", 20, "light", Vector2(150, 56))
+	# the page frame's corner as on FRIENDS: the X box in the corner, PROFILE right-aligned beside it
+	var close_b := UI.page_corner(layer, "PROFILE", close)[0] as Button
 	close_b.name = "ProfileClose"
-	close_b.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	close_b.offset_left = -MARGIN - 150.0
-	close_b.offset_right = -MARGIN
-	close_b.offset_top = 14.0
-	close_b.offset_bottom = 70.0
-	close_b.pressed.connect(close)
-	layer.add_child(close_b)
 	var tabs := VBoxContainer.new()
 	tabs.name = "ProfileTabs"
 	tabs.position = Vector2(MARGIN, TOP)

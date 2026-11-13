@@ -110,25 +110,9 @@ func open_page(title: String, side_tabs := true) -> Dictionary:
 	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	modal.add_child(inner)
 	UI.keep_clear_of_cutout(inner)
-	var close := UI.close_button(60.0)
-	close.name = "Close"
-	close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	close.offset_left = -64
-	close.offset_right = -4
-	close.offset_top = 4
-	close.offset_bottom = 64
-	close.pressed.connect(back)
-	inner.add_child(close)
-	var t := UI.label(title.to_upper(), 30, UI.TEXT, "heavy")
-	t.name = "PageTitle"
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	t.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	t.offset_left = -420
-	t.offset_right = -84
-	t.offset_top = 4
-	t.offset_bottom = 64
-	inner.add_child(t)
+	var corner := UI.page_corner(inner, title, back)      # the X box and the title beside it
+	var close := corner[0] as Button
+	var t := corner[1] as Label
 	var tabs := VBoxContainer.new()
 	tabs.name = "PageTabs"
 	tabs.add_theme_constant_override("separation", 6)

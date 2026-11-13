@@ -712,6 +712,34 @@ static func close_button(size := 52.0) -> Button:
 	return b
 
 
+## The page frame's corner (FRIENDS, PROFILE, WARDROBE, the mode pages): the X box in the top-right
+## corner (node "Close", 60 px, `on_close` on a tap) and the page's title in caps right-aligned
+## beside it (node "PageTitle"), both added to `parent` (a full-rect control). Returns [X, title].
+static func page_corner(parent: Control, title: String, on_close: Callable) -> Array:
+	var close := close_button(60.0)
+	close.name = "Close"
+	close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	close.offset_left = -64
+	close.offset_right = -4
+	close.offset_top = 4
+	close.offset_bottom = 64
+	if on_close.is_valid():
+		close.pressed.connect(on_close)
+	parent.add_child(close)
+	var t := label(title.to_upper(), 30, TEXT, "heavy")
+	t.name = "PageTitle"
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	t.offset_left = -420
+	t.offset_right = -84
+	t.offset_top = 4
+	t.offset_bottom = 64
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(t)
+	return [close, t]
+
+
 ## Yellow corner triangle with a black tick (selected / equipped marker) for a card of
 ## `card_size`, placed in its bottom-right corner.
 static func draw_tick_corner(ci: CanvasItem, card_size: Vector2, s := 30.0) -> void:
