@@ -143,6 +143,10 @@ func run(autotest: Node) -> int:
 	if not rr.custom or p.hp_max != 100.0 or p.hp > 100.0 or b.hp_max != 100.0 or not is_equal_approx(p.rule_speed, 1.25) \
 			or not is_equal_approx(p.rule_jump * p.rule_jump, 1.5) or (p as Player).room_assist:
 		_fail("this phone's match does not play the room's HP / speed / jump / aim rules")
+	# The HUD measures health against the room's HP (HP 100: "HP 100/100", not "/200").
+	var hp_said := String((arena.get("hud") as Node).call("hp_label"))
+	if hp_said != "HP %d/100" % ceili(p.hp):
+		_fail("the HUD's HP label should read against the room's HP 100 (%s)" % hp_said)
 	if p.gun().id != "sniper" or b.gun().id != "sniper" or bool((arena.get("hud") as Node).get("panels").pick_open):
 		_fail("ONE GUN: both fighters should hold the sniper without a pick panel (%s / %s)" % [p.gun().id, b.gun().id])
 	# The online HUD layer: the round trip to the other phone is measured, and the host's chat line

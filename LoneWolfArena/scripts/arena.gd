@@ -1673,7 +1673,7 @@ func scoreboard_rows() -> Array:
 		if f == bot and not _their_final.is_empty():
 			st = _their_final
 		var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
-		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": _shown_hp(f),
+		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": _shown_hp(f), "hp_max": f.hp_max,
 			"kills": int(st.kills), "damage": roundi(st.damage), "headshots": int(st.headshots),
 			"accuracy": roundi(acc), "rounds": int(score["player" if f == player else "bot"]),
 			"weapon": String(f.gun().def.name), "deaths": int(_downs["player" if f == player else "bot"])})

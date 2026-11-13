@@ -121,7 +121,7 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 		if knocked:
 			knock_hp = clampf(s[8], 0.0, KNOCK_HP)
 		return
-	var reported := clampf(s[8], 0.0, MAX_HP)
+	var reported := clampf(s[8], 0.0, hp_max)
 	if hp_cap >= 0.0:
 		if reported <= hp_cap + 0.5:
 			hp_cap = -1.0                # its phone took the word on its HP
@@ -129,7 +129,7 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 			reported = hp_cap            # (no healing back what it lost while away)
 	hp = reported
 	if hp > _hp_reported:
-		hp_left = minf(hp_left + hp - _hp_reported, MAX_HP)      # it healed
+		hp_left = minf(hp_left + hp - _hp_reported, hp_max)      # it healed
 	_hp_reported = hp
 	if hp < hp_left or _now() - _hit_sent_at > RESYNC_S:
 		hp_left = hp

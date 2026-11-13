@@ -759,10 +759,11 @@ func _process(delta: float) -> void:
 			_lag_hold = 0.35
 		_hp_last = player.hp
 		_lag_hold = maxf(_lag_hold - real, 0.0)
+		_hp_lag = minf(_hp_lag, player.hp_max)
 		if _hp_lag <= player.hp:
 			_hp_lag = player.hp
 		elif _lag_hold <= 0.0:
-			_hp_lag = maxf(player.hp, _hp_lag - Fighter.MAX_HP * 0.6 * real)
+			_hp_lag = maxf(player.hp, _hp_lag - player.hp_max * 0.6 * real)
 	for k in _pressed.keys():
 		_pressed[k] -= real
 		if _pressed[k] <= 0.0:
@@ -1445,7 +1446,7 @@ func _draw_heal(c: Vector2, u: float) -> void:
 func _draw_vignette(vs: Vector2) -> void:
 	var low := 0.0
 	if player.alive and not match_over:
-		low = clampf(1.0 - player.hp / (Fighter.MAX_HP * 0.35), 0.0, 1.0)
+		low = clampf(1.0 - player.hp / (player.hp_max * 0.35), 0.0, 1.0)
 	var pulse := low * (0.26 + 0.12 * sin(_time * 6.5))
 	var vig := maxf(_flash, pulse)
 	if vig > 0.01:
@@ -1544,19 +1545,30 @@ func _bottom_limits(vs: Vector2, u: float) -> Vector2:
 	return Vector2(lo, hi)
 
 
+## The player's full health: a room's HP rule (Fighter.hp_max), else Fighter.MAX_HP.
+func _hp_full() -> float:
+	return player.hp_max if player != null else Fighter.MAX_HP
+
+
+## The HP block's label, "HP 200/200" (a room's HP 100: "HP 100/100").
+func hp_label() -> String:
+	var hp := player.hp if player != null and not editor_mode else _hp_full()
+	return "HP %d/%d" % [ceili(hp), int(_hp_full())]
+
+
 func _draw_hp_block(vs: Vector2, u: float) -> void:
-	var hp := Fighter.MAX_HP
+	var mx := _hp_full()
+	var hp := mx
 	var healing_rem := 0.0
 	if player != null and not editor_mode:
 		hp = player.hp
 		if player.healing:
-			healing_rem = minf(Fighter.HEAL_RATE * minf(player.heal_left, Fighter.HEAL_AMOUNT / Fighter.HEAL_RATE), Fighter.MAX_HP - hp)
-	var mx := Fighter.MAX_HP
+			healing_rem = minf(Fighter.HEAL_RATE * minf(player.heal_left, Fighter.HEAL_AMOUNT / Fighter.HEAL_RATE), mx - hp)
 	var lim := _bottom_limits(vs, u)
 	var avail := lim.y - lim.x
 	var by := vs.y * 0.968
 	var bh := maxf(4.0, 0.0105 * u)
-	var label := "HP %d/%d" % [ceili(hp), int(mx)]
+	var label := hp_label()
 	# Inline like the reference: [helmet][vest] HP 200/200 [bar]. The layout is measured on the
 	# widest label so the bar does not shift while the number changes. Short of room (16:9
 	# between the medkit and grenade buttons) the label and icons get a little smaller first;
@@ -1693,10 +1705,10 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 			t = float(arena.call("stage_left"))
 		red = phase == 0 or (t <= 10.0 and not bool(arena.get("practice")))
 		if player != null:
-			hp_me = clampf(player.hp / Fighter.MAX_HP, 0.0, 1.0)
+			hp_me = clampf(player.hp / player.hp_max, 0.0, 1.0)
 		var b: Variant = arena.get("bot")
 		if b is Fighter:
-			hp_bot = clampf((b as Fighter).hp / Fighter.MAX_HP, 0.0, 1.0)
+			hp_bot = clampf((b as Fighter).hp / (b as Fighter).hp_max, 0.0, 1.0)
 		if team != null:
 			# DUO / SQUAD: each bar is the team's HP still standing (knocked and out count 0)
 			hp_me = team.team_hp(team.my_team())
