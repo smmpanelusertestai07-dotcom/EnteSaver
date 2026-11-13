@@ -14,7 +14,7 @@ extends RefCounted
 
 const STATUS := [["READY TO TEAM", Color(0.38, 0.86, 0.44)], ["ONLINE", Color(0.98, 0.78, 0.2)], ["DO NOT DISTURB", Color(0.92, 0.3, 0.3)]]
 const PANEL_X := 0.70                    # the panel's left edge (share of the width)
-const PANEL_BOTTOM := 0.78               # its bottom (the mode card and START stay clear below)
+const PANEL_BOTTOM := 0.75               # its bottom (the mode card and START stay clear below)
 
 var lobby: Lobby
 var arrow: Button

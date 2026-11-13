@@ -84,7 +84,7 @@ func run(at: Node) -> int:
 	await _tap(at, lobby.dialogs.modal.find_child("SocialTeamCode", true, false) as Control)
 	for k in ["4", "2", "1", "3"]:
 		await _tap(at, lobby.dialogs.modal.find_child("TeamKey_" + k, true, false) as Control)
-	_check((lobby.dialogs.modal.find_child("TeamCodeShown", true, false) as Label).text.begins_with("42 13"), "TEAM CODE's keypad shows the digits as a code")
+	_check((lobby.dialogs.modal.find_child("TeamCodeShown", true, false) as Label).text.replace(" ", "") == "4213", "TEAM CODE's keypad shows the digits as a code")
 	await at.shot("r07_team_code_pad")
 	lobby.dialogs.close_modal()
 	Game.profile = saved_profile
