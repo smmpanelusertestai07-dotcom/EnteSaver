@@ -118,6 +118,27 @@ func run(at: Node) -> int:
 	lobby.dialogs.select_mode()
 	await at.wait(0.6)
 	await at.shot("l10_select_mode")
+	_check_mode_page(lobby)
+	# With a left camera cutout the page keeps its cards and buttons clear of it.
+	UI.margins_for_test = Vector2(90, 40)
+	lobby.dialogs.close_modal()
+	lobby.dialogs.select_mode()
+	await at.wait(0.6)
+	var cards := lobby.dialogs.modal.find_child("ModeCards", true, false) as Control if lobby.dialogs.modal else null
+	_check(cards != null and cards.global_position.x >= 90.0, "the mode page keeps clear of a left cutout")
+	_check_mode_page(lobby)
+	await at.shot("l10b_select_mode_cutout")
+	UI.margins_for_test = Vector2(-1, -1)
+	# HOW TO PLAY on its bottom row: a page whose X comes back to the mode page.
+	var how := lobby.dialogs.modal.find_child("ModeWay_help", true, false) as Button if lobby.dialogs.modal else null
+	if how:
+		how.pressed.emit()
+	await at.wait(0.4)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("HowToScroll", true, false) != null, "HOW TO PLAY opens from the mode page")
+	await at.shot("l10c_mode_how_to_play")
+	lobby.dialogs.back()
+	await at.wait(0.3)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("Mode_lonewolf", true, false) != null, "HOW TO PLAY's X goes back to the mode page")
 	lobby.dialogs.close_modal()
 	lobby.dialogs.open_size_box()
 	await at.wait(0.4)
@@ -142,3 +163,29 @@ func _check(ok: bool, what: String) -> void:
 		print("FAIL  " + what)
 	else:
 		print("ok    " + what)
+
+
+## SELECT MODE as a page: the MODES tab, both cards side by side filling the page between the tab bar
+## and the bottom row, inside the screen, the picked card framed; the bottom row's three ways.
+func _check_mode_page(lobby: Lobby) -> void:
+	var page := lobby.dialogs.modal
+	var vs := lobby.get_viewport().get_visible_rect().size
+	var tab := page.find_child("ModeTab", true, false) as Label if page else null
+	var a := page.find_child("Mode_training", true, false) as Control if page else null
+	var b := page.find_child("Mode_lonewolf", true, false) as Control if page else null
+	var ways := page.find_child("ModeWays", true, false) as Control if page else null
+	_check(page != null and page.has_meta("page") and tab != null and tab.text == "MODES", "SELECT MODE is a page with the MODES tab")
+	if a == null or b == null or ways == null:
+		_check(false, "the mode page has both cards and the bottom row")
+		return
+	var ra := a.get_global_rect()
+	var rb := b.get_global_rect()
+	_check(absf(ra.position.y - rb.position.y) < 1.0 and ra.end.x < rb.position.x and ra.size.y >= 300.0 and rb.end.x <= vs.x
+		and ra.end.y < ways.get_global_rect().position.y and ways.get_global_rect().end.y <= vs.y,
+		"the mode cards stand side by side above the bottom row, on the screen (%s %s)" % [str(ra), str(rb)])
+	for k: String in ["room", "local", "help"]:
+		var w := ways.find_child("ModeWay_" + k, true, false) as Button
+		_check(w != null and w.size.y >= UI.TOUCH_MIN and w.get_global_rect().end.x <= vs.x, "the bottom row has %s" % k)
+	var ta := a.find_child("ModeTitle", true, false) as Control
+	var tb := b.find_child("ModeTitle", true, false) as Control
+	_check(ta != null and tb != null and absf(ta.global_position.y - tb.global_position.y) < 1.0, "both cards' names line up")

@@ -494,8 +494,13 @@ listed here. If a part needs something new from the core, add it in its own file
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
   `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
   `ModeFormat`: `Lobby.mode_format()`, "BOT: <level>  ·  FIRST TO n", "TARGET DUMMY" or "1 VS 1
-  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`; each
-  card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
+  ONLINE") opens SELECT MODE (`LobbyDialogs.select_mode()`: a full page, `open_page("", false)`
+  with no side tabs, in `Modal`: the tab bar `ModeTabs` / `ModeTab` "MODES", the cards
+  `Mode_training` / `Mode_lonewolf` in `ModeCards` (`ModeTitle`, `ModeStart`: "CARGO CAGE · START:
+  <LobbyDialogs.start_line(m)>"), the bottom row `ModeWays` with `ModeWay_room` / `ModeWay_local`
+  (FRIENDS on CUSTOM ROOM / PLAY WITHOUT INTERNET) and `ModeWay_help` (`how_to_play()`: HOW TO PLAY
+  as a page, X and back return to SELECT MODE); X and back close it; a group member gets a notice
+  instead; each card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
   (scripts/mode_help.gd: `ModeHelp.PAGES`, `pages_of(m)`, `show_page(i)`, `turn(step)`, nodes
   HelpPicture, HelpTitle, HelpText, HelpDots / HelpDot_<i>, HelpPrev, HelpNext; X and back return to
   SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the team-size box
