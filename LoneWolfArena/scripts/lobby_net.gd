@@ -97,9 +97,14 @@ static func open(owner_lobby: Lobby, friend_id: String, friend_name: String, bac
 	frame.mouse_filter = Control.MOUSE_FILTER_STOP
 	modal.add_child(frame)
 	modal.add_child(w)
+	# the background runs to the screen's edge; the content keeps clear of a camera cutout there
+	var safe := MarginContainer.new()
+	safe.name = "Safe"
+	frame.add_child(safe)
+	UI.pad_clear_of_cutout(safe)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 0)
-	frame.add_child(v)
+	safe.add_child(v)
 	w.build(v)
 	frame.position.x = -40.0
 	modal.modulate.a = 0.0

@@ -227,17 +227,31 @@ static var margins_for_test := Vector2(-1.0, -1.0)
 ## its offsets follow the cutout now, on a size change and every second (turning the phone over
 ## moves the cutout to the other side without one).
 static func keep_clear_of_cutout(c: Control) -> void:
-	var apply := func() -> void:
-		if c.is_inside_tree():
+	_follow_cutout(c, func() -> void:
+		if is_instance_valid(c) and c.is_inside_tree():
 			var m := safe_margins(c.get_viewport())
 			c.offset_left = m.x
-			c.offset_right = -m.y
+			c.offset_right = -m.y)
+
+
+## The same for a panel whose background runs to the screen's edge: the MarginContainer `m`
+## (inside the panel) pads its content by the cutout on the sides it touches (`left`, `right`).
+static func pad_clear_of_cutout(m: MarginContainer, left := true, right := false) -> void:
+	_follow_cutout(m, func() -> void:
+		if is_instance_valid(m) and m.is_inside_tree():
+			var cut := safe_margins(m.get_viewport())
+			m.add_theme_constant_override("margin_left", int(ceilf(cut.x)) if left else 0)
+			m.add_theme_constant_override("margin_right", int(ceilf(cut.y)) if right else 0))
+
+
+static func _follow_cutout(c: Control, apply: Callable) -> void:
 	var t := Timer.new()
 	t.wait_time = 1.0
 	t.autostart = true
 	t.timeout.connect(apply)
 	c.add_child(t)
 	c.resized.connect(apply, CONNECT_DEFERRED)
+	apply.call()                 # at once when already in the tree (no frame under the cutout)
 	apply.call_deferred()
 
 

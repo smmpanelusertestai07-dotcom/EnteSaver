@@ -381,7 +381,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - Camera cutout: `UI.safe_margins(viewport)` is the screen's left and right sides a cutout covers
   (canvas px; zero on desktop builds; `UI.margins_for_test` stands in for one in checks);
   `UI.keep_clear_of_cutout(control)` keeps a full-screen Control's content clear of it (the
-  lobby's main UI, the pause band's content; the results screen and the HUD do the same).
+  lobby's main UI, the pause band's content; the results screen and the HUD do the same);
+  `UI.pad_clear_of_cutout(margin_container, left, right)` pads a panel's content instead, where
+  the panel's background runs to the screen's edge (the lobby's chat panel, its "Safe").
 - Performance: `PerfGovernor.attach(scene, level_scale, dynamic := true)` (scripts/perf_governor.gd)
   from `Arena.apply_graphics()` (dynamic 3D resolution, 0.6 at the least) and the lobby's
   `_apply_quality()` (measuring only). AUTO graphics: `Game.start_auto_graphics()` (a first guess
@@ -567,7 +569,8 @@ listed here. If a part needs something new from the core, add it in its own file
   signal `chat_received(text)`; friends `Cloud.send_friend_chat(id, text)` (RSA to the friend's key,
   signed, retained on ROOT/fm/<to>/<from> until read) / signal `friend_chat_changed(id)`; the
   lobby's chat panel and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`:
-  the panel from the left in `dialogs.modal`, "ChatWindow", its "Frame", "ChatOutside" (a tap
+  the panel from the left in `dialogs.modal`, "ChatWindow", its "Frame" (to the screen's edge; the
+  content in "Safe", clear of a left cutout), "ChatOutside" (a tap
   beside it goes back), "ChatTab_friends", "Close", the friends column "ChatPeople" with
   "ChatPerson_<code>", "ChatField", "ChatSend", quick phrases "Quick_<n>", "FriendChat", message
   rows "ChatMine_<n>" / "ChatTheirs_<n>", `time_text(ts, now, tz_s)`).

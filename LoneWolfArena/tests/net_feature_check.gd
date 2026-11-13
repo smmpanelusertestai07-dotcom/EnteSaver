@@ -38,6 +38,7 @@ static func run(runner: Node) -> void:
 	me._settings()
 	me._reach()
 	me._notices()
+	me._chat_cutout()
 	me._volumes()
 	NetChat.reset_for_test()
 	Game.profile = saved_profile
@@ -522,6 +523,22 @@ func _notices() -> void:
 		and NetChat.first_words("SEE YOU AT 9? BRING THE SNIPERRIFLE") == "SEE YOU AT 9? BRING THE..."
 		and NetChat.first_words("X".repeat(60)) == "X".repeat(34) + "...", "a notice shows a message's first words")
 	NetChat.reset_for_test()
+
+
+## The chat panel's background runs to the screen's edge, its content keeps clear of a camera
+## cutout on that side (UI.pad_clear_of_cutout, as the lobby's keep_clear_of_cutout).
+func _chat_cutout() -> void:
+	UI.margins_for_test = Vector2(90, 40)
+	var m := MarginContainer.new()
+	t.add_child(m)
+	UI.pad_clear_of_cutout(m)
+	_check(m.get_theme_constant("margin_left") == 90 and m.get_theme_constant("margin_right") == 0,
+		"the chat panel's content is padded by a left cutout (only on the side it touches)")
+	UI.margins_for_test = Vector2.ZERO
+	(m.get_child(0) as Timer).timeout.emit()
+	_check(m.get_theme_constant("margin_left") == 0, "and follows the cutout when the phone turns over")
+	UI.margins_for_test = Vector2(-1, -1)
+	m.queue_free()               # after its deferred update has run
 
 
 ## SOUND (no master volume, as the reference's): VOICE CHAT plays the other player's voice on its own

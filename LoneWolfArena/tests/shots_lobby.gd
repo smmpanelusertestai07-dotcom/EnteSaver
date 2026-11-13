@@ -91,6 +91,19 @@ func run(at: Node) -> int:
 	_check(chat != null and chat.find_child("ChatWindow", true, false) != null and chat.find_children("ChatMine*", "", true, false).size() == 2
 		and chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) != null, "the chat panel shows the messages and the friends")
 	await at.shot("l08_chat")
+	# a left camera cutout: the panel's background still starts at the edge, its content clear of it
+	UI.margins_for_test = Vector2(90, 0)
+	lobby.dialogs.close_modal()
+	LobbyNet.open(lobby, fox, "NIGHTFOX21", "friends")
+	await at.wait(0.8)
+	chat = lobby.dialogs.modal
+	var frame := chat.find_child("Frame", true, false) as Control if chat else null
+	var tab := chat.find_child("ChatTab_friends", true, false) as Control if chat else null
+	var kite := chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) as Control if chat else null
+	_check(frame != null and tab != null and kite != null and is_zero_approx(frame.global_position.x)
+		and tab.global_position.x >= 90.0 and kite.global_position.x >= 90.0, "the chat panel's content keeps clear of a left cutout")
+	await at.shot("l08b_chat_cutout")
+	UI.margins_for_test = Vector2(-1, -1)
 	var outside := chat.find_child("ChatOutside", true, false) as Button if chat else null
 	if outside:
 		outside.pressed.emit()
