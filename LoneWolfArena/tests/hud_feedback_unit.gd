@@ -19,6 +19,7 @@ static func run(runner: Node) -> void:
 	me._test_kill_badge()
 	me._test_zoom_label()
 	me._test_gun_alert()
+	me._test_impact_kind()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -226,3 +227,22 @@ func _test_gun_alert() -> void:
 	hud.free()
 	me.free()
 	foe.free()
+
+
+## Impact sounds by what the bullet hit.
+func _test_impact_kind() -> void:
+	var a := Node3D.new()
+	a.name = "Container_3"
+	var b := Node3D.new()
+	b.name = "Crate_1"
+	var c := Node3D.new()
+	c.name = "WallNorth"
+	var g := Node3D.new()
+	g.add_to_group("wood")
+	_check(Effects.impact_kind(a) == "metal" and Effects.impact_kind(b) == "wood" and Effects.impact_kind(c) == "concrete"
+		and Effects.impact_kind(g) == "wood" and Effects.impact_kind(null) == "concrete", "impact sounds: metal, wood, concrete")
+	for n in [a, b, c, g]:
+		n.free()
+	for f: String in ["weapon_draw", "punch_swish", "punch_hit", "dry_click", "bullet_whiz", "impact_metal", "impact_wood",
+			"impact_concrete", "grunt_1", "grunt_2", "grunt_3"]:
+		_check(ResourceLoader.exists("res://assets/audio/%s.wav" % f), "the sound %s ships" % f)

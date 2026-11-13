@@ -260,6 +260,115 @@ def pump():
 
 
 # ----------------------------------------------------------------------------
+# round 8: the match's missing moments (weapon handling, punches, near misses, impacts, grunts)
+# ----------------------------------------------------------------------------
+@sfx("weapon_draw", "Weapon draw: cloth rustle, a short metal slide and a light latch click.")
+def weapon_draw():
+    rng = np.random.default_rng(2101)
+    n = ns(0.45)
+    out = np.zeros(n)
+    place(out, normalize(bp(white(ns(0.12), rng), 500, 3000) * env_ad(ns(0.12), 0.02, 0.04)), 0.0, 0.3)
+    place(out, scrape(rng, 0.08, 1500, 3400, 2.6, 0.6), 0.06, 0.45)
+    place(out, metal_click(rng, ns(0.08), 2900, 0.01), 0.16, 0.7)
+    place(out, thud(ns(0.06), 240, 140, 0.02, 0.015), 0.16, 0.25)
+    out = reverb(out, room(rng, 0.18), wet=0.1)
+    return finalize(out, max_len=0.35, fout=0.06)
+
+
+@sfx("punch_swish", "Punch swing: a fast airy whoosh, rising then falling band of noise.")
+def punch_swish():
+    rng = np.random.default_rng(2102)
+    m = ns(0.24)
+    t = tvec(m)
+    w = svf(white(m, rng), ramp_exp(m, 600, 2600, 0.09), 1.4, "bp")
+    w *= np.clip(t / 0.07, 0, 1) ** 1.5 * np.exp(-np.maximum(t - 0.07, 0) / 0.045)
+    return finalize(normalize(w), max_len=0.22, fout=0.05)
+
+
+@sfx("punch_hit", "Punch landing: a dull low body thump with a short slap on top.")
+def punch_hit():
+    rng = np.random.default_rng(2103)
+    n = ns(0.3)
+    out = 0.9 * sat(thud(n, 140, 60, 0.04, 0.045, 0.001), 2.0)
+    out += 0.5 * normalize(bp(white(n, rng), 900, 4500) * env_ad(n, 0.0002, 0.006))
+    out += 0.3 * normalize(lp(white(n, rng), 400, 2) * env_ad(n, 0.001, 0.03))
+    out = reverb(normalize(out), room(rng, 0.15), wet=0.06)
+    return finalize(out, max_len=0.25, fout=0.06)
+
+
+@sfx("dry_click", "Empty magazine: a small hollow trigger click, no shot.")
+def dry_click():
+    rng = np.random.default_rng(2104)
+    out = metal_click(rng, ns(0.1), 3200, 0.006, noise_gain=0.3)
+    out = 0.8 * normalize(out) + 0.3 * thud(ns(0.1), 600, 380, 0.01, 0.006)
+    return finalize(normalize(out), max_len=0.09, fout=0.03)
+
+
+@sfx("bullet_whiz", "Near miss: a short doppler zip of a round passing close by.")
+def bullet_whiz():
+    rng = np.random.default_rng(2105)
+    m = ns(0.22)
+    t = tvec(m)
+    f = ramp_exp(m, 3400, 900, 0.12)
+    w = svf(white(m, rng), f, 6.0, "bp") + 0.35 * sine(f * 0.5, m)
+    w *= np.exp(-((t - 0.06) / 0.035) ** 2)
+    return finalize(normalize(w), max_len=0.2, fout=0.04)
+
+
+def _impact(seed, ratios, base, decay, body, grit):
+    rng = np.random.default_rng(seed)
+    n = ns(0.35)
+    out = 0.6 * normalize(hp(white(n, rng), 1800, 2) * env_ad(n, 0.0001, 0.004))
+    out += body * normalize(modal(n, base * np.array(ratios), [decay, decay * 0.6, decay * 0.4], [1.0, 0.6, 0.35]))
+    out += grit * normalize(grains(rng, n, 18, 0.0, 0.05, 1500, 6500))
+    out = reverb(normalize(out), room(rng, 0.2), wet=0.08)
+    return finalize(out, max_len=0.3, fout=0.08)
+
+
+@sfx("impact_metal", "Bullet on metal: a sharp ping with a ringing tail.")
+def impact_metal():
+    return _impact(2106, (1.0, 2.41, 3.87), 1900, 0.09, 0.9, 0.2)
+
+
+@sfx("impact_wood", "Bullet on wood: a hollow knock with splinter crackle.")
+def impact_wood():
+    return _impact(2107, (1.0, 1.7, 2.6), 420, 0.025, 0.8, 0.6)
+
+
+@sfx("impact_concrete", "Bullet on concrete: a dry crack with gritty debris.")
+def impact_concrete():
+    return _impact(2108, (1.0, 1.4, 2.2), 900, 0.008, 0.4, 1.0)
+
+
+def _grunt(seed, f0, f1):
+    rng = np.random.default_rng(seed)
+    m = ns(0.35)
+    tm = tvec(m)
+    src = colored(m, rng, 1.0) * (1 + 0.5 * np.sin(2 * np.pi * 85 * tm))
+    fm_ = ramp_exp(m, f0, f1, 0.2)
+    g = svf(src, fm_, 4.5, "bp") + 0.5 * svf(src, fm_ * 2.3, 5.0, "bp")
+    g *= env_ad(m, 0.012, 0.07)
+    g = lp(g, 1600, 2)
+    g = hp(g, 90, 2)
+    return finalize(normalize(g), max_len=0.3, fout=0.08)
+
+
+@sfx("grunt_1", "Hurt grunt 1: a short breathy formant 'uh' (noise, no voice).")
+def grunt_1():
+    return _grunt(2111, 520, 360)
+
+
+@sfx("grunt_2", "Hurt grunt 2: a lower clipped formant 'oh' (noise, no voice).")
+def grunt_2():
+    return _grunt(2112, 430, 300)
+
+
+@sfx("grunt_3", "Hurt grunt 3: a higher short formant 'eh' (noise, no voice).")
+def grunt_3():
+    return _grunt(2113, 640, 420)
+
+
+# ----------------------------------------------------------------------------
 # movement
 # ----------------------------------------------------------------------------
 def footstep(seed, heavy=1.0):

@@ -465,6 +465,10 @@ func set_firing(on: bool) -> void:
 		arena.cancel_revive(self)        # firing cancels a revive
 	var was := firing
 	firing = on and alive and not knocked
+	if firing and not was:
+		var w := weapon()
+		if not Weapons.is_melee(w.def) and not w.infinite() and w.ammo <= 0:
+			Audio.play("dry_click", -6.0)        # (an empty magazine: the click, then the reload)
 	if firing and not was and scope_type() != "sniper" and not Weapons.is_melee(weapon().def):
 		_shot_wait = 0.0
 	elif not firing and was and _shot_wait >= 0.0:

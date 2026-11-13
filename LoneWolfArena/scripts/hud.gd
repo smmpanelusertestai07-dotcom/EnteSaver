@@ -550,6 +550,8 @@ func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fi
 	if _hurt_sound_t <= 0.0:
 		_hurt_sound_t = 0.12
 		Audio.play("hurt", -6.0, randf_range(0.95, 1.05))
+		if randf() < 0.3:             # (a grunt now and then, never on every hit)
+			Audio.play("grunt_%d" % (randi() % 3 + 1), -8.0, randf_range(0.94, 1.06))
 	Game.vibrate(35, "damage")
 
 

@@ -177,6 +177,42 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 	_hole_next = (_hole_next + 1) % MAX_HOLES
 
 
+## The bullet's impact sound by what it hit (round 8): metal (containers, barrels, the forklift),
+## wood (crates, pallets) or concrete (walls, floor, anything else): a group "metal" / "wood" on
+## the collider or its parent first, else its name. At most one every IMPACT_GAP_MS.
+const IMPACT_GAP_MS := 70
+static var _impact_ms := 0
+static func impact_kind(col: Object) -> String:
+	var n := col as Node
+	if n == null:
+		return "concrete"
+	for node: Node in [n, n.get_parent()]:
+		if node == null:
+			continue
+		if node.is_in_group("metal"):
+			return "metal"
+		if node.is_in_group("wood"):
+			return "wood"
+		var nm := String(node.name).to_lower()
+		for k: String in ["container", "barrel", "tank", "fork", "metal", "cabinet", "rail", "truss", "shelf"]:
+			if k in nm:
+				return "metal"
+		for k: String in ["crate", "pallet", "wood", "box", "plank"]:
+			if k in nm:
+				return "wood"
+	return "concrete"
+
+
+static func impact_sound(ctx: Node, pos: Vector3, col: Object) -> void:
+	if ctx == null or not ctx.is_inside_tree():
+		return
+	var now := Time.get_ticks_msec()
+	if now - _impact_ms < IMPACT_GAP_MS:
+		return
+	_impact_ms = now
+	Audio.play_at("impact_" + impact_kind(col), pos, -8.0, randf_range(0.92, 1.08), 40.0)
+
+
 ## Every bullet hole of the scene is an instance of one MultiMesh (one draw call, not one each): a
 ## ring of MAX_HOLES, the oldest overwritten; a hole goes after HOLE_LIFE_S (a timer clears it).
 static func _hole_layer(parent: Node) -> MultiMeshInstance3D:

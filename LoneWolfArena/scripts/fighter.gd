@@ -691,6 +691,10 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 			Effects.shield_hit(self, end_pos, normal)
 		else:
 			Effects.impact(self, end_pos, normal)
+			if i == 0:
+				Effects.impact_sound(self, end_pos, col)
+	if not is_player and arena != null and arena.get("player") is Fighter:
+		_near_miss(arena.get("player") as Fighter, ray_origin, base_dir, tally)
 	_after_shot(w, tally)
 	model.on_fire()
 	Effects.muzzle_flash(self, muzzle, aim_forward(), int(d.pellets) > 1)
@@ -757,6 +761,20 @@ func _after_shot(w: WeaponState, tally: Dictionary) -> void:
 	fired.emit(w)
 
 
+## A shot of another fighter that passed within 1.5 m of the player's head without hitting it:
+## the near-miss whiz there (round 8).
+func _near_miss(me: Fighter, from: Vector3, dir: Vector3, tally: Dictionary) -> void:
+	if not me.alive or not me.is_inside_tree() or tally.get("target") == me:
+		return
+	var head := me.head_position()
+	var along := (head - from).dot(dir)
+	if along < 2.0:
+		return
+	var closest := from + dir * along
+	if closest.distance_to(head) <= 1.5 and closest.distance_to(head) > 0.25:
+		Audio.play_at("bullet_whiz", closest, -6.0, rng.randf_range(0.92, 1.1), 30.0)
+
+
 func _melee(w: WeaponState, base_dir: Vector3) -> bool:
 	w.on_fire()
 	last_shot_time = _now()
@@ -771,7 +789,9 @@ func _melee(w: WeaponState, base_dir: Vector3) -> bool:
 		land(tally, hit_target, zone, float(w.def.damage) * Weapons.zone_mult(w.def, zone) * Weapons.pen_mult(w.def, zone), pos)
 		Effects.hit_spark(self, pos, -base_dir, zone == "head")
 	model.on_punch()
-	Audio.play_at("jump", global_position, -8.0, 1.5)
+	Audio.play_at("punch_swish", global_position, -8.0, rng.randf_range(0.95, 1.08))
+	if not res.is_empty() and res.collider is Area3D and (res.collider as Area3D).has_meta("fighter"):
+		Audio.play_at("punch_hit", global_position, -4.0, rng.randf_range(0.95, 1.05))
 	_after_shot(w, tally)
 	return true
 
@@ -802,7 +822,7 @@ func switch_weapon(index: int) -> void:
 	w.cooldown = maxf(w.cooldown, float(w.def.equip))
 	if model:
 		model.play_swap(String(w.def.model), w.def.get("tint", Color.WHITE), float(w.def.equip))
-	Audio.play_at("ui_select", global_position, -10.0)
+	Audio.play_at("weapon_draw", global_position, -6.0 if is_player else -10.0)
 	weapon_switched.emit()
 
 
