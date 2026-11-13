@@ -5,7 +5,8 @@ extends Control
 ## this player's own plate in a group, a leave glyph at its right end (a tap asks EXIT GROUP / DISBAND
 ## GROUP: LobbyTeam's own confirm). It is a 2D control on the lobby's UI layer, placed every frame
 ## where the character's feet are on screen (`anchor`: a point under the model, unprojected by the
-## lobby's camera), so it stays small and sharp at every screen size and never floats over the
+## lobby's camera; Lobby._place_plates lifts a plate that would overlap another or the mode card),
+## as wide as its name needs (at most SIZE.x), so it stays small and sharp at every screen size and never floats over the
 ## skyline. The hero's plate sits just above the voice pill (VoiceButtons.lobby_pill), a member's at
 ## its shins. Hidden while the wardrobe, PROFILE, SETTINGS or a popup is open (not the team-size box), and while its
 ## character is off screen. Node names: HeroPlate, MemberPlate_<n>, PlateLeave (the leave glyph's
@@ -44,12 +45,13 @@ func show_member(n: String, lv: int, is_leader: bool, leave: bool) -> void:
 	leader = is_leader
 	can_leave = leave
 	mouse_filter = Control.MOUSE_FILTER_STOP if leave else Control.MOUSE_FILTER_IGNORE
+	_fit()
 	queue_redraw()
 
 
 ## The leave glyph's place on the plate (local coordinates).
 func leave_rect() -> Rect2:
-	return Rect2(SIZE.x - LEAVE_W, 0.0, LEAVE_W, SIZE.y)
+	return Rect2(size.x - LEAVE_W, 0.0, LEAVE_W, SIZE.y)
 
 
 ## Whether the lobby has a window open over the podium (the plates step aside).
@@ -67,7 +69,9 @@ static func covered(l: Node) -> bool:
 	return l.call("_find_settings") != null
 
 
-func _process(_delta: float) -> void:
+## Where the plate wants to be this frame (Lobby._place_plates moves plates that would overlap
+## another plate or the mode card); false when it is hidden.
+func place() -> bool:
 	var cam := lobby.get("camera") as Camera3D if lobby else null
 	var on := cam != null and anchor != null and is_instance_valid(anchor) and anchor.is_visible_in_tree() \
 		and player_name != "" and not covered(lobby)
@@ -76,19 +80,27 @@ func _process(_delta: float) -> void:
 		if cam.is_position_behind(p):
 			on = false
 		else:
-			var at := cam.unproject_position(p) - SIZE * 0.5
+			var at := cam.unproject_position(p) - size * 0.5
 			if hero:
 				at.y -= HERO_RISE
 			var vs := get_viewport_rect().size
-			on = at.x > -SIZE.x * 0.5 and at.x < vs.x - SIZE.x * 0.5
-			at.x = clampf(at.x, 8.0, vs.x - SIZE.x - 8.0)
-			at.y = clampf(at.y, 80.0, vs.y - 92.0 - SIZE.y - 50.0)
-			position = at.round()
+			on = at.x > -size.x * 0.5 and at.x < vs.x - size.x * 0.5
+			at.x = clampf(at.x, 8.0, vs.x - size.x - 8.0)
+			at.y = clampf(at.y, 80.0, vs.y - 92.0 - size.y - 50.0)
+			global_position = at.round()
 	visible = on
+	return on
+
+
+## The plate's width for its name: the level square, the flag, the name and the glyph.
+func _fit() -> void:
+	var w := 3.0 + (SIZE.y - 6.0) + 6.0 + (20.0 if leader else 0.0) + HudDraw.text_width(player_name, 18, "heavy") \
+		+ (LEAVE_W if can_leave else 10.0)
+	size = Vector2(clampf(ceilf(w), 96.0, SIZE.x), SIZE.y)
 
 
 func _draw() -> void:
-	var r := Rect2(Vector2.ZERO, SIZE)
+	var r := Rect2(Vector2.ZERO, size)
 	draw_colored_polygon(UI.chamfer_points(r, 7.0, ["tl", "br"]), Color(0.03, 0.03, 0.035, 0.78))
 	# the level square
 	var sq := Rect2(3, 3, SIZE.y - 6.0, SIZE.y - 6.0)
@@ -99,7 +111,7 @@ func _draw() -> void:
 	if leader:
 		LobbyTeam.draw_flag(self, Vector2(x + 8.0, SIZE.y * 0.5), 16.0, UI.ACCENT)
 		x += 20.0
-	var room := SIZE.x - x - (LEAVE_W if can_leave else 8.0) - 2.0
+	var room := size.x - x - (LEAVE_W if can_leave else 8.0) - 2.0
 	var t := player_name
 	while t.length() > 1 and HudDraw.text_width(t, 18, "heavy") > room:
 		t = t.left(t.length() - 1)
