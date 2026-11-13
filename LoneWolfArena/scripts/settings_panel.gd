@@ -146,10 +146,12 @@ const SPOTS := {
 	"sprint": {"x": 0.226, "y": 0.438, "r": 0.066}, "joystick": {"x": 0.225, "y": 0.71, "r": 0.115},
 	"center": {"x": 0.5, "y": 0.5, "r": 0.05},
 }
-## Colours of this page (design/STYLE_SPEC.txt, SETTINGS): the column, row plates, the unselected
-## segment and the sub-tab bar.
-const COLUMN_BG := Color(0.059, 0.031, 0.063, 0.96)
-const ROW_BG := Color(0.067, 0.059, 0.071, 0.82)
+## Colours of this page (design/STYLE_SPEC.txt, SETTINGS). The column and the rows are the kit's
+## own (ui.gd: TAB_DARK for side columns, ROW for setting rows), so the settings look like the
+## other full pages (FRIENDS, PROFILE); the column's tabs are UI.side_tab. Only the settings have
+## these: the unselected segment, the sub-tab bar and the open sub-tab's light grey.
+const COLUMN_BG := UI.TAB_DARK
+const ROW_BG := UI.ROW
 const SEG_OFF := Color(0.051, 0.043, 0.055, 0.95)
 const SUBBAR_BG := Color(0.192, 0.184, 0.196, 0.9)
 const SUBTAB_ON := Color(0.906, 0.906, 0.906)
@@ -199,8 +201,11 @@ func _ready() -> void:
 	shade.color = Color(0.02, 0.015, 0.025, 0.82)
 	UI.full_rect(shade)
 	add_child(shade)
-	var bg := UI.gradient_rect([[0.0, Color(0.12, 0.09, 0.12, 0.97)], [0.5, Color(0.16, 0.12, 0.19, 0.97)], [1.0, Color(0.09, 0.07, 0.1, 0.98)]], true)
+	var bg := Control.new()          # the full pages' backdrop (UI.draw_page_bg), as FRIENDS and PROFILE
+	bg.name = "PageBg"
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UI.full_rect(bg)
+	bg.draw.connect(func() -> void: UI.draw_page_bg(bg, bg.size))
 	add_child(bg)
 	# Left tab column.
 	var col := Panel.new()
@@ -210,9 +215,9 @@ func _ready() -> void:
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(col)
 	_menu = VBoxContainer.new()
-	_menu.add_theme_constant_override("separation", 7)
-	_menu.position = Vector2(0, 68)
-	_menu.custom_minimum_size = Vector2(MENU_W, 0)
+	_menu.add_theme_constant_override("separation", 6)
+	_menu.position = Vector2(8, 68)
+	_menu.custom_minimum_size = Vector2(MENU_W - 16.0, 0)
 	add_child(_menu)
 	for m in MENU.size():
 		var b := _menu_button(String(MENU[m][0]), m)
@@ -346,35 +351,12 @@ func _ready() -> void:
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.18)
 
 
+## A tab of the column: the kit's side tab (UI.side_tab, as FRIENDS' and PROFILE's tabs: a dark box
+## with a light lower edge; the open one yellow with hazard stripes, a cut line and a notch).
 func _menu_button(text: String, m: int) -> Button:
-	var b := Button.new()
-	b.toggle_mode = true
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(MENU_W - 4.0, 58)
-	b.text = text
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 22)
-	var normal := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 24.0)
-	var hover := UI.box(Color(1, 1, 1, 0.06), 0, 0, Color.TRANSPARENT, 24.0)
-	var on := UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 24.0, ["br"])
-	for st in [normal, hover, on]:
-		st.content_margin_left = 22
-	b.add_theme_stylebox_override("normal", normal)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT)
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	# hazard stripes, corner cut and notch on the selected (yellow) tab
-	b.draw.connect(func() -> void:
-		if b.button_pressed:
-			UI.draw_tab_selected(b, b.size))
+	var b := UI.side_tab(text, false, 22, Vector2(MENU_W - 16.0, 58))
+	b.name = "Menu_" + text
 	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
 		var pages: Array = MENU[m][1]
 		_show_tab(_current if _current in pages else int(pages[0])))
 	return b
@@ -441,9 +423,7 @@ func _show_tab(i: int) -> void:
 	_current = clampi(i, 0, TABS.size() - 1)
 	var m := menu_of(_current)
 	for k in _menu_buttons:
-		var b: Button = _menu_buttons[k]
-		b.set_pressed_no_signal(k == m)
-		b.queue_redraw()
+		UI.style_side_tab(_menu_buttons[k] as Button, k == m)
 	for c in _subbar.get_children():
 		_subbar.remove_child(c)
 		c.queue_free()
@@ -535,6 +515,12 @@ func _plate(title: String, control: Control, note := "") -> PanelContainer:
 	var row := UI.plate_row(title, control, note)
 	row.add_theme_stylebox_override("panel", _row_style(false))
 	_dark_segments(control)
+	if note != "":
+		# The help line takes the row's free width (at least plate_row's title width): the control
+		# keeps its own width at the right end; a slider shares the room with the text.
+		(row.get_child(0).get_child(0) as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if not control.has_meta("slider"):
+			control.size_flags_horizontal = Control.SIZE_SHRINK_END
 	return row
 
 
@@ -881,7 +867,7 @@ func cache_row() -> Control:
 	clear_btn.name = "ClearCache"
 	clear_btn.pressed.connect(_ask_clear_cache)
 	var row := _plate("Cache", clear_btn, "Shader cache, old logs, leftover temporary files: %s" % CacheCleaner.size_text(int(CacheCleaner.scan().bytes)))
-	clear_btn.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_SHRINK_END      # at the row's end
+	clear_btn.size_flags_horizontal = Control.SIZE_SHRINK_END      # at the row's end (the note takes the rest)
 	_cache_note = _note_of(row)
 	return row
 
