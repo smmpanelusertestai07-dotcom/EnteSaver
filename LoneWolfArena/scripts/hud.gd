@@ -981,8 +981,8 @@ func _draw() -> void:
 			_draw_weapon_panel(vs)
 			_draw_controls(vs)
 		_draw_button("settings", vs)
-	if player.alive or match_over:
-		_draw_hp_block(vs, u)          # (out of the round: no HP 0/200, the reference hides it)
+	if hp_subject() != null:
+		_draw_hp_block(vs, u)          # (out of the round: no HP 0/200; spectating: the watched fighter's)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
 	if team != null:
@@ -1566,67 +1566,92 @@ func _bottom_limits(vs: Vector2, u: float) -> Vector2:
 	return Vector2(lo, hi)
 
 
+## Whose health the HP block shows: the player while alive; out of the 1 vs 1 round, the fighter
+## the camera follows (its HP, like the reference); else nobody (no HP 0/200 over the ELIMINATED
+## BY card, also not in the round break).
+func hp_subject() -> Fighter:
+	if player == null or editor_mode:
+		return player
+	if player.alive:
+		return player
+	if team == null:
+		return player.spectating_now()
+	return null
+
+
 ## The player's full health: a room's HP rule (Fighter.hp_max), else Fighter.MAX_HP.
 func _hp_full() -> float:
+	var f := hp_subject()
+	if f != null:
+		return f.hp_max
 	return player.hp_max if player != null else Fighter.MAX_HP
 
 
 ## The HP block's label, "HP 200/200" (a room's HP 100: "HP 100/100").
 func hp_label() -> String:
-	var hp := player.hp if player != null and not editor_mode else _hp_full()
+	var f := hp_subject()
+	var hp := f.hp if f != null and not editor_mode else _hp_full()
 	return "HP %d/%d" % [ceili(hp), int(_hp_full())]
 
 
-func _draw_hp_block(vs: Vector2, u: float) -> void:
+## The HP block's geometry on `vs`: font size fs, icon size isz, x0 (left edge of the first
+## armour icon), fixed (icons + label width), bar_w, stacked. Inline like the reference:
+## [helmet][vest] HP 200/200 [bar], measured on the widest label so the bar does not shift while
+## the number changes. Short of room (16:9 between the medkit and grenade buttons) the block
+## shifts between the bottom buttons; only a very narrow gap puts the label above the bar.
+func hp_geometry(vs: Vector2, u: float) -> Dictionary:
 	var mx := _hp_full()
-	var hp := mx
-	var healing_rem := 0.0
-	if player != null and not editor_mode:
-		hp = player.hp
-		if player.healing:
-			healing_rem = minf(Fighter.HEAL_RATE * minf(player.heal_left, Fighter.HEAL_AMOUNT / Fighter.HEAL_RATE), mx - hp)
 	var lim := _bottom_limits(vs, u)
 	var avail := lim.y - lim.x
-	var by := vs.y * 0.948              # (the reference's height, a little over the bottom edge)
-	var bh := maxf(4.0, 0.0105 * u)
-	var label := hp_label()
-	# Inline like the reference: [helmet][vest] HP 200/200 [bar]. The layout is measured on the
-	# widest label so the bar does not shift while the number changes. Short of room (16:9
-	# between the medkit and grenade buttons) the label and icons get a little smaller first;
-	# only a very narrow gap puts the label above the bar.
-	var fs := int(0.03 * u)
-	var isz := 0.05 * u
-	var lw := HudDraw.text_width("HP %d/%d" % [int(mx), int(mx)], fs, "bold")
+	var fs := int(0.019 * u)
+	var isz := 0.04 * u
+	var lw := HudDraw.text_width("HP %d/%d" % [int(mx), int(mx)], fs, "semi")
 	var icons_w := isz * 2.0 + 0.008 * u
-	var fixed := icons_w + 0.016 * u + lw + 0.014 * u
+	var fixed := icons_w + 0.014 * u + lw + 0.012 * u
 	var bar_w := minf(0.38 * u, avail - fixed)
-	if bar_w < 0.25 * u:
-		fs = int(0.027 * u)
-		isz = 0.045 * u
-		lw = HudDraw.text_width("HP %d/%d" % [int(mx), int(mx)], fs, "bold")
-		icons_w = isz * 2.0 + 0.008 * u
-		fixed = icons_w + 0.012 * u + lw + 0.012 * u
-		bar_w = minf(0.38 * u, avail - fixed)
 	var stacked := bar_w < 0.13 * u
 	if stacked:
 		fixed = icons_w + 0.014 * u
 		bar_w = clampf(avail - fixed, 0.14 * u, 0.38 * u)
 	# The bar sits on the screen centre when there is room, else the block shifts between limits.
 	var x0 := clampf(vs.x * 0.5 - bar_w * 0.5 - fixed, lim.x, maxf(lim.y - fixed - bar_w, lim.x))
-	var bar := Rect2(x0 + fixed, by - bh * 0.5, bar_w, bh)
+	return {"fs": fs, "isz": isz, "x0": x0, "fixed": fixed, "bar_w": bar_w, "stacked": stacked}
+
+
+func _draw_hp_block(vs: Vector2, u: float) -> void:
+	var f := hp_subject()
+	var mx := _hp_full()
+	var hp := mx
+	var healing_rem := 0.0
+	var lag_hp := _hp_lag
+	if f != null and not editor_mode:
+		hp = f.hp
+		if f != player:
+			lag_hp = hp
+		if f.healing:
+			healing_rem = minf(Fighter.HEAL_RATE * minf(f.heal_left, Fighter.HEAL_AMOUNT / Fighter.HEAL_RATE), mx - hp)
+	var g := hp_geometry(vs, u)
+	var by := vs.y * 0.948              # (the reference's height, a little over the bottom edge)
+	var bh := maxf(4.0, 0.0105 * u)
+	var label := hp_label()
+	var fs := int(g.fs)
+	var isz := float(g.isz)
+	var x0 := float(g.x0)
+	var bar_w := float(g.bar_w)
+	var bar := Rect2(x0 + float(g.fixed), by - bh * 0.5, bar_w, bh)
 	draw_rect(bar.grow(1.0), Color(0, 0, 0, 0.5))
 	var frac := clampf(hp / mx, 0.0, 1.0)
-	var lag := clampf(_hp_lag / mx, 0.0, 1.0)
+	var lag := clampf(lag_hp / mx, 0.0, 1.0)
 	if lag > frac:
 		draw_rect(Rect2(bar.position + Vector2(bar_w * frac, 0), Vector2(bar_w * (lag - frac), bh)), Color(0.95, 0.25, 0.2, 0.85))
 	var fill := HudDraw.HP_WHITE if frac > 0.3 else Color(1.0, 0.45, 0.4)
 	draw_rect(Rect2(bar.position, Vector2(bar_w * frac, bh)), fill)
 	if healing_rem > 0.0:
 		draw_rect(Rect2(bar.position + Vector2(bar_w * frac, 0), Vector2(bar_w * healing_rem / mx, bh)), Color(HudDraw.HEAL_GREEN, 0.85 + 0.15 * sin(_time * 8.0)))
-	if stacked:
-		HudDraw.text(self, label, Vector2(bar.position.x, by - bh - 0.02 * u), int(fs * 0.9), Color(1, 1, 1, 0.95), 0, 3, "bold")
+	if bool(g.stacked):
+		HudDraw.text(self, label, Vector2(bar.position.x, by - bh - 0.02 * u), int(fs * 0.9), Color(1, 1, 1, 0.95), 0, 3, "semi")
 	else:
-		HudDraw.text(self, label, Vector2(bar.position.x - 0.012 * u, by), fs, Color(1, 1, 1, 0.95), 2, 3, "bold")
+		HudDraw.text(self, label, Vector2(bar.position.x - 0.012 * u, by), fs, Color(1, 1, 1, 0.95), 2, 3, "semi")
 	# Helmet + vest (level 2) at the left end of the block.
 	for k in 2:
 		_armor_icon(Vector2(x0 + isz * 0.5 + k * (isz + 0.008 * u), by - isz * 0.12), isz, "v_helmet" if k == 0 else "v_vest", 2)
@@ -1984,32 +2009,43 @@ func _draw_eliminated_by(vs: Vector2, u: float) -> void:
 	var what := String({"zone": "THE ZONE", "fall": "A FALL", "self": "YOUR OWN FRAG", "left": "LEAVING"}.get(cause, by_name))
 	var line := String({"zone": "OUTSIDE THE SAFE ZONE TOO LONG", "fall": "A DROP FROM THE HIGH GROUND",
 		"self": "STAY CLEAR OF YOUR OWN FRAG", "left": ""}.get(cause, ""))
-	var fs := int(0.026 * u)
-	var w := 0.56 * u                    # (clear of the HP block's armour icons)
-	var h := 0.13 * u
-	var r := Rect2(0.03 * u, vs.y - h - 0.035 * u, w, h)
+	# The card ends 0.01u before the HP block's first armour icon on every screen shape (16:9: the
+	# block sits right of the medkit), its contents scaled down to that width.
+	var r := death_card_rect(vs, u)
+	var k := clampf(r.size.x / (0.56 * u), 0.6, 1.0)
+	var fs := int(0.026 * u * k)
+	var h := r.size.y
 	HudDraw.plate(self, r, 0.78)
 	draw_rect(Rect2(r.position, Vector2(0.008 * u, r.size.y)), HudDraw.RED)
-	var tx := r.position.x + 0.03 * u
+	var tx := r.position.x + 0.03 * u * k
 	var ty := r.position.y + 0.035 * u
 	HudDraw.text_parts(self, [["ELIMINATED BY ", Color(0.78, 0.8, 0.84)], [what, Color(1.0, 0.5, 0.45)]],
 		Vector2(tx, ty), fs, 0, 2, "bold")
-	draw_line(Vector2(tx, ty + 0.025 * u), Vector2(r.end.x - 0.03 * u, ty + 0.025 * u), Color(1, 1, 1, 0.14), 1.0)
+	draw_line(Vector2(tx, ty + 0.025 * u), Vector2(r.end.x - 0.03 * u * k, ty + 0.025 * u), Color(1, 1, 1, 0.14), 1.0)
 	var ry := r.position.y + h * 0.68
 	if cause in ["gun", "frag"]:
-		var nfs := int(0.028 * u)
+		var nfs := int(0.028 * u * k)
 		var nm := by_name
-		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.17 * u)
-		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.17 * u), Color.WHITE, 0, 2, "bold")
-		var gx := tx + nw + 0.03 * u
+		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.17 * u * k)
+		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.17 * u * k), Color.WHITE, 0, 2, "bold")
+		var gx := tx + nw + 0.03 * u * k
 		var gid := String(e.get("gun_id", ""))
 		var t: Texture2D = HudDraw.tex("item_grenade") if cause == "frag" else HudDraw.weapon_tex(Weapons.DEFS.get(gid, Weapons.DEFS[Weapons.DEFAULT_PICK]))
-		HudDraw.icon(self, t, Vector2(gx + 0.04 * u, ry), Vector2(0.08, 0.04) * u, Color(1, 1, 1, 0.92))
-		HudDraw.text(self, String(e.get("gun", "")), Vector2(gx + 0.09 * u, ry), int(0.022 * u), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+		HudDraw.icon(self, t, Vector2(gx + 0.04 * u * k, ry), Vector2(0.08, 0.04) * u * k, Color(1, 1, 1, 0.92))
+		HudDraw.text(self, String(e.get("gun", "")), Vector2(gx + 0.09 * u * k, ry), int(0.022 * u * k), Color(0.78, 0.8, 0.84), 0, 2, "semi")
 		HudDraw.text_parts(self, [["DMG ", Color(0.78, 0.8, 0.84)], [str(int(e.get("damage", 0))), HudDraw.YELLOW]],
-			Vector2(r.end.x - 0.03 * u, ry), nfs, 2, 2, "bold")
+			Vector2(r.end.x - 0.03 * u * k, ry), nfs, 2, 2, "bold")
 	elif line != "":
-		HudDraw.text(self, line, Vector2(tx, ry), int(0.022 * u), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+		HudDraw.text(self, line, Vector2(tx, ry), _fit_fs(line, int(0.022 * u * k), r.size.x - 0.05 * u * k), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+
+
+## The ELIMINATED BY card's rectangle: bottom left, at most 0.56u wide and ending at least 0.01u
+## before the HP block's first armour icon (the block may show the watched fighter's HP).
+func death_card_rect(vs: Vector2, u: float) -> Rect2:
+	var x := 0.03 * u
+	var right := minf(x + 0.56 * u, float(hp_geometry(vs, u).x0) - 0.01 * u)
+	var h := 0.13 * u
+	return Rect2(x, vs.y - h - 0.035 * u, maxf(right - x, 0.2 * u), h)
 
 
 ## Font size for `t`: `px`, smaller when the text would be wider than `room`.
