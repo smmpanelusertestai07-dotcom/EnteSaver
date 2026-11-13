@@ -82,6 +82,9 @@ signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching p
 ## GROUPS and all-human team matches (design/GROUPS.txt section 3; the lobby uses only these):
 signal group_changed                   # members, leader, sides, status or search progress changed
 signal group_invited(from_name: String) # a group invite waits: group_invite_from()
+## GROUP CODE with JOIN BY CODE off: a player asks the leader to let them in (code_asks; the leader's
+## answer_code_ask ACCEPT runs the normal join, DECLINE or CODE_ASK_WAIT_MS of silence says no).
+signal code_asked(from_id: String, from_name: String)
 signal member_left(id: String)         # an all-human match: that member left (its slot is LEFT)
 signal event_from(kind: String, data: Array, from_id: String)      # an all-human match's event, with its sender
 signal state_from(state: PackedFloat32Array, from_id: String)      # an all-human match's state, with its sender
@@ -1119,7 +1122,7 @@ func _on_inbox(d: Dictionary) -> void:
 				_on_gmatch(from, d)
 		"gacc":
 			_on_gmatch_answer(from, d, true)
-		"gin", "gno":
+		"gin", "gno", "gwait":
 			_on_code_answer(from, d)
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
@@ -3804,6 +3807,12 @@ var _code_topic := ""          # the bucket this phone listens on for asks with 
 var _code_keys := {}           # code -> its stretched key (the own one, the one being joined)
 var _code_tries: Array = []    # when the last join attempts began (ms)
 var _code_kicked := {}         # ids this leader REMOVEd this run: their code asks are never answered
+## Asks to join while JOIN BY CODE is off: id -> {"name", "t", "d"} (at most one per joiner, at most
+## CODE_ASKS_MIN a minute shown, each for CODE_ASK_WAIT_MS), and when the last ones came (ms).
+const CODE_ASK_WAIT_MS := 20000
+const CODE_ASKS_MIN := 3
+var code_asks := {}
+var _code_ask_times: Array = []
 
 
 ## The GROUP CODE the GROUP bar shows: a member's is the leader's (from the roster), a leader's or
@@ -3896,7 +3905,7 @@ func join_group_code(code: String) -> String:
 		return "CANCEL THE SEARCH FIRST"
 	if not _connected or _key == null:
 		return "OFFLINE: JOINING A GROUP NEEDS THE INTERNET"
-	if code_state == "asking":
+	if code_state in ["asking", "waiting"]:
 		return "A JOIN IS ALREADY UNDER WAY"
 	var now := Time.get_ticks_msec()
 	_code_tries = _code_tries.filter(func(t: int) -> bool: return now - t < 60000)
@@ -3922,8 +3931,8 @@ func _code_ask_msg() -> Dictionary:
 ## on, not in QUICK MATCH); a join by code asks every CODE_ASK_S until answered or CODE_WAIT_MS.
 func _tick_code(delta: float, now: int) -> void:
 	var want := ""
-	if _connected and _want_lobby and code_join and my_id != "" and is_group_leader() and not in_room() and room_code == "" \
-			and not in_session and not session_multi and not seeking and code_state != "asking":
+	if _connected and _want_lobby and my_id != "" and is_group_leader() and not in_room() and room_code == "" \
+			and not in_session and not session_multi and not seeking and code_state not in ["asking", "waiting"]:
 		want = code_topic(group_code())
 	if want != _code_topic:
 		if _code_topic != "" and _connected:
@@ -3931,12 +3940,15 @@ func _tick_code(delta: float, now: int) -> void:
 		_code_topic = want
 		if want != "":
 			_subscribe(want)
-	if code_state == "asking" and not _cjoin.is_empty():
+	for id: String in code_asks.keys():
+		if now - int(code_asks[id].t) > CODE_ASK_WAIT_MS:
+			answer_code_ask(id, false)    # (not answered in time: no)
+	if code_state in ["asking", "waiting"] and not _cjoin.is_empty():
 		_cjoin.ask_t = float(_cjoin.ask_t) - delta
 		if float(_cjoin.ask_t) <= 0.0:
 			_cjoin.ask_t = CODE_ASK_S
 			_publish_json(code_topic(String(_cjoin.code)), _code_ask_msg())
-		if now - int(_cjoin.t) > CODE_WAIT_MS:
+		if now - int(_cjoin.t) > (CODE_ASK_WAIT_MS + 3000 if code_state == "waiting" else CODE_WAIT_MS):
 			_cjoin = {}
 			code_state = "none"
 			group_changed.emit()
@@ -3944,13 +3956,13 @@ func _tick_code(delta: float, now: int) -> void:
 
 ## A "gask" on this phone's bucket: answered only when its tag is this phone's code's ("" else, the
 ## ask is another group's). Returns the answer that went out ({} for none).
-func _on_code_ask(d: Dictionary) -> Dictionary:
+func _on_code_ask(d: Dictionary, accepted := false) -> Dictionary:
 	var from := String(d.get("from", "")).left(32)
 	if String(d.get("t", "")) != "gask" or from == "" or from == my_id or typeof(d.get("mac")) != TYPE_STRING:
 		return {}
-	if not code_join or in_room() or not is_group_leader() or in_session or session_multi or seeking:
+	if in_room() or not is_group_leader() or in_session or session_multi or seeking:
 		return {}
-	if not _bucket("gc", CODE_RATE, 8.0) or not _bucket("gc" + from, 0.5, 3.0):
+	if not accepted and (not _bucket("gc", CODE_RATE, 8.0) or not _bucket("gc" + from, 0.5, 3.0)):
 		return {}
 	var key := _code_key(group_code())
 	if not _crypto.constant_time_compare(_code_tag(key, "gask" + from).to_utf8_buffer(), String(d.mac).to_utf8_buffer()):
@@ -3958,6 +3970,8 @@ func _on_code_ask(d: Dictionary) -> Dictionary:
 	if not NetMatch.allowed(from, my_id) or _code_kicked.has(from) or typeof(d.get("pk")) != TYPE_STRING \
 			or String(d.pk).length() > 1200 or from != String(d.pk).sha256_text().left(32):
 		return {}                    # blocked, not let in by DUEL CHALLENGES FROM, or REMOVEd: no answer
+	if not code_join and not accepted:
+		return _code_pending(from, d, key)
 	var taken := 0
 	if not group.is_empty():
 		taken = (group.members as Array).size() + (_grp.invited as Dictionary).size()
@@ -3988,16 +4002,57 @@ func _on_code_ask(d: Dictionary) -> Dictionary:
 	return msg
 
 
-## The joiner: the leader's "gin" (the group's keys, wrapped for this phone) or "gno" (full), both
-## tagged with the code's key; a "gin" from a leader this phone blocked is refused.
+## A valid code ask while JOIN BY CODE is off: the leader is asked (code_asked; one waiting ask per
+## joiner, at most CODE_ASKS_MIN new ones a minute, the rest dropped silently) and the joiner told
+## to wait ("gwait", tagged with the code's key: only the code's holder can say it).
+func _code_pending(from: String, d: Dictionary, key: PackedByteArray) -> Dictionary:
+	var now := Time.get_ticks_msec()
+	if not code_asks.has(from):
+		_code_ask_times = _code_ask_times.filter(func(t: int) -> bool: return now - t < 60000)
+		if _code_ask_times.size() >= CODE_ASKS_MIN:
+			return {}
+		_code_ask_times.append(now)
+		var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+		code_asks[from] = {"name": who if who != "" else "PLAYER", "t": now, "d": d.duplicate()}
+		code_asked.emit(from, String(code_asks[from].name))
+	var msg := {"t": "gwait", "from": my_id, "rt": _code_tag(key, "gwait" + my_id)}
+	_publish_json(ROOT + "/u/" + from, msg)
+	return msg
+
+
+## The leader's answer to a waiting code ask: ACCEPT lets the player in as JOIN BY CODE would (the
+## same checks again), DECLINE (or no answer in time) tells them no ("gno" {"no": true}).
+func answer_code_ask(from: String, yes: bool) -> Dictionary:
+	if not code_asks.has(from):
+		return {}
+	var a: Dictionary = code_asks[from]
+	code_asks.erase(from)
+	if yes and not Game.is_blocked(from):
+		return _on_code_ask(a.d, true)
+	if group_code() == "":
+		return {}
+	var no := {"t": "gno", "from": my_id, "no": true, "rt": _code_tag(_code_key(group_code()), "gno" + my_id)}
+	_publish_json(ROOT + "/u/" + from, no)
+	return no
+
+
+## The joiner: the leader's "gin" (the group's keys, wrapped for this phone), "gno" (full, or "no":
+## the leader said no) or "gwait" (the leader was asked: JOIN BY CODE is off there), all tagged with
+## the code's key; a "gin" from a leader this phone blocked is refused.
 func _on_code_answer(from: String, d: Dictionary) -> void:
-	if code_state != "asking" or _cjoin.is_empty() or typeof(d.get("rt")) != TYPE_STRING:
+	if not code_state in ["asking", "waiting"] or _cjoin.is_empty() or typeof(d.get("rt")) != TYPE_STRING:
 		return
 	var key: PackedByteArray = _cjoin.key
+	if String(d.t) == "gwait":
+		if code_state == "asking" and _crypto.constant_time_compare(_code_tag(key, "gwait" + from).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
+			code_state = "waiting"
+			_cjoin.t = Time.get_ticks_msec()
+			group_changed.emit()
+		return
 	if String(d.t) == "gno":
 		if _crypto.constant_time_compare(_code_tag(key, "gno" + from).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
 			_cjoin = {}
-			code_state = "full"
+			code_state = "said_no" if d.get("no") == true else "full"
 			group_changed.emit()
 		return
 	var sec_text := String(d.get("sec", "")) if typeof(d.get("sec")) == TYPE_STRING else ""

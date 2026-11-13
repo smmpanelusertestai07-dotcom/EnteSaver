@@ -584,6 +584,61 @@ func go_back() -> void:
 
 # ---------------------------------------------------------------- lobby notices
 
+## A notice at the top of the lobby that asks (a GROUP CODE ask: "<NAME> WANTS TO JOIN"): `text`,
+## ACCEPT and DECLINE (AskAccept / AskDecline), for `seconds`; nothing tapped by then is a DECLINE.
+## Plays ui_invite (and a short vibration when the vibration setting allows it).
+static func ask_toast(owner_lobby: Lobby, text: String, seconds: float, on_accept: Callable, on_decline: Callable) -> Control:
+	var layer := owner_lobby.get_node_or_null(^"AskLayer") as CanvasLayer
+	if layer == null:
+		layer = CanvasLayer.new()
+		layer.name = "AskLayer"
+		layer.layer = 21
+		owner_lobby.add_child(layer)
+	var p := PanelContainer.new()
+	p.name = "AskToast"
+	p.add_theme_stylebox_override("panel", UI.chamfer(Color(0.05, 0.05, 0.045, 0.96), 12, 2, Color(UI.ACCENT, 0.9), 14.0, ["tl", "br"]))
+	p.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	p.offset_left = -TOAST_W * 0.5
+	p.offset_right = TOAST_W * 0.5
+	p.offset_top = 10.0 + float(layer.get_child_count()) * 84.0
+	layer.add_child(p)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	p.add_child(row)
+	var l := UI.ellipsis(UI.label(text, 19, UI.TEXT, "semi"))
+	l.name = "AskText"
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(l)
+	var done := [false]
+	var answer := func(yes: bool) -> void:
+		if done[0]:
+			return
+		done[0] = true
+		if is_instance_valid(p):
+			p.queue_free()
+		(on_accept if yes else on_decline).call()
+	var acc := UI.button("ACCEPT", 16, "primary", Vector2(120, 56))
+	acc.name = "AskAccept"
+	acc.pressed.connect(answer.bind(true))
+	row.add_child(acc)
+	var dec := UI.button("DECLINE", 16, "dark", Vector2(120, 56))
+	dec.name = "AskDecline"
+	dec.pressed.connect(answer.bind(false))
+	row.add_child(dec)
+	p.get_tree().create_timer(seconds).timeout.connect(answer.bind(false))
+	alert(true)
+	return p
+
+
+## A sound for an invite (ui_invite, with a short vibration when the vibration setting allows) or a
+## message (ui_msg).
+static func alert(invite: bool) -> void:
+	Audio.play("ui_invite" if invite else "ui_msg", -4.0)
+	if invite:
+		Game.vibrate(120, "lobby")
+
+
 ## A notice at the top of the lobby: an icon, `text` (cut with "..." when too long) and a small
 ## `caption` on the right; it slides in, stays TOAST_S seconds and fades. A tap closes it and
 ## runs on_tap. A newer notice takes its place.
