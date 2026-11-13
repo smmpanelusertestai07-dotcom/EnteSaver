@@ -470,7 +470,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `QuitConfirm`); it is ignored during the START overlay.
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, the bottom bar `BottomBar` with WARDROBE
   `BundlesButton`, PROFILE `ProfileButton` and ONLINE 1 VS 1 `OnlineButton`, the chat strip above it
-  `ChatStrip` (UI.TOUCH_MIN tall, its icon and ticker centred; its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
+  `ChatStrip` (UI.TOUCH_MIN tall, its icon and ticker centred; `chat_strip_width()`: CHAT_W, shorter with
+  group members so the voice pill's place under the hero's feet stays free, also with a cutout; its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
   `AddFriendButton` on the right (FRIENDS on PLAYERS), FRIENDS `FriendsButton` and the gear
   `SettingsButton` top-right, mode card, START, settings, input; the reference's layout: no text
   menu, stats chips, name plate or version) makes four helpers that build under its `ui` and reach

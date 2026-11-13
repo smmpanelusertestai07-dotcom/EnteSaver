@@ -810,17 +810,23 @@ func _build_bottom_bar(root: Control) -> void:
 		row.add_child(_bar_button(String(it[0]), String(it[1]), String(it[2]), it[3]))
 
 
+## The chat strip's full width, and the room it leaves for the voice's mic / speaker pill, which
+## is centred under the hero's feet (half the pill's width and a gap, VOICE_PLACE_LEFT).
+const CHAT_W := 470.0
+const VOICE_PLACE_LEFT := 66.0
+
+
 ## The chat strip above the bottom bar (the reference's chat icons and one-line ticker): a speech
 ## bubble button (ChatButton) and the newest friend message as "[FRIEND] NAME: text" (ChatTicker,
 ## "[FRIENDS] TAP TO CHAT WITH A FRIEND" when there is none); a tap opens the chat panel with that
-## friend, or FRIENDS when there is nobody to chat with yet.
+## friend, or FRIENDS when there is nobody to chat with yet. Its width: chat_strip_width().
 func _build_chat_strip(root: Control) -> void:
 	var strip := Button.new()
 	strip.name = "ChatStrip"
 	strip.focus_mode = Control.FOCUS_NONE
 	strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	strip.offset_left = 12
-	strip.offset_right = 12 + 470
+	strip.offset_right = 12 + CHAT_W
 	strip.offset_top = -12 - UI.TOUCH_MIN - 8 - UI.TOUCH_MIN      # a full 56 px touch target
 	strip.offset_bottom = -12 - UI.TOUCH_MIN - 8
 	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
@@ -829,7 +835,7 @@ func _build_chat_strip(root: Control) -> void:
 	ticker.name = "ChatTicker"
 	UI.outlined(ticker, 3, Color(0, 0, 0, 0.6))
 	ticker.position = Vector2(62, 0)
-	ticker.size = Vector2(404, UI.TOUCH_MIN)
+	ticker.size = Vector2(CHAT_W - 66.0, UI.TOUCH_MIN)
 	ticker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	strip.add_child(ticker)
 	strip.draw.connect(func() -> void:
@@ -884,11 +890,27 @@ var _chat_shown := ""
 var _chat_t := 0.0
 
 
-## The ticker follows the newest friend message (checked twice a second from _process).
+## The chat strip's width: CHAT_W, but with group members beside it the hero stands further left
+## (HERO_X_GROUP), so the strip ends short of the voice pill's place under the hero's feet (the
+## hero is 3D: a left camera cutout moves the strip right, not the hero).
+func chat_strip_width() -> float:
+	if _member_models.is_empty():
+		return CHAT_W
+	var vp := get_viewport()
+	var free := hero_x() * vp.get_visible_rect().size.x - VOICE_PLACE_LEFT - UI.safe_margins(vp).x - 12.0
+	return clampf(floorf(free), 180.0, CHAT_W)
+
+
+## The ticker follows the newest friend message (checked twice a second from _process), the
+## strip's width follows chat_strip_width().
 func _refresh_chat_strip() -> void:
 	var strip := _main_ui.get_node_or_null("ChatStrip") as Button if _main_ui else null
 	if strip == null:
 		return
+	var w := chat_strip_width()
+	if not is_equal_approx(strip.size.x, w):
+		strip.offset_right = 12 + w
+		(strip.get_node("ChatTicker") as Label).size.x = w - 66.0
 	var who := chat_ticker_friend()
 	var text := "[FRIENDS] TAP TO CHAT WITH A FRIEND"
 	if who != "":
@@ -1428,6 +1450,7 @@ func show_group_members(list: Array) -> void:
 	var view := _main_view()
 	if camera != null and wardrobe == null and not (view[0] as Vector3).is_equal_approx(_cam_to_pos):
 		_move_camera(view[0], view[1])
+	_refresh_chat_strip()            # (its width: the voice pill's place under the hero stays free)
 
 
 func _add_member(id: String, slot: int, bundle: String) -> CharacterModel:

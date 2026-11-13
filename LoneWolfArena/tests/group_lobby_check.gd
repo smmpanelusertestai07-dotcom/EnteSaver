@@ -236,6 +236,25 @@ func _leader(lobby: Lobby) -> void:
 	for cm: CharacterModel in models:
 		if lobby.camera.unproject_position(cm.global_position).x <= hero_px:
 			_fail("a member's model does not stand right of the hero")
+	# The voice's mic / speaker pill (112 x 44, centred under the hero's feet, kept over the bottom
+	# bar) stays clear of the chat strip with the hero further left, also with a left camera cutout
+	# (the strip moves right, the 3D hero does not).
+	var win := get_tree().root
+	var win_was := win.size
+	win.size = Vector2i(1280, 720)          # (a 16:9 phone: the headless window is square)
+	for cut: float in [0.0, 90.0]:
+		UI.margins_for_test = Vector2(cut, 0.0)
+		await at.wait(1.2)
+		var vs := lobby.get_viewport().get_visible_rect().size
+		var feet := lobby.camera.unproject_position(lobby.model.global_position + Vector3(0, 0.12, 0))
+		var pill := Rect2(feet - Vector2(56, 22), Vector2(112, 44))
+		pill.position.y = clampf(pill.position.y, 80.0, vs.y - 92.0 - 44.0)
+		var strip := lobby.find_child("ChatStrip", true, false) as Control
+		if strip == null or not strip.is_visible_in_tree() or strip.get_global_rect().intersects(pill):
+			_fail("the chat strip %s runs into the voice pill's place %s under the hero (cutout %d)" % [str(strip.get_global_rect() if strip else Rect2()), str(pill), int(cut)])
+	UI.margins_for_test = Vector2(-1, -1)
+	win.size = win_was
+	await at.wait(0.3)
 	var team_bar := lobby.find_child("TeamBar", true, false) as Control
 	var card := lobby.find_child("PlayerCard", true, false) as Control
 	if team_bar == null or not team_bar.is_visible_in_tree() or card == null or team_bar.get_global_rect().position.y < card.get_global_rect().end.y - 1.0:

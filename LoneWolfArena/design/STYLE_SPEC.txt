@@ -134,7 +134,8 @@ reference:
   (two busts; the unread badge) and the gear; bottom-left a dark translucent bar of main buttons
   (WARDROBE | PROFILE | ONLINE 1 VS 1, glyph and caption each) with the chat strip above it (a
   speech-bubble square with the unread count and a one-line ticker of the newest friend message,
-  "[FRIEND] NAME: text"; a tap opens the chat panel); ADD (person with a plus over its caption) on
+  "[FRIEND] NAME: text"; a tap opens the chat panel; shorter while group members stand beside the
+  hero, so the place under the hero's feet stays free for the voice pill); ADD (person with a plus over its caption) on
   the right edge at mid height opens FRIENDS on PLAYERS; bottom-right the mode card (purple to blue
   ramp, 2 px yellow frame, the mode name white) (TRAINING GROUND /
   CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
