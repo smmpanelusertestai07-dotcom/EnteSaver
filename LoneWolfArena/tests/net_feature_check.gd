@@ -421,6 +421,26 @@ func _voice() -> void:
 	b.free()
 	_voice_group_key(frame)
 	_voice_units(frame)
+	_voice_popup_tap()
+
+
+## On a phone one tap is sent twice: the emulated mouse press opens the lobby pill's popup, then
+## the touch press itself reaches the popup's catcher; it must not close the popup at once.
+func _voice_popup_tap() -> void:
+	var host := Control.new()
+	host.size = Vector2(1280, 720)
+	t.add_child(host)
+	var c := VoiceButtons.open_popup(host, "mic", Vector2(640, 400), false)
+	var touch := InputEventScreenTouch.new()
+	touch.pressed = true
+	touch.position = Vector2(10, 10)
+	c.gui_input.emit(touch)
+	var stays := is_instance_valid(c) and not c.is_queued_for_deletion()
+	c.set_meta("opened_ms", Time.get_ticks_msec() - VoiceButtons.OPEN_GRACE_MS - 10)
+	c.gui_input.emit(touch)
+	_check(stays and c.is_queued_for_deletion(),
+		"the MIC MODE popup stays open through the rest of the tap that opened it (a phone's touch after its mouse press); a later tap outside closes it")
+	host.queue_free()
 
 
 ## GROUP voice under the sender's own key, given only to its teammates: the other team holds the

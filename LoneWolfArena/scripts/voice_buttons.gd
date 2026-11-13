@@ -20,6 +20,7 @@ const LIFT := 0.12                 # the pill's height over the character's feet
 const ITEM := Vector2(78, 70)
 const TALK := Vector2(84, 44)      # the lobby's TALK beside the pill (PUSH TO TALK)
 const TONE_HOLD_MS := 3000        # MIC TEST's START held this long: the hidden test tone switch
+const OPEN_GRACE_MS := 300        # a popup ignores the rest of the tap that opened it (phones send a tap twice)
 
 var lobby: Node                    # the Lobby (camera, model, wardrobe, profile_ui, team)
 var popup: Control                 # the open popup's full-screen catcher
@@ -146,9 +147,14 @@ static func open_popup(host: Control, kind: String, at: Vector2, in_match: bool)
 	catcher.name = "VoicePopup"
 	catcher.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	catcher.set_meta("opened_ms", Time.get_ticks_msec())
 	catcher.gui_input.connect(func(e: InputEvent) -> void:
 		if (e is InputEventMouseButton and (e as InputEventMouseButton).pressed) or (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed):
 			catcher.accept_event()
+			# On a phone one tap arrives twice (its emulated mouse press, then the touch itself):
+			# the half that opened the popup must not close it at once. A later tap closes it.
+			if Time.get_ticks_msec() - int(catcher.get_meta("opened_ms", 0)) < OPEN_GRACE_MS:
+				return
 			catcher.queue_free())
 	host.add_child(catcher)
 	var box := PanelContainer.new()
