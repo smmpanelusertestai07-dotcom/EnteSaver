@@ -388,6 +388,13 @@ func run(at: Node) -> int:
 	await at.get_tree().process_frame
 	await at.shot("hud_14b_zone_splats")
 	hud._zone_hurt = 0.0
+	# Gunshot alerts: shots off screen to the right (close) and behind (far, fainter).
+	hud._gun_alerts = [{"who": b, "pos": p.global_position + p.camera.global_basis.x * 12.0, "dist": 12.0, "t": 1.0},
+		{"who": null, "pos": p.global_position + p.camera.global_basis.z * 40.0, "dist": 40.0, "t": 1.0}]
+	hud.queue_redraw()
+	await at.get_tree().process_frame
+	await at.shot("hud_14c_gunshot_alerts")
+	hud._gun_alerts.clear()
 	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# Elimination: sniper headshot (hold fire = scope in, release = shot).
 	p.hp = 150.0

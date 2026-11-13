@@ -88,6 +88,7 @@ var _kill_x_t := 0.0
 var _kill_x_pos := Vector3.ZERO
 var _dmg_numbers: Array = []
 var _dmg_dirs: Array = []
+var _gun_alerts: Array = []           # gun_alert: {who, pos, dist, t}
 var _kill_feed: Array = []
 ## Lines the kill feed keeps: three in DUO / SQUAD (and a HUD never bound), ONE in the 1 vs 1 (bind:
 ## a new line replaces the old, centred, with the gun's silhouette on a soft highlight before it).
@@ -367,11 +368,46 @@ func reveal(f: Fighter, seconds := 2.5) -> void:
 ## shot was fired and fades over SHOT_SHOW s (never its live position); in sight its arrowhead
 ## shows anyway.
 func shot_heard(f: Fighter) -> void:
+	gun_alert(f)
 	if seen.get(f, false):
 		return
 	shots_heard.append({"p": Vector2(f.global_position.x, f.global_position.z), "t": SHOT_SHOW})
 	if shots_heard.size() > 12:
 		shots_heard.pop_front()
+
+
+## GUNSHOT ALERTS (round 8, setting gunshot_alerts): an enemy fired off screen within GUN_ALERT_M:
+## a pale mark round the crosshair toward it for GUN_ALERT_S, fainter the further it is (none for
+## a shooter on screen; the arenas call this only for the other side).
+const GUN_ALERT_M := 60.0
+const GUN_ALERT_S := 1.2
+func gun_alert(f: Fighter) -> void:
+	if player == null or f == null or f == player or not bool(Game.settings.get("gunshot_alerts", true)):
+		return
+	var dist := f.global_position.distance_to(player.global_position)
+	if dist > GUN_ALERT_M or on_screen(f.chest_position()):
+		return
+	for g: Dictionary in _gun_alerts:
+		if g.who == f:
+			g.pos = f.global_position
+			g.dist = dist
+			g.t = GUN_ALERT_S
+			return
+	_gun_alerts.append({"who": f, "pos": f.global_position, "dist": dist, "t": GUN_ALERT_S})
+	if _gun_alerts.size() > 4:
+		_gun_alerts.pop_front()
+
+
+## Whether a world point is in the player's view now (in front of the camera, inside the screen).
+func on_screen(p: Vector3) -> bool:
+	if player == null or player.camera == null or not player.camera.is_inside_tree() or player.camera.is_position_behind(p):
+		return false
+	return Rect2(Vector2.ZERO, size).has_point(player.camera.unproject_position(p))
+
+
+## A gunshot alert's opacity: 1 close by, 0 at GUN_ALERT_M.
+static func gun_alert_alpha(dist: float) -> float:
+	return clampf(1.0 - dist / GUN_ALERT_M, 0.0, 1.0)
 
 
 ## Someone ran: a footprint where the step landed (left and right in turn), shown on the
@@ -849,6 +885,9 @@ func _process(delta: float) -> void:
 	for d in _dmg_dirs:
 		d.t -= real
 	_dmg_dirs = _dmg_dirs.filter(func(d: Dictionary) -> bool: return float(d.t) > 0.0)
+	for g in _gun_alerts:
+		g.t -= real
+	_gun_alerts = _gun_alerts.filter(func(g: Dictionary) -> bool: return float(g.t) > 0.0)
 	for k in _kill_feed:
 		k.t -= real
 	_kill_feed = _kill_feed.filter(func(k: Dictionary) -> bool: return float(k.t) > 0.0)
@@ -1580,7 +1619,7 @@ func _edge_glow(vs: Vector2, col: Color, t: float) -> void:
 
 
 func _draw_damage_dirs(c: Vector2, u: float) -> void:
-	if player.camera == null or _dmg_dirs.is_empty():
+	if player.camera == null or (_dmg_dirs.is_empty() and _gun_alerts.is_empty()):
 		return
 	var fwd := -player.camera.global_basis.z
 	fwd.y = 0.0
@@ -1599,6 +1638,24 @@ func _draw_damage_dirs(c: Vector2, u: float) -> void:
 		var r := 0.2 * u
 		draw_arc(c, r, ang - 0.36, ang + 0.36, 20, Color(0.9, 0.05, 0.04, 0.35 * a), 0.026 * u, true)
 		draw_arc(c, r, ang - 0.3, ang + 0.3, 20, Color(1.0, 0.18, 0.12, 0.9 * a), 0.012 * u, true)
+	# Gunshot alerts: a paler orange arc further out with a small muzzle-flash glyph on it.
+	for g in _gun_alerts:
+		var to: Vector3 = (g.pos as Vector3) - player.global_position
+		to.y = 0.0
+		if to.length() < 0.1:
+			continue
+		to = to.normalized()
+		var ang := atan2(to.dot(right), to.dot(fwd)) - PI * 0.5
+		var a := clampf(float(g.t) / 0.3, 0.0, 1.0) * gun_alert_alpha(float(g.dist))
+		var r := 0.26 * u
+		var col := Color(1.0, 0.62, 0.35)
+		draw_arc(c, r, ang - 0.22, ang + 0.22, 16, Color(col, 0.75 * a), 0.008 * u, true)
+		var m := c + Vector2.from_angle(ang) * (r + 0.03 * u)
+		var d := Vector2.from_angle(ang)
+		var sd := d.orthogonal()
+		var k := 0.016 * u
+		draw_colored_polygon(PackedVector2Array([m + d * k * 1.3, m + sd * k * 0.55, m - d * k * 0.5, m - sd * k * 0.55]), Color(col, 0.9 * a))
+		draw_circle(m - d * k * 0.2, k * 0.3, Color(1, 0.95, 0.8, a), true, -1.0, true)
 
 
 func _draw_damage_numbers(u: float) -> void:

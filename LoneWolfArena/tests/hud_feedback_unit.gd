@@ -18,6 +18,7 @@ static func run(runner: Node) -> void:
 	me._test_solo_feed()
 	me._test_kill_badge()
 	me._test_zoom_label()
+	me._test_gun_alert()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -205,3 +206,23 @@ func _test_zoom_label() -> void:
 		ok = ok and HUD.zoom_label(d) == want
 	_check(ok, "every gun's scope label matches its sight (none without one)")
 	_check(HUD.zoom_label({"scope": "none"}) == "" and HUD.zoom_label({"scope": "sniper"}) == "8X", "no sight, no label; a sniper scope 8X")
+
+
+## Gunshot alerts fade with distance: full close by, none at 60 m and beyond.
+func _test_gun_alert() -> void:
+	_check(is_equal_approx(HUD.gun_alert_alpha(0.0), 1.0) and is_equal_approx(HUD.gun_alert_alpha(30.0), 0.5)
+		and HUD.gun_alert_alpha(60.0) == 0.0 and HUD.gun_alert_alpha(90.0) == 0.0, "a gunshot alert's opacity is 1 - dist / 60")
+	var hud := _hud()
+	var me := Player.new()
+	var foe := Fighter.new()
+	hud.player = me
+	var keep: Variant = Game.settings.get("gunshot_alerts", true)
+	Game.settings.gunshot_alerts = false
+	hud.gun_alert(foe)
+	_check(hud._gun_alerts.is_empty(), "GUNSHOT ALERTS off: no alert")
+	Game.settings.gunshot_alerts = keep
+	hud.gun_alert(me)
+	_check(hud._gun_alerts.is_empty(), "the player's own shots never alert")
+	hud.free()
+	me.free()
+	foe.free()
