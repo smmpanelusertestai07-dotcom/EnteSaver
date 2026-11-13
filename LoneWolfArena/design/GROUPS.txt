@@ -55,6 +55,11 @@ current members (plus a "gjoin" from an id the leader invited).
         "gend"    {}                                  leader: DISBAND (or the leader EXITs)
         "gstart"  {room, aes, mac, size, roster}      leader: the group's own 2 VS 2 / the merged
                                                       match (see below): every member joins it
+        "gchat"   {x, ts}                             any member: a TEAM / ROOM chat line (NetChat.clean,
+                                                      FRIEND_MAX characters, one a second from a phone,
+                                                      Cloud.send_group_chat); kept in memory only, for
+                                                      that group (NetChat.group_*). Builds before 1.9
+                                                      ignore it (no "gchat" case in their match).
 Matchmaking (never retained): ROOT/mm/g<size> ("g2" DUO, "g4" SQUAD), every SEEK_S from each
 searching LEADER (a solo searcher is a leader of 1): {"t":"gseek","id","n":members,"saw":[ids]}.
 The searching leader with the lowest id among those it sees becomes the MATCH HOST: it picks
@@ -145,6 +150,12 @@ places are roster slots t * NetGroup.per_team(size) .. + NetGroup.places(size, t
         a full room answers "rno" {"full": true}; a KICKed id is never answered again.
   then the group room as above ("gjoin", the host's "groster" the only truth) plus
   "gslot"   {t, s}                                 a player asks for an empty place (Cloud.room_take)
+  The host's "groster" in a room also carries "rr" = RoomRules.text(room_rules) (the room's rules,
+  inside the group room's encryption; Cloud.joined_rules on the players, Cloud.room_rules_now()),
+  and the room's DUO / SQUAD match plays by them (_multi_enter: session_rules). The SOLO start's
+  invite carries "rr" too with "rrt" = HMAC(password key, "rules" + rr + host). A joiner of this
+  build says "rv" in its "ask"; a room whose rules differ from today's beyond rounds / ammo / walls
+  / frags (RoomRules.needs_new) answers an "ask" without "rv" (an older build) "rno" {"full": true}.
 START is the host's only (Cloud.room_start): SOLO = the 1 vs 1 with the room's rules
 (start_room_match), DUO / SQUAD = _group_launch: the all-human match of the players in their places
 (uneven allowed, empty places stay empty, no bots). The room closes when its match starts. A player
