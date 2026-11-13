@@ -4,22 +4,24 @@ extends Node
 ## leaves the machine). Cloud's own group API, with no relay: the check puts a group in Cloud (its
 ## `group` and keys, as a roster or an invite brings them) and emits group_changed as Cloud does.
 ## Real taps where a player taps:
-## - a solo in LONE WOLF: the GROUP bar with + INVITE; the invite list (GroupAsk_<code> only on an
-##   online friend); an invite that cannot go out (no relay) says so; a friend in a match (the
-##   announce's "im") reads IN A MATCH there and in FRIENDS, INVITE and DUEL 1 VS 1 greyed;
-## - the leader of 4: three member models on the podium besides the hero, with name plates; REMOVE
-##   on each other member (asked first) drops them, DISBAND GROUP, no + INVITE row (full); the bar,
-##   with its 10-digit code, COPY and the switch unclipped, ends above the bottom bar;
+## - a solo in LONE WOLF: no TEAM bar, no "+" plate by the hero; the mode card's TEAM panel (code,
+##   COPY, the JOIN BY CODE and FILL EMPTY PLACES ticks, SOLO / DUO / SQUAD tiles that pick the
+##   size); the social panel's "+" only on an online friend; an invite that cannot go out (no relay)
+##   says so; its GROUP CODE keypad (JOIN BY CODE); a friend in a match (the announce's "im") reads
+##   IN A MATCH there and in FRIENDS, "+" and DUEL 1 VS 1 greyed;
+## - the leader of 4: the hero steps left, three member models to its right with name plates; the
+##   TEAM bar under the player card opens the TEAM panel: REMOVE on each other member (asked first)
+##   drops them, DISBAND GROUP, + INVITE greyed (full), TEAMS, the 10-digit code with COPY unclipped,
+##   all on the screen;
 ## - START (leader, DUO): a group of 3 is told why it cannot start offline; a group of 2 searches:
 ##   the search tab with PLAYERS n/N and its X (no popup); TEAMS: the slot panel moves a member (Cloud.set_group_team);
-## - a member: the GROUP CODE with COPY only while the leader's JOIN BY CODE is on (else THE LEADER
+## - a member: the TEAM panel's GROUP CODE with COPY only while the leader's JOIN BY CODE is on (else THE LEADER
 ##   SHARES THE GROUP CODE); WAITING FOR <LEADER> TO START in START's place, the LEADER mark on the leader's model,
-##   the mode card follows the leader's mode, EXIT GROUP (asked first) leaves and the models go;
+##   the mode card follows the leader's mode and its TEAM panel is read-only, EXIT GROUP (asked
+##   first) leaves and the models go;
 ## - GROUP INVITE: "<NAME> invites you to their group", waiting behind a question, ACCEPT;
-## - the DUEL in a group of two: the leader's START shows MATCHING... (the podium's + plate hidden)
-##   until the member's phone takes it; one never taken gives START back with a notice;
-## - the podium's "+" plate: a solo's, right of the hero and clear of the mode card and START, opens
-##   the INVITE list; none in a full group or for a member;
+## - the DUEL in a group of two: the leader's START shows MATCHING... until the member's phone
+##   takes it; one never taken gives START back with a notice;
 ## - CUSTOM ROOM with slots: CREATE with SQUAD shows 8 places with the HOST tag; in a DUO room a
 ##   player who joined sits on ORANGE with the host's KICK, START goes once both teams have a
 ##   player, a tap on an empty place moves the host there, KICK removes the player (START waits
@@ -65,63 +67,55 @@ func run(autotest: Node) -> int:
 	return _done("")
 
 
-## A solo in LONE WOLF: + INVITE, the list of friends, INVITED <NAME>.
+## A solo in LONE WOLF (moved on purpose in round 7: the left GROUP column is gone): no TEAM bar
+## and no "+" plate by the hero; the social panel's "+" invites (on the online friend only), an
+## invite that cannot go out says so; a friend in a match reads IN A MATCH with "+" greyed; the
+## social panel's GROUP CODE keypad joins by code; the mode card's TEAM panel has the code with
+## COPY, the JOIN BY CODE and FILL EMPTY PLACES ticks and the SOLO / DUO / SQUAD tiles.
 func _solo(lobby: Lobby) -> void:
-	var bar := lobby.find_child("GroupBar", true, false) as Control
-	if bar == null or not bar.is_visible_in_tree():
-		_fail("no GROUP bar in LONE WOLF")
-		return
-	var invite := bar.find_child("GroupInvite", true, false) as Button
-	if invite == null or invite.disabled or bar.find_child("GroupExit", true, false) or bar.find_child("GroupDisband", true, false):
-		_fail("a solo's GROUP bar is not + INVITE alone")
-	_touch_ok(bar)
-	# The podium's "+": right of the hero, clear of the mode card and START, opens the INVITE list.
-	var plus := lobby.find_child("PodiumInvite", true, false) as Control
-	if plus == null or not plus.is_visible_in_tree():
-		_fail("a solo in LONE WOLF has no + plate on the podium")
-	else:
-		var r := plus.get_global_rect()
-		var view := lobby.get_viewport().get_visible_rect()
-		if r.get_center().x <= view.size.x * Lobby.HERO_X or not view.encloses(r):
-			_fail("the podium's + plate is not right of the hero on the screen (%s)" % str(r))
-		_no_overlap([plus, lobby.mode_card, lobby.start_btn, bar])
-		_touch_ok(plus)
-		await at.shot("g00_podium_invite")
-		await _tap(plus)
-		await at.wait(0.6)
-		if lobby.dialogs.modal == null or lobby.dialogs.modal.find_child("GroupInviteList", true, false) == null:
-			_fail("a tap on the podium's + does not open the INVITE list")
-		lobby.dialogs.close_modal()
-		await at.wait(0.2)
+	var team_bar := lobby.find_child("TeamBar", true, false) as Control
+	if team_bar == null or team_bar.is_visible_in_tree():
+		_fail("a solo sees the TEAM bar (only a group has one)")
+	if lobby.find_child("GroupBar", true, false) != null or lobby.find_child("PodiumInvite", true, false) != null:
+		_fail("the old GROUP column or the podium's + plate is still in the lobby")
+	await _team_box_solo(lobby)
 	Game.profile.friends = {ids.ZORA: {"name": "ZORA"}, ids["OFFLINE PAL"]: {"name": "ABBY"}}
 	cloud.peers[ids.ZORA] = {"name": "ZORA", "bundle": "neon", "pk": "", "seen": Time.get_ticks_msec() + 600000}
-	await _tap(invite)
-	await at.wait(0.8)
+	var arrow := lobby.find_child("SocialArrow", true, false) as Control
+	await _tap(arrow)
+	await at.wait(0.6)
 	var popup := lobby.dialogs.modal
-	var list := popup.find_child("GroupInviteList", true, false) if popup else null
-	var ask := list.find_child("GroupAsk_" + Cloud.friend_code(ids.ZORA), true, false) as Button if list else null
-	var ask_off := list.find_child("GroupAsk_" + Cloud.friend_code(ids["OFFLINE PAL"]), true, false) as Button if list else null
+	var ask := popup.find_child("SocialInvite_" + Cloud.friend_code(ids.ZORA), true, false) as Button if popup else null
+	var ask_off := popup.find_child("SocialInvite_" + Cloud.friend_code(ids["OFFLINE PAL"]), true, false) as Button if popup else null
 	if ask == null or ask_off == null or ask.disabled or not ask_off.disabled:
-		_fail("+ INVITE does not list the friends with INVITE on the online one only")
+		_fail("the social panel does not list the friends with \"+\" on the online one only")
 		return
-	_touch_ok(list)
+	_touch_ok(popup.find_child("SocialPanel", true, false))
 	await at.shot("g01_group_invite_list")
 	await _tap(ask)
 	await at.wait(0.6)
-	if lobby.dialogs.modal == null or not _find_text(lobby.dialogs.modal, "ZORA COULD NOT BE REACHED") or not cloud.group.is_empty():
+	if not _find_text(lobby.get_node_or_null(^"NoticeLayer"), "ZORA COULD NOT BE REACHED") or not cloud.group.is_empty():
 		_fail("an invite that cannot go out (no relay here) does not say so")
 	lobby.dialogs.close_modal()
 	cloud.peers.erase(ids.ZORA)
-	# A friend whose lobby announce says it plays a match: IN A MATCH, INVITE and DUEL 1 VS 1 greyed.
+	# JOIN BY CODE: the social panel's keypad (the old GROUP column's JOIN BY CODE).
+	await _tap(arrow)
+	await at.wait(0.5)
+	await _tap(lobby.dialogs.modal.find_child("SocialGroupCode", true, false) as Control if lobby.dialogs.modal else null)
+	await at.wait(0.4)
+	if lobby.dialogs.modal == null or lobby.dialogs.modal.find_child("CodeKeyGo", true, false) == null:
+		_fail("JOIN BY CODE is not reachable from the social panel's GROUP CODE keypad")
+	lobby.dialogs.close_modal()
+	# A friend whose lobby announce says it plays a match: IN A MATCH, "+" and DUEL 1 VS 1 greyed.
 	var friends_was: Dictionary = Game.profile.friends.duplicate(true)
 	Game.profile.friends[ids.KITE] = {"name": "KITE"}
 	cloud.peers[ids.KITE] = {"name": "KITE", "bundle": "default", "pk": "", "seen": Time.get_ticks_msec() + 600000, "im": true}
-	await _tap(invite)
-	await at.wait(0.8)
-	list = lobby.dialogs.modal.find_child("GroupInviteList", true, false) if lobby.dialogs.modal else null
-	var ask_busy := list.find_child("GroupAsk_" + Cloud.friend_code(ids.KITE), true, false) as Button if list else null
-	if ask_busy == null or not ask_busy.disabled or not _find_text(list, "IN A MATCH"):
-		_fail("a friend in a match is not IN A MATCH with INVITE greyed in the INVITE list")
+	await _tap(arrow)
+	await at.wait(0.6)
+	var row := lobby.dialogs.modal.find_child("SocialRow_" + Cloud.friend_code(ids.KITE), true, false) if lobby.dialogs.modal else null
+	var ask_busy := lobby.dialogs.modal.find_child("SocialInvite_" + Cloud.friend_code(ids.KITE), true, false) as Button if lobby.dialogs.modal else null
+	if ask_busy == null or not ask_busy.disabled or not _find_text(row, "IN A MATCH"):
+		_fail("a friend in a match is not IN A MATCH with \"+\" greyed in the social panel")
 	lobby.dialogs.close_modal()
 	lobby.friends.open("friends")
 	await at.wait(0.8)
@@ -138,6 +132,78 @@ func _solo(lobby: Lobby) -> void:
 	lobby.dialogs.close_modal()
 	cloud.peers.erase(ids.KITE)
 	Game.profile.friends = friends_was
+
+
+## The mode card's TEAM panel for a solo leader: the 10-digit code with COPY, the JOIN BY CODE tick
+## (Cloud.code_join), the FILL EMPTY PLACES tick (setting team_fill) and a tile per size that picks
+## it; everything inside the panel, nothing overlapping, every target 56 px.
+func _team_box_solo(lobby: Lobby) -> void:
+	if not await _until(func() -> bool: return cloud.group_code() != "", 20.0):     # (made once the key is ready)
+		_fail("a solo has no GROUP CODE")
+	var fig := lobby.mode_card.find_child("SizeBoxButton", true, false) as Control
+	await _tap(fig)
+	await at.wait(0.4)
+	var box := lobby.dialogs.size_box
+	var panel := box.find_child("SizeBoxPanel", true, false) as Control if box else null
+	if panel == null:
+		_fail("the mode card's figure does not open the TEAM panel")
+		return
+	var parts := ["GroupCodeRow", "GroupCode", "GroupCodeCopy", "GroupCodeSwitch", "TeamFillTick", "SizeTile_1", "SizeTile_2", "SizeTile_4"]
+	for part: String in parts:
+		var c := panel.find_child(part, true, false) as Control
+		if c == null or not c.is_visible_in_tree() or not panel.get_global_rect().grow(0.5).encloses(c.get_global_rect()):
+			_fail("the TEAM panel's %s is missing or clipped" % part)
+	if _text(panel, "GroupCode").replace(" ", "").length() != Cloud.CODE_LEN:
+		_fail("the TEAM panel's code is not %d digits (%s)" % [Cloud.CODE_LEN, _text(panel, "GroupCode")])
+	_no_overlap([panel.find_child("GroupCodeRow", true, false), panel.find_child("GroupCodeSwitch", true, false),
+		panel.find_child("TeamFillTick", true, false), panel.find_child("SizeTile_1", true, false)])
+	_no_overlap([panel, lobby.mode_card, lobby.start_btn])
+	_touch_ok(panel)
+	await at.shot("g00_team_panel_solo")
+	# JOIN BY CODE: the tick turns the switch on and off.
+	var was := cloud.code_join
+	await _tap(panel.find_child("GroupCodeSwitch", true, false) as Control)
+	await at.wait(0.3)
+	if cloud.code_join == was or lobby.dialogs.size_box == null:
+		_fail("the TEAM panel's JOIN BY CODE tick does not switch Cloud.code_join (or closed the panel)")
+	cloud.set_code_join(was)
+	await at.wait(0.3)
+	# FILL EMPTY PLACES: on by default, the tick flips the setting.
+	var fill_was := bool(Game.settings.get("team_fill", true))
+	box = lobby.dialogs.size_box
+	await _tap(box.find_child("TeamFillTick", true, false) as Control if box else null)
+	await at.wait(0.3)
+	if bool(Game.settings.get("team_fill", true)) == fill_was:
+		_fail("the FILL EMPTY PLACES tick does not change the setting")
+	Game.settings.team_fill = fill_was
+	await at.wait(0.3)
+	# A tile picks its size (as SELECT MODE's chip does) and closes the panel.
+	box = lobby.dialogs.size_box
+	await _tap(box.find_child("SizeTile_4", true, false) as Control if box else null)
+	await at.wait(0.4)
+	if Game.team_size != 4 or lobby.dialogs.size_box != null:
+		_fail("the TEAM panel's SQUAD tile does not pick SQUAD (team size %d)" % Game.team_size)
+	await _tap(fig)
+	await at.wait(0.4)
+	box = lobby.dialogs.size_box
+	await _tap(box.find_child("SizeTile_2", true, false) as Control if box else null)
+	await at.wait(0.4)
+	if Game.team_size != 2:
+		_fail("the TEAM panel's DUO tile does not pick DUO")
+
+
+## Taps the TEAM bar and gives the TEAM panel (null when it did not open).
+func _open_team_panel(lobby: Lobby) -> Control:
+	var team_bar := lobby.find_child("TeamBar", true, false) as Control
+	if team_bar == null or not team_bar.is_visible_in_tree():
+		_fail("no TEAM bar while in a group")
+		return null
+	await _tap(team_bar)
+	await at.wait(0.4)
+	var panel := lobby.dialogs.modal.find_child("TeamPanel", true, false) as Control if lobby.dialogs.modal else null
+	if panel == null:
+		_fail("the TEAM bar does not open the TEAM panel")
+	return panel
 
 
 ## The leader of 4: three models besides the hero with name plates; REMOVE, DISBAND, INVITE greyed.
@@ -162,40 +228,51 @@ func _leader(lobby: Lobby) -> void:
 	var heroes := lobby.find_children("*", "CharacterModel", true, false).filter(func(n: Node) -> bool: return not n.is_queued_for_deletion())
 	if heroes.size() != 4:
 		_fail("the lobby has %d character models, not the hero + 3" % heroes.size())
-	var bar := lobby.find_child("GroupBar", true, false) as Control
+	# The hero steps left, the members stand to its right (no + plate anywhere).
+	if not is_equal_approx(lobby.hero_x(), Lobby.HERO_X_GROUP):
+		_fail("the hero does not step left with members beside it")
+	await at.wait(0.6)
+	var hero_px := lobby.camera.unproject_position(lobby.model.global_position).x
+	for cm: CharacterModel in models:
+		if lobby.camera.unproject_position(cm.global_position).x <= hero_px:
+			_fail("a member's model does not stand right of the hero")
+	var team_bar := lobby.find_child("TeamBar", true, false) as Control
+	var card := lobby.find_child("PlayerCard", true, false) as Control
+	if team_bar == null or not team_bar.is_visible_in_tree() or card == null or team_bar.get_global_rect().position.y < card.get_global_rect().end.y - 1.0:
+		_fail("the TEAM bar is not under the player card")
+	await at.shot("g02a_team_bar")
+	var bar := await _open_team_panel(lobby)
+	if bar == null:
+		return
 	for n in [1, 2, 3, 4]:
-		if bar.find_child("GroupMember_%d" % n, true, false) == null:
-			_fail("no GroupMember_%d" % n)
+		if bar.find_child("GroupMember_%d" % n, true, false) == null or bar.find_child("SpeakMark_%d" % n, true, false) == null:
+			_fail("no GroupMember_%d (with its speaking mark's place)" % n)
 	if bar.find_child("GroupRemove_1", true, false) != null or bar.find_child("GroupRemove_2", true, false) == null \
 			or bar.find_child("GroupRemove_4", true, false) == null:
 		_fail("REMOVE is not on every other member only")
 	if bar.find_child("GroupDisband", true, false) == null or bar.find_child("GroupExit", true, false) != null:
 		_fail("the leader does not see DISBAND GROUP (alone)")
-	if _find_label(bar.find_child("GroupMember_1", true, false), "LEADER") == null:
-		_fail("the leader's row has no LEADER tag")
-	if bar.find_child("GroupInvite", true, false) != null:
-		_fail("a full group still shows the + INVITE row (its badge would repeat the last member's number)")
-	var plus := lobby.find_child("PodiumInvite", true, false) as Control
-	if plus == null or plus.is_visible_in_tree():
-		_fail("the podium's + plate shows in a full group")
-	# (the chat strip sits on the bottom bar: the GROUP bar ends above both)
-	var bottom := lobby.find_child("ChatStrip", true, false) as Control
-	var bar_end := 0.0
-	for c: Node in bar.get_children():
-		if c is Control and (c as Control).visible and not c.is_queued_for_deletion():
-			bar_end = maxf(bar_end, (c as Control).get_global_rect().end.y)
-	if bottom == null or bar_end > bottom.get_global_rect().position.y:
-		_fail("the GROUP bar of 4 runs into the chat strip over the bottom bar (ends at %.0f)" % bar_end)
+	if bar.find_child("GroupMember_1", true, false).find_child("LeaderTag", true, false) == null:
+		_fail("the leader's row has no leader flag")
+	# (moved on purpose: a full group's + INVITE stays, greyed, instead of no row)
+	var inv := bar.find_child("GroupInvite", true, false) as Button
+	if inv == null or not inv.disabled:
+		_fail("a full group's + INVITE is not greyed")
+	if bar.find_child("GroupTeams", true, false) == null:
+		_fail("the TEAM panel has no TEAMS")
+	var view := lobby.get_viewport().get_visible_rect()
+	for c: Node in bar.find_children("Group*", "Control", true, false):
+		if (c as Control).is_visible_in_tree() and not view.encloses((c as Control).get_global_rect().grow(-0.5)):
+			_fail("%s runs off the screen in the TEAM panel of 4" % c.name)
 	var code_row := bar.find_child("GroupCodeRow", true, false) as Control
 	if code_row == null or _text(code_row, "GroupCode").length() != 12:
-		_fail("the leader's GROUP bar has no 10-digit code (%s)" % (_text(code_row, "GroupCode") if code_row else "none"))
+		_fail("the leader's TEAM panel has no 10-digit code (%s)" % (_text(code_row, "GroupCode") if code_row else "none"))
 	else:
-		for part: String in ["GroupCode", "GroupCodeCopy", "GroupCodeSwitch"]:
+		for part: String in ["GroupCode", "GroupCodeCopy"]:
 			var c := code_row.find_child(part, true, false) as Control
 			if c == null or not c.is_visible_in_tree() or not code_row.get_global_rect().grow(0.5).encloses(c.get_global_rect()):
 				_fail("%s is missing or clipped out of the code row" % part)
-		_no_overlap([code_row.find_child("GroupCode", true, false), code_row.find_child("GroupCodeCopy", true, false),
-			code_row.find_child("GroupCodeSwitch", true, false)])
+		_no_overlap([code_row.find_child("GroupCode", true, false), code_row.find_child("GroupCodeCopy", true, false)])
 	_touch_ok(bar)
 	await at.shot("g02_leader_of_four")
 	await _tap(bar.find_child("GroupRemove_3", true, false) as Control)
@@ -242,7 +319,7 @@ func _start_and_search(lobby: Lobby) -> void:
 
 ## TEAMS: the leader's slot panel; tap a member, then a place: Cloud.set_group_team.
 func _teams(lobby: Lobby) -> void:
-	var bar := lobby.find_child("GroupBar", true, false) as Control
+	var bar := await _open_team_panel(lobby)
 	await _tap(bar.find_child("GroupTeams", true, false) as Control if bar else null)
 	await at.wait(0.4)
 	var panel := lobby.dialogs.modal.find_child("SlotPanel", true, false) if lobby.dialogs.modal else null
@@ -285,30 +362,48 @@ func _member(lobby: Lobby) -> void:
 				_fail("the LEADER mark is not on ZORA's model")
 	if marks != 1:
 		_fail("%d models show the LEADER mark, not 1" % marks)
-	var plus := lobby.find_child("PodiumInvite", true, false) as Control
-	if plus == null or plus.is_visible_in_tree():
-		_fail("a member sees the podium's + plate (only the leader invites)")
-	var bar := lobby.find_child("GroupBar", true, false) as Control
+	var bar := await _open_team_panel(lobby)
+	if bar == null:
+		return
 	if bar.find_child("GroupExit", true, false) == null or bar.find_child("GroupDisband", true, false) != null \
-			or bar.find_child("GroupRemove_2", true, false) != null:
-		_fail("a member does not see EXIT GROUP alone")
+			or bar.find_child("GroupRemove_2", true, false) != null or not (bar.find_child("GroupInvite", true, false) as Button).disabled:
+		_fail("a member does not see EXIT GROUP alone (+ INVITE greyed)")
 	# The leader's JOIN BY CODE off: no code, no COPY, the line that the leader shares it; on: the
 	# code with COPY (no switch: it is the leader's).
 	cloud.group.code = "4213579086"
 	cloud.group.code_join = false
 	cloud.group_changed.emit()
 	await at.wait(0.3)
-	if bar.find_child("GroupCodeRow", true, false) != null or bar.find_child("GroupCodeNote", true, false) == null \
+	bar = lobby.dialogs.modal.find_child("TeamPanel", true, false) as Control if lobby.dialogs.modal else null
+	if bar == null or bar.find_child("GroupCodeRow", true, false) != null or bar.find_child("GroupCodeNote", true, false) == null \
 			or not _find_text(bar, LobbyTeam.CODE_NOTE):
-		_fail("a member sees the GROUP CODE while the leader's JOIN BY CODE is off")
+		_fail("a member sees the GROUP CODE while the leader's JOIN BY CODE is off (or the panel closed)")
 	cloud.group.code_join = true
 	cloud.group_changed.emit()
 	await at.wait(0.3)
-	var m_row := bar.find_child("GroupCodeRow", true, false) as Control
+	var m_row := bar.find_child("GroupCodeRow", true, false) as Control if bar else null
 	if m_row == null or _text(m_row, "GroupCode") != "42 1357 9086" or m_row.find_child("GroupCodeCopy", true, false) == null \
-			or m_row.find_child("GroupCodeSwitch", true, false) != null or bar.find_child("GroupCodeNote", true, false) != null:
-		_fail("a member does not see the code with COPY (and no switch) while the leader's JOIN BY CODE is on")
+			or bar.find_child("GroupCodeNote", true, false) != null:
+		_fail("a member does not see the code with COPY while the leader's JOIN BY CODE is on")
 	await at.shot("g05a_member_code_on")
+	lobby.dialogs.close_modal()
+	await at.wait(0.2)
+	# The mode card's TEAM panel opens for a member too, read-only: the leader's size lit, the JOIN BY
+	# CODE tick shown greyed, no FILL EMPTY PLACES, a tile tap changes nothing.
+	var fig := lobby.mode_card.find_child("SizeBoxButton", true, false) as Control
+	await _tap(fig)
+	await at.wait(0.4)
+	var box := lobby.dialogs.size_box
+	var t2 := box.find_child("SizeTile_2", true, false) as Button if box else null
+	var jt := box.find_child("GroupCodeSwitch", true, false) as Button if box else null
+	if t2 == null or not t2.disabled or jt == null or not jt.disabled or box.find_child("TeamFillTick", true, false) != null:
+		_fail("a member's TEAM panel is not read-only (tiles and JOIN BY CODE greyed, no FILL EMPTY PLACES)")
+	await at.shot("g05d_member_team_panel")
+	await _tap(t2)
+	await at.wait(0.3)
+	if Game.team_size != 4:
+		_fail("a member's tile tap changed the size")
+	lobby.dialogs.close_size_box()
 	var before := JSON.stringify(cloud.group)
 	await _tap(wait)
 	await _tap(lobby.find_child("ModeCard", true, false) as Control)
@@ -329,10 +424,11 @@ func _member(lobby: Lobby) -> void:
 	if not tab.is_visible_in_tree() or _text(tab, "SearchPlayers") != "PLAYERS 5/8" or x.is_visible_in_tree() \
 			or wait.is_visible_in_tree() or matching == null or not matching.is_visible_in_tree():
 		_fail("a member does not see the group's search tab without its X (%s)" % _text(tab, "SearchPlayers"))
-	_no_overlap([tab, matching, bar])
+	_no_overlap([tab, matching, lobby.find_child("TeamBar", true, false)])
 	await at.shot("g05b_member_searching")
-	# TEAMS opened meanwhile: its popup stays clear of the search tab.
-	await _tap(bar.find_child("GroupTeams", true, false) as Control)
+	# TEAMS opened meanwhile (from the TEAM panel): its popup stays clear of the search tab.
+	bar = await _open_team_panel(lobby)
+	await _tap(bar.find_child("GroupTeams", true, false) as Control if bar else null)
 	await at.wait(0.4)
 	var frame := lobby.dialogs.modal.find_child("Frame", true, false) as Control if lobby.dialogs.modal else null
 	if frame == null:
@@ -346,7 +442,8 @@ func _member(lobby: Lobby) -> void:
 	cloud.search_needed = 0
 	await at.wait(0.3)
 	await at.shot("g05_member_view")
-	await _tap(bar.find_child("GroupExit", true, false) as Control)
+	bar = await _open_team_panel(lobby)
+	await _tap(bar.find_child("GroupExit", true, false) as Control if bar else null)
 	await at.wait(0.4)
 	await _tap(lobby.dialogs.modal.find_child("ConfirmOk", true, false) as Control if lobby.dialogs.modal else null)
 	await at.wait(0.6)
@@ -367,22 +464,24 @@ func _duel_plate(lobby: Lobby) -> void:
 	(cloud.group.members as Array).resize(2)                 # this player and ZORA
 	cloud.group_changed.emit()
 	await at.wait(0.5)
-	var plus := lobby.find_child("PodiumInvite", true, false) as Control
-	var plus_before := plus != null and plus.is_visible_in_tree()
-	at.log_line("the + plate before the DUEL: %s" % plus_before)
 	var zora := ids.ZORA as String
 	cloud.peers[zora] = {"name": "ZORA", "bundle": "neon", "pk": Crypto.new().generate_rsa(1024).save_to_string(true),
 		"seen": Time.get_ticks_msec() + 600000}
 	var was_connected := cloud._connected
+	# (the lobby's relay attempts to 127.0.0.1:9 would drop the stand-in link the moment a closed
+	# socket is polled: no socket, no retry while the stand-in holds)
+	if cloud._ws != null:
+		cloud._ws.close()
+		cloud._ws = null
+	cloud._retry_t = 1.0e9
 	cloud._connected = true
 	await _tap(lobby.start_btn)
 	await at.wait(0.6)
 	var matching := lobby.find_child("MatchingPlate", true, false) as Control
 	if cloud.waiting_for_id() != zora or matching == null or not matching.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree() \
 			or lobby.dialogs.modal != null:
-		_fail("the leader's DUEL start does not show MATCHING... while the member's phone answers (to %s)" % cloud.waiting_for())
-	if plus == null or plus.is_visible_in_tree():
-		_fail("the podium's + plate still shows while MATCHING... stands for the DUEL")
+		_fail("the leader's DUEL start does not show MATCHING... while the member's phone answers (to %s; notice %s; team size %d)"
+			% [cloud.waiting_for(), _text(lobby.dialogs.modal, "NoticeText"), Game.team_size])
 	await at.shot("g09_duel_matching")
 	# The member's phone never takes it: START comes back, a notice says so.
 	cloud.cancel_invite(false)
@@ -393,9 +492,8 @@ func _duel_plate(lobby: Lobby) -> void:
 		_fail("a DUEL never taken does not give START back with a notice")
 	lobby.dialogs.close_modal()
 	await at.wait(0.3)
-	if plus_before and not plus.is_visible_in_tree():
-		_fail("the podium's + plate does not come back with START after the DUEL")
 	cloud._connected = was_connected
+	cloud._retry_t = 0.5
 	cloud.peers.erase(zora)
 	cloud.leave_group()
 	Game.team_size = size_was

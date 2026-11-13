@@ -115,13 +115,13 @@ func open(tab := "") -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 0)
 	v.add_child(tabs)
-	var close := UI.button(">", 24, "dark", Vector2(48, 52))
+	var close := UI.button(">", 24, "dark", Vector2(56, 56))
 	close.name = "SocialClose"
 	close.pressed.connect(dlg.close_modal)
 	tabs.add_child(close)
 	for t: Array in [["friends", "FRIENDS"], ["recent", "RECENT"]]:
 		var key := String(t[0])
-		var b := UI.top_tab(String(t[1]), _tab == key, 18, Vector2(0, 52))
+		var b := UI.top_tab(String(t[1]), _tab == key, 18, Vector2(0, 56))
 		b.name = "SocialTab_" + key
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(func() -> void:
@@ -131,7 +131,7 @@ func open(tab := "") -> void:
 	var tools := HBoxContainer.new()
 	tools.add_theme_constant_override("separation", 6)
 	v.add_child(tools)
-	var stb := UI.button(String(STATUS[status()][0]), 13, "dark", Vector2(132, 46))
+	var stb := UI.button(String(STATUS[status()][0]), 13, "dark", Vector2(132, 56))
 	stb.name = "SocialStatus"
 	stb.add_theme_color_override("font_color", STATUS[status()][1])
 	stb.pressed.connect(func() -> void:
@@ -139,13 +139,13 @@ func open(tab := "") -> void:
 		Game.save_settings()
 		open())
 	tools.add_child(stb)
-	var rf := UI.button("REFRESH", 13, "dark", Vector2(0, 46))
+	var rf := UI.button("REFRESH", 13, "dark", Vector2(0, 56))
 	rf.name = "SocialRefresh"
 	rf.pressed.connect(func() -> void:
 		Game.cloud_service().start_lobby()
 		open())
 	tools.add_child(rf)
-	var tc := UI.button("GROUP CODE", 14, "light", Vector2(0, 46))
+	var tc := UI.button("GROUP CODE", 14, "light", Vector2(0, 56))
 	tc.name = "SocialGroupCode"
 	tc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tc.pressed.connect(open_pad)
@@ -155,7 +155,7 @@ func open(tab := "") -> void:
 	search.placeholder_text = "SEARCH NAME OR ID"
 	search.max_length = 24
 	search.text = _query
-	search.custom_minimum_size = Vector2(0, 44)
+	search.custom_minimum_size = Vector2(0, 56)
 	search.add_theme_font_size_override("font_size", 16)
 	search.text_submitted.connect(func(s: String) -> void:
 		_query = s.strip_edges().to_upper()
@@ -215,7 +215,7 @@ func _fill() -> void:
 		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_list.add_child(empty)
 		if _tab == "friends":
-			var add := UI.button("ADD FRIENDS", 17, "light", Vector2(0, 52))
+			var add := UI.button("ADD FRIENDS", 17, "light", Vector2(0, 56))
 			add.name = "SocialAddFriends"
 			add.pressed.connect(func() -> void: lobby.friends.open("online"))
 			_list.add_child(add)
@@ -241,7 +241,7 @@ func _row(cloud: Cloud, id: String, who: String) -> Control:
 		# (RECENT: only a friend can be invited, so a stranger's row offers ADD FRIEND instead of a
 		# greyed "+"; ASKED once the request went out)
 		var asked := cloud.friend_asked(id)
-		var add := UI.button("ASKED" if asked else "ADD FRIEND", 13, "dark" if asked else "light", Vector2(104, 52))
+		var add := UI.button("ASKED" if asked else "ADD FRIEND", 13, "dark" if asked else "light", Vector2(104, 56))
 		add.name = "SocialAdd_" + code
 		add.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		add.disabled = asked
@@ -254,7 +254,7 @@ func _row(cloud: Cloud, id: String, who: String) -> Control:
 				LobbyNet.toast(lobby, "COULD NOT SEND THE REQUEST", "TRY AGAIN WHEN ONLINE", Callable()))
 		row.add_child(add)
 		return row
-	var plus := UI.button("+", 26, "primary", Vector2(52, 52))
+	var plus := UI.button("+", 26, "primary", Vector2(56, 56))
 	plus.name = "SocialInvite_" + code
 	plus.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var may := LobbyTeam.is_leader() and (not LobbyTeam.in_group() or LobbyTeam.members().size() < LobbyTeam.group_max())
