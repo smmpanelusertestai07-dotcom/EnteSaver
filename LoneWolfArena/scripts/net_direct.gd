@@ -30,6 +30,12 @@ extends RefCounted
 ##     local network first, then IPv6, which most Indian mobile networks give and which needs no
 ##     NAT, then IPv4), not to whichever packet came last, so the path and its ping do not flip
 ##     between them.
+##  7. An all-human DUO / SQUAD (Cloud._pairs) opens one such path PER other player (a pair, at most
+##     7): keys derived from the room's with the pair's label (pair_label_for: the two ids, lower
+##     first), the lower id sending direction 0, the hello and candidates addressed to that one
+##     player in the room ("dh" / "dc" with "to"). So with DIRECT CONNECTION on, this phone's
+##     addresses go (end-to-end encrypted inside the match room) to each other player of that match
+##     who has it on too, and never to anyone else. A pair carries the state and voice frames.
 ## What comes in goes through the same checks as the relay's (Cloud, Arena's token buckets and item
 ## caps, RemoteFighter's finite numbers). Automated runs stay off unless LW_DIRECT=local: then the
 ## only candidate is 127.0.0.1 and no STUN server is asked (two copies on one machine).
@@ -50,7 +56,8 @@ const MAX_CANDIDATES := 8
 const MAX_PACKET := 1200
 const MAX_IN_PER_FRAME := 64     # packets read per frame (a flood is dropped by the socket)
 
-var host := false                # the host sends direction 0, the guest direction 1
+var host := false                # the host (a pair's lower id) sends direction 0, the other direction 1
+var label := ""                  # a pair's label (pair_label_for), "" for the 1 vs 1's path
 var local_mode := false          # LW_DIRECT=local (tests): loopback only, no STUN
 var blocked := false             # tests: the direct path cut (nothing sent, nothing read)
 var port := 0
@@ -60,6 +67,8 @@ var peer_candidates: Array = []  # the other phone's [ip, port]
 var rtt := -1                    # ms, direct round trip (-1 until measured)
 var states_in := 0               # counters (tests, logs)
 var states_out := 0
+var voices_in := 0               # voice frames over the path (an all-human match's pairs, the 1 vs 1)
+var voices_out := 0
 var _sock: PacketPeerUDP
 var _crypto := Crypto.new()
 var _aes := PackedByteArray()
@@ -98,12 +107,33 @@ static func mode() -> String:
 	return "on" if bool(Game.settings.get("direct_connect", true)) else "off"
 
 
-func _init(is_host: bool, room_mac: PackedByteArray, local := false) -> void:
-	host = is_host
+## dir_low: this phone sends direction 0 (the 1 vs 1's host; in a pair the lower id). pair_label
+## (pair_label_for: the two ids, lower first) makes the keys of one pair of an all-human match;
+## "" is the 1 vs 1's path, whose keys and packets stay as they were (older phones talk to it).
+## The label of the pair of `a` and `b` (member ids): the lower id first, so both phones make the
+## same one; the lower id sends direction 0 (dir_low_for).
+static func pair_label_for(a: String, b: String) -> String:
+	return (a if a < b else b) + "|" + (b if a < b else a)
+
+
+static func dir_low_for(me: String, other: String) -> bool:
+	return me < other
+
+
+## The key a pair's packets are sealed with (tests: pairs differ from each other and from the 1 vs 1).
+func key_id() -> String:
+	return Marshalls.raw_to_base64(_mac).left(12)
+
+
+func _init(dir_low: bool, room_mac: PackedByteArray, local := false, pair_label := "") -> void:
+	host = dir_low
 	local_mode = local
-	# Keys of their own, derived from the match's HMAC key: a relay message never opens here.
-	_aes = _crypto.hmac_digest(HashingContext.HASH_SHA256, room_mac, "lonewolf-direct-aes".to_utf8_buffer())
-	_mac = _crypto.hmac_digest(HashingContext.HASH_SHA256, room_mac, "lonewolf-direct-mac".to_utf8_buffer())
+	label = pair_label
+	# Keys of their own, derived from the match's HMAC key: a relay message never opens here, and
+	# one pair's packets never open in another pair.
+	var suffix := "" if pair_label == "" else "|" + pair_label
+	_aes = _crypto.hmac_digest(HashingContext.HASH_SHA256, room_mac, ("lonewolf-direct-aes" + suffix).to_utf8_buffer())
+	_mac = _crypto.hmac_digest(HashingContext.HASH_SHA256, room_mac, ("lonewolf-direct-mac" + suffix).to_utf8_buffer())
 	# The sequence starts at the wall clock (ms), not at 0: a phone that comes back into its match
 	# after its app was closed makes a new path with the same keys, and its packets must count as
 	# newer than every one the other phone already took (a path sends far less than 1000 a second).
@@ -163,8 +193,9 @@ func _gather(now: int) -> void:
 	_start_ms = now
 
 
-## Every frame (now: the tick clock): STUN, punching, pings; returns the states that came in
-## (Dictionaries {"k": "st", "s", "t"} for Cloud; pings and punches are handled here).
+## Every frame (now: the tick clock): STUN, punching, pings; returns the states and voice frames
+## that came in (Dictionaries {"k": "st", "s", "t"} / {"k": "vo", "a"} / {"k": "vg", "s"} for
+## Cloud; pings and punches are handled here).
 func poll(now: int, delta: float) -> Array:
 	var out := []
 	if _sock == null:
@@ -202,6 +233,9 @@ func poll(now: int, delta: float) -> Array:
 					_pings.erase(int(i))
 			"st":
 				states_in += 1
+				out.append(d)
+			"vo", "vg":
+				voices_in += 1
 				out.append(d)
 	_pong_budget = minf(_pong_budget + delta * 4.0, 4.0)
 	if not up(now):
@@ -319,6 +353,12 @@ func can_send(now: int) -> bool:
 func send_state(a: Array, t: int, now: int) -> void:
 	states_out += 1
 	_send({"k": "st", "s": a, "t": t}, now)
+
+
+## A voice frame over the path (Cloud: "vo" {"a"} raw, "vg" {"s"} sealed under the GROUP key).
+func send_voice(d: Dictionary, now: int) -> void:
+	voices_out += 1
+	_send(d.duplicate(), now)
 
 
 func _punch(now: int) -> void:

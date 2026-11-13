@@ -27,7 +27,11 @@ extends Node
 ## The state can take a faster way: with DIRECT CONNECTION on for both players, the two phones open
 ## a direct UDP path (NetDirect: candidates swapped in the room, hole punching, packets sealed with
 ## keys derived from the room's) and the state goes over it while it works both ways (direct_up),
-## through the relay again after NetDirect.TIMEOUT_MS of silence; everything else stays here.
+## through the relay again after NetDirect.TIMEOUT_MS of silence; everything else stays here. An
+## all-human DUO / SQUAD does the same with one path per other player (_pairs: hello and candidates
+## addressed to that one player in the match room), so with DIRECT CONNECTION on this phone's
+## addresses go, end-to-end encrypted inside the match room, to each other player of that match
+## who has it on too. Voice frames take the direct paths too when every phone they are for has one up.
 ## Anyone can publish to a public broker, so invites are rate limited and the list is capped. The
 ## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere but on
 ## the phone (a live 1 vs 1's sealed session file, so a closed app can rejoin it: see "the session
@@ -66,6 +70,13 @@ signal friends_changed                 # a friend request came in or was answere
 signal room_changed                    # the hosted custom room got a player / a join attempt ended
 signal directory_changed               # a player card came in (the ALL PLAYERS list)
 signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
+## Any match chat line with its sender: team_only for a TEAM line ("tc", sealed under the sender's
+## GROUP key: only its teammates read it), else ALL ("chat"). chat_received still comes for both.
+signal chat_from(text: String, from_id: String, team_only: bool)
+## The match's quick-chat bubble (HudNet): a sticker ("stk", NetChat.STICKERS id) and a teammate's map
+## marker ("tm", sealed for the own team like "tc"; markers holds it MARKER_MS).
+signal sticker_from(id: int, from_id: String)
+signal marker_from(from_id: String, pos: Vector3)
 signal voice_received(frame: PackedByteArray)    # the opponent's audio (a NetVoice frame; 1 vs 1 only, as before)
 ## Any player's voice frame (NetVoice plays it): the sender and whether it is a teammate (voice_mate).
 signal voice_from(frame: PackedByteArray, from_id: String, mate: bool)
@@ -75,6 +86,9 @@ signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching p
 ## GROUPS and all-human team matches (design/GROUPS.txt section 3; the lobby uses only these):
 signal group_changed                   # members, leader, sides, status or search progress changed
 signal group_invited(from_name: String) # a group invite waits: group_invite_from()
+## GROUP CODE with JOIN BY CODE off: a player asks the leader to let them in (code_asks; the leader's
+## answer_code_ask ACCEPT runs the normal join, DECLINE or CODE_ASK_WAIT_MS of silence says no).
+signal code_asked(from_id: String, from_name: String)
 signal member_left(id: String)         # an all-human match: that member left (its slot is LEFT)
 signal event_from(kind: String, data: Array, from_id: String)      # an all-human match's event, with its sender
 signal state_from(state: PackedFloat32Array, from_id: String)      # an all-human match's state, with its sender
@@ -275,9 +289,26 @@ var _direct_peer := false      # the other phone can go direct too (its "dh" or 
 var _direct_sent := false      # this phone's candidates went out (for the current gathering)
 var _direct_hello_n := 0
 var _direct_hello_t := 0.0
+var _direct_voice := false     # the other phone takes voice over the direct path ("v": 2 in its "dh" / "dc"; not 1.9.1)
 var _state_in_t := -1          # sender's clock on the newest state taken (either path): older ones are dropped
 var relay_states_out := 0      # states sent through the relay this session (tests)
 var relay_states_in := 0       # states taken from the relay this session (tests)
+## An all-human match's direct paths (DIRECT CONNECTION): one NetDirect per other member (a pair),
+## member id -> NetDirect, at most PAIRS_MAX; _pair_meta: id -> {"peer", "sent", "hn", "ht"} (that
+## member said hello or sent candidates; ours went out; hellos sent; s to the next).
+const PAIRS_MAX := 7
+var _pairs := {}
+var _pair_meta := {}
+var pair_states_in := 0        # states taken from the pairs this session (tests)
+var state_counts := {}         # member id -> [states taken from the relay, from its pair] this session (tests)
+var relay_voice_out := 0       # voice frames sent through the relay this session (tests)
+## Map markers (HudNet's MARKER button): id (this phone: my_id) -> {"p": Vector3, "t": ms}, one live
+## marker per player for MARKER_MS; this phone places at most one per MARKER_EVERY_MS.
+const MARKER_MS := 15000
+const MARKER_EVERY_MS := 2000
+const MARKER_MAX_M := 80.0
+var markers := {}
+var _marker_out_ms := -100000
 var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
 var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
 ## DUO / SQUAD over this 1 vs 1 session: the team of the session a team invite ("tinv") started, on
@@ -579,6 +610,8 @@ func _process(delta: float) -> void:
 			_save_resume()
 	if direct != null:
 		_tick_direct(delta)
+	if not _pairs.is_empty():
+		_tick_pairs(delta)
 	if _keygen != -1 and not _keygen_out.is_empty():
 		WorkerThreadPool.wait_for_task_completion(_keygen)
 		_keygen = -1
@@ -1107,7 +1140,7 @@ func _on_inbox(d: Dictionary) -> void:
 				_on_gmatch(from, d)
 		"gacc":
 			_on_gmatch_answer(from, d, true)
-		"gin", "gno":
+		"gin", "gno", "gwait":
 			_on_code_answer(from, d)
 		"can":
 			if String(_incoming.get("id", "")) == from and _tagged(d, _incoming, "can", from):
@@ -1846,6 +1879,8 @@ func try_resume() -> bool:
 	queue.clear()
 	if multi.is_empty():
 		_direct_begin()
+	else:
+		_pairs_begin()
 	if _connected:
 		_subscribe(ROOT + "/r/" + _room)
 		session_started.emit.call_deferred(is_host)
@@ -2681,6 +2716,7 @@ func _on_room(msg: PackedByteArray) -> void:
 	_last_heard = Time.get_ticks_msec()
 	_present(_last_heard)            # (this phone is back in the match: it hears the other one)
 	var kind := String((d as Dictionary).get("k", ""))
+	kind = _talk_kind(d as Dictionary, kind)
 	if in_session and not kind in LOAD_KINDS:
 		# (a phone that comes back after a restart says "ka" while its arena loads, and offers
 		# its direct link: its fighter stays frozen here, and can be hit, until the arena is up)
@@ -2716,6 +2752,8 @@ func _on_room(msg: PackedByteArray) -> void:
 				_in_match_unix = Time.get_unix_time_from_system()
 				_save_resume()
 				_decline_waiting()
+				if voice_mates() > 0:
+					_vk_sync()       # (the co-op mate gets this phone's GROUP key: it learns TEAM lines go)
 				session_started.emit(is_host)
 		"st":
 			if _on_state_msg(d as Dictionary):
@@ -2724,10 +2762,12 @@ func _on_room(msg: PackedByteArray) -> void:
 			# The other phone can go direct (DIRECT CONNECTION on there): ours go out once gathered.
 			if in_session and direct != null:
 				_direct_peer = true
+				_direct_voice = _direct_voice or _says_direct_voice(d as Dictionary)
 		"dc":
 			# Its candidates (checked: real unicast addresses, ports from 1024): punching starts.
 			if in_session and direct != null:
 				_direct_peer = true
+				_direct_voice = _direct_voice or _says_direct_voice(d as Dictionary)
 				var list := NetDirect.candidates_from((d as Dictionary).get("c"), direct.local_mode)
 				if not list.is_empty():
 					direct.set_peer_candidates(list, Time.get_ticks_msec())
@@ -2744,12 +2784,17 @@ func _on_room(msg: PackedByteArray) -> void:
 			if (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, Time.get_ticks_msec() - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
-		"chat":
+		"qc", "tq", "stk", "tm":
+			if in_session:
+				_on_talk(d as Dictionary, String(opponent.get("id", "")))
+		"chat", "tc":
 			# A chat line: only with CHAT on, never from a blocked player, at most one per
-			# NetChat.RATE_S (a short burst of two), cleaned and cut to NetChat.MATCH_MAX.
-			var x: Variant = (d as Dictionary).get("x")
+			# NetChat.RATE_S (a short burst of two), cleaned and cut to NetChat.MATCH_MAX. A TEAM
+			# line ("tc") only from a co-op teammate, opened with its GROUP key.
+			var opp_id := String(opponent.get("id", ""))
+			var x: Variant = (d as Dictionary).get("x") if kind == "chat" else team_line_open((d as Dictionary).get("s"), opp_id)
 			if not in_session or typeof(x) != TYPE_STRING or not bool(Game.settings.get("chat", true)) \
-					or Game.is_blocked(String(opponent.get("id", ""))):
+					or Game.is_blocked(opp_id):
 				return
 			var now := Time.get_ticks_msec()
 			var tokens := minf(2.0, float(_chat_in[0]) + float(now - int(_chat_in[1])) / 1000.0 / NetChat.RATE_S)
@@ -2757,27 +2802,12 @@ func _on_room(msg: PackedByteArray) -> void:
 			var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 			if tokens >= 1.0 and line != "":
 				chat_received.emit(line)
+				chat_from.emit(line, opp_id, kind == "tc")
 		"vp", "vk":
 			if in_session:
 				_vk_on(d as Dictionary, String(opponent.get("id", "")))
 		"vo", "vg":
-			# Voice (NetVoice, "vo": to everyone; "vg" to teammates only, under the sender's GROUP
-			# key: a co-op DUO's other phone, never a 1 vs 1's opponent): with the SPEAKER on here,
-			# never from a blocked player, at most NetVoice.MAX_FRAMES_S frames a second, each a
-			# frame NetVoice can play.
-			var mate := voice_mate(String(opponent.get("id", "")))
-			var a: Variant = (d as Dictionary).get("a") if kind == "vo" \
-				else _vk_b64((d as Dictionary).get("s"), String(opponent.get("id", "")), mate)
-			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or (kind == "vg" and not mate) \
-					or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
-				return
-			var now := Time.get_ticks_msec()
-			var tokens := minf(NetVoice.MAX_FRAMES_S, float(_voice_in[0]) + float(now - int(_voice_in[1])) / 1000.0 * NetVoice.MAX_FRAMES_S)
-			_voice_in = [tokens - 1.0 if tokens >= 1.0 else tokens, now]
-			var frame := Marshalls.base64_to_raw(String(a))
-			if tokens >= 1.0 and NetVoice.frame_ok(frame):
-				voice_received.emit(frame)
-				voice_from.emit(frame, String(opponent.get("id", "")), mate)
+			_on_voice_msg(d as Dictionary)
 		"ev":
 			var ev: Variant = (d as Dictionary).get("e", "")
 			var data: Variant = (d as Dictionary).get("d", [])
@@ -2793,6 +2823,26 @@ func _on_room(msg: PackedByteArray) -> void:
 					queue.append([String(ev), data])
 			else:
 				event_received.emit(String(ev), data)
+
+
+## The 1 vs 1's voice frame (the room's or the direct path's). Voice (NetVoice, "vo": to everyone;
+## "vg" to teammates only, under the sender's GROUP key: a co-op DUO's other phone, never a 1 vs 1's
+## opponent): with the SPEAKER on here, never from a blocked player, at most NetVoice.MAX_FRAMES_S
+## frames a second, each a frame NetVoice can play.
+func _on_voice_msg(d: Dictionary) -> void:
+	var kind := String(d.get("k", ""))
+	var mate := voice_mate(String(opponent.get("id", "")))
+	var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), String(opponent.get("id", "")), mate)
+	if not in_session or not kind in ["vo", "vg"] or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or (kind == "vg" and not mate) \
+			or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
+		return
+	var now := Time.get_ticks_msec()
+	var tokens := minf(NetVoice.MAX_FRAMES_S, float(_voice_in[0]) + float(now - int(_voice_in[1])) / 1000.0 * NetVoice.MAX_FRAMES_S)
+	_voice_in = [tokens - 1.0 if tokens >= 1.0 else tokens, now]
+	var frame := Marshalls.base64_to_raw(String(a))
+	if tokens >= 1.0 and NetVoice.frame_ok(frame):
+		voice_received.emit(frame)
+		voice_from.emit(frame, String(opponent.get("id", "")), mate)
 
 
 ## Ends the match's session: "left" (the other phone said bye, `theirs`, or went silent, or this
@@ -2835,6 +2885,7 @@ func end_session(reason := "left", theirs := false) -> void:
 	clear_resume()
 	_reset_away()
 	session_team = {}
+	markers = {}
 	if session_multi:
 		_multi_reset()
 	peer_rtt = -1
@@ -2868,7 +2919,19 @@ func send_state(s: PackedFloat32Array) -> bool:
 		_same_n = 0
 		_last_state = a
 	_state_ms = now
-	if direct != null and direct.can_send(now):
+	if session_multi:
+		# Through every pair that is up, and once through the relay unless every live member's is.
+		var all_up := true
+		for id: String in _live_members():
+			var p: NetDirect = _pairs.get(id)
+			if p != null and p.can_send(now):
+				p.send_state(a, now, now)
+			else:
+				all_up = false
+		if not all_up:
+			relay_states_out += 1
+			_room_send({"k": "st", "s": a, "t": now})
+	elif direct != null and direct.can_send(now):
 		direct.send_state(a, now, now)
 	else:
 		relay_states_out += 1
@@ -2933,6 +2996,8 @@ func _direct_end() -> void:
 		direct.close()
 	direct = null
 	_direct_peer = false
+	_direct_voice = false
+	_pairs_end()
 
 
 func _tick_direct(delta: float) -> void:
@@ -2945,14 +3010,132 @@ func _tick_direct(delta: float) -> void:
 		if _direct_hello_t <= 0.0 and _direct_hello_n < 5:
 			_direct_hello_t = 2.0
 			_direct_hello_n += 1
-			_room_send({"k": "dh"})
+			_room_send({"k": "dh", "v": 2})
 	if direct.wants_regather(now):
 		_direct_sent = false
 	if _direct_peer and direct.gathered and not _direct_sent:
 		_direct_sent = true
-		_room_send({"k": "dc", "c": direct.candidates})
+		_room_send({"k": "dc", "c": direct.candidates, "v": 2})
 	for d: Dictionary in direct.poll(now, delta):
-		_on_state_msg(d)
+		if String(d.get("k", "")) == "st":
+			_on_state_msg(d)
+		else:
+			_on_voice_msg(d)
+
+
+# An all-human match's pairs: one direct path per other member (NetDirect with the pair's label),
+# opened when the match starts (or is entered again from the session file) while DIRECT CONNECTION
+# is on. Each pair says hello ("dh" {"to"}) up to 5 times, 2 s apart; its candidates ("dc" {"to",
+# "c"}) go only to a member whose hello (or candidates) came, so a player with DIRECT CONNECTION off
+# never sends or gets an address. A pair closes when its member LEFT or is blocked, and with the
+# session. What comes over it is taken as that member's (never an id from the packet).
+
+## The members of this all-human match still in it (not LEFT), this phone left out.
+func _live_members() -> Array:
+	var out := []
+	if _multi.is_empty():
+		return out
+	for id: String in (_multi.ids as Dictionary):
+		if id != my_id and not (_multi.left as Dictionary).has(id):
+			out.append(id)
+	return out
+
+
+func _pairs_begin() -> void:
+	_pairs_end()
+	pair_states_in = 0
+	relay_voice_out = 0
+	state_counts = {}
+	var m := NetDirect.mode()
+	if m == "off" or not direct_allowed() or not session_multi or _mac.is_empty():
+		return
+	for id: String in _live_members():
+		if _pairs.size() >= PAIRS_MAX or Game.is_blocked(id):
+			continue
+		var p := NetDirect.new(NetDirect.dir_low_for(my_id, id), _mac, m == "local", NetDirect.pair_label_for(my_id, id))
+		if p.open(Time.get_ticks_msec()):
+			_pairs[id] = p
+			_pair_meta[id] = {"peer": false, "sent": false, "hn": 0, "ht": 0.0}
+
+
+func _pairs_end() -> void:
+	for id: String in _pairs:
+		(_pairs[id] as NetDirect).close()
+	_pairs.clear()
+	_pair_meta.clear()
+
+
+func _pair_close(id: String) -> void:
+	if _pairs.has(id):
+		(_pairs[id] as NetDirect).close()
+	_pairs.erase(id)
+	_pair_meta.erase(id)
+
+
+## A member's "dh" / "dc": taken only when addressed to this phone ("to") and its pair is open.
+func _pair_on(d: Dictionary, f: String) -> void:
+	if not in_session or not _pairs.has(f) or typeof(d.get("to")) != TYPE_STRING or String(d.to) != my_id:
+		return
+	var meta: Dictionary = _pair_meta[f]
+	if not bool(meta.peer) or String(d.get("k", "")) == "dh":
+		meta.sent = false            # (a hello again: it started over, so its candidates go out again)
+	meta.peer = true
+	if String(d.get("k", "")) == "dc":
+		var p: NetDirect = _pairs[f]
+		var list := NetDirect.candidates_from(d.get("c"), p.local_mode)
+		if not list.is_empty():
+			p.set_peer_candidates(list, Time.get_ticks_msec())
+
+
+func _tick_pairs(delta: float) -> void:
+	if not in_session or not session_multi or _room == "":
+		_pairs_end()
+		return
+	var now := Time.get_ticks_msec()
+	for id: String in _pairs.keys():
+		if (_multi.left as Dictionary).has(id) or Game.is_blocked(id):
+			_pair_close(id)
+			continue
+		var p: NetDirect = _pairs[id]
+		var meta: Dictionary = _pair_meta[id]
+		if not bool(meta.peer):
+			meta.ht = float(meta.ht) - delta
+			if float(meta.ht) <= 0.0 and int(meta.hn) < 5:
+				meta.ht = 2.0
+				meta.hn = int(meta.hn) + 1
+				_room_send({"k": "dh", "to": id})
+		if p.wants_regather(now):
+			meta.sent = false
+		if bool(meta.peer) and p.gathered and not bool(meta.sent):
+			meta.sent = true
+			_room_send({"k": "dc", "to": id, "c": p.candidates})
+		for d: Dictionary in p.poll(now, delta):
+			if not _pairs.has(id) or not _bucket("m" + id, MULTI_RATE, MULTI_RATE):
+				continue
+			if String(d.get("k", "")) == "st":
+				if in_session and _arena_listens():
+					_multi.heard[id] = now        # (a state is a sign of life, as any room message)
+					_multi.live[id] = now
+					_set_away(id, false)
+				_on_multi_state(d, id, true)
+			else:
+				_on_multi_voice(d, id)
+
+
+## Whether that member's pair is up now (tests, the HUD tag).
+func pair_up(id: String) -> bool:
+	return _pairs.has(id) and (_pairs[id] as NetDirect).can_send(Time.get_ticks_msec())
+
+
+## The pairs open now (tests): member id -> NetDirect.
+func pairs() -> Dictionary:
+	return _pairs
+
+
+## A 1 vs 1 "dh" / "dc" from a build that takes voice frames over the direct path (from 1.10).
+static func _says_direct_voice(d: Dictionary) -> bool:
+	var v: Variant = d.get("v")
+	return (v is int or v is float) and int(v) >= 2
 
 
 ## Whether the state goes straight to the other phone right now (the match HUD's DIRECT tag).
@@ -2960,9 +3143,25 @@ func direct_up() -> bool:
 	return direct != null and direct.can_send(Time.get_ticks_msec())
 
 
-## How the match state travels, for the tag under the match HUD's ping: "DIRECT" or "RELAY".
+## How the match state travels, for the tag under the match HUD's ping: "DIRECT" or "RELAY"; in an
+## all-human match "DIRECT" when every live member's pair is up, "DIRECT n/m" when some are.
 func link_tag() -> String:
+	if session_multi:
+		var live := _live_members()
+		var now := Time.get_ticks_msec()
+		var up := 0
+		for id: String in live:
+			if _pairs.has(id) and (_pairs[id] as NetDirect).can_send(now):
+				up += 1
+		return link_tag_for(up, live.size())
 	return "DIRECT" if direct_up() else "RELAY"
+
+
+## The tag for `up` pairs up out of `live` members.
+static func link_tag_for(up: int, live: int) -> String:
+	if up <= 0 or live <= 0:
+		return "RELAY"
+	return "DIRECT" if up >= live else "DIRECT %d/%d" % [up, live]
 
 
 ## The relay's round trip while this phone is connected to it, else -1 (the ping chip of a match
@@ -2975,6 +3174,16 @@ func relay_ping() -> int:
 func match_ping() -> int:
 	if direct_up() and direct.rtt >= 0:
 		return direct.rtt
+	if session_multi and not _pairs.is_empty():
+		# A member: its pair with the host while up; the host: the slowest of its pairs that are up.
+		var now := Time.get_ticks_msec()
+		var worst := -1
+		for id: String in _pairs:
+			var p: NetDirect = _pairs[id]
+			if p.can_send(now) and p.rtt >= 0 and (is_host or id == session_host_id):
+				worst = maxi(worst, p.rtt)
+		if worst >= 0:
+			return worst
 	return NetPing.match_ms(peer_rtt, relay_rtt, status == "online")
 
 
@@ -2990,8 +3199,11 @@ static func compact_state(s: PackedFloat32Array) -> Array:
 
 
 ## A chat line in the match (CHAT on, NetChat.clean, at most one per NetChat.RATE_S): "" when it
-## went out, else why not ("WAIT" too soon, "OFF", "EMPTY").
-func send_chat(text: String) -> String:
+## went out, else why not ("WAIT" too soon, "OFF", "EMPTY", "NO TEAM": team_only with no teammate).
+## team_only: to the own team only ("tc", sealed under this phone's GROUP key, which only the
+## teammates hold: the other team and builds before 1.10 drop it); in the two-phone co-op the
+## team is the other phone.
+func send_chat(text: String, team_only := false) -> String:
 	if not in_session:
 		return "OFF"
 	if not bool(Game.settings.get("chat", true)):
@@ -3002,21 +3214,184 @@ func send_chat(text: String) -> String:
 	var now := Time.get_ticks_msec()
 	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
 		return "WAIT"
+	if team_only:
+		if voice_mates() == 0:
+			return "NO TEAM"
+		if int(team_line_mates()[1]) == 0:
+			_vk_sync()
+			return "OLD TEAM"
+		_chat_out_ms = now
+		_vk_sync()
+		_room_send({"k": "tc", "s": Marshalls.raw_to_base64(_vk_seal(line.to_utf8_buffer()))})
+		return ""
 	_chat_out_ms = now
 	_room_send({"k": "chat", "x": line})
 	return ""
 
 
+## A quick phrase or sticker to everyone goes as a plain "chat" line that every build shows (its
+## text in "x"), with the id beside it ("i" a NetChat.QUICK id, "stk" a sticker): builds from 1.10
+## take it as "qc" / "stk" by the id (their own copy of the phrase, the sticker's icon); 1.9.1 and
+## older show "x" and never see a "qc" or "stk" message, which they would drop.
+static func _talk_kind(d: Dictionary, kind: String) -> String:
+	if kind != "chat" or not (d.has("i") or d.has("stk")):
+		return kind
+	kind = "stk" if d.has("stk") else "qc"
+	d["i"] = d.get("stk", d.get("i"))
+	d["k"] = kind
+	return kind
+
+
+## The quick-chat bubble's messages from a match player: a quick phrase by id ("qc" {"i"} to all,
+## "tq" sealed for the own team), a sticker ("stk" {"i"}) and a teammate's map marker ("tm", sealed:
+## x, y, z). Never from a blocked player; phrases and stickers with CHAT on and the chat's rate
+## (NetChat.RATE_S, a burst of two), markers at most one per MARKER_EVERY_MS. Unknown ids, other
+## teams' markers and points that are not finite or far out are dropped.
+func _on_talk(d: Dictionary, f: String) -> void:
+	var kind := String(d.get("k", ""))
+	if f == "" or f == my_id or Game.is_blocked(f):
+		return
+	if kind == "tm":
+		var raw: Variant = team_line_open(d.get("s"), f)
+		if typeof(raw) != TYPE_STRING or not _bucket("tm" + f, 1000.0 / MARKER_EVERY_MS, 2.0):
+			return
+		var parts := String(raw).split(",")
+		if parts.size() != 3:
+			return
+		var v := Vector3.ZERO
+		for i in 3:
+			if not parts[i].is_valid_float() or not is_finite(parts[i].to_float()) or absf(parts[i].to_float()) > 10000.0:
+				return
+			v[i] = parts[i].to_float()
+		markers[f] = {"p": v, "t": Time.get_ticks_msec()}
+		marker_from.emit(f, v)
+		return
+	if not bool(Game.settings.get("chat", true)):
+		return
+	if kind == "stk":
+		if NetChat.sticker_ok(d.get("i")) and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
+			sticker_from.emit(int(d.i), f)
+		return
+	var id: Variant = d.get("i")
+	if kind == "tq":
+		var raw: Variant = team_line_open(d.get("s"), f)
+		id = null
+		if typeof(raw) == TYPE_STRING and String(raw).is_valid_int():
+			id = int(String(raw))
+	var text := NetChat.quick_text(id)
+	if text != "" and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
+		chat_from.emit(text, f, kind == "tq")
+
+
+## A quick phrase by its id (NetChat.quick_text) to everyone, or to the own team (sealed, "tq"); the
+## same rate and answers as send_chat.
+func send_quick(id: int, team_only := false) -> String:
+	if not in_session or not bool(Game.settings.get("chat", true)):
+		return "OFF"
+	if NetChat.quick_text(id) == "":
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
+		return "WAIT"
+	if team_only:
+		if voice_mates() == 0:
+			return "NO TEAM"
+		if int(team_line_mates()[1]) == 0:
+			_vk_sync()
+			return "OLD TEAM"
+		_vk_sync()
+		_chat_out_ms = now
+		_room_send({"k": "tq", "s": Marshalls.raw_to_base64(_vk_seal(str(id).to_utf8_buffer()))})
+		return ""
+	_chat_out_ms = now
+	_room_send({"k": "chat", "x": NetChat.quick_text(id), "i": id})     # (_talk_kind: 1.9.1 shows the text)
+	return ""
+
+
+## A sticker (NetChat.STICKERS id) to everyone in the match, at the chat's rate.
+func send_sticker(id: int) -> String:
+	if not in_session or not bool(Game.settings.get("chat", true)):
+		return "OFF"
+	if not NetChat.sticker_ok(id):
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
+		return "WAIT"
+	_chat_out_ms = now
+	_room_send({"k": "chat", "x": String(NetChat.STICKERS[id]), "stk": id})     # (_talk_kind: 1.9.1 shows its name)
+	return ""
+
+
+## This player's map marker at `pos` to the own team only (sealed like a TEAM line), at most one per
+## MARKER_EVERY_MS; it replaces the last one and is kept MARKER_MS here too. "" when placed.
+func send_marker(pos: Vector3) -> String:
+	if not in_session:
+		return "OFF"
+	var now := Time.get_ticks_msec()
+	if now - _marker_out_ms < MARKER_EVERY_MS:
+		return "WAIT"
+	if voice_mates() == 0:
+		return "NO TEAM"
+	_marker_out_ms = now
+	markers[my_id] = {"p": pos, "t": now}
+	_vk_sync()
+	_room_send({"k": "tm", "s": Marshalls.raw_to_base64(_vk_seal(("%.2f,%.2f,%.2f" % [pos.x, pos.y, pos.z]).to_utf8_buffer()))})
+	return ""
+
+
+## The markers still live (MARKER_MS): id -> Vector3; the expired ones go.
+func live_markers(now := Time.get_ticks_msec()) -> Dictionary:
+	var out := {}
+	for id: String in markers.keys():
+		if now - int(markers[id].t) >= MARKER_MS or (id != my_id and not voice_mate(id)):
+			markers.erase(id)
+		else:
+			out[id] = markers[id].p
+	return out
+
+
+## A teammate's TEAM line ("tc" "s") as text; null from anyone else, under a key it did not give
+## this phone, or when it does not open.
+func team_line_open(a: Variant, from: String) -> Variant:
+	if not voice_mate(from) or typeof(a) != TYPE_STRING or String(a).length() > 600:
+		return null
+	var raw := _vk_open(a, from)
+	if raw.is_empty():
+		return null
+	return raw.get_string_from_utf8()
+
+
 ## One voice frame (NetVoice, only while the player speaks) to the match: everyone ("vo", what
 ## every build plays), or the own team only ("vg": older builds ignore it, the other team's drop it).
+## When every phone it is for has its direct path up (the 1 vs 1's, or each recipient's pair) it
+## goes over those paths only, else through the relay only.
 func send_voice(frame: PackedByteArray, group_only := false) -> void:
 	if not in_session or not NetVoice.frame_ok(frame):
 		return
+	var d := {"k": "vo", "a": Marshalls.raw_to_base64(frame)}
 	if group_only:
 		_vk_sync()
-		_room_send({"k": "vg", "s": Marshalls.raw_to_base64(_vk_seal(frame))})
+		d = {"k": "vg", "s": Marshalls.raw_to_base64(_vk_seal(frame))}
+	# Over the direct path when every phone it is for has one up (never both ways: no frame twice).
+	var now := Time.get_ticks_msec()
+	if not session_multi:
+		if direct != null and _direct_voice and direct.can_send(now):
+			direct.send_voice(d, now)
+			return
 	else:
-		_room_send({"k": "vo", "a": Marshalls.raw_to_base64(frame)})
+		var to := _live_members()
+		if group_only:
+			to = to.filter(func(id: String) -> bool: return voice_mate(id))
+		var all_up := not to.is_empty()
+		for id: String in to:
+			if not (_pairs.has(id) and (_pairs[id] as NetDirect).can_send(now)):
+				all_up = false
+		if all_up:
+			for id: String in to:
+				(_pairs[id] as NetDirect).send_voice(d, now)
+			return
+	relay_voice_out += 1
+	_room_send(d)
 
 
 ## The voice channel the GROUP keys belong to: the match room, or the group / room.
@@ -3082,7 +3457,7 @@ func _vk_sync() -> void:
 		var pub := CryptoKey.new()
 		if pub.load_from_string(pem, true) != OK:
 			continue
-		_vk_out({"k": "vk", "to": id, "s": Marshalls.raw_to_base64(_crypto.encrypt(pub, _vk.raw))})
+		_vk_out({"k": "vk", "to": id, "s": Marshalls.raw_to_base64(_crypto.encrypt(pub, _vk.raw)), "v": 2})     # (v 2: takes TEAM lines)
 		_vk.given[id] = true
 
 
@@ -3159,7 +3534,8 @@ func _vk_on(d: Dictionary, from: String) -> void:
 			and String(d.s).length() < 1000 and _key != null and voice_mate(from):
 		var raw := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.s)))
 		if raw.size() == 64:
-			_vkeys[from] = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": ch}
+			var v: Variant = d.get("v")
+			_vkeys[from] = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": ch, "v2": (v is float or v is int) and float(v) >= 2.0}
 
 
 ## Whether that match or group player counts as GROUP for voice: the same team in a DUO / SQUAD
@@ -3183,6 +3559,22 @@ func voice_mate(id: String) -> bool:
 	for m: Dictionary in group.members:
 		teams[String(m.id)] = int(m.get("team", -1))
 	return int(teams.get(id, -2)) == int(teams.get(my_id, -3))
+
+
+## The live teammates in the match and how many of them take TEAM lines ("tc", "tq", "tm"): builds
+## from 1.10 say "v": 2 in the GROUP key they give ("vk"); 1.9.1 drops those kinds. [n, takers]
+func team_line_mates() -> Array:
+	var ch := _vk_channel()
+	var n := 0
+	var ok := 0
+	for id: String in _vk_mate_ids():
+		if in_session and session_multi and (_multi.get("left", {}) as Dictionary).has(id):
+			continue
+		n += 1
+		var k: Dictionary = _vkeys.get(id, {})
+		if bool(k.get("v2", false)) and String(k.get("ch", "")) == ch:
+			ok += 1
+	return [n, ok]
 
 
 ## How many players count as GROUP for voice (voice_mate) in the match, or else the group.
@@ -3571,8 +3963,10 @@ func _search_begin(size: int) -> void:
 # {sec, rt} with the group's id and keys RSA-wrapped for the joiner's key (as a room's "rin") and rt
 # = HMAC(code key, "gin" + sec + leader), or "gno" {full: true, rt} when the group is full. The
 # joiner then says "gjoin" in the group room as an invitee does; the leader's roster is the truth.
-# Rules: nobody listens until the leader (or solo) turns JOIN BY CODE on (code_join, OFF at the
-# start of every run; COPY of the code turns it on, since copying means sharing); an ask is answered
+# Rules: nobody is let in until the leader (or solo) turns JOIN BY CODE on (code_join, OFF at the
+# start of every run; COPY of the code turns it on, since copying means sharing); with it off the
+# leader still listens on its bucket and a valid ask becomes a question to the leader (code_asks,
+# "gwait" to the joiner; ACCEPT runs the normal "gin", DECLINE or 20 s says "gno" {"no"}); an ask is answered
 # only from a player DUEL CHALLENGES FROM lets in (NetMatch.allowed: never a blocked one, none with
 # NOBODY, only friends with FRIENDS), never from one the leader REMOVEd this run (_code_kicked), and
 # not while this phone is in QUICK MATCH (seeking); a joiner never takes a "gin" from a leader it
@@ -3594,6 +3988,12 @@ var _code_topic := ""          # the bucket this phone listens on for asks with 
 var _code_keys := {}           # code -> its stretched key (the own one, the one being joined)
 var _code_tries: Array = []    # when the last join attempts began (ms)
 var _code_kicked := {}         # ids this leader REMOVEd this run: their code asks are never answered
+## Asks to join while JOIN BY CODE is off: id -> {"name", "t", "d"} (at most one per joiner, at most
+## CODE_ASKS_MIN a minute shown, each for CODE_ASK_WAIT_MS), and when the last ones came (ms).
+const CODE_ASK_WAIT_MS := 20000
+const CODE_ASKS_MIN := 3
+var code_asks := {}
+var _code_ask_times: Array = []
 
 
 ## The GROUP CODE the GROUP bar shows: a member's is the leader's (from the roster), a leader's or
@@ -3686,7 +4086,7 @@ func join_group_code(code: String) -> String:
 		return "CANCEL THE SEARCH FIRST"
 	if not _connected or _key == null:
 		return "OFFLINE: JOINING A GROUP NEEDS THE INTERNET"
-	if code_state == "asking":
+	if code_state in ["asking", "waiting"]:
 		return "A JOIN IS ALREADY UNDER WAY"
 	var now := Time.get_ticks_msec()
 	_code_tries = _code_tries.filter(func(t: int) -> bool: return now - t < 60000)
@@ -3712,8 +4112,8 @@ func _code_ask_msg() -> Dictionary:
 ## on, not in QUICK MATCH); a join by code asks every CODE_ASK_S until answered or CODE_WAIT_MS.
 func _tick_code(delta: float, now: int) -> void:
 	var want := ""
-	if _connected and _want_lobby and code_join and my_id != "" and is_group_leader() and not in_room() and room_code == "" \
-			and not in_session and not session_multi and not seeking and code_state != "asking":
+	if _connected and _want_lobby and my_id != "" and is_group_leader() and not in_room() and room_code == "" \
+			and not in_session and not session_multi and not seeking and code_state not in ["asking", "waiting"]:
 		want = code_topic(group_code())
 	if want != _code_topic:
 		if _code_topic != "" and _connected:
@@ -3721,12 +4121,15 @@ func _tick_code(delta: float, now: int) -> void:
 		_code_topic = want
 		if want != "":
 			_subscribe(want)
-	if code_state == "asking" and not _cjoin.is_empty():
+	for id: String in code_asks.keys():
+		if now - int(code_asks[id].t) > CODE_ASK_WAIT_MS:
+			answer_code_ask(id, false)    # (not answered in time: no)
+	if code_state in ["asking", "waiting"] and not _cjoin.is_empty():
 		_cjoin.ask_t = float(_cjoin.ask_t) - delta
 		if float(_cjoin.ask_t) <= 0.0:
 			_cjoin.ask_t = CODE_ASK_S
 			_publish_json(code_topic(String(_cjoin.code)), _code_ask_msg())
-		if now - int(_cjoin.t) > CODE_WAIT_MS:
+		if now - int(_cjoin.t) > (CODE_ASK_WAIT_MS + 3000 if code_state == "waiting" else CODE_WAIT_MS):
 			_cjoin = {}
 			code_state = "none"
 			group_changed.emit()
@@ -3734,13 +4137,13 @@ func _tick_code(delta: float, now: int) -> void:
 
 ## A "gask" on this phone's bucket: answered only when its tag is this phone's code's ("" else, the
 ## ask is another group's). Returns the answer that went out ({} for none).
-func _on_code_ask(d: Dictionary) -> Dictionary:
+func _on_code_ask(d: Dictionary, accepted := false) -> Dictionary:
 	var from := String(d.get("from", "")).left(32)
 	if String(d.get("t", "")) != "gask" or from == "" or from == my_id or typeof(d.get("mac")) != TYPE_STRING:
 		return {}
-	if not code_join or in_room() or not is_group_leader() or in_session or session_multi or seeking:
+	if in_room() or not is_group_leader() or in_session or session_multi or seeking:
 		return {}
-	if not _bucket("gc", CODE_RATE, 8.0) or not _bucket("gc" + from, 0.5, 3.0):
+	if not accepted and (not _bucket("gc", CODE_RATE, 8.0) or not _bucket("gc" + from, 0.5, 3.0)):
 		return {}
 	var key := _code_key(group_code())
 	if not _crypto.constant_time_compare(_code_tag(key, "gask" + from).to_utf8_buffer(), String(d.mac).to_utf8_buffer()):
@@ -3748,6 +4151,8 @@ func _on_code_ask(d: Dictionary) -> Dictionary:
 	if not NetMatch.allowed(from, my_id) or _code_kicked.has(from) or typeof(d.get("pk")) != TYPE_STRING \
 			or String(d.pk).length() > 1200 or from != String(d.pk).sha256_text().left(32):
 		return {}                    # blocked, not let in by DUEL CHALLENGES FROM, or REMOVEd: no answer
+	if not code_join and not accepted:
+		return _code_pending(from, d, key)
 	var taken := 0
 	if not group.is_empty():
 		taken = (group.members as Array).size() + (_grp.invited as Dictionary).size()
@@ -3778,16 +4183,57 @@ func _on_code_ask(d: Dictionary) -> Dictionary:
 	return msg
 
 
-## The joiner: the leader's "gin" (the group's keys, wrapped for this phone) or "gno" (full), both
-## tagged with the code's key; a "gin" from a leader this phone blocked is refused.
+## A valid code ask while JOIN BY CODE is off: the leader is asked (code_asked; one waiting ask per
+## joiner, at most CODE_ASKS_MIN new ones a minute, the rest dropped silently) and the joiner told
+## to wait ("gwait", tagged with the code's key: only the code's holder can say it).
+func _code_pending(from: String, d: Dictionary, key: PackedByteArray) -> Dictionary:
+	var now := Time.get_ticks_msec()
+	if not code_asks.has(from):
+		_code_ask_times = _code_ask_times.filter(func(t: int) -> bool: return now - t < 60000)
+		if _code_ask_times.size() >= CODE_ASKS_MIN:
+			return {}
+		_code_ask_times.append(now)
+		var who := Game.clean_name(String(d.get("name", ""))) if typeof(d.get("name")) == TYPE_STRING else ""
+		code_asks[from] = {"name": who if who != "" else "PLAYER", "t": now, "d": d.duplicate()}
+		code_asked.emit(from, String(code_asks[from].name))
+	var msg := {"t": "gwait", "from": my_id, "rt": _code_tag(key, "gwait" + my_id)}
+	_publish_json(ROOT + "/u/" + from, msg)
+	return msg
+
+
+## The leader's answer to a waiting code ask: ACCEPT lets the player in as JOIN BY CODE would (the
+## same checks again), DECLINE (or no answer in time) tells them no ("gno" {"no": true}).
+func answer_code_ask(from: String, yes: bool) -> Dictionary:
+	if not code_asks.has(from):
+		return {}
+	var a: Dictionary = code_asks[from]
+	code_asks.erase(from)
+	if yes and not Game.is_blocked(from):
+		return _on_code_ask(a.d, true)
+	if group_code() == "":
+		return {}
+	var no := {"t": "gno", "from": my_id, "no": true, "rt": _code_tag(_code_key(group_code()), "gno" + my_id)}
+	_publish_json(ROOT + "/u/" + from, no)
+	return no
+
+
+## The joiner: the leader's "gin" (the group's keys, wrapped for this phone), "gno" (full, or "no":
+## the leader said no) or "gwait" (the leader was asked: JOIN BY CODE is off there), all tagged with
+## the code's key; a "gin" from a leader this phone blocked is refused.
 func _on_code_answer(from: String, d: Dictionary) -> void:
-	if code_state != "asking" or _cjoin.is_empty() or typeof(d.get("rt")) != TYPE_STRING:
+	if not code_state in ["asking", "waiting"] or _cjoin.is_empty() or typeof(d.get("rt")) != TYPE_STRING:
 		return
 	var key: PackedByteArray = _cjoin.key
+	if String(d.t) == "gwait":
+		if code_state == "asking" and _crypto.constant_time_compare(_code_tag(key, "gwait" + from).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
+			code_state = "waiting"
+			_cjoin.t = Time.get_ticks_msec()
+			group_changed.emit()
+		return
 	if String(d.t) == "gno":
 		if _crypto.constant_time_compare(_code_tag(key, "gno" + from).to_utf8_buffer(), String(d.rt).to_utf8_buffer()):
 			_cjoin = {}
-			code_state = "full"
+			code_state = "said_no" if d.get("no") == true else "full"
 			group_changed.emit()
 		return
 	var sec_text := String(d.get("sec", "")) if typeof(d.get("sec")) == TYPE_STRING else ""
@@ -4410,7 +4856,8 @@ func _on_gstart(d: Dictionary) -> void:
 # session and answers "joined", which starts it on each member. Events and states come with their
 # sender (event_from, state_from), at most MULTI_RATE a second from one member; "bye" from a member
 # is member_left, from the host (or the host silent) the session's end ("left"). The host hears
-# every member, so it ends the session when all of them left. No direct UDP path in these matches.
+# every member, so it ends the session when all of them left. With DIRECT CONNECTION on, the states
+# (and voice) also take one direct UDP path per other member (_pairs, see "An all-human match's pairs").
 
 func _multi_enter(room: String, aes: PackedByteArray, mac: PackedByteArray, size: int, roster: Array, host_id: String) -> void:
 	if in_session:
@@ -4478,6 +4925,9 @@ func _multi_start() -> void:
 	_in_match_unix = Time.get_unix_time_from_system()
 	_save_resume()                   # (a closed app can come back into it: the session file)
 	_decline_waiting()
+	_pairs_begin()
+	if voice_mates() > 0:
+		_vk_sync()                   # (the teammates get this phone's GROUP key now: TEAM lines open at once)
 	session_started.emit(is_host)
 	if is_host:
 		for id: String in (_multi.left as Dictionary).keys():
@@ -4495,6 +4945,7 @@ func _multi_abort() -> void:
 
 
 func _multi_reset() -> void:
+	_pairs_end()
 	session_multi = false
 	session_roster = []
 	session_host_id = ""
@@ -4520,7 +4971,7 @@ func _on_multi(d: Dictionary) -> void:
 	if is_host or f == session_host_id:
 		_last_heard = now            # (a member waits on the host; the host on anyone)
 		_present(now)
-	var kind := String(d.get("k", ""))
+	var kind := _talk_kind(d, String(d.get("k", "")))
 	if not kind in LOAD_KINDS:
 		_multi.live[f] = now         # (an AWAY member's "ka" while its resumed arena loads keeps it AWAY)
 		if in_session:
@@ -4554,26 +5005,27 @@ func _on_multi(d: Dictionary) -> void:
 			if (is_host or f == session_host_id) and typeof(to) == TYPE_STRING and String(to) == my_id and (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, now - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
-		"chat":
-			var x: Variant = d.get("x")
+		"qc", "tq", "stk", "tm":
+			if in_session:
+				_on_talk(d, f)
+		"chat", "tc":
+			# ALL, or a TEAM line ("tc": only a teammate's, opened with its GROUP key).
+			var x: Variant = d.get("x") if kind == "chat" else team_line_open(d.get("s"), f)
 			if in_session and typeof(x) == TYPE_STRING and bool(Game.settings.get("chat", true)) and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
 				var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 				if line != "":
 					chat_received.emit(line)
+					chat_from.emit(line, f, kind == "tc")
 		"vp", "vk":
 			if in_session:
 				_vk_on(d, f)
 		"vo", "vg":
-			# Voice: "vo" to everyone, "vg" to the sender's team only (under its GROUP key, _vk_open).
-			var mate := voice_mate(f)
-			var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), f, mate)
-			if in_session and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and NetVoice.speaker_mode() != NetVoice.OFF \
-					and (kind == "vo" or mate) and not Game.is_blocked(f) and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
-				var frame := Marshalls.base64_to_raw(String(a))
-				if NetVoice.frame_ok(frame):
-					voice_from.emit(frame, f, mate)
+			_on_multi_voice(d, f)
 		"st":
 			_on_multi_state(d, f)
+		"dh", "dc":
+			# A member's direct-path hello / candidates: only those addressed to this phone count.
+			_pair_on(d, f)
 		"ev":
 			var ev: Variant = d.get("e", "")
 			var data: Variant = d.get("d", [])
@@ -4591,8 +5043,23 @@ func _on_multi(d: Dictionary) -> void:
 				event_from.emit(String(ev), data, f)
 
 
-## A member's state: STATE_SIZE numbers and its clock "t" (older than its newest: dropped).
-func _on_multi_state(d: Dictionary, f: String) -> void:
+## A member's voice frame (the room's or its pair's): "vo" to everyone, "vg" to the sender's team only
+## (under its GROUP key, _vk_open); with the SPEAKER on, never from a blocked player, at most
+## NetVoice.MAX_FRAMES_S a second from one member, each a frame NetVoice can play.
+func _on_multi_voice(d: Dictionary, f: String) -> void:
+	var kind := String(d.get("k", ""))
+	var mate := voice_mate(f)
+	var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), f, mate)
+	if in_session and kind in ["vo", "vg"] and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and NetVoice.speaker_mode() != NetVoice.OFF \
+			and (kind == "vo" or mate) and not Game.is_blocked(f) and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
+		var frame := Marshalls.base64_to_raw(String(a))
+		if NetVoice.frame_ok(frame):
+			voice_from.emit(frame, f, mate)
+
+
+## A member's state: STATE_SIZE numbers and its clock "t" (older than its newest: dropped, so the
+## copy the other path brings too counts once). `direct`: it came over that member's pair.
+func _on_multi_state(d: Dictionary, f: String, via_pair := false) -> void:
 	var s: Variant = d.get("s", [])
 	if not in_session or not s is Array or (s as Array).size() != RemoteFighter.STATE_SIZE:
 		return
@@ -4608,7 +5075,13 @@ func _on_multi_state(d: Dictionary, f: String) -> void:
 			return
 		_multi.state_t[f] = sent
 	last_state_sent_ms = sent
-	relay_states_in += 1
+	var c: Array = state_counts.get(f, [0, 0])
+	c[1 if via_pair else 0] = int(c[1 if via_pair else 0]) + 1
+	state_counts[f] = c
+	if via_pair:
+		pair_states_in += 1
+	else:
+		relay_states_in += 1
 	state_from.emit(out, f)
 
 

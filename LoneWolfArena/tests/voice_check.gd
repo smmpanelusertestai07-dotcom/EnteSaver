@@ -11,6 +11,8 @@ extends Node
 ##     the room's group carries the voice (its own voice topic): ALL reaches the guest; GROUP does
 ##     not (an enemy); once the guest takes a place on the host's side, GROUP reaches it. With PUSH
 ##     TO TALK the host sends nothing until the lobby's TALK (beside the pill) is held, then sends.
+##     With LW_DIRECT=local (the direct path on loopback) the voice goes over the direct path while it
+##     is up (no frame through the relay) and through the relay again once it is cut.
 ##  c. the room's DUO match (the guest back on the other side, the host's START: an all-human match
 ##     over the match room): ALL reaches the guest, GROUP ("vg") does not reach the enemy.
 ## Prints "VOICE CHECK DONE bad=N".
@@ -55,7 +57,7 @@ func run(autotest: Node) -> int:
 	at.log_line("1 vs 1 up, channel %s" % NetVoice.channel())
 	if host:
 		hub.set_mic_mode(NetVoice.ALL)
-		await at.wait(8.0)
+		await _direct_voice(8.0)
 		at.log_line("host sent %d frames with MIC ALL" % hub.frames_sent)
 		if hub.frames_sent < 20:
 			_fail("the host's open mic sent only %d frames in 8 s (the tone speaks 1 s of every 1.6)" % hub.frames_sent)
@@ -218,3 +220,29 @@ func _done(error: String) -> int:
 		_fail(error)
 	at.log_line("VOICE CHECK DONE bad=%d" % bad)
 	return bad
+
+
+## The host's open mic in the 1 vs 1 for `seconds`: with the direct path (LW_DIRECT=local) up, no
+## frame goes through the relay and they go direct; the path cut, through the relay again.
+func _direct_voice(seconds: float) -> void:
+	if NetDirect.mode() != "local":
+		await at.wait(seconds)
+		return
+	var t0 := Time.get_ticks_msec()
+	if not await _until(func() -> bool: return cloud.direct_up() and cloud._direct_voice, seconds * 0.5):
+		_fail("the direct path (taking voice) never came up in the 1 vs 1")
+		await at.wait(maxf(seconds - float(Time.get_ticks_msec() - t0) / 1000.0, 0.0))
+		return
+	var r0 := cloud.relay_voice_out
+	var d0 := cloud.direct.voices_out
+	await at.wait(2.0)
+	at.log_line("host: voice over the direct path %d frames, through the relay %d" % [cloud.direct.voices_out - d0, cloud.relay_voice_out - r0])
+	if cloud.relay_voice_out != r0 or cloud.direct.voices_out - d0 < 5:
+		_fail("with the direct path up the voice still went through the relay (%d) or not direct (%d)" % [cloud.relay_voice_out - r0,
+			cloud.direct.voices_out - d0])
+	cloud.direct.blocked = true
+	r0 = cloud.relay_voice_out
+	await at.wait(maxf(seconds - float(Time.get_ticks_msec() - t0) / 1000.0, 1.5))
+	at.log_line("host: direct path cut, voice through the relay %d frames" % (cloud.relay_voice_out - r0))
+	if cloud.relay_voice_out - r0 < 3:
+		_fail("with the direct path cut the voice did not go through the relay")

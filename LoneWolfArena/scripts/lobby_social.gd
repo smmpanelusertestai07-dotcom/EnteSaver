@@ -26,6 +26,11 @@ var _pad_shown: Label
 var _pad_state: Label
 var _pad_digits := ""
 var _pad_asked := false
+var _scroll: ScrollContainer
+var _sig := ""                           # what the rows show now (_signature): a change refills them
+var _refill_due := false
+var rebuilds := 0                        # times the open panel's rows were made again (tests)
+const ONLINE_MAX := 5                    # PLAYERS ONLINE rows under the friends
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -65,6 +70,18 @@ func build(root: Control) -> void:
 		Audio.play("ui_click", -4.0)
 		open())
 	root.add_child(arrow)
+	var cloud := Game.cloud_service()
+	# The lobby's sounds for what comes in: an invite or a challenge (ui_invite, a short buzz), a
+	# message while no chat is open (ui_msg); a GROUP CODE ask goes to its notice (_on_code_asked).
+	var links := [[cloud.code_asked, _on_code_asked], [cloud.invited, _on_invite_sound], [cloud.group_invited, _on_invite_sound],
+		[cloud.friend_chat_changed, _on_message_sound], [cloud.group_chat_changed, _on_message_sound]]
+	for l: Array in links:
+		if not (l[0] as Signal).is_connected(l[1]):
+			(l[0] as Signal).connect(l[1])
+	arrow.tree_exiting.connect(func() -> void:
+		for l: Array in links:
+			if (l[0] as Signal).is_connected(l[1]):
+				(l[0] as Signal).disconnect(l[1]))
 
 
 ## Every frame: the arrow shows with the lobby's own controls (not in a room, not while teams are
@@ -171,8 +188,16 @@ func open(tab := "") -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 6)
 	sc.add_child(_list)
+	_scroll = sc
+	_sig = _signature()
 	_fill()
 	UI.drag_scroll(sc, _list)
+	# The rows follow the players: who is online, the friends, player cards (pictures), the group.
+	var cloud := Game.cloud_service()
+	for sig: Signal in [cloud.peers_changed, cloud.directory_changed, cloud.friends_changed, cloud.group_changed]:
+		if not sig.is_connected(_on_changed):
+			sig.connect(_on_changed)
+	modal.tree_exiting.connect(_unlisten.bind(modal))
 	frame.offset_left = 40.0
 	frame.offset_right = 40.0
 	var tw := modal.create_tween().set_parallel()
@@ -180,8 +205,82 @@ func open(tab := "") -> void:
 		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 
 
+## When the panel's modal goes. A reopen (tab, REFRESH, status, search, ADD FRIEND) builds the new
+## panel before the old modal is freed: that old modal's exit must not cut the new panel's signals.
+func _unlisten(modal: Node) -> void:
+	if _list != null and is_instance_valid(_list) and is_instance_valid(modal) and not modal.is_ancestor_of(_list):
+		return
+	var cloud := Game.cloud_service()
+	for sig: Signal in [cloud.peers_changed, cloud.directory_changed, cloud.friends_changed, cloud.group_changed]:
+		if sig.is_connected(_on_changed):
+			sig.disconnect(_on_changed)
+	_list = null
+	_scroll = null
+
+
+func _on_changed() -> void:
+	if not _refill_due:
+		_refill_due = true
+		refresh.call_deferred()
+
+
+## The open panel's rows again, where the list was scrolled to; nothing is rebuilt while what they
+## show (_signature) is the same.
+func refresh() -> void:
+	_refill_due = false
+	if _list == null or not is_instance_valid(_list) or not _list.is_inside_tree():
+		return
+	var sig := _signature()
+	if sig == _sig:
+		return
+	_sig = sig
+	var keep := _scroll.scroll_vertical if _scroll and is_instance_valid(_scroll) else 0
+	for c in _list.get_children():
+		_list.remove_child(c)
+		c.queue_free()
+	_fill()
+	rebuilds += 1
+	if _scroll and is_instance_valid(_scroll):
+		(func() -> void:
+			if _scroll and is_instance_valid(_scroll):
+				_scroll.scroll_vertical = keep).call_deferred()
+
+
+## What the rows show: the players listed, each with online / in a match / in the group, picture,
+## level and friend-request state, plus whether this player may invite.
+func _signature() -> String:
+	var cloud := Game.cloud_service()
+	var out := [_tab, _query, LobbyTeam.is_leader(), LobbyTeam.members().size()]
+	var mates := LobbyTeam.members().map(func(m: Dictionary) -> String: return String(m.id))
+	var ids: Array = Game.profile.friends.keys() if _tab == "friends" else Game.profile.get("recent", []).map(
+		func(r: Variant) -> String: return String((r as Dictionary).get("id", "")) if r is Dictionary else "")
+	if _tab == "friends":
+		ids = ids + online_players(cloud)
+	for id: String in ids:
+		var card: Dictionary = cloud.directory.get(id, {})
+		var on := cloud.peers.has(id)
+		out.append([id, Game.is_blocked(id), Game.is_friend(id), on, on and cloud.peer_in_match(id), mates.has(id), String(card.get("avatar", "")),
+			int(card.get("level", 0)), cloud.friend_asked(id),
+			String((cloud.peers.get(id, {}) as Dictionary).get("name", "")) if not Game.is_friend(id) else String(Game.profile.friends[id].name)])
+	return JSON.stringify(out)
+
+
+## PLAYERS ONLINE: up to ONLINE_MAX players online now who are not friends, not blocked and not this
+## player (by name).
+func online_players(cloud: Cloud) -> Array:
+	var out: Array = []
+	for id: String in cloud.peers:
+		if id == cloud.my_id or id == "" or Game.is_friend(id) or Game.is_blocked(id):
+			continue
+		out.append(id)
+	out.sort_custom(func(a: String, b: String) -> bool:
+		return String((cloud.peers[a] as Dictionary).get("name", "")) < String((cloud.peers[b] as Dictionary).get("name", "")))
+	return out.slice(0, ONLINE_MAX)
+
+
 ## The rows: FRIENDS (online first, never blocked ones) or RECENT (the players last met, newest
-## first), filtered by the search.
+## first), filtered by the search; under the friends PLAYERS ONLINE (online_players, each with ADD
+## FRIEND; a tap opens the player's card), hidden when there is none.
 func _fill() -> void:
 	var cloud := Game.cloud_service()
 	var ids: Array = []
@@ -219,6 +318,25 @@ func _fill() -> void:
 			add.name = "SocialAddFriends"
 			add.pressed.connect(func() -> void: lobby.friends.open("online"))
 			_list.add_child(add)
+	if _tab != "friends" or _query != "":
+		return
+	var others := online_players(cloud)
+	if others.is_empty():
+		return
+	var head := UI.label("PLAYERS ONLINE", 15, UI.TEXT_DIM, "bold")
+	head.name = "SocialOnlineHead"
+	_list.add_child(head)
+	for id: String in others:
+		var who := String((cloud.peers[id] as Dictionary).get("name", "PLAYER"))
+		var row := _row(cloud, id, who if who != "" else "PLAYER")
+		row.name = "SocialOnline_" + Cloud.friend_code(id)
+		# (a tap on the row opens the player's card)
+		row.mouse_filter = Control.MOUSE_FILTER_STOP
+		row.gui_input.connect(func(e: InputEvent) -> void:
+			if (e is InputEventMouseButton and (e as InputEventMouseButton).pressed and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT) \
+					or (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed):
+				lobby.profile_ui.open_player(id))
+		_list.add_child(row)
 
 
 ## One player: picture, name, where they are, and the invite "+".
@@ -268,8 +386,41 @@ func _row(cloud: Cloud, id: String, who: String) -> Control:
 
 # ---------------------------------------------------------------- GROUP CODE keypad
 
-## GROUP CODE: a keypad (CodePad) for a friend's Cloud.CODE_LEN-digit group code: keys
-## CodeKey_<0-9>, CodeKeyBack (yellow), CodeKeyPaste, CodeKeyGo (yellow tick: Cloud.join_group_code);
+## What the keypad's line says for Cloud.code_state: a leader with JOIN BY CODE off is asked first
+## (ASKED THE LEADER..., then the join, or THE LEADER SAID NO), else LobbyTeam.code_state_text.
+static func pad_text(state: String) -> String:
+	match state:
+		"waiting":
+			return "ASKED THE LEADER..."
+		"said_no":
+			return "THE LEADER SAID NO"
+	return LobbyTeam.code_state_text(state)
+
+
+func _on_invite_sound(_who: String) -> void:
+	LobbyNet.alert(true)
+
+
+func _on_message_sound(_id := "") -> void:
+	var m := lobby.dialogs.modal if lobby and is_instance_valid(lobby) else null
+	if m != null and is_instance_valid(m) and m.find_child("ChatWindow", true, false) != null:
+		return                           # (the chat is open: it shows the message itself)
+	LobbyNet.alert(false)
+
+
+## The leader: a player typed this group's code while JOIN BY CODE is off (Cloud.code_asked): a
+## notice "<NAME> WANTS TO JOIN" with ACCEPT and DECLINE for Cloud.CODE_ASK_WAIT_MS (no answer: no).
+func _on_code_asked(id: String, who: String) -> void:
+	if lobby == null or not is_instance_valid(lobby) or not lobby.is_inside_tree():
+		return
+	var cloud := Game.cloud_service()
+	LobbyNet.ask_toast(lobby, "%s WANTS TO JOIN" % who, Cloud.CODE_ASK_WAIT_MS / 1000.0,
+		func() -> void: cloud.answer_code_ask(id, true), func() -> void: cloud.answer_code_ask(id, false))
+
+
+## GROUP CODE: a keypad (CodePad) for a friend's Cloud.CODE_LEN-digit group code: light grey keys
+## CodeKey_<0-9>, CodeKeyBack (yellow), CodeKeyGo (the yellow tick, the 12th key:
+## Cloud.join_group_code) and CodeKeyPaste above them;
 ## the line under it follows Cloud.code_state and the pad closes once the join it started let this
 ## player in (a player already in a group reads EXIT YOUR GROUP FIRST there and the pad stays open).
 func open_pad() -> void:
@@ -283,28 +434,36 @@ func open_pad() -> void:
 	_pad_shown.custom_minimum_size = Vector2(440, 56)
 	_pad_shown.add_theme_stylebox_override("normal", UI.box(Color(0, 0, 0, 0.5), 0, 0, Color.TRANSPARENT, 8.0))
 	v.add_child(_pad_shown)
+	var paste := UI.button("PASTE", 15, "dark", Vector2(140, 44))
+	paste.name = "CodeKeyPaste"
+	paste.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	paste.pressed.connect(_pad_key.bind("PASTE"))
+	v.add_child(paste)
+	# Light grey digit keys, the yellow back key and the yellow tick (JOIN) as the 12th key.
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	v.add_child(grid)
-	for k: String in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "PASTE", "0", "<"]:
-		var b := UI.button(k, 22 if k.length() == 1 else 15, "primary" if k == "<" else "dark", Vector2(140, 56))
-		b.name = "CodeKeyBack" if k == "<" else ("CodeKeyPaste" if k == "PASTE" else "CodeKey_" + k)
-		b.pressed.connect(_pad_key.bind(k))
+	for k: String in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "GO"]:
+		var b := UI.button("" if k == "GO" else k, 24, "primary" if k in ["<", "GO"] else "light", Vector2(140, 60))
+		b.name = "CodeKeyBack" if k == "<" else ("CodeKeyGo" if k == "GO" else "CodeKey_" + k)
+		if k == "GO":
+			var tick := UI.icon("v_tick", 34.0, UI.INK)
+			tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			tick.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+			b.add_child(tick)
+			b.pressed.connect(func() -> void:
+				var why := Game.cloud_service().join_group_code(_pad_digits)
+				_pad_asked = why == ""
+				_pad_state.text = why if why != "" else pad_text(Game.cloud_service().code_state))
+		else:
+			b.pressed.connect(_pad_key.bind(k))
 		grid.add_child(b)
-	var go := UI.button("JOIN", 22, "primary", Vector2(436, 56))
-	go.name = "CodeKeyGo"
-	go.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	go.pressed.connect(func() -> void:
-		var why := Game.cloud_service().join_group_code(_pad_digits)
-		_pad_asked = why == ""
-		_pad_state.text = why if why != "" else LobbyTeam.code_state_text(Game.cloud_service().code_state))
-	v.add_child(go)
 	# (in a group already the code cannot be used: said at once, and the pad stays open)
 	_pad_state = UI.label("EXIT YOUR GROUP FIRST: a code joins another group." if LobbyTeam.in_group()
-		else "Enter a friend's %d-digit GROUP CODE (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN, 16, UI.TEXT_DIM, "semi")
+		else "Enter a friend's %d-digit GROUP CODE (with their JOIN BY CODE off, they are asked)." % Cloud.CODE_LEN, 16, UI.TEXT_DIM, "semi")
 	_pad_state.name = "CodePadState"
 	_pad_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_pad_state.custom_minimum_size = Vector2(440, 0)
@@ -344,6 +503,6 @@ func _follow_pad() -> void:
 		_pad_state = null
 		lobby.dialogs.close_modal()
 		return
-	var st := LobbyTeam.code_state_text(Game.cloud_service().code_state)
+	var st := pad_text(Game.cloud_service().code_state)
 	if _pad_asked and st != "" and _pad_state.text != st:
 		_pad_state.text = st

@@ -408,3 +408,5 @@ class LevelMeter extends Control:
 		draw_line(Vector2(gate, 0), Vector2(gate, size.y), Color(1, 1, 1, 0.6), 1.5)
 		if note != "" and not hub.test_loop:
 			HudDraw.text(self, note, Vector2(0, size.y + 12.0), 12, UI.BAD, 0, 2)
+		elif hub.test_loop and hub.no_input:
+			HudDraw.text(self, NetVoice.NO_INPUT_NOTE, Vector2(0, size.y + 12.0), 12, UI.BAD, 0, 2)

@@ -37,6 +37,7 @@ static func run(runner: Node) -> void:
 	me._room_rules()
 	me._room_cloud()
 	me._group_code()
+	me._code_asks()
 	me._duel()
 	me._quick_behind_popup()
 	me._code_leftovers()
@@ -284,6 +285,62 @@ func _peer(c: Cloud, bits := 1024) -> Cloud:
 
 
 ## JOIN BY CODE between Clouds: the asks and answers rebuilt here as they would go out.
+## GROUP CODE with the leader's JOIN BY CODE off (round 8): the joiner's ask reaches the leader
+## (code_asked) and waits ("gwait": ASKED THE LEADER...); ACCEPT runs the normal join, DECLINE and
+## the 20 s timeout answer no (THE LEADER SAID NO); a blocked asker is dropped silently; one waiting
+## ask per joiner, at most 3 new ones a minute.
+func _code_asks() -> void:
+	var lead := _peer(Cloud.new())
+	lead.my_code = "5512345678"
+	var shown := []
+	lead.code_asked.connect(func(id: String, who: String) -> void: shown.append([id, who]))
+	var a := _peer(Cloud.new())
+	a.join_group_code("5512345678")
+	var w := lead._on_code_ask(a._code_ask_msg())
+	_check(String(w.get("t", "")) == "gwait" and shown.size() == 1 and lead.group.is_empty(), "a code ask with JOIN BY CODE off asks the leader")
+	lead._on_code_ask(a._code_ask_msg())
+	_check(shown.size() == 1 and lead.code_asks.size() == 1, "the joiner's repeated asks are one waiting ask")
+	a._on_code_answer(lead.my_id, w)
+	_check(a.code_state == "waiting" and LobbySocial.pad_text("waiting") == "ASKED THE LEADER...", "the joiner reads ASKED THE LEADER...")
+	var forged := w.duplicate()
+	forged.rt = "00".repeat(32)
+	var b := _peer(Cloud.new())
+	b.join_group_code("5512345678")
+	b._on_code_answer(lead.my_id, forged)
+	_check(b.code_state == "asking", "a forged \"gwait\" is not taken")
+	var gin := lead.answer_code_ask(a.my_id, true)
+	_check(String(gin.get("t", "")) == "gin" and (lead._grp.invited as Dictionary).has(a.my_id) and lead.code_asks.is_empty(), "ACCEPT runs the normal join")
+	a._on_code_answer(lead.my_id, gin)
+	_check(a.code_state == "in", "the joiner is let in after ACCEPT (%s)" % a.code_state)
+	lead._on_code_ask(b._code_ask_msg())
+	var no := lead.answer_code_ask(b.my_id, false)
+	b._on_code_answer(lead.my_id, no)
+	_check(no.get("no") == true and b.code_state == "said_no" and LobbySocial.pad_text("said_no") == "THE LEADER SAID NO", "DECLINE: THE LEADER SAID NO")
+	var c := _peer(Cloud.new())
+	c.join_group_code("5512345678")
+	lead._on_code_ask(c._code_ask_msg())
+	lead.code_asks[c.my_id].t = Time.get_ticks_msec() - Cloud.CODE_ASK_WAIT_MS - 10
+	lead._tick_code(0.0, Time.get_ticks_msec())
+	_check(not lead.code_asks.has(c.my_id), "an ask not answered in 20 s is answered no")
+	var bad := _peer(Cloud.new())
+	bad.join_group_code("5512345678")
+	var blocked_was: Array = Game.profile.blocked
+	Game.profile.blocked = [{"id": bad.my_id, "name": "BAD", "t": 0}]
+	var n := shown.size()
+	_check(lead._on_code_ask(bad._code_ask_msg()).is_empty() and shown.size() == n, "a blocked player's ask is dropped silently")
+	Game.profile.blocked = blocked_was
+	lead._code_ask_times = []
+	var many := []
+	for i in Cloud.CODE_ASKS_MIN + 1:
+		var p := _peer(Cloud.new())
+		p.join_group_code("5512345678")
+		many.append(p)
+		lead._on_code_ask(p._code_ask_msg())
+	_check(lead.code_asks.size() == Cloud.CODE_ASKS_MIN, "at most %d asks a minute reach the leader (%d)" % [Cloud.CODE_ASKS_MIN, lead.code_asks.size()])
+	for x: Cloud in [lead, a, b, c, bad] + many:
+		x.free()
+
+
 func _group_code() -> void:
 	var host := _peer(Cloud.new())
 	var guest := _peer(Cloud.new())
@@ -300,7 +357,11 @@ func _group_code() -> void:
 	var said_ok := guest.join_group_code("42 1357 9086")
 	_check(said_ok == "" and guest.code_state == "asking" and String(guest._cjoin.get("code", "")) == "4213579086",
 		"JOIN BY CODE takes the code as shown (spaces) and asks (%s)" % said_ok)
-	_check(not host.code_join and host._on_code_ask(guest._code_ask_msg()).is_empty(), "JOIN BY CODE is OFF until the player turns it on")
+	# (round 8: with JOIN BY CODE off the leader is asked instead: "gwait", never the group's keys)
+	var asked := host._on_code_ask(guest._code_ask_msg())
+	_check(not host.code_join and String(asked.get("t", "")) == "gwait" and host.group.is_empty() and host.code_asks.has(guest.my_id),
+		"JOIN BY CODE OFF: nobody is let in, the leader is asked (%s)" % str(asked.get("t")))
+	host.code_asks.clear()
 	host.set_code_join(true)
 	var reply := host._on_code_ask(guest._code_ask_msg())
 	_check(String(reply.get("t", "")) == "gin" and not host.group.is_empty() and (host._grp.invited as Dictionary).has(guest.my_id),
@@ -417,7 +478,8 @@ func _group_code() -> void:
 	host.set_code_join(false)
 	var shut := _peer(Cloud.new())
 	shut.join_group_code("4213579086")
-	_check(host._on_code_ask(shut._code_ask_msg()).is_empty(), "JOIN BY CODE: OFF lets nobody in")
+	_check(String(host._on_code_ask(shut._code_ask_msg()).get("t", "")) == "gwait", "JOIN BY CODE: OFF lets nobody in (the leader is asked)")
+	host.code_asks.clear()
 	host.code_join = true
 	# Too many tries in a minute wait.
 	var eager := _peer(Cloud.new())

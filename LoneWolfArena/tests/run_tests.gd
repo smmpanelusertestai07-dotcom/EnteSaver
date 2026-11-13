@@ -16,6 +16,7 @@ const TeamRulesUnit := preload("res://tests/team_rules_unit.gd")   # DUO / SQUAD
 const TeamNetUnit := preload("res://tests/team_net_unit.gd")       # DUO / SQUAD: WP-N fills it
 const GroupLobbyUnit := preload("res://tests/group_lobby_unit.gd") # GROUPS: the lobby (UI)
 const HudFeedbackUnit := preload("res://tests/hud_feedback_unit.gd") # round 8: the match feedback
+const VoiceUnit := preload("res://tests/voice_unit.gd")             # round 8: the microphone's permission, input, resampling
 
 var _fails := 0
 var _passes := 0
@@ -110,6 +111,7 @@ func _ready() -> void:
 	GroupLobbyUnit.run(self)      # GROUPS in the lobby: bar, START gating, podium, texts (tests/group_lobby_unit.gd)
 	preload("res://tests/menus_unit.gd").run(self)   # out of the match, round 8 (tests/menus_unit.gd)
 	HudFeedbackUnit.run(self)     # round 8: death card, damage numbers, minimap, feed, wall, migration (tests/hud_feedback_unit.gd)
+	VoiceUnit.run(self)           # the microphone through its OS seam (tests/voice_unit.gd)
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 

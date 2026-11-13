@@ -37,6 +37,8 @@ static func run(runner: Node) -> void:
 	me._privacy()
 	me._arena_net()
 	me._away_host()
+	me._pairs_unit()
+	me._talk_unit()
 	Game.profile = saved_profile
 	Game.settings = saved_settings
 	Game.autotest = saved_at
@@ -538,3 +540,148 @@ func _human_duo(holder: Node3D, me: String) -> TeamArenaNet:
 	a.fighters = list.duplicate()
 	a.referee.setup(teams)
 	return a
+
+
+## An all-human match's direct paths (Cloud._pairs, NetDirect with a pair label): the label and the
+## direction are the same seen from both ends, each pair has keys of its own (and none is the 1 vs
+## 1's), a "dh" / "dc" for another member is ignored, and the HUD's tag counts the pairs that are up.
+func _pairs_unit() -> void:
+	_check(NetDirect.pair_label_for("b7", "a3") == "a3|b7" and NetDirect.pair_label_for("a3", "b7") == "a3|b7",
+		"a pair's label is the same from both ends (the lower id first)")
+	_check(NetDirect.dir_low_for("a3", "b7") and not NetDirect.dir_low_for("b7", "a3"),
+		"in a pair the lower id sends direction 0 and the other direction 1")
+	var mac := PackedByteArray()
+	mac.resize(32)
+	mac.fill(7)
+	var ab_low := NetDirect.new(true, mac, true, "a|b")
+	var ab_high := NetDirect.new(false, mac, true, "a|b")
+	var ac_high := NetDirect.new(false, mac, true, "a|c")
+	var duel_guest := NetDirect.new(false, mac, true)
+	var duel_host := NetDirect.new(true, mac, true)
+	var pkt := ab_low.seal('{"k":"st","s":[],"t":1}'.to_utf8_buffer())
+	_check(not ab_high.open_packet(pkt).is_empty(), "a pair's packet opens at the other end of that pair")
+	_check(ac_high.open_packet(pkt).is_empty() and duel_guest.open_packet(pkt).is_empty(),
+		"a pair's packet never opens in another pair or on a 1 vs 1's path")
+	_check(ab_low.key_id() != ac_high.key_id() and ab_low.key_id() != duel_host.key_id() and ab_low.key_id() == ab_high.key_id(),
+		"pair keys differ per pair and from the 1 vs 1's, and match at both ends")
+	var duel_pkt := duel_host.seal('{"k":"st"}'.to_utf8_buffer())
+	_check(not duel_guest.open_packet(duel_pkt).is_empty(), "the 1 vs 1's path keeps its own keys (no label)")
+	var cl := RecordingCloud.new()
+	cl.my_id = "a"
+	cl.in_session = true
+	cl.session_multi = true
+	cl._multi = {"ids": {"a": 0, "b": 1, "c": 2, "d": 3}, "left": {}}
+	cl._pairs = {"b": ab_low}
+	cl._pair_meta = {"b": {"peer": false, "sent": false, "hn": 0, "ht": 0.0}}
+	cl._pair_on({"k": "dc", "to": "c", "c": [["127.0.0.1", 40000]]}, "b")
+	_check(not bool(cl._pair_meta.b.peer) and ab_low.peer_candidates.is_empty(), "a \"dc\" addressed to another member is ignored")
+	cl._pair_on({"k": "dc", "to": "a", "c": [["127.0.0.1", 40000]]}, "c")
+	_check(ab_low.peer_candidates.is_empty(), "a \"dc\" from a member without a pair here is ignored")
+	cl._pair_on({"k": "dc", "to": "a", "c": [["127.0.0.1", 40000]]}, "b")
+	_check(bool(cl._pair_meta.b.peer) and ab_low.peer_candidates == [["127.0.0.1", 40000]], "a \"dc\" addressed to this phone sets that pair's candidates")
+	_check(cl.link_tag() == "RELAY", "no pair up: RELAY (%s)" % cl.link_tag())
+	_check(Cloud.link_tag_for(0, 3) == "RELAY" and Cloud.link_tag_for(2, 3) == "DIRECT 2/3" and Cloud.link_tag_for(3, 3) == "DIRECT"
+		and Cloud.link_tag_for(1, 1) == "DIRECT" and Cloud.link_tag_for(0, 0) == "RELAY", "the link tag: RELAY, DIRECT n/m, DIRECT")
+	cl._multi.left = {"c": true, "d": true}
+	_check(cl._live_members() == ["b"], "the live members leave out this phone and those who LEFT")
+	cl._pairs = {}
+	cl._pair_meta = {}
+	cl.in_session = false
+	cl.session_multi = false
+	cl.free()
+
+
+## TEAM lines ("tc"), quick ids ("qc" / "tq"), stickers ("stk") and map markers ("tm") as an
+## all-human match's phone "a" (team 0 with "b"; "c" the other team) takes them.
+func _talk_unit() -> void:
+	Game.settings.chat = true
+	var cl := RecordingCloud.new()
+	cl.my_id = "a"
+	cl.in_session = true
+	cl.session_multi = true
+	cl._room = "r1"
+	cl.session_roster = [{"id": "a", "team": 0, "slot": 0, "name": "A"}, {"id": "b", "team": 0, "slot": 1, "name": "B"},
+		{"id": "c", "team": 1, "slot": 2, "name": "C"}]
+	cl._multi = {"ids": {"a": 0, "b": 1, "c": 2}, "seq": {}, "heard": {}, "live": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	var n := [0]
+	var room := func(d: Dictionary, f: String) -> void:
+		n[0] += 1
+		d["f"] = f
+		d["n"] = n[0]
+		cl._on_multi(d)
+	var raw := Crypto.new().generate_random_bytes(64)
+	var mate := Cloud.new()
+	mate.my_id = "b"
+	mate._vk = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64)}
+	var enemy := Cloud.new()
+	enemy.my_id = "c"
+	enemy._vk = mate._vk.duplicate()
+	var other_key := Cloud.new()
+	other_key.my_id = "b"
+	var raw2 := Crypto.new().generate_random_bytes(64)
+	other_key._vk = {"aes": raw2.slice(0, 32), "mac": raw2.slice(32, 64)}
+	cl._vkeys = {"b": {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": "m:r1"},
+		"c": {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": "m:r1"}}
+	var seal := func(c: Cloud, text: String) -> String: return Marshalls.raw_to_base64(c._vk_seal(text.to_utf8_buffer()))
+	var got := []
+	cl.chat_from.connect(func(x: String, f: String, team: bool) -> void: got.append([x, f, team]))
+	room.call({"k": "tc", "s": seal.call(mate, "PUSH LEFT")}, "b")
+	_check(got.size() == 1 and got[0] == ["PUSH LEFT", "b", true], "a teammate's TEAM line is shown as TEAM (%s)" % str(got))
+	cl._buckets.clear()
+	room.call({"k": "tc", "s": seal.call(enemy, "I SEE YOU")}, "c")
+	_check(got.size() == 1, "a TEAM line from the other team is dropped")
+	cl._buckets.clear()
+	room.call({"k": "tc", "s": seal.call(other_key, "FORGED")}, "b")
+	_check(got.size() == 1, "a TEAM line under a key the teammate did not give is dropped")
+	cl._buckets.clear()
+	cl._on_talk({"k": "tq", "s": seal.call(mate, str(NetChat.TEAM_BASE + 1))}, "b")
+	cl._buckets.clear()
+	cl._on_talk({"k": "qc", "i": 0}, "c")
+	cl._buckets.clear()
+	cl._on_talk({"k": "qc", "i": 57}, "c")
+	_check(got.size() == 3 and got[1] == [NetChat.TEAM_QUICK[1], "b", true] and got[2] == [NetChat.QUICK[0], "c", false],
+		"quick phrases come as ids and show this phone's own text; an unknown id is dropped (%s)" % str(got))
+	var stk := []
+	cl.sticker_from.connect(func(i: int, f: String) -> void: stk.append([i, f]))
+	cl._buckets.clear()
+	cl._on_talk({"k": "stk", "i": NetChat.STICKERS.size()}, "c")
+	cl._buckets.clear()
+	cl._on_talk({"k": "stk", "i": -1}, "c")
+	cl._buckets.clear()
+	cl._on_talk({"k": "stk", "i": 2}, "c")
+	_check(stk == [[2, "c"]], "a sticker id out of range is dropped (%s)" % str(stk))
+	cl._on_talk({"k": "tm", "s": seal.call(enemy, "1.00,2.00,3.00")}, "c")
+	_check(not cl.markers.has("c"), "a map marker from the other team is dropped")
+	cl._on_talk({"k": "tm", "s": seal.call(mate, "1.00,2.00,nan")}, "b")
+	_check(not cl.markers.has("b"), "a marker that is not a finite point is dropped")
+	cl._buckets.clear()
+	cl._on_talk({"k": "tm", "s": seal.call(mate, "4.00,0.50,-6.25")}, "b")
+	_check(cl.live_markers().get("b") == Vector3(4.0, 0.5, -6.25), "a teammate's marker is kept")
+	cl.markers.b.t = Time.get_ticks_msec() - Cloud.MARKER_MS - 1
+	_check(not cl.live_markers().has("b"), "a marker is gone after 15 s")
+	# Phrases and stickers to ALL go as plain "chat" lines with the id beside the text (1.9.1 shows
+	# the text, 1.10 its own copy / the icon); TEAM lines only once a teammate says it takes them.
+	cl._buckets.clear()
+	room.call({"k": "chat", "x": "WHATEVER", "i": 1}, "c")
+	_check(got.size() == 4 and got[3] == [NetChat.QUICK[1], "c", false], "a phrase as a chat line shows this phone's own text (%s)" % str(got))
+	cl._buckets.clear()
+	room.call({"k": "chat", "x": "LAUGH", "stk": 1}, "c")
+	_check(got.size() == 4 and stk.size() == 2 and stk[1] == [1, "c"], "a sticker as a chat line shows as the sticker, not as text")
+	cl._aes = Crypto.new().generate_random_bytes(32)
+	cl._mac = Crypto.new().generate_random_bytes(32)
+	var out := func() -> Dictionary: return cl._unseal(cl.sent[cl.sent.size() - 1][1], cl._aes, cl._mac)
+	_check(cl.send_quick(2) == "" and out.call().k == "chat" and out.call().x == NetChat.QUICK[2] and int(out.call().i) == 2,
+		"a quick phrase to ALL goes as a chat line every build shows (%s)" % str(out.call()))
+	cl._chat_out_ms = 0
+	_check(cl.send_sticker(3) == "" and out.call().k == "chat" and out.call().x == NetChat.STICKERS[3] and int(out.call().stk) == 3,
+		"a sticker goes as a chat line with its name (%s)" % str(out.call()))
+	cl._chat_out_ms = 0
+	_check(cl.team_line_mates() == [1, 0] and cl.send_chat("hold here", true) == "OLD TEAM" and cl.send_quick(NetChat.TEAM_BASE, true) == "OLD TEAM",
+		"with a teammate that never said it takes TEAM lines (1.9.1), nothing goes out as TEAM")
+	cl._vkeys.b.v2 = true
+	_check(cl.team_line_mates() == [1, 1] and cl.send_chat("hold here", true) == "" and out.call().k == "tc",
+		"a teammate that takes TEAM lines gets them")
+	cl.in_session = false
+	cl.session_multi = false
+	for c: Cloud in [cl, mate, enemy, other_key]:
+		c.free()

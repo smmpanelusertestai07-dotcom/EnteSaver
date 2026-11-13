@@ -132,6 +132,75 @@ func _solo(lobby: Lobby) -> void:
 	lobby.dialogs.close_modal()
 	cloud.peers.erase(ids.KITE)
 	Game.profile.friends = friends_was
+	await _social_live(lobby)
+
+
+## The open social panel follows the players (round 8): a friend coming online through the relay's
+## signals turns ONLINE with its picture and an enabled "+" without reopening the panel, nothing is
+## rebuilt while nothing changed, and players online who are not friends show under PLAYERS ONLINE
+## with ADD FRIEND (gone again when they leave).
+func _social_live(lobby: Lobby) -> void:
+	var friends_was: Dictionary = Game.profile.friends.duplicate(true)
+	var pal := String(ids["OFFLINE PAL"])
+	Game.profile.friends = {pal: {"name": "ABBY"}}
+	cloud.peers.erase(pal)
+	cloud.directory.erase(pal)
+	await _tap(lobby.find_child("SocialArrow", true, false) as Control)
+	await at.wait(0.6)
+	var modal := lobby.dialogs.modal
+	var code := Cloud.friend_code(pal)
+	var plus := modal.find_child("SocialInvite_" + code, true, false) as Button if modal else null
+	if plus == null or not plus.disabled or not _find_text(modal, "OFFLINE"):
+		_fail("the social panel does not start with the friend OFFLINE (\"+\" greyed)")
+		lobby.dialogs.close_modal()
+		Game.profile.friends = friends_was
+		return
+	var built := lobby.social.rebuilds
+	cloud.peers[pal] = {"name": "ABBY", "bundle": "default", "pk": "", "seen": Time.get_ticks_msec() + 600000}
+	cloud.directory[pal] = {"id": pal, "name": "ABBY", "avatar": "neon", "level": 7}
+	cloud.peers_changed.emit()
+	cloud.directory_changed.emit()
+	await at.wait(0.4)
+	modal = lobby.dialogs.modal
+	plus = modal.find_child("SocialInvite_" + code, true, false) as Button if modal else null
+	var row := modal.find_child("SocialRow_" + code, true, false) if modal else null
+	if plus == null or plus.disabled or not _find_text(row, "ONLINE") or row.find_child("RowAvatar", true, false) == null:
+		_fail("a friend who came online does not turn ONLINE with a picture and an enabled \"+\" in the open panel")
+	if lobby.social.rebuilds != built + 1:
+		_fail("the two signals did not refill the rows exactly once (%d)" % (lobby.social.rebuilds - built))
+	built = lobby.social.rebuilds
+	cloud.peers_changed.emit()
+	cloud.friends_changed.emit()
+	await at.wait(0.3)
+	if lobby.social.rebuilds != built:
+		_fail("the social panel rebuilt its rows with nothing changed")
+	# A reopen inside the panel (here RECENT and back to FRIENDS) keeps it following the players:
+	# the old modal going away must not cut the new panel's signals.
+	await _tap(lobby.dialogs.modal.find_child("SocialTab_recent", true, false) as Control if lobby.dialogs.modal else null)
+	await at.wait(0.3)
+	await _tap(lobby.dialogs.modal.find_child("SocialTab_friends", true, false) as Control if lobby.dialogs.modal else null)
+	await at.wait(0.3)
+	# PLAYERS ONLINE: a stranger online shows with ADD FRIEND; the panel follows it leaving.
+	var vip := String(ids.VIPER)
+	cloud.peers[vip] = {"name": "VIPER", "bundle": "default", "pk": "", "seen": Time.get_ticks_msec() + 600000}
+	cloud.peers_changed.emit()
+	await at.wait(0.4)
+	modal = lobby.dialogs.modal
+	var orow := modal.find_child("SocialOnline_" + Cloud.friend_code(vip), true, false) if modal else null
+	if modal == null or modal.find_child("SocialOnlineHead", true, false) == null or orow == null \
+			or orow.find_child("SocialAdd_" + Cloud.friend_code(vip), true, false) == null:
+		_fail("a player online who is not a friend is not under PLAYERS ONLINE with ADD FRIEND")
+	await at.shot("g01c_social_live")
+	cloud.peers.erase(vip)
+	cloud.peers_changed.emit()
+	await at.wait(0.4)
+	modal = lobby.dialogs.modal
+	if modal != null and modal.find_child("SocialOnlineHead", true, false) != null:
+		_fail("PLAYERS ONLINE stays with nobody in it")
+	lobby.dialogs.close_modal()
+	cloud.peers.erase(pal)
+	cloud.directory.erase(pal)
+	Game.profile.friends = friends_was
 
 
 ## The mode card's TEAM panel for a solo leader: the 10-digit code with COPY, the JOIN BY CODE tick
