@@ -392,12 +392,28 @@ func _voice() -> void:
 ## The open mic's gate, the MIC / SPEAKER modes, the channels' teammates, mutes, the playback per
 ## talker and the settings' migration from VOICE CHAT.
 func _voice_units(frame: PackedByteArray) -> void:
-	var st := {"open": false, "hang": 0}
+	var st := {"open": false, "hang": 0, "loud": 0}
 	var seq := []
-	for r: float in [0.001, 0.05, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.03]:
+	for r: float in [0.001, 0.05, 0.004, 0.05, 0.05, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.03, 0.03]:
 		seq.append(NetVoice.gate_next(st, r))
-	_check(seq == [false, true, true, true, true, true, true, false, false, true],
-		"the open mic opens on speech, stays open %d quiet frames (the ends of words), then closes: %s" % [NetVoice.GATE_HANG - 1, str(seq)])
+	_check(seq == [false, false, false, false, true, true, true, true, true, true, false, false, true],
+		"the open mic opens on speech (%d frames in a row: not on a click), stays open %d quiet frames (the ends of words), then closes: %s"
+		% [NetVoice.GATE_FRAMES, NetVoice.GATE_HANG - 1, str(seq)])
+	# The phone's own loudspeaker: no echo of the others sent back, no shots sent.
+	st = {"open": false, "hang": 0, "loud": 0}
+	seq = []
+	for r: float in [0.5, 0.5, 0.5]:
+		seq.append(NetVoice.gate_next(st, r, NetVoice.NEVER))
+	for r: float in [0.05, 0.05, 0.05, 0.2, 0.2]:
+		seq.append(NetVoice.gate_next(st, r, NetVoice.GATE_LOUD))
+	_check(seq == [false, false, false, false, false, false, false, true],
+		"while another player is heard here the gate stays shut; while the game is loud only a louder voice opens it: %s" % str(seq))
+	st = {"open": true, "hang": NetVoice.GATE_HANG, "loud": 0}
+	seq = []
+	for r: float in [0.2, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03]:
+		seq.append(NetVoice.gate_next(st, r, NetVoice.NEVER))
+	_check(seq == [true, true, true, true, true, true, false],
+		"talking over another player goes on, their quieter echo alone closes it: %s" % str(seq))
 	var quiet := PackedFloat32Array()
 	quiet.resize(NetVoice.FRAME_SAMPLES)
 	_check(NetVoice.rms_of(quiet) == 0.0 and NetVoice.rms_of(NetVoice.decode(frame)) > NetVoice.GATE_OPEN, "silence keeps it shut, a voice opens it")
@@ -456,6 +472,19 @@ func _voice_units(frame: PackedByteArray) -> void:
 	for i in 12:
 		v.on_voice(frame, "x".repeat(32), false)
 	_check(((v._talkers["x".repeat(32)] as Dictionary).queue as Array).size() <= NetVoice.MAX_QUEUE, "a talker far behind catches up")
+	# A talker's voice queued here: the gate's need is NEVER (its echo), then back to GATE_OPEN.
+	v._echo_until = 0
+	v._loud_until = 0
+	var calm := v.gate_need()
+	v._process(0.05)
+	v._process(0.05)
+	var echo := v.gate_need()
+	v._echo_until = 0
+	v._loud_until = Time.get_ticks_msec() + 1000
+	var loud := v.gate_need()
+	v._loud_until = 0
+	_check(calm == NetVoice.GATE_OPEN and echo == NetVoice.NEVER and loud == NetVoice.GATE_LOUD,
+		"the open mic stays shut while another player's voice plays on this phone, needs more while the game is loud: %s" % str([calm, echo, loud]))
 	# The app goes to the background: the microphone stops at once, TALK is let go; back, it starts afresh.
 	var tone_was := NetVoice.tone_source
 	NetVoice.tone_source = false

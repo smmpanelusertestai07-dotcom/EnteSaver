@@ -11,9 +11,12 @@ extends Node
 ##    never stored. No channel (alone, offline): the microphone does not run.
 ##  - MIC MODE (setting mic_mode): OFF / ALL (everyone in the match, room or group: in a 1 vs 1 the
 ##    opponent too) / GROUP (the player's own group or team; with no teammates it sends nothing).
-##    The open microphone sends only while the player speaks (`gate_next`: a 100 ms frame louder
-##    than GATE_OPEN opens it, GATE_HANG quiet frames close it, the frame before the voice goes
-##    too); PUSH TO TALK (setting push_to_talk) sends only while TALK is held (`ptt_held`) and
+##    The open microphone sends only while the player speaks (`gate_next`: GATE_FRAMES frames in a
+##    row louder than GATE_OPEN open it, GATE_HANG quiet frames close it, the frame before the voice
+##    goes too). A phone without headphones hears its own loudspeaker, so the gate does not open
+##    while another player's voice plays here (until ECHO_MS after it: half duplex, no echo sent
+##    back) and needs GATE_LOUD while the game's own sound is loud (shots, steps: OUT_LOUD_DB on the
+##    SFX or Voice bus); PUSH TO TALK (setting push_to_talk) sends only while TALK is held (`ptt_held`) and
 ##    runs the microphone only then.
 ##  - SPEAKER MODE (setting speaker_mode): OFF / ALL / GROUP (only teammates: Cloud.voice_from's
 ##    `mate`). A player muted for this session (`set_muted`) or blocked is never played.
@@ -54,6 +57,11 @@ const MODE_NAMES := ["OFF", "ALL", "GROUP"]
 ## it stays open after the voice dropped (the ends of words are not cut).
 const GATE_OPEN := 0.02
 const GATE_HANG := 6
+const GATE_FRAMES := 2                                   # loud frames in a row that open it (a click does not)
+const GATE_LOUD := 0.07                                  # what opens it while the game itself is loud (-23 dBFS)
+const ECHO_MS := 400                                     # after another player's voice played here: shut
+const OUT_LOUD_DB := -12.0                               # the SFX / Voice bus peak that counts as loud (shots; not the ambience)
+const NEVER := 2.0                                       # (above any frame's RMS: the gate stays shut)
 const SPEAKING_MS := 450
 const MAX_TALKERS := 8                                   # players heard at once (the oldest quiet one makes room)
 const QUIET_FREE_MS := 15000                             # a talker's player is freed after this long without a frame
@@ -96,8 +104,10 @@ var _acc_n := 0
 var _phase := 0.0
 var _tone_t := 0.0
 var _tone_due := 0.0
-var _gate := {"open": false, "hang": 0}
-var _prev := PackedByteArray()                # the frame before the gate opened (it goes first)
+var _gate := {"open": false, "hang": 0, "loud": 0}
+var _prev := []                               # the last frames before the gate opened (they go first)
+var _echo_until := 0                          # ms: another player's voice played here until then (+ECHO_MS)
+var _loud_until := 0                          # ms: the game's own sound was loud until then (+ECHO_MS)
 var _heard := {}                              # id -> when its last frame came (ms; ME: the last one sent)
 var _asking := false
 var _paused := false
@@ -166,16 +176,25 @@ static func sends(mode: int, ch: String, mate_n: int) -> String:
 	return "all"
 
 
-## The open microphone's gate over one frame's RMS: open from GATE_OPEN, closed after GATE_HANG
-## quieter frames. `state`: {"open", "hang"}.
-static func gate_next(state: Dictionary, rms: float) -> bool:
-	if rms >= GATE_OPEN:
+## The open microphone's gate over one frame's RMS. Shut, GATE_FRAMES frames in a row from `need`
+## open it (GATE_OPEN; GATE_LOUD while the game is loud; NEVER while another player's voice plays
+## here). Open, frames from GATE_OPEN keep it open (GATE_LOUD when `need` is higher: the player's own
+## voice, close to the phone, is louder than its loudspeaker), GATE_HANG quieter ones close it.
+## `state`: {"open", "hang", "loud"}.
+static func gate_next(state: Dictionary, rms: float, need := GATE_OPEN) -> bool:
+	if bool(state.open):
+		state.loud = 0
+		if rms >= (GATE_OPEN if need <= GATE_OPEN else GATE_LOUD):
+			state.hang = GATE_HANG
+		else:
+			state.hang = int(state.hang) - 1
+			if int(state.hang) <= 0:
+				state.open = false
+		return bool(state.open)
+	state.loud = int(state.get("loud", 0)) + 1 if rms >= need else 0
+	if int(state.loud) >= GATE_FRAMES:
 		state.open = true
 		state.hang = GATE_HANG
-	elif bool(state.open):
-		state.hang = int(state.hang) - 1
-		if int(state.hang) <= 0:
-			state.open = false
 	return bool(state.open)
 
 
@@ -433,8 +452,8 @@ func _set_capture(on: bool) -> void:
 	_acc_n = 0
 	_phase = 0.0
 	_tone_due = 0.0
-	_gate = {"open": false, "hang": 0}
-	_prev = PackedByteArray()
+	_gate = {"open": false, "hang": 0, "loud": 0}
+	_prev = []
 	if not tone_source and _mic != null:
 		if on:
 			if _capture:
@@ -461,8 +480,14 @@ func _process(delta: float) -> void:
 	for id: String in _talkers.keys():
 		var t: Dictionary = _talkers[id]
 		_feed(t, delta)
+		if id != ME and t.gen != null:
+			var left := int(t.room) - (t.gen as AudioStreamGeneratorPlayback).get_frames_available()
+			if left > 0:                 # (its voice comes out of this phone's speaker until then)
+				_echo_until = maxi(_echo_until, now + left * 1000 / RATE + ECHO_MS)
 		if id != ME and (t.queue as Array).is_empty() and now - int(t.ms) > QUIET_FREE_MS:
 			_drop_talker(id)
+	if capturing and out_loud():
+		_loud_until = now + ECHO_MS
 	if tone_source:
 		_log_t += delta
 		if _log_t >= 3.0:
@@ -494,14 +519,35 @@ func _frame(samples: PackedFloat32Array) -> void:
 		frame_ready.emit(enc)
 		return
 	var was := sending
-	sending = ptt_held if push_to_talk() else gate_next(_gate, level)
+	sending = ptt_held if push_to_talk() else gate_next(_gate, level, gate_need())
 	if sending:
-		if not was and not _prev.is_empty() and not push_to_talk():
-			_send(_prev)                 # the start of the first word
+		if not was and not push_to_talk():
+			for f: PackedByteArray in _prev:
+				_send(f)                 # the start of the first word
 		_send(enc)
 		frame_ready.emit(enc)
 		_heard[ME] = Time.get_ticks_msec()
-	_prev = enc
+	_prev.append(enc)
+	while _prev.size() > GATE_FRAMES:
+		_prev.pop_front()
+
+
+## What opens the gate now: NEVER while another player's voice plays here (or just did: its echo),
+## GATE_LOUD while the game's own sound is loud, else GATE_OPEN.
+func gate_need() -> float:
+	var now := Time.get_ticks_msec()
+	if now < _echo_until:
+		return NEVER
+	return GATE_LOUD if now < _loud_until else GATE_OPEN
+
+
+## Whether this phone's own sound (the game's SFX, the players' Voice) peaks loud now.
+static func out_loud() -> bool:
+	for b: String in ["SFX", OUT_BUS]:
+		var i := AudioServer.get_bus_index(b)
+		if i >= 0 and maxf(AudioServer.get_bus_peak_volume_left_db(i, 0), AudioServer.get_bus_peak_volume_right_db(i, 0)) > OUT_LOUD_DB:
+			return true
+	return false
 
 
 func _send(frame: PackedByteArray) -> void:
