@@ -502,9 +502,9 @@ func _layout() -> void:
 	var bottom := 16.0 + UI.TOUCH_MIN + 12.0
 	var x := left
 	if _pane.visible:
-		var w := clampf((vs.x - left - 40.0) * 0.4, 340.0, 520.0)
+		var w := clampf((vs.x - left - 40.0) * 0.38, 330.0, 520.0)
 		_pane.position = Vector2(left, top)
-		_pane.size = Vector2(w, vs.y - top - bottom)
+		_pane.size = Vector2(w, minf(vs.y - top - bottom, w * 0.8 + 90.0))
 		var pic_h := _pic_h()
 		_desc.position = Vector2(12, pic_h + 8.0)
 		_desc.size = Vector2(w - 24.0, _pane.size.y - pic_h - 12.0)
@@ -517,7 +517,7 @@ func _layout() -> void:
 
 
 func _pic_h() -> float:
-	return maxf(_pane.size.y - 86.0, 120.0)
+	return maxf(_pane.size.y - 90.0, 120.0)
 
 
 # ---------------------------------------------------------------- rows and pictures
@@ -542,6 +542,7 @@ func _row_style(selected: bool) -> StyleBoxFlat:
 func _dark_segments(c: Control) -> void:
 	if not (c is HBoxContainer):
 		return
+	var seg := false
 	for b in c.get_children():
 		if b is Button and (b as Button).toggle_mode and (b as Button).button_group != null:
 			var st := (b as Button).get_theme_stylebox("normal")
@@ -550,6 +551,9 @@ func _dark_segments(c: Control) -> void:
 				dark.bg_color = SEG_OFF
 				dark.border_color = Color(1, 1, 1, 0.35)
 				(b as Button).add_theme_stylebox_override("normal", dark)
+				seg = true
+	if seg:
+		(c as HBoxContainer).alignment = BoxContainer.ALIGNMENT_END      # at the row's right end
 
 
 ## An indented sub-row (the reference's: a grey bar on its left).
@@ -570,7 +574,7 @@ func _indent(c: Control) -> HBoxContainer:
 ## `info` returns what the picture shows for the row's current value: {pic, spot, callout, value,
 ## text}. Tapping the row or using its control selects it.
 func _prow(id: String, title: String, control: Control, info: Callable) -> PanelContainer:
-	var row := UI.plate_row(title, control, "", 230.0)
+	var row := UI.plate_row(title, control, "", 170.0)
 	row.name = "Row_" + id
 	row.add_theme_stylebox_override("panel", _row_style(false))
 	_dark_segments(control)
@@ -664,6 +668,8 @@ func _draw_preview() -> void:
 
 
 func _callout(font: Font, text: String, at: Vector2) -> void:
+	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	_pane.draw_rect(Rect2(at.x - 6.0, at.y - 19.0, tw + 12.0, 26.0), Color(0, 0, 0, 0.55))
 	_pane.draw_string(font, at + Vector2(1.5, 1.5), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0, 0, 0, 0.85))
 	_pane.draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, UI.ACCENT)
 
@@ -1006,6 +1012,7 @@ func _sens_row(title: String, key: String, note: String) -> void:
 		_apply(key, sens_value(key, int(v)))
 		_refresh_preset())
 	st.name = "Sens_" + key
+	(st.get_meta("slider") as Control).custom_minimum_size.x = 150.0
 	_sens_rows[key] = st
 	var spot := "swipe"
 	var pic := "hud.png"
@@ -1060,14 +1067,14 @@ func _refresh_preset() -> void:
 func _build_controls() -> void:
 	_body.add_child(UI.section("SHOOTING"))
 	var precision := clampi(int(Game.settings.aim_precision), 0, PRECISION_NAMES.size() - 1)
-	var aim_seg := UI.segmented(PRECISION_NAMES, precision, _set_precision, 15, 132.0)
+	var aim_seg := UI.segmented(PRECISION_NAMES, precision, _set_precision, 14, 124.0)
 	aim_seg.name = "AimPrecision"
 	_prow("aim", "Aim precision", aim_seg, func() -> Dictionary:
 		var v := clampi(int(Game.settings.aim_precision), 0, PRECISION_NAMES.size() - 1)
 		return {"pic": "hud.png", "spot": "fire_r", "callout": "Fire when the crosshair turns red",
 			"value": PRECISION_NAMES[v], "text": PRECISION_NOTES[v]})
 	var lf_at := maxi(LEFT_FIRE_VALUES.find(int(Game.settings.left_fire)), 0)
-	var left_fire := UI.segmented(LEFT_FIRE_NAMES, lf_at, func(v: int) -> void: _apply("left_fire", int(LEFT_FIRE_VALUES[v])), 15, 118.0)
+	var left_fire := UI.segmented(LEFT_FIRE_NAMES, lf_at, func(v: int) -> void: _apply("left_fire", int(LEFT_FIRE_VALUES[v])), 14, 108.0)
 	left_fire.name = "LeftFire"
 	_prow("left_fire", "Left fire button", left_fire, func() -> Dictionary:
 		var at := maxi(LEFT_FIRE_VALUES.find(int(Game.settings.left_fire)), 0)
