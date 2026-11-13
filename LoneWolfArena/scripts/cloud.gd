@@ -3904,8 +3904,10 @@ func _search_begin(size: int) -> void:
 # {sec, rt} with the group's id and keys RSA-wrapped for the joiner's key (as a room's "rin") and rt
 # = HMAC(code key, "gin" + sec + leader), or "gno" {full: true, rt} when the group is full. The
 # joiner then says "gjoin" in the group room as an invitee does; the leader's roster is the truth.
-# Rules: nobody listens until the leader (or solo) turns JOIN BY CODE on (code_join, OFF at the
-# start of every run; COPY of the code turns it on, since copying means sharing); an ask is answered
+# Rules: nobody is let in until the leader (or solo) turns JOIN BY CODE on (code_join, OFF at the
+# start of every run; COPY of the code turns it on, since copying means sharing); with it off the
+# leader still listens on its bucket and a valid ask becomes a question to the leader (code_asks,
+# "gwait" to the joiner; ACCEPT runs the normal "gin", DECLINE or 20 s says "gno" {"no"}); an ask is answered
 # only from a player DUEL CHALLENGES FROM lets in (NetMatch.allowed: never a blocked one, none with
 # NOBODY, only friends with FRIENDS), never from one the leader REMOVEd this run (_code_kicked), and
 # not while this phone is in QUICK MATCH (seeking); a joiner never takes a "gin" from a leader it
