@@ -58,7 +58,7 @@ const DEFS := {
 		"attach": ["STOCK"],
 	},
 	"pistol": {
-		"name": "HAWK .50", "class": "PISTOL", "icon": "weapon_pistol", "model": "weapon_pistol", "sound": "pistol_shot",
+		"name": "BRUTE .50", "class": "PISTOL", "icon": "weapon_pistol", "model": "weapon_pistol", "sound": "pistol_shot",
 		"damage": 90.0, "min_damage": 45.0, "falloff_start": 15.0, "range": 50.0,
 		"head_mult": 4.0, "head_far_mult": 1.0, "limb_mult": 0.75, "pen": 0.0,
 		"interval": 0.45, "auto": false, "mag": 7, "reserve": 35,

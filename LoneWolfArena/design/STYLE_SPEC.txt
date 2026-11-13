@@ -109,7 +109,7 @@ reference:
 | ADS / firing speed | x0.70 / firing x0.80-0.85 for ARs and shotguns (SMGs x0.93-0.95, pistols x0.90-0.92, DMR x0.75, snipers x0.60) |
 | Jump | apex ~1.3 m (can climb 1.2 m crates), gravity 22 m/s2 |
 | Fall damage | none up to 4 m, then 12 HP per extra metre |
-| Head multiplier | pistols 4.0 (HAWK .50) / 3.4 (M1917), snipers 3.0-3.2, ARs and the DMR 2.5-2.6, SMGs 2.2, shotgun pellets 2.0-2.2, fists 1.5 (decays to 80 % at range for SMGs and shotguns); legs x0.75-0.8 (values: weapons.gd) |
+| Head multiplier | pistols 4.0 (BRUTE .50) / 3.4 (M1917), snipers 3.0-3.2, ARs and the DMR 2.5-2.6, SMGs 2.2, shotgun pellets 2.0-2.2, fists 1.5 (decays to 80 % at range for SMGs and shotguns); legs x0.75-0.8 (values: weapons.gd) |
 | Armour | helmet Lv2 35 %, vest Lv2 35 % (Weapons.HELMET_REDUCTION / VEST_REDUCTION) |
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |

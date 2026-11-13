@@ -2,10 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
+uid="uid://de448x0r4ucen"
+path="res://.godot/imported/v_splat.png-adb5eff54f6975cccdeea2ef873dfbcc.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/ui/icons/v_splat.png"
+dest_files=["res://.godot/imported/v_splat.png-adb5eff54f6975cccdeea2ef873dfbcc.ctex"]
 
 [params]
 

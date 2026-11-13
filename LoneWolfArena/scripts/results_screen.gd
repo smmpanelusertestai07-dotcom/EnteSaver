@@ -232,8 +232,9 @@ func _build() -> void:
 	add_child(head)
 	head.add_child(UI.shadowed(UI.label(String(r.get("mode", Game.mode_name(String(r.get("mode_id", ""))))).to_upper(), 36, UI.TEXT, "heavy")))
 	head.add_child(UI.shadowed(UI.label(String(r.get("map", "CARGO CAGE")).to_upper(), 28, Color(0.72, 0.72, 0.74), "heavy")))
-	var sub := UI.label("VS %s  ·  %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper(),
-		String(r.get("weapon", "")).to_upper()], 16, UI.TEXT_DIM, "bold")
+	# (mode, map and the opponent only: a match of several picks has no one gun to name)
+	var sub := UI.label("VS %s  ·  %s" % [String(r.get("enemy", "BOT")).to_upper(), String(r.get("difficulty", "")).to_upper()],
+		16, UI.TEXT_DIM, "bold")
 	head.add_child(UI.spacer(8))
 	head.add_child(sub)
 	# ---- page 1: the character, the medal and the big title with its line, the player's plate.
