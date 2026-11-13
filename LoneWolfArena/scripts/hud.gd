@@ -980,7 +980,8 @@ func _draw() -> void:
 			_draw_weapon_panel(vs)
 			_draw_controls(vs)
 		_draw_button("settings", vs)
-	_draw_hp_block(vs, u)
+	if player.alive or match_over:
+		_draw_hp_block(vs, u)          # (out of the round: no HP 0/200, the reference hides it)
 	_draw_kill_feed(vs, u)
 	_draw_score_bar(vs, u)
 	if team != null:

@@ -551,9 +551,10 @@ func _draw_tags(u: float) -> void:
 	for r: Rect2 in HudLayout.weapon_slots(hud.layout.weapons, vs):
 		wp = wp.merge(r)
 	var fixed: Array[Rect2] = [mr, wp, hud.score_rect(), panel_rect()]
+	var watched := spectated()
 	for f: Fighter in members(my_team()):
-		if f == p or status(f) != "up":
-			continue
+		if f == p or f == watched or status(f) != "up":
+			continue                     # (not over the teammate the camera follows: SPECTATING names them)
 		var at: Variant = tag_point(cam, f.global_position + Vector3.UP * TAG_UP, vs)
 		if at == null:
 			continue
