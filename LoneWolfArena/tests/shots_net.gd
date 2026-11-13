@@ -131,7 +131,63 @@ func run(at: Node) -> int:
 	await at.shot("n07_match_mic_mode")
 	net.voice_popup.queue_free()
 	await at.wait(0.2)
+	# (round 8) An all-human DUO as this phone sees it (a Cloud outside the tree stands in: nothing is
+	# sent): the chat's TEAM / ALL tabs, numbered feed lines, a sticker, the quick-chat bubble and
+	# its tabs, the team's map markers on screen.
 	cloud.direct = null
+	net.queue_free()
+	var fake := Cloud.new()
+	fake.my_id = "tour-me"
+	fake.in_session = true
+	fake.session_multi = true
+	fake._room = "tour"
+	fake.session_roster = [{"id": "tour-me", "team": 0, "slot": 0, "name": "YOU"}, {"id": "tour-m2", "team": 0, "slot": 1, "name": "KESTREL"},
+		{"id": "tour-e1", "team": 1, "slot": 2, "name": "NIGHTFOX21"}, {"id": "tour-e2", "team": 1, "slot": 3, "name": "VIPER"}]
+	fake._multi = {"ids": {"tour-me": 0, "tour-m2": 1, "tour-e1": 2, "tour-e2": 3}, "left": {}}
+	Game.session = fake
+	Game.settings.mic_mode = NetVoice.OFF
+	await at.wait(0.2)
+	var tn := HudNet.attach(hud)
+	await at.wait(0.3)
+	_check(tn.team_tabs() and tn.channel == "team", "a DUO with a human teammate: the chat starts on TEAM")
+	_check(tn.button_centers().has("quickchat") and tn.button_centers().has("marker"), "the quick-chat bubble and MARKER show in a DUO")
+	tn._on_chat_from("PUSH LEFT, I COVER", "tour-m2", true)
+	tn._on_chat_from("GG EASY", "tour-e1", false)
+	tn._on_sticker(1, "tour-m2")
+	_check(tn.feed.size() == 3 and int(tn.feed[0].num) == 2 and bool(tn.feed[1].all) and int(tn.feed[2].stk) == 1,
+		"feed lines: the teammate's number, the enemy's ALL tag, a sticker")
+	var me_f: Fighter = arena.get("player")
+	var fwd := -me_f.global_transform.basis.z
+	var t_now := Time.get_ticks_msec()
+	fake.markers = {"tour-m2": {"p": me_f.global_position + fwd * 14.0 + Vector3(2.0, 0.0, 0.0), "t": t_now},
+		"tour-me": {"p": me_f.global_position - fwd * 20.0, "t": t_now}}
+	_check(fake.live_markers().size() == 2, "both team markers are live")
+	await at.wait(0.4)
+	await at.shot("n08_team_feed_markers")
+	tn.open_panel()
+	await at.wait(0.4)
+	_check(tn.panel != null and tn.panel.find_child("Tab_team", true, false) != null and tn.panel.find_child("Tab_all", true, false) != null,
+		"the chat panel has TEAM and ALL")
+	await at.shot("n09_team_chat_panel")
+	tn.set_channel("all")
+	await at.wait(0.2)
+	tn.close_panel()
+	tn.open_bubble()
+	await at.wait(0.4)
+	_check(tn.bubble != null and tn.bubble.find_child("BubbleQuick_%d" % NetChat.TEAM_BASE, true, false) != null, "the bubble's QUICK tab has the team set")
+	await at.shot("n10_bubble_quick")
+	tn.bubble_tab = "stickers"
+	tn._fill_bubble()
+	await at.wait(0.3)
+	_check(tn.bubble.find_child("Sticker_5", true, false) != null, "the bubble's STICKERS tab has the six stickers")
+	await at.shot("n11_bubble_stickers")
+	tn.close_bubble()
+	tn.queue_free()
+	await at.wait(0.2)
+	Game.session = null
+	fake.in_session = false
+	fake.session_multi = false
+	fake.free()
 	Game.session = null
 	Game.profile = saved_profile
 	Game.settings = saved_settings

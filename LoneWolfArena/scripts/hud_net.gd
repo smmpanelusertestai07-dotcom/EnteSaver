@@ -25,7 +25,7 @@ const R := 26.0                  # button radius (touch radius x 1.15: 60 px)
 const GAP := 12.0
 const FEED_S := 9.0
 const FEED_LINES := 3
-const IDS := ["speaker", "mic", "talk", "chat", "mute"]
+const IDS := ["speaker", "mic", "talk", "chat", "mute", "quickchat", "marker"]
 const SPEAK_ROW := 22.0          # the speaking list's line height
 const PING_AT := Vector2(0.278, 0.031)   # the ping's centre, fractions of the screen (the reference's place)
 
@@ -45,6 +45,14 @@ var _panel_note: Label
 ## the own team reads it) or "all"; a 1 vs 1 has only "all".
 var channel := "all"
 var _tabs: Dictionary = {}       # "team" / "all" -> the panel's tab Button
+## The quick-chat bubble's panel (HudLayout "quickchat": a round bubble right of the crosshair that
+## turns into a round X while open): tabs QUICK (NetChat.QUICK, and in a DUO / SQUAD the team set
+## NetChat.TEAM_QUICK) and STICKERS (NetChat.STICKERS), plus the TEAM / ALL switch with teammates.
+## Phrases and stickers go as ids (Cloud.send_quick, send_sticker). MARKER (HudLayout "marker",
+## DUO / SQUAD with teammates): a map marker where the crosshair points (Cloud.send_marker), shown
+## to the team as a diamond in the player's colour with its distance, kept on screen at the edges.
+var bubble: PanelContainer
+var bubble_tab := "quick"
 ## An online (or LOCAL) match: chat, voice and the other phone's round trip; false: the ping only.
 var net := true
 
@@ -65,6 +73,7 @@ func _ready() -> void:
 	if cloud == null or not net:
 		return
 	cloud.chat_from.connect(_on_chat_from)
+	cloud.sticker_from.connect(_on_sticker)
 	channel = "team" if team_tabs() else "all"
 	voice = NetVoice.hub()
 	voice.mic_refused.connect(_on_mic_refused)
@@ -75,6 +84,8 @@ func _exit_tree() -> void:
 	if cloud and net:
 		if cloud.chat_from.is_connected(_on_chat_from):
 			cloud.chat_from.disconnect(_on_chat_from)
+		if cloud.sticker_from.is_connected(_on_sticker):
+			cloud.sticker_from.disconnect(_on_sticker)
 	if voice and is_instance_valid(voice):
 		voice.ptt_held = false
 		if voice.mic_refused.is_connected(_on_mic_refused):
@@ -93,6 +104,10 @@ func shown(id: String) -> bool:
 			return voice != null
 		"talk":
 			return voice != null and NetVoice.push_to_talk() and NetVoice.mic_mode() != NetVoice.OFF
+		"quickchat":
+			return bool(Game.settings.chat) and hud != null and hud.layout.has("quickchat")
+		"marker":
+			return team_tabs() and hud != null and hud.layout.has("marker")
 	return false
 
 
@@ -131,15 +146,25 @@ func button_centers() -> Dictionary:
 		if shown(id):
 			out[id] = Vector2(x0, y0 + i * pitch.y)
 			i += 1
+	for id: String in ["quickchat", "marker"]:
+		if shown(id):
+			out[id] = HudLayout.center(lay[id], vs)
 	return out
 
 
 func button_at(pos: Vector2) -> String:
 	var c := button_centers()
 	for id: String in c:
-		if pos.distance_to(c[id]) <= R * 1.15:
+		if pos.distance_to(c[id]) <= _radius(id) * 1.15:
 			return id
 	return ""
+
+
+## A button's radius: the layout's for the bubble and the marker, else R.
+func _radius(id: String) -> float:
+	if id in ["quickchat", "marker"] and hud != null and hud.layout.has(id):
+		return maxf(HudLayout.touch_radius(hud.layout[id], size if size.x > 0.0 else Vector2(1560, 720)), R * 0.9)
+	return R
 
 
 # ---------------------------------------------------------------- input
@@ -159,6 +184,10 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			elif panel != null and not panel.get_global_rect().has_point(t.position):
 				close_panel()            # a tap beside the open panel closes it
+				_touch[t.index] = ""
+				get_viewport().set_input_as_handled()
+			elif bubble != null and not bubble.get_global_rect().has_point(t.position):
+				close_bubble()
 				_touch[t.index] = ""
 				get_viewport().set_input_as_handled()
 		elif _touch.has(t.index):        # (a release counts even after the HUD was hidden)
@@ -190,6 +219,13 @@ func press(id: String) -> void:
 				_say("SPEAKER OFF" if NetVoice.speaker_mode() == NetVoice.OFF else "SPEAKER ON")
 		"mic":
 			open_voice_popup()
+		"quickchat":
+			if bubble:
+				close_bubble()
+			else:
+				open_bubble()
+		"marker":
+			place_marker()
 
 
 ## PUSH TO TALK's TALK: the microphone runs only while it is held (Android asks for it if it was
@@ -391,6 +427,250 @@ func close_panel() -> void:
 		hud.set_process_input(true)
 
 
+# ---------------------------------------------------------------- quick-chat bubble and marker
+
+## A sticker from a player (Cloud.sticker_from): a feed line with its name and the sticker's icon.
+func _on_sticker(id: int, from_id: String) -> void:
+	if feed_muted or NetVoice.is_muted(from_id) or Game.is_blocked(from_id) or not NetChat.sticker_ok(id):
+		return
+	_on_chat_from(String(NetChat.STICKERS[id]), from_id, false)
+	if not feed.is_empty():
+		feed[feed.size() - 1]["stk"] = id
+
+
+## The bubble's panel (x 0.405-0.61, y 0.32-0.81 of the screen): a tab column (QUICK, STICKERS and,
+## with teammates, TEAM / ALL) and the tab's big rows.
+func open_bubble() -> void:
+	if bubble or not bool(Game.settings.chat):
+		return
+	if panel:
+		close_panel()
+	hud.release_all()
+	hud.set_process_input(false)
+	var vs := size if size.x > 0.0 else Vector2(1560, 720)
+	bubble = PanelContainer.new()
+	bubble.name = "QuickBubble"
+	bubble.add_theme_stylebox_override("panel", UI.box(Color(0.05, 0.05, 0.06, 0.92), 10, 1, Color(1, 1, 1, 0.16), 8.0))
+	bubble.position = Vector2(vs.x * 0.405, vs.y * 0.32)
+	bubble.custom_minimum_size = Vector2(vs.x * 0.205, vs.y * 0.49)
+	bubble.size = bubble.custom_minimum_size
+	add_child(bubble)
+	_fill_bubble()
+
+
+func _fill_bubble() -> void:
+	for c in bubble.get_children():
+		bubble.remove_child(c)
+		c.queue_free()
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	bubble.add_child(h)
+	var tabs := VBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 6)
+	h.add_child(tabs)
+	var list := [["quick", "QUICK"], ["stickers", "STICK"]]
+	for t: Array in list:
+		var key := String(t[0])
+		var b := UI.button(String(t[1]), 12, "primary" if bubble_tab == key else "dark", Vector2(64, 52))
+		b.name = "BubbleTab_" + key
+		b.pressed.connect(func() -> void:
+			bubble_tab = key
+			_fill_bubble())
+		tabs.add_child(b)
+	if team_tabs():
+		var sw := UI.button("TEAM" if channel == "team" else "ALL", 12, "light", Vector2(64, 52))
+		sw.name = "BubbleChannel"
+		sw.pressed.connect(func() -> void:
+			set_channel("all" if channel == "team" else "team")
+			_fill_bubble())
+		tabs.add_child(sw)
+	var sc := ScrollContainer.new()
+	sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	UI.style_scroll(sc)
+	h.add_child(sc)
+	var rows := VBoxContainer.new()
+	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rows.add_theme_constant_override("separation", 6)
+	sc.add_child(rows)
+	if bubble_tab == "stickers":
+		var grid := GridContainer.new()
+		grid.columns = 2
+		grid.add_theme_constant_override("h_separation", 6)
+		grid.add_theme_constant_override("v_separation", 6)
+		rows.add_child(grid)
+		for i in NetChat.STICKERS.size():
+			var b := Button.new()
+			b.name = "Sticker_%d" % i
+			b.custom_minimum_size = Vector2(76, 76)
+			b.focus_mode = Control.FOCUS_NONE
+			b.add_theme_stylebox_override("normal", UI.box(Color(1, 1, 1, 0.06), 8, 0, Color.TRANSPARENT, 0.0))
+			b.add_theme_stylebox_override("pressed", UI.box(Color(UI.ACCENT, 0.3), 8, 0, Color.TRANSPARENT, 0.0))
+			b.add_theme_stylebox_override("hover", UI.box(Color(1, 1, 1, 0.1), 8, 0, Color.TRANSPARENT, 0.0))
+			var id := i
+			b.draw.connect(func() -> void: draw_sticker(b, b.size * 0.5, 28.0, id))
+			b.pressed.connect(func() -> void: send_sticker(id))
+			grid.add_child(b)
+		UI.drag_scroll(sc, rows)
+		return
+	var ids: Array = []
+	if team_tabs():
+		for i in NetChat.TEAM_QUICK.size():
+			ids.append(NetChat.TEAM_BASE + i)
+	for i in NetChat.QUICK.size():
+		ids.append(i)
+	for id: int in ids:
+		var b := UI.button(NetChat.quick_text(id), 15, "dark", Vector2(0, 48))
+		b.name = "BubbleQuick_%d" % id
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.pressed.connect(func() -> void: send_quick(id))
+		rows.add_child(b)
+	UI.drag_scroll(sc, rows)
+
+
+func close_bubble() -> void:
+	if bubble == null:
+		return
+	bubble.queue_free()
+	bubble = null
+	if hud and panel == null:
+		hud.set_process_input(true)
+
+
+## A quick phrase by id from the bubble (TEAM or ALL as the switch says): shown as YOU in the feed.
+func send_quick(id: int) -> bool:
+	var why := Game.session.send_quick(id, team_tabs() and channel == "team") if Game.session else "OFF"
+	if why == "":
+		add_line("YOU", NetChat.quick_text(id), true)
+		close_bubble()
+		return true
+	_say({"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "NO TEAM": "NO TEAMMATE TO READ IT"}.get(why, "CHAT IS OFF"))
+	return false
+
+
+func send_sticker(id: int) -> bool:
+	var why := Game.session.send_sticker(id) if Game.session else "OFF"
+	if why == "":
+		add_line("YOU", String(NetChat.STICKERS[id]), true)
+		feed[feed.size() - 1]["stk"] = id
+		close_bubble()
+		return true
+	_say("ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S) if why == "WAIT" else "CHAT IS OFF")
+	return false
+
+
+## MARKER: the first ground or wall point under the crosshair within Cloud.MARKER_MAX_M, to the team.
+func place_marker() -> void:
+	var p: Variant = aim_point()
+	if p == null:
+		_say("NOTHING TO MARK THERE")
+		return
+	var why := Game.session.send_marker(p as Vector3) if Game.session else "OFF"
+	if why == "WAIT":
+		_say("ONE MARKER EVERY %d SECONDS" % int(Cloud.MARKER_EVERY_MS / 1000))
+	elif why == "":
+		_say("MARKED")
+
+
+## The point the crosshair is on (a ray from the camera through the screen's centre to the first
+## body that is not the player, at most Cloud.MARKER_MAX_M from the player), or null.
+func aim_point() -> Variant:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null or hud == null or hud.player == null:
+		return null
+	var vs := get_viewport_rect().size
+	var from := cam.project_ray_origin(vs * 0.5)
+	var to := from + cam.project_ray_normal(vs * 0.5) * (Cloud.MARKER_MAX_M + from.distance_to(hud.player.global_position))
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.exclude = [hud.player.get_rid()]
+	var hit := hud.player.get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty() or (hit.position as Vector3).distance_to(hud.player.global_position) > Cloud.MARKER_MAX_M:
+		return null
+	return hit.position
+
+
+## The team's live markers (Cloud.live_markers): a diamond in the player's colour with the distance,
+## pinned to the screen's edge when off screen or behind.
+func _draw_markers() -> void:
+	var s: Cloud = Game.session
+	var cam := get_viewport().get_camera_3d()
+	if s == null or cam == null or hud == null or hud.player == null:
+		return
+	var vs := size
+	for id: String in s.live_markers():
+		var w: Vector3 = s.markers[id].p
+		var behind := cam.is_position_behind(w)
+		var m := HudTeam.edge_point(cam.unproject_position(w), behind, vs, 48.0)
+		var col := HudTeam.slot_color(maxi(member_number(id), 1))
+		var c: Vector2 = m.pos
+		var d := 13.0
+		var pts := PackedVector2Array([c + Vector2(0, -d), c + Vector2(d, 0), c + Vector2(0, d), c + Vector2(-d, 0)])
+		draw_colored_polygon(pts, Color(0, 0, 0, 0.45))
+		var inner := PackedVector2Array()
+		for q in pts:
+			inner.append(c + (q - c) * 0.72)
+		draw_colored_polygon(inner, col)
+		HudDraw.text(self, "%d M" % roundi(hud.player.global_position.distance_to(w)), c + Vector2(0, d + 11.0), 12, UI.TEXT, 1, 3, "bold")
+
+
+## A teammate's number in the team list's order (1..; 0 for anyone else; this phone counts too).
+func member_number(id: String) -> int:
+	var s: Cloud = Game.session
+	if s == null:
+		return 0
+	if not s.session_multi:
+		return 1 if id == s.my_id else (2 if s.voice_mate(id) else 0)
+	var mine := -1
+	for e: Dictionary in s.session_roster:
+		if String(e.get("id", "")) == s.my_id:
+			mine = int(e.get("team", -1))
+	var n := 0
+	for e: Dictionary in s.session_roster:
+		if int(e.get("team", -2)) == mine:
+			n += 1
+			if String(e.get("id", "")) == id:
+				return n
+	return 0
+
+
+## One of our own stickers (NetChat.STICKERS) drawn at `c`, radius `r`: a round face or a hand.
+static func draw_sticker(ci: CanvasItem, c: Vector2, r: float, id: int) -> void:
+	var face := Color(1.0, 0.8, 0.22)
+	var ink := Color(0.12, 0.08, 0.05)
+	match id:
+		0:      # thumbs up: a fist with the thumb raised
+			ci.draw_rect(Rect2(c + Vector2(-r * 0.55, -r * 0.05), Vector2(r * 1.0, r * 0.75)), face)
+			ci.draw_rect(Rect2(c + Vector2(-r * 0.2, -r * 0.8), Vector2(r * 0.32, r * 0.8)), face)
+			ci.draw_rect(Rect2(c + Vector2(-r * 0.85, r * 0.0), Vector2(r * 0.25, r * 0.65)), Color(0.3, 0.6, 1.0))
+		4:      # wave: an open hand
+			ci.draw_circle(c + Vector2(0, r * 0.25), r * 0.5, face)
+			for i in 4:
+				ci.draw_rect(Rect2(c + Vector2(-r * 0.48 + i * r * 0.26, -r * 0.75), Vector2(r * 0.2, r * 0.75)), face)
+			ci.draw_arc(c + Vector2(r * 0.2, -r * 0.2), r * 1.0, -1.2, -0.4, 8, Color(1, 1, 1, 0.7), 2.0)
+		5:      # GG on a round badge
+			ci.draw_circle(c, r, Color(0.3, 0.75, 0.45))
+			HudDraw.text(ci, "GG", c + Vector2(0, 1), int(r * 0.9), Color.WHITE, 1, 2, "heavy")
+		_:
+			ci.draw_circle(c, r, face)
+			var eye_y := c.y - r * 0.2
+			match id:
+				1:  # laugh: closed eyes, a wide open mouth
+					for sx in [-1.0, 1.0]:
+						ci.draw_arc(Vector2(c.x + sx * r * 0.35, eye_y + 2.0), r * 0.16, PI, TAU, 8, ink, 2.5)
+					ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-r * 0.5, r * 0.1), c + Vector2(r * 0.5, r * 0.1),
+						c + Vector2(0, r * 0.62)]), ink)
+				2:  # angry: slanted brows, a flat mouth, red cheeks
+					ci.draw_circle(c, r, Color(0.95, 0.45, 0.25))
+					ci.draw_line(Vector2(c.x - r * 0.55, eye_y - r * 0.2), Vector2(c.x - r * 0.15, eye_y), ink, 3.0)
+					ci.draw_line(Vector2(c.x + r * 0.55, eye_y - r * 0.2), Vector2(c.x + r * 0.15, eye_y), ink, 3.0)
+					ci.draw_line(c + Vector2(-r * 0.35, r * 0.4), c + Vector2(r * 0.35, r * 0.4), ink, 3.0)
+				3:  # cry: tears under the eyes, a sad mouth
+					for sx in [-1.0, 1.0]:
+						ci.draw_circle(Vector2(c.x + sx * r * 0.35, eye_y), r * 0.1, ink)
+						ci.draw_rect(Rect2(c.x + sx * r * 0.35 - r * 0.07, eye_y + r * 0.12, r * 0.14, r * 0.45), Color(0.35, 0.65, 1.0))
+					ci.draw_arc(c + Vector2(0, r * 0.62), r * 0.32, PI + 0.4, TAU - 0.4, 10, ink, 3.0)
+
+
 # ---------------------------------------------------------------- drawing
 
 func _process(delta: float) -> void:
@@ -425,6 +705,7 @@ func _draw() -> void:
 	for id: String in c:
 		_draw_button(id, c[id])
 	_draw_speaking(c)
+	_draw_markers()
 	_draw_feed()
 	if _note_t > 0.0 and c.size() > 0:
 		var first: Vector2 = c.values()[0]
@@ -486,6 +767,9 @@ func _draw_button(id: String, c: Vector2) -> void:
 			label = "TALK"
 		"speaker", "mic":
 			on = id == "mic" and (voice_popup != null or NetVoice.speaking(NetVoice.ME))
+	if id in ["quickchat", "marker"]:
+		_draw_round(id, c)
+		return
 	HudDraw.disk(self, c, R, Color(0.06, 0.06, 0.07, 0.6 if not on else 0.8))
 	HudDraw.ring(self, c, R - 0.75, Color(UI.ACCENT, 0.95) if on else Color(1, 1, 1, 0.35), 2.0 if on else 1.5)
 	var ink := UI.ACCENT if on else Color(1, 1, 1, 0.95)
@@ -507,6 +791,32 @@ func _draw_button(id: String, c: Vector2) -> void:
 		HudDraw.text(self, label, c + Vector2(0, R + 9.0), 11, Color(UI.TEXT, 0.9), 1, 3)
 	if id == "mic" and voice != null and voice.capturing and voice.no_input:
 		HudDraw.text(self, NetVoice.NO_INPUT_NOTE, c + Vector2(0, R + 10.0), 11, UI.BAD, 1, 3, "bold")
+
+
+## The quick-chat bubble (a round X while its panel is open) and the marker (a map pin's diamond).
+func _draw_round(id: String, c: Vector2) -> void:
+	var r := _radius(id)
+	var open := id == "quickchat" and bubble != null
+	HudDraw.disk(self, c, r, Color(0.06, 0.06, 0.07, 0.8 if open else 0.55))
+	HudDraw.ring(self, c, r - 0.75, Color(UI.ACCENT, 0.95) if open else Color(1, 1, 1, 0.4), 2.0)
+	var ink := Color(1, 1, 1, 0.95)
+	if open:
+		var k := r * 0.36
+		draw_line(c + Vector2(-k, -k), c + Vector2(k, k), UI.ACCENT, 3.0, true)
+		draw_line(c + Vector2(-k, k), c + Vector2(k, -k), UI.ACCENT, 3.0, true)
+	elif id == "quickchat":
+		var b := Rect2(c + Vector2(-r * 0.45, -r * 0.36), Vector2(r * 0.9, r * 0.6))
+		draw_rect(b, ink)
+		draw_colored_polygon(PackedVector2Array([Vector2(b.position.x + r * 0.15, b.end.y), Vector2(b.position.x + r * 0.42, b.end.y),
+			Vector2(b.position.x + r * 0.08, b.end.y + r * 0.24)]), ink)
+		for i in 3:
+			draw_circle(b.get_center() + Vector2((i - 1) * r * 0.24, 0), r * 0.065, Color(0.06, 0.06, 0.07), true, -1.0, true)
+	else:
+		var d := r * 0.42
+		var top := c + Vector2(0, -r * 0.12)
+		draw_colored_polygon(PackedVector2Array([top + Vector2(0, -d), top + Vector2(d * 0.8, 0), top + Vector2(0, d), top + Vector2(-d * 0.8, 0)]),
+			HudTeam.slot_color(maxi(member_number(Game.session.my_id if Game.session else ""), 1)))
+		draw_line(top + Vector2(0, d), c + Vector2(0, r * 0.62), ink, 2.0)
 
 
 ## A speech bubble (filled with three dots, or an outline).
@@ -572,9 +882,12 @@ func _draw_feed() -> void:
 		var tag := "ALL" if bool(e.get("all", false)) else ""
 		# [n] (the teammate's number box) or a small ALL tag, then NAME: and the line
 		var lead := 0.0 if num == 0 and tag == "" else (24.0 if num > 0 else HudDraw.text_width(tag, 11) + 10.0) + 6.0
+		var stk := int(e.get("stk", -1))
 		var who := String(e.who) + ": "
 		var who_w := lead + HudDraw.text_width(who, 16)
 		var lines := wrap_words(String(e.text), 16, sr.size.x - 24.0 - who_w)
+		if stk >= 0:
+			lines = PackedStringArray([""])
 		var h := 24.0 * lines.size()
 		var w := who_w
 		for l: String in lines:
@@ -591,9 +904,16 @@ func _draw_feed() -> void:
 			HudDraw.text(self, tag, Vector2(x + tw * 0.5, y + 11.0), 11, Color(0.05, 0.05, 0.06, a), 1, 0, "bold")
 		var ink: Color = UI.BLUE if bool(e.mine) else (HudTeam.slot_color(num) if num > 0 else UI.ORANGE)
 		HudDraw.text(self, who, Vector2(x + lead, y + 11.0), 16, Color(ink, a), 0, 2)
-		for i in lines.size():
-			HudDraw.text(self, lines[i], Vector2(box.position.x + 10.0 + who_w, y + 11.0 + 24.0 * i), 16,
-				Color(UI.TEXT, a), 0, 2, "semi")
+		if stk >= 0:
+			# (a sticker: its icon, 0.06 of the screen's height, after the name)
+			var ir := size.y * 0.03
+			draw_rect(Rect2(box.end.x, box.position.y, ir * 2.0 + 8.0, maxf(box.size.y, ir * 2.0 + 4.0)), Color(0, 0, 0, 0.45 * a))
+			draw_sticker(self, Vector2(box.end.x + ir + 4.0, box.position.y + maxf(box.size.y, ir * 2.0 + 4.0) * 0.5), ir, stk)
+			h = maxf(h, ir * 2.0)
+		else:
+			for i in lines.size():
+				HudDraw.text(self, lines[i], Vector2(box.position.x + 10.0 + who_w, y + 11.0 + 24.0 * i), 16,
+					Color(UI.TEXT, a), 0, 2, "semi")
 		y += h + 8.0
 
 

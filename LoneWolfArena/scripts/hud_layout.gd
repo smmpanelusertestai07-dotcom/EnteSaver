@@ -72,6 +72,9 @@ const DEFAULTS := {
 	# under the gear.
 	"speaker": {"x": 0.148, "y": 0.125, "s": 0.066, "o": 0.9, "a": "l"},
 	"mic": {"x": 0.148, "y": 0.21, "s": 0.066, "o": 0.9, "a": "l"},
+	# (round 8) the quick-chat bubble and, in DUO / SQUAD, the map marker, right of the crosshair
+	"quickchat": {"x": 0.61, "y": 0.355, "s": 0.055, "o": 0.9, "a": "c"},
+	"marker": {"x": 0.66, "y": 0.354, "s": 0.06, "o": 0.9, "a": "c"},
 }
 ## The default sizes until the defaults followed the reference's 16:9 layout: a saved layout made
 ## with them keeps its sizes (the size range a saved widget is held to covers both, size_range).
