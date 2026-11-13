@@ -26,13 +26,13 @@ const OUTFIT_COLORS := {
 ## The categories: [kind, tab caption] and each pose's name and line ("" = the game's choice).
 const KINDS := [["outfit", "OUTFIT"], ["lobby", "LOBBY POSE"], ["victory", "VICTORY POSE"]]
 const POSE_INFO := {
-	"lobby": {"": ["RANDOM", "A different gesture now and then, as before."],
-		"lobby_hip": ["HAND ON HIP", "Waits in the lobby with a hand on the hip."],
-		"lobby_shift": ["WEIGHT SHIFT", "Shifts the weight from foot to foot."],
-		"lobby_look": ["LOOK AROUND", "Looks round the yard now and then."]},
-	"victory": {"": ["THE GAME'S CHOICE", "The results screen picks the pose."],
+	"lobby": {"": ["RANDOM", "A new gesture now and then."],
+		"lobby_hip": ["HAND ON HIP", "A hand on the hip."],
+		"lobby_shift": ["WEIGHT SHIFT", "From one foot to the other."],
+		"lobby_look": ["LOOK AROUND", "A look round the yard."]},
+	"victory": {"": ["THE GAME'S CHOICE", "The results pick the pose."],
 		"victory": ["CHEER", "Both arms up after a win."],
-		"victory_pose": ["FIST UP", "A fist up, the other hand on the hip."]},
+		"victory_pose": ["FIST UP", "A fist up, a hand on the hip."]},
 }
 const POSE_SIZE := Vector2(258, 96)
 
