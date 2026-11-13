@@ -68,11 +68,15 @@ const DEFAULTS := {
 	"settings": {"x": 0.9865, "y": 0.035, "s": 0.046, "o": 0.9, "a": "r"},
 	"weapons": {"x": 0.861, "y": 0.158, "s": 0.152, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.075, "y": 0.15, "s": 0.27, "o": 0.95, "a": "l"},
+	# Voice (HudNet draws them in an online match only; not in ORDER: the HUD's own touches and the
+	# editor leave them to HudNet): the reference's speaker and mic in the column beside the minimap.
+	"speaker": {"x": 0.16, "y": 0.105, "s": 0.066, "o": 0.9, "a": "l"},
+	"mic": {"x": 0.16, "y": 0.19, "s": 0.066, "o": 0.9, "a": "l"},
 }
 const LABELS := {
 	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
 	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "freelook": "FREE LOOK",
-	"weapons": "WEAPONS", "minimap": "MAP", "reload": "RELOAD", "swap": "SWITCH",
+	"weapons": "WEAPONS", "minimap": "MAP", "reload": "RELOAD", "swap": "SWITCH", "speaker": "SPEAKER", "mic": "MIC",
 }
 
 

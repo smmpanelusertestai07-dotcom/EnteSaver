@@ -605,6 +605,7 @@ func _build_ui() -> void:
 	_build_add_button(root)
 	team.build(root)
 	_build_podium_invite(root)
+	VoiceButtons.lobby_pill(self, root)        # [mic | speaker] under the character (scripts/voice_buttons.gd)
 	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
 	# so the search stays in sight and its X in reach while the player looks around.
 	_search_layer = CanvasLayer.new()

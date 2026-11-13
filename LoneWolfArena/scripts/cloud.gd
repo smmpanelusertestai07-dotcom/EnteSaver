@@ -66,7 +66,9 @@ signal friends_changed                 # a friend request came in or was answere
 signal room_changed                    # the hosted custom room got a player / a join attempt ended
 signal directory_changed               # a player card came in (the ALL PLAYERS list)
 signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
-signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk audio (a NetVoice frame)
+signal voice_received(frame: PackedByteArray)    # the opponent's audio (a NetVoice frame; 1 vs 1 only, as before)
+## Any player's voice frame (NetVoice plays it): the sender and whether it is a teammate (voice_mate).
+signal voice_from(frame: PackedByteArray, from_id: String, mate: bool)
 signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
 signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching player's "seek" (NetMatch)
 ## GROUPS and all-human team matches (design/GROUPS.txt section 3; the lobby uses only these):
@@ -255,6 +257,7 @@ var _state_ms := 0
 var _chat_in := [2.0, 0]       # the opponent's chat lines: [tokens, ms] (NetChat.RATE_S)
 var _chat_out_ms := 0          # when this phone last sent one
 var _voice_in := [10.0, 0]     # the opponent's voice frames: [tokens, ms]
+var _gv_topic := ""            # the group's voice topic listened to now ("" none: _sync_group_voice)
 var _fchat_ms := 0             # when this phone last sent a friend a chat message
 ## The match's direct UDP path (NetDirect, DIRECT CONNECTION): null while off or outside a match.
 ## The state goes over it while it works both ways; everything else stays on the relay.
@@ -312,6 +315,7 @@ var _buckets := {}             # token buckets per sender (group and match rooms
 func _ready() -> void:
 	name = "Cloud"
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	NetVoice.hub()                   # (it plays the players' voice_from and sends the microphone's)
 	if not OS.has_feature("template") and OS.get_environment("LW_MQTT_URL") != "":
 		_brokers = [OS.get_environment("LW_MQTT_URL")]      # tests: a local broker
 	if not OS.has_feature("template") and OS.get_environment("LW_AWAY_GRACE_MS").is_valid_int():
@@ -639,6 +643,7 @@ func _process(delta: float) -> void:
 	_tick_room(delta)
 	if not _grp.is_empty():
 		_tick_group(delta, Time.get_ticks_msec())
+	_sync_group_voice()
 	_tick_code(delta, Time.get_ticks_msec())
 	if not _mm.is_empty():
 		_tick_mm(delta, Time.get_ticks_msec())
@@ -872,6 +877,7 @@ func _parse() -> void:
 					status = "online"
 					_ping_t = 0.0                                  # the first ping now: the round trip shows at once
 					_subscribe(ROOT + "/u/" + my_id)
+					_gv_topic = ""                                 # (the group's voice topic is listened to again)
 					_subscribe(ROOT + "/fr/" + my_id + "/+")      # friend requests waiting for this phone
 					_subscribe(ROOT + "/fa/" + my_id + "/+")      # answers to the ones it sent
 					_subscribe(ROOT + "/fm/" + my_id + "/+")      # friends' chat messages (NetChat)
@@ -964,6 +970,8 @@ func _on_publish(topic: String, payload: PackedByteArray) -> void:
 		_on_room(payload)
 	elif not _grp.is_empty() and topic == ROOT + "/g/" + String(_grp.gid):
 		_on_group(payload)
+	elif _gv_topic != "" and topic == _gv_topic:
+		_on_group_voice(payload)
 	elif room_code != "" and topic == ROOT + "/c/" + room_code:
 		var a: Variant = JSON.parse_string(payload.get_string_from_utf8())
 		if a is Dictionary:
@@ -2662,11 +2670,12 @@ func _on_room(msg: PackedByteArray) -> void:
 			if tokens >= 1.0 and line != "":
 				chat_received.emit(line)
 		"vo":
-			# Push-to-talk audio (NetVoice): with VOICE CHAT on here, never from a blocked player,
-			# at most NetVoice.MAX_FRAMES_S frames a second, each a frame NetVoice can play.
+			# Voice (NetVoice, "vo": to everyone; a "vg" is for teammates, and a 1 vs 1 has none):
+			# with the SPEAKER on here, never from a blocked player, at most NetVoice.MAX_FRAMES_S
+			# frames a second, each a frame NetVoice can play.
 			var a: Variant = (d as Dictionary).get("a")
 			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 \
-					or not bool(Game.settings.get("voice_chat", false)) or Game.is_blocked(String(opponent.get("id", ""))):
+					or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
 				return
 			var now := Time.get_ticks_msec()
 			var tokens := minf(NetVoice.MAX_FRAMES_S, float(_voice_in[0]) + float(now - int(_voice_in[1])) / 1000.0 * NetVoice.MAX_FRAMES_S)
@@ -2674,6 +2683,7 @@ func _on_room(msg: PackedByteArray) -> void:
 			var frame := Marshalls.base64_to_raw(String(a))
 			if tokens >= 1.0 and NetVoice.frame_ok(frame):
 				voice_received.emit(frame)
+				voice_from.emit(frame, String(opponent.get("id", "")), false)
 		"ev":
 			var ev: Variant = (d as Dictionary).get("e", "")
 			var data: Variant = (d as Dictionary).get("d", [])
@@ -2903,10 +2913,109 @@ func send_chat(text: String) -> String:
 	return ""
 
 
-## One push-to-talk frame (NetVoice), sent only while the button is held.
-func send_voice(frame: PackedByteArray) -> void:
+## One voice frame (NetVoice, only while the player speaks) to the match: everyone ("vo", what
+## every build plays), or the own team only ("vg": older builds ignore it, the other team's drop it).
+func send_voice(frame: PackedByteArray, group_only := false) -> void:
 	if in_session and NetVoice.frame_ok(frame):
-		_room_send({"k": "vo", "a": Marshalls.raw_to_base64(frame)})
+		_room_send({"k": "vg" if group_only else "vo", "a": Marshalls.raw_to_base64(frame)})
+
+
+## Whether that match or group player counts as GROUP for voice: the same team in a DUO / SQUAD
+## match or a custom room's places, anyone in a lobby group, nobody in a 1 vs 1.
+func voice_mate(id: String) -> bool:
+	if id == my_id:
+		return false
+	if in_session:
+		if not session_multi:
+			return false
+		var sides := {}
+		for e: Dictionary in session_roster:
+			sides[String(e.get("id", ""))] = int(e.get("team", -1))
+		return sides.has(id) and sides.has(my_id) and int(sides[id]) == int(sides[my_id])
+	if group.is_empty() or not _group_has(id):
+		return false
+	if not in_room():
+		return true
+	var teams := {}
+	for m: Dictionary in group.members:
+		teams[String(m.id)] = int(m.get("team", -1))
+	return int(teams.get(id, -2)) == int(teams.get(my_id, -3))
+
+
+## How many players count as GROUP for voice (voice_mate) in the match, or else the group.
+func voice_mates() -> int:
+	var n := 0
+	if in_session:
+		for e: Dictionary in session_roster:
+			if voice_mate(String(e.get("id", ""))) and not (_multi.get("left", {}) as Dictionary).has(String(e.get("id", ""))):
+				n += 1
+	elif not group.is_empty():
+		for m: Dictionary in group.members:
+			if voice_mate(String(m.id)):
+				n += 1
+	return n
+
+
+## A lobby group or custom room this phone is in, with someone else, on a live relay: voice goes there.
+func voice_group_ready() -> bool:
+	return _connected and in_group() and not bool(_grp.get("joining", false))
+
+
+## One voice frame to the group or room (its own topic, ROOT/g/<gid>/v, inside the group's
+## encryption; builds before 1.9 never subscribe to it). group_only: only the own side of a room.
+func send_group_voice(frame: PackedByteArray, group_only := false) -> bool:
+	if not voice_group_ready() or not NetVoice.frame_ok(frame):
+		return false
+	_grp.seq = int(_grp.seq) + 1
+	var d := {"k": "gv", "a": Marshalls.raw_to_base64(frame)}
+	if group_only:
+		d.g = true
+	_publish(ROOT + "/g/" + String(_grp.gid) + "/v", _seal(d, my_id, int(_grp.seq), _grp.aes, _grp.mac))
+	return true
+
+
+## The group's voice topic is listened to while this phone is in a group with the SPEAKER on (and
+## left at once when it goes OFF: the relay then sends nothing).
+func _sync_group_voice() -> void:
+	var want := ""
+	if _connected and not _grp.is_empty() and NetVoice.speaker_mode() != NetVoice.OFF and not in_session:
+		want = ROOT + "/g/" + String(_grp.gid) + "/v"
+	if not _connected:
+		_gv_topic = ""
+	if want == _gv_topic:
+		return
+	if _gv_topic != "" and _connected:
+		_unsubscribe(_gv_topic)
+	_gv_topic = want
+	if want != "":
+		_subscribe(want)
+
+
+## A group member's voice frame: a member's, not replayed, at most NetVoice.MAX_FRAMES_S a second,
+## a GROUP one only from the own side.
+func _on_group_voice(payload: PackedByteArray) -> void:
+	if _grp.is_empty():
+		return
+	var d := _unseal(payload, _grp.aes, _grp.mac)
+	if d.is_empty() or String(d.get("k", "")) != "gv":
+		return
+	var f := String(d.f)
+	if f == my_id or Game.is_blocked(f) or not _group_has(f):
+		return
+	var seen: Dictionary = _grp.get("vtheir", {})
+	if int(d.n) <= int(seen.get(f, -1)):
+		return
+	seen[f] = int(d.n)
+	_grp.vtheir = seen
+	var a: Variant = d.get("a")
+	if typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or not _bucket("gv" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
+		return
+	var mate := voice_mate(f)
+	if d.get("g") == true and not mate:
+		return
+	var frame := Marshalls.base64_to_raw(String(a))
+	if NetVoice.frame_ok(frame):
+		voice_from.emit(frame, f, mate)
 
 
 func send_event(kind: String, data: Array = []) -> void:
@@ -4185,13 +4294,15 @@ func _on_multi(d: Dictionary) -> void:
 				var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 				if line != "":
 					chat_received.emit(line)
-		"vo":
+		"vo", "vg":
+			# Voice: "vo" to everyone, "vg" to the sender's team only (dropped here unless a teammate).
 			var a: Variant = d.get("a")
-			if in_session and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and bool(Game.settings.get("voice_chat", false)) \
-					and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
+			var mate := voice_mate(f)
+			if in_session and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and NetVoice.speaker_mode() != NetVoice.OFF \
+					and (kind == "vo" or mate) and not Game.is_blocked(f) and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
 				var frame := Marshalls.base64_to_raw(String(a))
 				if NetVoice.frame_ok(frame):
-					voice_received.emit(frame)
+					voice_from.emit(frame, f, mate)
 		"st":
 			_on_multi_state(d, f)
 		"ev":

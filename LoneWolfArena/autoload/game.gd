@@ -64,7 +64,11 @@ const DEFAULT_SETTINGS := {
 	"minimap_turns": true,        # the minimap turns with the view (the player's arrow up) or stays north up (HudMinimap)
 	"vol_sfx": 90,
 	"vol_music": 45,
-	"vol_voice": 80,              # the other player's push-to-talk voice (NetVoice, bus "Voice")
+	"vol_voice": 80,              # the other players' voice (NetVoice, bus "Voice"): SOUND > VOICE CHAT > VOICE
+	# Voice (NetVoice), as the reference: the speaker plays everyone, the mic is off until picked.
+	"mic_mode": 0,                # MIC MODE: NetVoice.OFF, ALL (everyone in the match / room / group), GROUP (teammates)
+	"speaker_mode": 1,            # SPEAKER: NetVoice.OFF, ALL, GROUP
+	"push_to_talk": false,        # PUSH TO TALK: the mic sends only while TALK is held
 	"difficulty": 1,
 	"last_pick": "ar",
 	"team_size": 1,               # SOLO 1, DUO 2, SQUAD 4: the team size START plays (Game.team_size)
@@ -72,7 +76,6 @@ const DEFAULT_SETTINGS := {
 	"chat": true,                 # chat in an online match (NetChat)
 	"friend_chat": true,          # FRIENDS CHAT: true friends only, false off
 	"show_career": true,          # SHOW MY CAREER: the player card carries a career summary (Cloud card v3)
-	"voice_chat": false,          # push-to-talk in an online match (NetVoice; asks for the microphone)
 	"challenges_from": 0,         # DUEL CHALLENGES FROM: CHALLENGES_EVERYONE, _FRIENDS, _NOBODY (Cloud.challenge_allowed)
 	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
 	"direct_connect": true,       # DIRECT CONNECTION: the match state straight to the other phone (NetDirect)
@@ -103,12 +106,12 @@ const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
 	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "vol_sfx": [0, 100], "vol_music": [0, 100],
 	"difficulty": [0, 2], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
-	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY], "team_size": [1, 4],
+	"vol_voice": [0, 100], "mic_mode": [0, 2], "speaker_mode": [0, 2], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY], "team_size": [1, 4],
 }
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "dynamic_joystick", "vibrate_footsteps", "vibrate_damage",
 	"vibrate_shooting", "vibration", "visual_effects", "reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope",
-	"freelook_button", "chat", "friend_chat", "show_career", "voice_chat", "friend_requests", "direct_connect", "minimap_turns"]
+	"freelook_button", "chat", "friend_chat", "show_career", "push_to_talk", "friend_requests", "direct_connect", "minimap_turns"]
 ## What each kind of buzz (vibrate()) needs on: the reference's vibration rows (CONTROLS) and,
 ## out of a match, the lobby's (ONLINE).
 const VIBRATE_KEYS := {"footsteps": "vibrate_footsteps", "damage": "vibrate_damage", "shooting": "vibrate_shooting",
@@ -368,6 +371,14 @@ func _migrate_settings(saved: Dictionary) -> void:
 		saved.erase("freelook_button")
 		if saved.get("vibration") is bool and not bool(saved.vibration):
 			saved["vibrate_footsteps"] = false
+	if not saved.has("mic_mode") and saved.has("voice_chat"):
+		# 1.9: the reference's MIC MODE / SPEAKER / PUSH TO TALK replace VOICE CHAT (push to talk,
+		# off by default). A player who had it on keeps talking the way they did: the mic to
+		# everyone, with PUSH TO TALK. Either way the speaker plays the others (its new default).
+		if saved.get("voice_chat") == true:
+			saved["mic_mode"] = 1
+			saved["push_to_talk"] = true
+		saved.erase("voice_chat")
 	if int(version) < 7:
 		# v7: the minimap turns with the view, as the reference's does by default. Before it was
 		# always north up and never a choice, so every older file starts on the new default
