@@ -1090,3 +1090,55 @@ listed here. If a part needs something new from the core, add it in its own file
   declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
 - FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,
   DUEL DUEL_W; on MY FRIENDS CHAT CHAT_W and REMOVE REMOVE_W), empty places held by ColumnGap.
+
+==================================================================================================
+ROUND 8 - NETWORK AND TALK (lane X)
+==================================================================================================
+Direct pair links (all-human DUO / SQUAD, scripts/cloud.gd "An all-human match's pairs", net_direct.gd 7.)
+  - Cloud._pairs: member id -> NetDirect, one per other live member (PAIRS_MAX 7), opened in _multi_start and
+    when a resumed all-human match is entered from the session file, only while NetDirect.mode() != "off";
+    closed when that member LEFT or is blocked, and with the session (_multi_reset / _direct_end).
+  - NetDirect.new(dir_low, room_mac, local, pair_label): pair_label = NetDirect.pair_label_for(a, b) (lower id
+    first); keys HMAC-SHA256(room_mac, "lonewolf-direct-aes|" + label) / ("lonewolf-direct-mac|" + label);
+    the lower id sends direction 0. pair_label "" is the 1 vs 1's path, byte-identical to 1.9.1.
+  - Signalling in the match room, each addressed to ONE member ("to"; everyone else ignores it):
+    "dh" {"to"} (hello, up to 5, 2 s apart), "dc" {"to", "c": [[ip, port]...]} (candidates, only to a member
+    whose hello or candidates came: a player with DIRECT CONNECTION off never sends or gets an address).
+  - What a pair carries: "st" (states; Cloud.send_state sends through every pair that can_send and ONE relay
+    "st" unless every live member's pair is up; _on_multi_state drops the copy that is not newer), and
+    voice "vo" / "vg" (X10). States from a pair go to _on_multi_state(d, id, true) with the PAIR's id and
+    the same MULTI_RATE bucket; they also count as signs of life (heard / live).
+  - Cloud.link_tag(): "DIRECT" (all live pairs up), "DIRECT n/m", "RELAY"; link_tag_for(up, live) static.
+    match_ping(): a member its pair with the host, the host the slowest of its up pairs, else NetPing.
+  - Tests: pair_up(id), pairs(), pair_states_in, state_counts (id -> [relay, pair]), relay_voice_out.
+  - 1 vs 1: "dh" / "dc" now carry "v": 2; voice goes over the 1 vs 1's direct path only to such a phone
+    (_direct_voice), so a 1.9.1 opponent still gets voice through the relay.
+Voice over the direct paths (X10): Cloud.send_voice sends a frame over the direct path(s) when every phone it
+  is for has one up (all live members for "vo", the live teammates for "vg"; the 1 vs 1's direct_up), else
+  through the relay only, never both. Received frames pass every existing check (_on_multi_voice / _on_voice_msg).
+Team chat and quick talk (cloud.gd _on_talk, hud_net.gd):
+  - "tc" {"s"}: a TEAM line sealed under the sender's GROUP key (_vk_seal; team_line_open on the receiver,
+    only from a voice_mate). Cloud.send_chat(text, team_only := false) -> "", "WAIT", "OFF", "EMPTY", "NO TEAM".
+  - "qc" {"i"} / "tq" {"s": sealed id}: a quick phrase by id (NetChat.quick_text: QUICK 0.., TEAM_QUICK from
+    TEAM_BASE 100); "stk" {"i"}: a sticker (NetChat.STICKERS, 0..5). Ids only, each phone shows its own copy;
+    the chat's rate (NetChat.RATE_S, receiver bucket "c"+id). Cloud.send_quick(id, team_only), send_sticker(id).
+  - "tm" {"s": sealed "x,y,z"}: a teammate's map marker; Cloud.send_marker(pos) at most one per MARKER_EVERY_MS
+    (2 s), Cloud.markers id -> {"p", "t"}, live_markers() drops them after MARKER_MS (15 s).
+  - Signals: chat_from(text, from_id, team_only) (chat_received stays for old listeners), sticker_from(id,
+    from_id), marker_from(from_id, pos).
+  - HudLayout DEFAULTS (voice block, not ORDER): "quickchat" {0.61, 0.355, s 0.055, a "c"}, "marker" {0.66, 0.354,
+    s 0.06, a "c"}; HudNet draws and handles both (MARKER only with human teammates).
+GROUP CODE ask (JOIN BY CODE off): the leader listens on its code's bucket while it leads in the lobby; a valid
+  "gask" with JOIN BY CODE off becomes Cloud.code_asks[from] (one per joiner, CODE_ASKS_MIN 3 a minute, blocked
+  askers dropped silently), signal code_asked(from_id, from_name), and the joiner gets "gwait" {rt} (code_state
+  "waiting": ASKED THE LEADER...). Cloud.answer_code_ask(id, yes): yes runs the normal "gin", no (or
+  CODE_ASK_WAIT_MS 20 s) sends "gno" {"no": true} (code_state "said_no": THE LEADER SAID NO). LobbySocial.pad_text.
+Microphone (net_voice.gd): perm_state not_asked / waiting / granted / denied / denied_forever; the OS seam
+  NetVoice.os_granted / os_request / on_android (tests replace them); restart_input() after the grant and on
+  focus back; no_input (NO_INPUT_NOTE after NO_INPUT_MS of silence, one restart); take_capture(buf, rate) and
+  source_rate() (the bus mix rate the capture runs at).
+Lobby: LobbySocial refreshes its open rows on peers_changed / directory_changed / friends_changed / group_changed
+  (signature, scroll kept; rebuilds counter for tests) and lists PLAYERS ONLINE (online_players, at most 5).
+  LobbyNet.ask_toast(lobby, text, seconds, on_accept, on_decline), LobbyNet.alert(invite) (ui_invite + vibration
+  "lobby" / ui_msg); the chat's quick phrases behind ChatQuickButton (ChatQuickList). Audio.duck_music(db).
+  Sounds: assets/audio/ui_invite.wav, ui_msg.wav, match_found.wav (tools/media/make_sfx.py).
