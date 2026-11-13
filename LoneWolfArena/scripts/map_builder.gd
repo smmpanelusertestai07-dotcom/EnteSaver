@@ -60,7 +60,12 @@ var map_name := "CARGO CAGE"
 ## Minimap area: the hall interior plus both spawn alcoves (and the wall caps around them).
 var map_rect := Rect2(-HX - AL_D - 0.6, -HZ - 0.6, (HX + AL_D + 0.6) * 2.0, (HZ + 0.6) * 2.0)
 var zone_center := Vector3.ZERO
-var zone_start_radius := 27.6    # covers the hall corners (25.8 m) and the alcoves (27.2 m)
+## The safe zone's radius through stage 1 and as stage 2 begins: well outside the hall (about 1.12
+## x its 42 m long side; the corners are 25.8 m, the spawn alcoves 27.2 m from the centre), so the
+## evenly closing circle reaches the spawn ends only in roughly the last 35-45 s of stage 2. A
+## tuning from an estimate of the reference mode (fitted from its minimap, not seen to the end).
+const ZONE_START_R := 47.0
+var zone_start_radius := ZONE_START_R
 
 var kit: Kit = Kit.new()
 var _S := Transform3D.IDENTITY   # current half: identity (west / A) or 180 degrees (east / B)

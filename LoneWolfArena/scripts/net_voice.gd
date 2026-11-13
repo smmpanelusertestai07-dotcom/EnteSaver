@@ -1,0 +1,772 @@
+class_name NetVoice
+extends Node
+## Voice between players, as the reference does it: the SPEAKER plays the others (ALL by
+## default), the MIC is OFF until the player picks ALL or GROUP (asking Android for the microphone,
+## RECORD_AUDIO, at that moment). One NetVoice (`hub()`, made on first use under the tree's root,
+## it outlives scene changes) runs the microphone and every player's sound:
+##  - CHANNELS (`channel()`): in a match (Game.session in session: the 1 vs 1, online or LOCAL, and
+##    DUO / SQUAD) the match room (Cloud.send_voice: "vo" to everyone, "vg" to the own team only);
+##    out of one, the lobby GROUP or CUSTOM ROOM this phone is in (Cloud.send_group_voice, the group
+##    room's own voice topic). Every frame goes inside that room's end-to-end encryption and is
+##    never stored. No channel (alone, offline): the microphone does not run.
+##  - MIC MODE (setting mic_mode): OFF / ALL (everyone in the match, room or group: in a 1 vs 1 the
+##    opponent too) / GROUP (the player's own group or team; with no teammates it sends nothing).
+##    The open microphone sends only while the player speaks (`gate_next`: GATE_FRAMES frames in a
+##    row louder than GATE_OPEN open it, GATE_HANG quiet frames close it, the frame before the voice
+##    goes too). A phone without headphones hears its own loudspeaker, so while another player's
+##    voice plays here (until ECHO_MS after it) the gate needs GATE_ECHO: the player's own voice,
+##    close to the phone, gets through and the quieter echo of the loudspeaker does not (a talker who
+##    never stops cannot shut the others out), and it needs GATE_LOUD while the game's own sound is
+##    loud (shots, steps: OUT_LOUD_DB on the SFX or Voice bus); PUSH TO TALK (setting push_to_talk) sends only while TALK is held (`ptt_held`) and
+##    runs the microphone only then.
+##  - SPEAKER MODE (setting speaker_mode): OFF / ALL / GROUP (only teammates: Cloud.voice_from's
+##    `mate`). A player muted for this session (`set_muted`) or blocked is never played.
+##  - Each talker gets an AudioStreamGenerator of its own (so two talkers mix) on the bus OUT_BUS,
+##    whose volume is SOUND > VOICE CHAT > VOICE (setting vol_voice, Game.apply_settings), with a
+##    small jitter buffer (START_FRAMES before it starts, MAX_QUEUE at most). `speaking(id)`: a frame
+##    of that player played within SPEAKING_MS (the HUD's and the lobby's speaking marks); "" is
+##    this phone (its gate open).
+##  - MIC TEST (SOUND > VOICE CHAT, `test_loop`): the microphone's frames come back here through
+##    the codec (what the others would hear) with the level meter (`level`), nothing is sent.
+## The permission (perm_state): not asked, waiting (the system's question open), granted, denied
+## (asked again only on the player's next tap) or denied for good ("don't ask again": Android shows
+## no question any more, so the game never asks again and only says where to allow it). A refusal
+## puts MIC MODE back to OFF with one note (mic_refused: REFUSED_NOTE). The OS calls are a seam
+## (os_granted, os_request) the tests replace. Capturing with nothing but silence for NO_INPUT_MS
+## (no frames, or exact zeros: a microphone another app holds, an input that never started) logs
+## "voice: no input", shows NO MIC INPUT (MIC TEST, under the match's mic) and starts the stream
+## once more; so does the grant, and the app's focus coming back while it captures.
+## The microphone plays into the muted bus BUS through an AudioEffectCapture; the sound is cut to
+## 8 kHz mono and packed as IMA ADPCM (4 bits a sample) in FRAME_MS frames (`encode`). On Android
+## Godot starts the input only when the microphone stream starts, and it fails without the
+## permission: when the permission arrives later (or the app comes back from the background) the
+## stream is started again. `tone_source` (tests and the cloud phones, which have no microphone:
+## LW_VOICE_TONE=1 in a debug build, or SETTINGS' hidden test switch) replaces the microphone with a
+## generated tone that speaks for TONE_ON_S and pauses for TONE_OFF_S.
+
+const RATE := 8000
+const FRAME_MS := 100
+const FRAME_SAMPLES := RATE * FRAME_MS / 1000          # 800
+const HEADER := 4                                        # version, predictor (int16), step index
+const MAX_FRAME := HEADER + FRAME_SAMPLES / 2            # 404 bytes
+const MAX_B64 := 600                                     # its base64 is 540 characters
+const MAX_FRAMES_S := 14.0                               # frames a second accepted (10 are sent)
+const START_FRAMES := 2
+const MAX_QUEUE := 6
+const START_WAIT_S := 0.25
+const BUS := "VoiceIn"
+const OUT_BUS := "Voice"                                 # made by Game (_setup_audio_buses)
+const MIC_PERMISSION := "android.permission.RECORD_AUDIO"
+## The modes of the settings mic_mode and speaker_mode.
+const OFF := 0
+const ALL := 1
+const GROUP := 2
+const MODE_NAMES := ["OFF", "ALL", "GROUP"]
+## The open microphone's gate: RMS of a 100 ms frame (-1..1) that opens it, and the quiet frames
+## it stays open after the voice dropped (the ends of words are not cut).
+const GATE_OPEN := 0.02
+const GATE_HANG := 6
+const GATE_FRAMES := 2                                   # loud frames in a row that open it (a click does not)
+const GATE_LOUD := 0.07                                  # what opens it while the game itself is loud (-23 dBFS)
+const ECHO_MS := 400                                     # after another player's voice played here: GATE_ECHO
+const GATE_ECHO := 0.12                                  # what opens it while another player's voice plays here (-18 dBFS:
+                                                         # the own voice close to the phone, not the loudspeaker's echo)
+const OUT_LOUD_DB := -12.0                               # the SFX / Voice bus peak that counts as loud (shots; not the ambience)
+const NEVER := 2.0                                       # (above any frame's RMS: the gate stays shut)
+const SPEAKING_MS := 450
+const MAX_TALKERS := 8                                   # players heard at once (the oldest quiet one makes room)
+const QUIET_FREE_MS := 15000                             # a talker's player is freed after this long without a frame
+const TONE_HZ := 440.0
+const TONE_ON_S := 1.0
+const TONE_OFF_S := 1.5                                 # (longer than the gate's hang: it closes between words)
+const ME := ""                                           # this phone in `speaking` and the MIC TEST's player
+const REFUSED_NOTE := "MICROPHONE NOT ALLOWED - ALLOW IT FOR WOLF ARENA IN ANDROID SETTINGS"
+const NO_INPUT_NOTE := "NO MIC INPUT"
+const NO_INPUT_MS := 2000                                # capturing with no frames (or only zeros) this long: no input
+## The microphone permission as this phone knows it (perm_state).
+const PERM_NOT_ASKED := "not_asked"
+const PERM_WAITING := "waiting"                          # the system's question is open
+const PERM_GRANTED := "granted"
+const PERM_DENIED := "denied"                            # refused once: asked again only on the player's next tap
+const PERM_DENIED_FOREVER := "denied_forever"            # "don't ask again": no dialog comes any more, never asked again
+const QUICK_DENIAL_MS := 400                             # a refusal this fast with no dialog seen: "don't ask again"
+
+const STEPS := [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80,
+	88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724,
+	796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428,
+	4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385,
+	24623, 27086, 29794, 32767]
+const INDEX_STEP := [-1, -1, -1, -1, 2, 4, 6, 8]
+
+signal frame_ready(frame: PackedByteArray)    # every frame the microphone lets out (sent, or the MIC TEST's)
+signal changed                                # a mode, a mute or the microphone changed (the buttons redraw)
+signal mic_refused                            # Android refused the microphone: the mic is OFF again (REFUSED_NOTE)
+
+static var _hub: NetVoice = null
+## Tests and the cloud phones: a generated tone instead of the microphone (no permission needed).
+static var tone_source := not OS.has_feature("template") and OS.get_environment("LW_VOICE_TONE") == "1"
+static var _muted := {}                       # id -> true: players muted for this session
+
+var capturing := false                        # the microphone (or the test tone) runs
+var sending := false                          # frames go out now: the gate is open, or TALK is held
+var ptt_held := false                         # PUSH TO TALK: the TALK button is held
+var test_loop := false                        # MIC TEST: the own voice back here, nothing sent
+var level := 0.0                              # RMS of the last frame (0..1): the MIC TEST's meter
+var frames_sent := 0
+var frames_heard := 0                         # frames pushed into a talker's generator
+var _capture: AudioEffectCapture
+var _mic: AudioStreamPlayer
+var _out: AudioStreamPlayer                   # the MIC TEST's player (ME)
+var _talkers := {}                            # id -> {"player", "gen", "queue", "wait", "room", "ms"}
+var _pending := PackedFloat32Array()          # 8 kHz samples not framed yet
+var _acc := 0.0                               # resampling: input frames summed into the next 8 kHz sample
+var _acc_n := 0
+var _phase := 0.0
+var _tone_t := 0.0
+var _tone_due := 0.0
+var _gate := {"open": false, "hang": 0, "loud": 0}
+var _prev := []                               # the last frames before the gate opened (they go first)
+var _echo_until := 0                          # ms: another player's voice played here until then (+ECHO_MS)
+var _loud_until := 0                          # ms: the game's own sound was loud until then (+ECHO_MS)
+var _heard := {}                              # id -> when its last frame came (ms; ME: the last one sent)
+var _asking := false
+var _paused := false
+var _speaker_back := ALL                      # the match's speaker button turns this back on
+var _log_t := 0.0
+var perm_state := PERM_NOT_ASKED
+var no_input := false                         # capturing, but the microphone gives nothing (NO_INPUT_NOTE)
+var restarts := 0                             # times the microphone's stream was started again (tests, logs)
+var _ask_ms := -1                             # when the permission was last asked for
+var _focus_lost := false                      # the app lost focus since then (the system's dialog showed)
+var _denials := 0
+var _input_ms := 0                            # when the microphone last gave a frame that was not silence
+var _input_retry := false                     # the one restart after NO_INPUT_MS was made
+## The OS seam (tests replace them): whether RECORD_AUDIO is granted, and the request (true when
+## granted at once; false when a question is shown, or with "don't ask again" none).
+static var os_granted := func() -> bool: return MIC_PERMISSION in OS.get_granted_permissions()
+static var os_request := func() -> bool: return OS.request_permission(MIC_PERMISSION)
+static var on_android := OS.get_name() == "Android"
+
+
+## The one NetVoice (made on first use under the tree's root; it outlives scene changes).
+static func hub() -> NetVoice:
+	if _hub == null or not is_instance_valid(_hub):
+		_hub = NetVoice.new()
+		_hub.name = "NetVoiceHub"
+		var tree := Engine.get_main_loop() as SceneTree
+		if tree != null and tree.root != null:
+			tree.root.add_child.call_deferred(_hub)
+	return _hub
+
+
+static func mic_mode() -> int:
+	return clampi(int(Game.settings.get("mic_mode", OFF)), OFF, GROUP)
+
+
+static func speaker_mode() -> int:
+	return clampi(int(Game.settings.get("speaker_mode", ALL)), OFF, GROUP)
+
+
+static func push_to_talk() -> bool:
+	return bool(Game.settings.get("push_to_talk", false))
+
+
+## Muted for this session (V4), or blocked: never played.
+static func is_muted(id: String) -> bool:
+	return _muted.has(id) or (id != "" and Game.is_blocked(id))
+
+
+static func set_muted(id: String, on: bool) -> void:
+	if on:
+		_muted[id] = true
+	else:
+		_muted.erase(id)
+	if _hub != null and is_instance_valid(_hub):
+		_hub._drop_talker(id)
+		_hub.changed.emit()
+
+
+## Whether that player was heard within SPEAKING_MS (ME: this phone's own voice going out).
+static func speaking(id: String) -> bool:
+	if _hub == null or not is_instance_valid(_hub) or not _hub._heard.has(id):
+		return false
+	return Time.get_ticks_msec() - int(_hub._heard[id]) < SPEAKING_MS
+
+
+## Whether a frame from a player is played: the speaker mode (GROUP: teammates only), mutes.
+static func hears(mate: bool, mode: int, muted: bool) -> bool:
+	if muted or mode == OFF:
+		return false
+	return mate if mode == GROUP else true
+
+
+## What the microphone sends in a channel: "" nothing, "all" to everyone, "group" to teammates.
+static func sends(mode: int, ch: String, mate_n: int) -> String:
+	if mode == OFF or ch == "":
+		return ""
+	if mode == GROUP:
+		return "group" if mate_n > 0 else ""
+	return "all"
+
+
+## The open microphone's gate over one frame's RMS. Shut, GATE_FRAMES frames in a row from `need`
+## open it (GATE_OPEN; GATE_LOUD while the game is loud; GATE_ECHO while another player's voice
+## plays here; NEVER: shut). Open, frames from GATE_OPEN keep it open (GATE_LOUD when `need` is higher: the player's own
+## voice, close to the phone, is louder than its loudspeaker), GATE_HANG quieter ones close it.
+## `state`: {"open", "hang", "loud"}.
+static func gate_next(state: Dictionary, rms: float, need := GATE_OPEN) -> bool:
+	if bool(state.open):
+		state.loud = 0
+		if rms >= (GATE_OPEN if need <= GATE_OPEN else GATE_LOUD):
+			state.hang = GATE_HANG
+		else:
+			state.hang = int(state.hang) - 1
+			if int(state.hang) <= 0:
+				state.open = false
+		return bool(state.open)
+	state.loud = int(state.get("loud", 0)) + 1 if rms >= need else 0
+	if int(state.loud) >= GATE_FRAMES:
+		state.open = true
+		state.hang = GATE_HANG
+	return bool(state.open)
+
+
+static func rms_of(samples: PackedFloat32Array) -> float:
+	if samples.is_empty():
+		return 0.0
+	var sum := 0.0
+	for v in samples:
+		sum += v * v
+	return sqrt(sum / samples.size())
+
+
+## Where the voice goes now: "match" (Game.session in a session), "group" (the lobby group or
+## custom room this phone is in, with someone else in it), "" (nowhere: the microphone stays off).
+static func channel() -> String:
+	var s: Cloud = Game.session
+	if s != null and is_instance_valid(s) and s.in_session:
+		return "match"
+	var c: Cloud = Game.cloud
+	if c != null and is_instance_valid(c) and c.voice_group_ready():
+		return "group"
+	return ""
+
+
+## The other players of the channel who count as GROUP (teammates; in a 1 vs 1 none).
+static func mates() -> int:
+	match channel():
+		"match":
+			return Game.session.voice_mates()
+		"group":
+			return Game.cloud.voice_mates()
+	return 0
+
+
+static func mic_allowed() -> bool:
+	return tone_source or not on_android or bool(os_granted.call())
+
+
+## MIC MODE (the lobby's and the match's popup): a mode other than OFF asks Android for the
+## microphone the first time; refused, the mode goes back to OFF and mic_refused says so.
+func set_mic_mode(m: int) -> void:
+	Game.settings["mic_mode"] = clampi(m, OFF, GROUP)
+	Game.save_settings()
+	if m != OFF:
+		ask_mic()
+	changed.emit()
+
+
+func set_speaker_mode(m: int) -> void:
+	Game.settings["speaker_mode"] = clampi(m, OFF, GROUP)
+	Game.save_settings()
+	if m == OFF:
+		for id: String in _talkers.keys():
+			if id != ME:
+				_drop_talker(id)
+	else:
+		_speaker_back = m
+	changed.emit()
+
+
+## The match's speaker button: OFF, and back to what it was.
+func toggle_speaker() -> void:
+	set_speaker_mode(OFF if speaker_mode() != OFF else _speaker_back)
+
+
+func set_push_to_talk(on: bool) -> void:
+	Game.settings["push_to_talk"] = on
+	Game.save_settings()
+	ptt_held = false
+	changed.emit()
+
+
+## True when the microphone may run now; else asks for it (only on the player's tap: MIC MODE,
+## TALK, MIC TEST; never at start or in a loop) and the answer comes in _on_permission. After
+## "don't ask again" (PERM_DENIED_FOREVER) Android shows no question any more: nothing is asked,
+## the mic goes OFF and mic_refused says where to allow it.
+func ask_mic() -> bool:
+	if mic_allowed():
+		perm_state = PERM_GRANTED
+		return true
+	if perm_state == PERM_DENIED_FOREVER:
+		_refused()
+		return false
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null and not tree.on_request_permissions_result.is_connected(_on_permission):
+		tree.on_request_permissions_result.connect(_on_permission)
+	var now := Time.get_ticks_msec()
+	if _asking and now - _ask_ms < 30000:
+		return false                     # (the question is open: one at a time)
+	_asking = true
+	perm_state = PERM_WAITING
+	_ask_ms = now
+	_focus_lost = false
+	if bool(os_request.call()):
+		_asking = false
+		perm_state = PERM_GRANTED
+		return true
+	return false
+
+
+func _on_permission(perm: String, granted: bool) -> void:
+	if perm != MIC_PERMISSION:
+		return
+	_asking = false
+	if granted:
+		perm_state = PERM_GRANTED
+		if capturing:
+			restart_input()              # Godot's input failed to start without it: start it again
+	else:
+		_denials += 1
+		# A refusal at once with no question seen (the app never lost focus), or a second one:
+		# Android asks no more ("don't ask again"), so neither does the game.
+		var quick := _ask_ms >= 0 and Time.get_ticks_msec() - _ask_ms < QUICK_DENIAL_MS and not _focus_lost
+		perm_state = PERM_DENIED_FOREVER if quick or _denials >= 2 else PERM_DENIED
+		_refused()
+	changed.emit()
+
+
+## Refused: the mic OFF again (MIC MODE, MIC TEST, TALK) and one note (mic_refused: REFUSED_NOTE).
+func _refused() -> void:
+	test_loop = false
+	ptt_held = false
+	Game.settings["mic_mode"] = OFF
+	Game.save_settings()
+	mic_refused.emit()
+	changed.emit()
+
+
+## The microphone's stream started again with an empty buffer (Godot on Android starts the input
+## only when the stream starts: after the permission came, back from the background or a call).
+func restart_input() -> void:
+	restarts += 1
+	_input_ms = Time.get_ticks_msec()
+	if _capture:
+		_capture.clear_buffer()
+	if not tone_source and _mic != null and _mic.is_inside_tree():
+		_mic.stop()
+		_mic.play()
+
+
+# ---------------------------------------------------------------- codec
+
+## 8 kHz samples (-1..1) as one frame: [1, predictor lo, hi, step index] + two samples a byte.
+static func encode(samples: PackedFloat32Array) -> PackedByteArray:
+	var n := mini(samples.size(), FRAME_SAMPLES)
+	var pred := clampi(roundi(samples[0] * 32767.0), -32768, 32767) if n > 0 else 0
+	var index := 0
+	if n > 1:
+		var first_diff := absi(roundi(samples[1] * 32767.0) - pred)
+		while index < 88 and STEPS[index] < first_diff / 4:
+			index += 1
+	var out := PackedByteArray([1, pred & 0xFF, (pred >> 8) & 0xFF, index])
+	var byte := 0
+	for i in n:
+		var target := clampi(roundi(samples[i] * 32767.0), -32768, 32767)
+		var step: int = STEPS[index]
+		var diff := target - pred
+		var code := 0
+		if diff < 0:
+			code = 8
+			diff = -diff
+		var delta := step >> 3
+		if diff >= step:
+			code |= 4
+			diff -= step
+			delta += step
+		if diff >= step >> 1:
+			code |= 2
+			diff -= step >> 1
+			delta += step >> 1
+		if diff >= step >> 2:
+			code |= 1
+			delta += step >> 2
+		pred = clampi(pred - delta if code & 8 else pred + delta, -32768, 32767)
+		index = clampi(index + int(INDEX_STEP[code & 7]), 0, 88)
+		if i % 2 == 0:
+			byte = code
+		else:
+			out.append(byte | (code << 4))
+	if n % 2 == 1:
+		out.append(byte)
+	return out
+
+
+## A frame back to 8 kHz samples (-1..1); empty when it is not a frame (`frame_ok`).
+static func decode(frame: PackedByteArray) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	if not frame_ok(frame):
+		return out
+	var pred := frame[1] | (frame[2] << 8)
+	if pred >= 32768:
+		pred -= 65536
+	var index := int(frame[3])
+	for i in range(HEADER, frame.size()):
+		for code: int in [frame[i] & 0x0F, frame[i] >> 4]:
+			var step: int = STEPS[index]
+			var delta := step >> 3
+			if code & 4:
+				delta += step
+			if code & 2:
+				delta += step >> 1
+			if code & 1:
+				delta += step >> 2
+			pred = clampi(pred - delta if code & 8 else pred + delta, -32768, 32767)
+			index = clampi(index + int(INDEX_STEP[code & 7]), 0, 88)
+			out.append(pred / 32768.0)
+	return out
+
+
+static func frame_ok(frame: PackedByteArray) -> bool:
+	return frame.size() > HEADER and frame.size() <= MAX_FRAME and frame[0] == 1 and frame[3] <= 88
+
+
+# ---------------------------------------------------------------- microphone and speaker
+
+## The microphone's muted bus with its capture (made once), and the MIC TEST's player.
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	var bus := AudioServer.get_bus_index(BUS)
+	if bus == -1:
+		AudioServer.add_bus()
+		bus = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bus, BUS)
+		AudioServer.set_bus_mute(bus, true)          # captured, never heard here
+		var cap := AudioEffectCapture.new()
+		cap.buffer_length = 0.5                      # half a second between two reads at most
+		AudioServer.add_bus_effect(bus, cap)
+	_capture = AudioServer.get_bus_effect(bus, 0) as AudioEffectCapture
+	_mic = AudioStreamPlayer.new()
+	_mic.stream = AudioStreamMicrophone.new()
+	_mic.bus = BUS
+	add_child(_mic)
+	_out = _new_player()
+	_talkers[ME] = _talker_entry(_out)
+
+
+func _exit_tree() -> void:
+	if _mic != null and capturing:
+		_mic.stop()
+	capturing = false
+
+
+## No microphone in the background: it stops here at once (the main loop stops right after the
+## pause on a phone, no _process would stop it), TALK is let go (its release never comes), and on
+## the way back the next _process starts the input afresh (a call may have taken it meanwhile).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED:
+		_paused = true
+		_focus_lost = true
+		ptt_held = false
+		if capturing:
+			_set_capture(false)
+	elif what == NOTIFICATION_APPLICATION_RESUMED:
+		_paused = false
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_focus_lost = true               # (the permission question, a call, the notification shade)
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN and capturing:
+		restart_input()                  # (another app may have held the microphone meanwhile)
+
+
+func _new_player() -> AudioStreamPlayer:
+	var gen := AudioStreamGenerator.new()
+	gen.mix_rate = RATE
+	gen.buffer_length = 0.6
+	var p := AudioStreamPlayer.new()
+	p.stream = gen
+	p.bus = OUT_BUS
+	add_child(p)
+	return p
+
+
+func _talker_entry(p: AudioStreamPlayer) -> Dictionary:
+	return {"player": p, "gen": null, "queue": [], "wait": 0.0, "room": 0, "ms": Time.get_ticks_msec()}
+
+
+func _want_capture() -> bool:
+	if not is_inside_tree() or _paused or not mic_allowed():
+		return false
+	if test_loop:
+		return true
+	if sends(mic_mode(), channel(), mates()) == "":
+		return false
+	return not push_to_talk() or ptt_held
+
+
+func _set_capture(on: bool) -> void:
+	if not on and sending and not test_loop:
+		_read_source(0.0)
+		if _pending.size() > 0:
+			_send(encode(_pending))     # the last words
+	capturing = on
+	sending = false
+	level = 0.0
+	_pending.clear()
+	_acc = 0.0
+	_acc_n = 0
+	_phase = 0.0
+	_tone_due = 0.0
+	_gate = {"open": false, "hang": 0, "loud": 0}
+	_prev = []
+	_input_ms = Time.get_ticks_msec()
+	_input_retry = false
+	no_input = false
+	if not tone_source and _mic != null:
+		if on:
+			if _capture:
+				_capture.clear_buffer()
+			_mic.play()
+		else:
+			_mic.stop()
+	changed.emit()
+
+
+func _process(delta: float) -> void:
+	for c: Cloud in [Game.cloud, Game.lan, Game.session]:
+		if c != null and is_instance_valid(c) and not c.voice_from.is_connected(on_voice):
+			c.voice_from.connect(on_voice)
+	var want := _want_capture()
+	if want != capturing:
+		_set_capture(want)
+	if capturing:
+		_read_source(delta)
+		_check_input(Time.get_ticks_msec())
+		while _pending.size() >= FRAME_SAMPLES:
+			_frame(_pending.slice(0, FRAME_SAMPLES))
+			_pending = _pending.slice(FRAME_SAMPLES)
+	var now := Time.get_ticks_msec()
+	for id: String in _talkers.keys():
+		var t: Dictionary = _talkers[id]
+		_feed(t, delta)
+		if id != ME and t.gen != null:
+			var left := int(t.room) - (t.gen as AudioStreamGeneratorPlayback).get_frames_available()
+			if left > 0:                 # (its voice comes out of this phone's speaker until then)
+				_echo_until = maxi(_echo_until, now + left * 1000 / RATE + ECHO_MS)
+		if id != ME and (t.queue as Array).is_empty() and now - int(t.ms) > QUIET_FREE_MS:
+			_drop_talker(id)
+	if capturing and out_loud():
+		_loud_until = now + ECHO_MS
+	if tone_source:
+		_log_t += delta
+		if _log_t >= 3.0:
+			_log_t = 0.0
+			print("VOICE ch=%s mic=%s spk=%s capturing=%s sent=%d heard=%d talkers=%d" % [channel(), MODE_NAMES[mic_mode()],
+				MODE_NAMES[speaker_mode()], capturing, frames_sent, frames_heard, _talkers.size() - 1])
+
+
+## The source's new samples into _pending: the microphone's capture, or the test tone.
+func _read_source(delta: float) -> void:
+	if not tone_source:
+		_read_mic()
+		return
+	_tone_due += delta * RATE
+	while _tone_due >= 1.0:
+		_tone_due -= 1.0
+		_tone_t += 1.0 / RATE
+		var on := fmod(_tone_t, TONE_ON_S + TONE_OFF_S) < TONE_ON_S
+		_pending.append(0.4 * sin(TAU * TONE_HZ * _tone_t) if on else 0.0)
+
+
+## One 100 ms frame of the source: the level, the gate, then out (or back here in the MIC TEST).
+func _frame(samples: PackedFloat32Array) -> void:
+	level = rms_of(samples)
+	var enc := encode(samples)
+	if test_loop:
+		sending = level >= GATE_OPEN
+		_queue_frame(ME, enc)
+		frame_ready.emit(enc)
+		return
+	var was := sending
+	sending = ptt_held if push_to_talk() else gate_next(_gate, level, gate_need())
+	if sending:
+		if not was and not push_to_talk():
+			for f: PackedByteArray in _prev:
+				_send(f)                 # the start of the first word
+		_send(enc)
+		frame_ready.emit(enc)
+		_heard[ME] = Time.get_ticks_msec()
+	_prev.append(enc)
+	while _prev.size() > GATE_FRAMES:
+		_prev.pop_front()
+
+
+## What opens the gate now: GATE_ECHO while another player's voice plays here (or just did: its
+## echo), GATE_LOUD while the game's own sound is loud, else GATE_OPEN.
+func gate_need() -> float:
+	var now := Time.get_ticks_msec()
+	if now < _echo_until:
+		return GATE_ECHO
+	return GATE_LOUD if now < _loud_until else GATE_OPEN
+
+
+## Whether this phone's own sound (the game's SFX, the players' Voice) peaks loud now.
+static func out_loud() -> bool:
+	for b: String in ["SFX", OUT_BUS]:
+		var i := AudioServer.get_bus_index(b)
+		if i >= 0 and maxf(AudioServer.get_bus_peak_volume_left_db(i, 0), AudioServer.get_bus_peak_volume_right_db(i, 0)) > OUT_LOUD_DB:
+			return true
+	return false
+
+
+func _send(frame: PackedByteArray) -> void:
+	var kind := sends(mic_mode(), channel(), mates())
+	match channel():
+		"match":
+			if kind != "":
+				Game.session.send_voice(frame, kind == "group")
+				frames_sent += 1
+		"group":
+			if kind != "" and Game.cloud.send_group_voice(frame, kind == "group"):
+				frames_sent += 1
+
+
+## A frame from another player (Cloud.voice_from): played unless the speaker mode, a mute or a block
+## says no (GROUP: only a teammate's, `mate`).
+func on_voice(frame: PackedByteArray, from: String, mate: bool) -> void:
+	if from == ME or not hears(mate, speaker_mode(), is_muted(from)) or not frame_ok(frame):
+		return
+	_queue_frame(from, frame)
+
+
+func _queue_frame(id: String, frame: PackedByteArray) -> void:
+	if not is_inside_tree():
+		return
+	var now := Time.get_ticks_msec()
+	if not _talkers.has(id):
+		if _talkers.size() > MAX_TALKERS:
+			var oldest := ""
+			for k: String in _talkers:
+				if k != ME and (oldest == "" or int(_talkers[k].ms) < int(_talkers[oldest].ms)):
+					oldest = k
+			_drop_talker(oldest)
+		_talkers[id] = _talker_entry(_new_player())
+	var t: Dictionary = _talkers[id]
+	var q: Array = t.queue
+	q.append(frame)
+	while q.size() > MAX_QUEUE:
+		q.pop_front()                    # far behind: catch up
+	t.ms = now
+	if id != ME:
+		_heard[id] = now
+
+
+func _drop_talker(id: String) -> void:
+	if id == ME or not _talkers.has(id):
+		return
+	var p := _talkers[id].player as AudioStreamPlayer
+	_talkers.erase(id)
+	if p != null and is_instance_valid(p):
+		p.queue_free()
+
+
+## The captured sound so far, cut to 8 kHz mono (each 8 kHz sample the mean of its input frames).
+func _read_mic() -> void:
+	if _capture == null:
+		return
+	var avail := _capture.get_frames_available()
+	if avail <= 0:
+		return
+	take_capture(_capture.get_buffer(avail), source_rate())
+
+
+## Frames of the capture at `rate` Hz into _pending at RATE (the resampler keeps its place between
+## calls); a frame that is not silence marks the input alive (_check_input).
+func take_capture(buf: PackedVector2Array, rate: float) -> void:
+	var ratio := float(RATE) / maxf(rate, float(RATE))
+	var live := false
+	for f in buf:
+		if not live and (f.x != 0.0 or f.y != 0.0):
+			live = true
+		_acc += (f.x + f.y) * 0.5
+		_acc_n += 1
+		_phase += ratio
+		if _phase >= 1.0:
+			_phase -= 1.0
+			_pending.append(clampf(_acc / _acc_n, -1.0, 1.0))
+			_acc = 0.0
+			_acc_n = 0
+	if live:
+		_input_ms = Time.get_ticks_msec()
+		if no_input:
+			no_input = false
+			changed.emit()
+
+
+## The rate the capture's frames come at. The microphone's stream (AudioStreamPlaybackMicrophone,
+## a resampled playback) is converted by Godot from the input's rate (get_input_mix_rate: 48 kHz
+## on many phones) to the mix rate of the bus it plays on, which the capture reads: so the mix rate
+## is the right one here, whatever the input runs at (a 48 kHz input never plays at a wrong pitch
+## or speed). The input's own rate counts only if the mix rate is unknown.
+static func source_rate() -> float:
+	var r := AudioServer.get_mix_rate()
+	if r <= 0.0:
+		r = AudioServer.get_input_mix_rate()
+	return r if r > 0.0 else 44100.0
+
+
+## Capturing the microphone with nothing but silence (no frames, or only exact zeros) for
+## NO_INPUT_MS: "voice: no input" once in the log, the NO MIC INPUT note (no_input), and the
+## stream started once more.
+func _check_input(now: int) -> void:
+	if tone_source or no_input or now - _input_ms < NO_INPUT_MS:
+		return
+	no_input = true
+	print("voice: no input")
+	changed.emit()
+	if not _input_retry:
+		_input_retry = true
+		restart_input()
+		no_input = true                  # (the note stays until a frame comes)
+
+
+## A talker's frames into its generator. After its sound ran dry (between two sentences)
+## START_FRAMES wait in the queue first, or the frames that came once START_WAIT_S passed, so
+## uneven packets do not chop the next words up. The generator plays silence when it has nothing.
+func _feed(t: Dictionary, delta: float) -> void:
+	var q: Array = t.queue
+	if q.is_empty():
+		t.wait = 0.0
+		return
+	t.wait = float(t.wait) + delta
+	var gen := t.gen as AudioStreamGeneratorPlayback
+	if gen == null:
+		var p := t.player as AudioStreamPlayer
+		if p == null or not p.is_inside_tree():
+			return
+		p.play()
+		gen = p.get_stream_playback() as AudioStreamGeneratorPlayback
+		if gen == null:
+			return
+		t.gen = gen
+		t.room = gen.get_frames_available()
+	var buffered := int(t.room) - gen.get_frames_available()
+	if buffered < FRAME_SAMPLES / 4 and q.size() < START_FRAMES and float(t.wait) < START_WAIT_S:
+		return
+	while not q.is_empty() and gen.get_frames_available() >= FRAME_SAMPLES:
+		var samples := decode(q.pop_front())
+		var frames := PackedVector2Array()
+		frames.resize(samples.size())
+		for i in samples.size():
+			frames[i] = Vector2(samples[i], samples[i])
+		gen.push_buffer(frames)
+		frames_heard += 1

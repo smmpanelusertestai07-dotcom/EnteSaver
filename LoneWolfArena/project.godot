@@ -5,13 +5,19 @@ config_version=5
 
 config/name="Wolf Arena"
 config/description="Offline 1v1 third-person arena shooter."
-config/version="1.0.0"
+config/version="1.10.0"
 run/main_scene="res://scenes/loading.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.png"
 config/quit_on_go_back=false
 boot_splash/bg_color=Color(0.05, 0.05, 0.07, 1)
-boot_splash/show_image=false
+boot_splash/show_image=true
+boot_splash/image="res://assets/ui/boot_splash.png"
+boot_splash/stretch_mode=0
+
+[audio]
+
+driver/enable_input=true
 
 [autoload]
 
@@ -54,4 +60,4 @@ limits/opengl/max_renderable_lights=12
 limits/opengl/max_lights_per_object=4
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=1
 anti_aliasing/quality/msaa_3d=0
-environment/defaults/default_clear_color=Color(0.55, 0.72, 0.92, 1)
+environment/defaults/default_clear_color=Color(0.02, 0.02, 0.03, 1)

@@ -75,7 +75,7 @@ func _build_panel() -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 8)
 	v.add_child(top)
-	var back := UI.button("BACK", 19, "dark", Vector2(96, 46))
+	var back := UI.button("BACK", 19, "dark", Vector2(96, 56))
 	back.name = "BackButton"
 	back.pressed.connect(_on_back)
 	top.add_child(back)
@@ -83,11 +83,11 @@ func _build_panel() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	top.add_child(title)
-	var reset := UI.button("RESET", 19, "ghost", Vector2(100, 46))
+	var reset := UI.button("RESET", 19, "ghost", Vector2(100, 56))
 	reset.name = "ResetButton"
 	reset.pressed.connect(_on_reset)
 	top.add_child(reset)
-	var save := UI.button("SAVE", 20, "primary", Vector2(110, 46))
+	var save := UI.button("SAVE", 20, "primary", Vector2(110, 56))
 	save.name = "SaveButton"
 	save.pressed.connect(_on_save)
 	top.add_child(save)
@@ -98,7 +98,7 @@ func _build_panel() -> void:
 	_sel_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sel_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	sel_row.add_child(_sel_label)
-	_hide_btn = UI.button("HIDE", 16, "ghost", Vector2(76, 38))
+	_hide_btn = UI.button("HIDE", 16, "ghost", Vector2(84, 56))
 	_hide_btn.pressed.connect(func() -> void:
 		_body.visible = not _body.visible
 		_hide_btn.text = "HIDE" if _body.visible else "SHOW")
@@ -137,7 +137,7 @@ func _place_panel() -> void:
 
 ## Small button with a chevron drawn on it (the UI fonts have no arrow glyphs).
 func _arrow_button(dir: Vector2) -> Button:
-	var b := UI.button("", 18, "dark", Vector2(62, 40))
+	var b := UI.button("", 18, "dark", Vector2(62, 56))
 	var glyph := Control.new()
 	glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -247,23 +247,26 @@ func _input(event: InputEvent) -> void:
 			_changed()
 
 
-## Widget under the finger; round buttons pick the closest centre, panels their rect.
+## Widget under the finger, as drawn: round buttons (the closest centre) over the weapon panel
+## and the minimap (their rect), so a button dragged onto the panel can still be picked up.
 func _widget_at(pos: Vector2, vs: Vector2) -> String:
 	var best := ""
 	var best_d := INF
 	for id: String in HudLayout.ORDER:
-		var w: Dictionary = layout[id]
-		var r := HudLayout.hit_rect(id, w, vs)
 		if HudLayout.kind(id) in ["panel", "square"]:
-			if r.grow(6).has_point(pos):
-				return id
 			continue
+		var r := HudLayout.hit_rect(id, layout[id], vs)
 		var rad := maxf(r.size.x * 0.5, HudLayout.MIN_TOUCH * HudLayout.unit(vs))
 		var d := pos.distance_to(r.get_center()) / maxf(rad, 1.0)
 		if d <= 1.2 and d < best_d:
 			best = id
 			best_d = d
-	return best
+	if best != "":
+		return best
+	for id: String in HudLayout.ORDER:
+		if HudLayout.kind(id) in ["panel", "square"] and HudLayout.hit_rect(id, layout[id], vs).grow(6).has_point(pos):
+			return id
+	return ""
 
 
 func _notification(what: int) -> void:

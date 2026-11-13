@@ -6,7 +6,12 @@ extends Node
 const POSES_ALL := [
 	["idle", 0.0], ["reload", 0.45], ["reload", 1.0], ["heal", 0.3], ["throw", 0.3], ["throw", 0.43],
 	["swap", 0.25], ["hit_react", 0.06], ["pump", 0.18], ["prone_idle", 0.0], ["prone_fwd", 0.4], ["run_fwd", 0.2],
+	["carry_idle", 0.5], ["carry_run_a", 0.0], ["sprint_fwd", 0.1], ["sprint_fwd", 0.4], ["jump_air", 0.3],
+	["jump_land", 0.09], ["prone_up", 0.3], ["prone_up", 0.6], ["victory_pose", 0.5], ["lobby_hip", 1.5],
 ]
+## Clips where the game has the gun follow the hand, and clips with the hands empty.
+const FOLLOW := ["reload", "heal", "swap", "hit_react", "carry_idle", "carry_run_a", "sprint_fwd"]
+const NO_GUN := ["throw", "victory_pose", "lobby_hip"]
 ## LW_POSES=heal,reload limits the sheet to those clips (quicker iterations).
 var POSES: Array = []
 
@@ -66,8 +71,8 @@ func run(at: Node) -> int:
 			m.anim.seek(t, true)
 			m.anim.pause()
 			# as in the game: the gun follows the hand in these clips and is put away to throw
-			m._hand_follow = 1.0 if clip in ["reload", "heal", "swap", "hit_react"] else 0.0
-			m.weapon_node.visible = clip != "throw"
+			m._hand_follow = 1.0 if clip in FOLLOW else 0.0
+			m.weapon_node.visible = not clip in NO_GUN
 			if m._kit == null and clip == "heal":
 				m._build_kit()
 			if m._kit:

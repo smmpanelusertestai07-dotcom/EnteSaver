@@ -1,23 +1,45 @@
 extends Node3D
-## Match controller for one Lone Wolf round (1 vs 1 bot) on the warehouse arena:
-## PREP (spawn alcoves behind a red barrier, weapon pick for both players, red countdown)
-## -> FIGHT (round banner, 90 s timer, safe zone that holds then shrinks) -> END (kill, time-out
-## on HP, or an integrity flag) -> results screen. Also renders the top-down minimap image once,
-## runs the pause menu and feeds the HUD and scoreboard.
+## Match controller of a 1 vs 1 on the warehouse arena CARGO CAGE, first to rounds_to_win rounds:
+## TRAINING GROUND against the bot or the target dummy (practice), LONE WOLF against another
+## phone online (`mode`, `mode_name`). Each round: PREP (spawn alcoves behind a red barrier,
+## weapon pick for both players, red countdown) -> FIGHT (round banner, the two-stage clock of
+## RoundRules: stage 1 with the zone over the whole hall, stage 2 with the zone closing) -> a break,
+## or END (kill, time-out on HP, or an integrity flag) -> results screen. Also renders the top-down minimap image once, runs the pause menu and feeds the HUD and
+## scoreboard.
 
 enum Phase { PREP, FIGHT, END, BREAK }      # BREAK: the pause between two rounds
 
-const PREP_TIME := 10.0
+## Online, after the match: the other player wants a rematch (their REMATCH, event "rm"); the
+## results screen offers to accept it.
+signal rematch_asked
+
+## The prep of a round that opens a pick pair (the pick panel closes a second before it ends).
+const PREP_TIME := 15.0
 const PREP_SHORT := 5.0          # the second round of a pick keeps the gun: no pick panel
-const BREAK_TIME := 3.5
-const SPECTATE_EXTRA := 1.5       # s more between rounds while the eliminated player watches the killer
-const ROUND_TIME := 90.0
-const ZONE_HOLD := 25.0
-const ZONE_SHRINK := 40.0
-const ZONE_MIN := 4.0
-const ROUNDS_TO_WIN := 5         # the reference mode: first to 5 rounds (best of 9)
-const MODE_NAME := "LONE WOLF"
+## Between two rounds (Phase.BREAK): RoundRules' timed break, the same length on both phones
+## (online the host's "round" ends it; the guest goes on alone 8 s later if that never comes).
+const BREAK_TIME := RoundRules.BREAK_S
+## The 1 vs 1's fight: stage 1 (the zone holds over the whole hall) and stage 2 (it closes to
+## ZONE_MIN); RoundRules has the clock, team_arena.gd a longer SQUAD stage 2 (stage2_time).
+const ROUND_TIME := 110.0          # RoundRules.STAGE1_S + RoundRules.STAGE2_S
+const ZONE_HOLD := 20.0            # RoundRules.STAGE1_S
+const ZONE_SHRINK := 90.0          # RoundRules.STAGE2_S
+const ZONE_MIN := 0.5              # RoundRules.ZONE_FINAL_R
+## The final centre keeps this far (m, and a metre more) from the hall's walls (zone_final_for).
+const ZONE_EDGE := 4.0
+## The most rounds a match lasts (the best-of, 2 x rounds_to_win - 1, is never longer): rounds that
+## keep ending in draws still end the match, which the most rounds won wins (level: a DRAW).
+const MAX_ROUNDS := 9
+## Online the results wait this long (real seconds) at most for the other phone's own numbers.
+const FINAL_WAIT_S := 3.0
+## The results open this long (real seconds) after the match's last round ends: the cheer, the
+## round's plates and a look at the arena first.
+const RESULTS_DELAY_S := 5.5
+## A match voided by the integrity check has no last kill to watch: its results come after the
+## INTEGRITY CHECK FAILED line instead.
+const RESULTS_DELAY_VOID_S := 3.2
 const BOT_NAMES := ["KAI", "REX", "VIPER", "NOVA", "BLAZE", "GHOST", "RAPTOR", "ONYX", "TITAN", "ZED"]
+const DUMMY_NAME := "TARGET DUMMY"
 
 var fighters: Array[Fighter] = []
 var player: Player
@@ -30,14 +52,20 @@ var time_left := ROUND_TIME
 var elapsed := 0.0
 var match_time := 0.0
 var round_index := 1
-var rounds_to_win := ROUNDS_TO_WIN
+var rounds_to_win := Game.ROUNDS_TO_WIN       # Game.rounds_to_win(): a custom room's own number online
+## The rules this match plays by (scripts/room_rules.gd): a custom room's online, today's otherwise.
+var rules := RoomRules.new()
+## The mode this match is played in (a key of Game.MODE_NAMES): "lonewolf" online, "training"
+## against the bot or the target dummy; mode_name is what the HUD, pause menu and results show.
+var mode := Game.DEFAULT_MODE
+var mode_name := Game.mode_name(Game.DEFAULT_MODE)
 var score := {"player": 0, "bot": 0}
 var picked_weapon := ""
 var pick_note := ""                # prep line under PREPARE: who picks the gun, or which it is
 var zone_center := Vector3.ZERO
 var zone_radius := 999.0
 var zone_start_radius := 30.0
-var zone_state := "stationary"      # "stationary" (before the shrink), "shrinking", "closed"
+var zone_state := "stationary"      # "stationary" (stage 1), "shrinking" (stage 2), "closed"
 var zone_warning := ""
 var map_name := "CARGO CAGE"
 var map_rect := Rect2(-22, -16, 44, 32)   # world XZ area shown by the minimap
@@ -55,12 +83,13 @@ var _outside := {}                  # fighter -> seconds outside the zone (never
 var _last_count := 99
 var _end_t := 0.0
 var _result_shown := false
+var _results_open := false          # the ResultsScreen is up (the result can be in before: _record_decided)
 var _winner: Fighter
 var _draw := false
 var _invalid := false
 var _rng := RandomNumberGenerator.new()
-var practice := false      # Game.practice: a training dummy with endless HP, no zone, no clock, no record
-var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Lan/Cloud)
+var practice := false      # Game.practice: the target dummy with endless HP, no zone, no clock, no record
+var online := false        # Game.online: the "bot" is the other phone's player (RemoteFighter, see Cloud)
 var _net_t := 0.0
 var _net_begun := false
 var _net_their_ready := false
@@ -68,6 +97,60 @@ var _net_timeup_t := -1.0
 var _break_t := 0.0
 var _bot_pick_t := -1.0
 var _forfeit := false            # the other phone left: the match is ours
+var _deaths := 0                 # times this phone's player went down (the result's "deaths")
+var _downs := {"player": 0, "bot": 0}   # times each fighter was eliminated (the results' K/D/A)
+var _enemy_id := ""              # the online opponent's player id (the result's "enemy_id")
+var _counted := false            # Game.count_match counted this match (its first fight began)
+var _quiet_round := 0            # a rejoin landed in this round (its prep or fight): its band never shows
+var _called_off := false         # online: the session ended with no result to show (_on_net_ended)
+var _left_scene := false
+var _graphics_on := []           # [graphics, visual effects] apply_graphics last set up
+## A custom room's unlimited walls or frags: at most this many per round and player (spawn_cap).
+const ROOM_SPAWN_CAP := 30
+var _net_buckets := {}           # kind of message from the other phone -> [tokens, ms] (_net_rate_ok)
+var _net_spawns := {}            # "wall" / "grenade" -> how many the other phone's player used this round
+var _my_spawns := {}             # the same for this phone's player (online, held to spawn_cap)
+## Online the host decides each round (_net_decide): the deaths it learned of this round
+## ("player" / "bot" as the host sees them -> [killer, headshot, when (s, the guest's one-way trip
+## taken off its report)]), decided once the other phone's report of a death up to DEATH_SETTLE_S
+## after the first could have come: two deaths that close are one draw on both phones, else the
+## first one down loses. The guest reports its own death ("died", with its cause) and applies the
+## host's word ("rend": winner, score, round).
+const DEATH_SETTLE_S := 0.35
+var _round_deaths := {}
+var _settle_t := -1.0
+var _down_cause := {}            # fighter -> what took them out this round (death_cause)
+## Online, once the match is over each phone sends its own player's numbers ("fin": kills, damage,
+## headshots, shots, hits; the host adds the match time and both players' HP as it decided with),
+## so both results show the same table: the guest takes the time and the HP from the host.
+var _their_final := {}
+var _final_sent := false
+var _net_host := false           # this phone hosts the online match (Game.session.is_host at its start)
+var _net_left := false           # this arena is done with its session (leave_session / _exit_tree)
+var _rematch_sent := false       # "rm" went out (ask_rematch)
+var rematch_wanted := false      # the other player asked for a rematch ("rm", after the match)
+var rematch_they_take := true    # ... and their phone takes this one's challenges (their "rm" says)
+## A player AWAY (Cloud.peer_away_changed: no link, the app in the background, BACK pressed out of
+## the app) is not out of the match: its fighter stands frozen and this phone decides its HP and
+## death meanwhile (RemoteFighter.set_away); past Cloud.AWAY_GRACE_MS it has LEFT. Back, it asks
+## ("back", once a second while Cloud.rejoining) and takes the other phone's word ("sync",
+## _send_sync) before it sends its own states again.
+var _back_t := 0.0
+## The app was closed in this match and opened again (Cloud.resumed): this fresh arena holds still
+## until the other phone's "sync" says where the match stands, then enters it there (_resume_into).
+var _resuming := false
+var _resume_round := 1           # the round the file's note says to play on (_resume_from_note)
+var _last_rend: Array = []       # the host's last "rend" (sent again after a "sync")
+## The safe zone's centre when it has closed this round (zone_final_for): it moves there from the
+## map's centre while it shrinks.
+var zone_final := Vector3.ZERO
+## This round's ELIMINATED BY card (the HUD draws it while the player spectates): {} until the
+## player goes down, then {"cause": death_cause, "name", "gun", "gun_id", "damage" (what the
+## killer dealt the player this round)}.
+var eliminated_by := {}
+## The 1 vs 1 weapon cooldown (RoundRules.cooldown_left): pick round -> the gun picked for that pair
+## of rounds, whoever picked it. Both phones fill it alike from the same picks.
+var picks := {}
 
 
 func _ready() -> void:
@@ -82,19 +165,27 @@ func _ready() -> void:
 	map_rect = map.map_rect
 	map_name = map.map_name
 	zone_center = map.zone_center
-	zone_start_radius = map.zone_start_radius
-	practice = Game.practice
-	if not OS.has_feature("template") and OS.get_environment("LW_ROUNDS_TO_WIN") != "":
-		rounds_to_win = maxi(int(OS.get_environment("LW_ROUNDS_TO_WIN")), 1)     # tests: shorter matches
-	online = Game.online and Game.session != null and bool(Game.session.get("in_session"))
-	if online and not Game.room_rules.is_empty():
-		rounds_to_win = clampi(int(Game.room_rules.get("rounds", ROUNDS_TO_WIN)), 1, 7)
+	online = Game.online and Game.session != null and Game.session.in_session
+	zone_start_radius = RoundRules.zone_start_for(map_rect, map.zone_start_radius, online)   # (online: the 1.9.x start, alike on both phones)
+	practice = Game.practice and not online
+	mode = "lonewolf" if online else "training"
+	mode_name = Game.mode_name(mode) + (" · LOCAL" if online and Game.local_match() else "")   # PLAY WITHOUT INTERNET
+	rounds_to_win = Game.rounds_to_win(online)
+	rules = RoomRules.active()
 	if Game.online and not online:
+		# The session ended while this phone was loading: back to the lobby, which says why (never
+		# a match against the bot instead).
 		Game.online = false
-		Game.goto_lobby.call_deferred()        # the other phone left while this one was loading
+		var lost := Game.session != null and Game.session.last_end_reason != "left"
+		Game.match_notice = ["CONNECTION LOST" if lost else "OPPONENT LEFT", ("The connection was lost" if lost
+			else "The other player left") + " before the match began. Nothing was counted."]
+		if Game.session != null and Game.session.rejoin_notice.size() == 2:
+			Game.match_notice = Game.session.rejoin_notice.duplicate()     # (what ended the rejoin, and what it counted)
+		Game.goto_lobby.call_deferred()
 		return
 	_build_zone()
 	_spawn_fighters()
+	_rules_to_fighters()
 	ui_layer = CanvasLayer.new()
 	ui_layer.layer = 5
 	add_child(ui_layer)
@@ -130,28 +221,55 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	Audio.stop_ambience()
-	if online:
-		Game.online = false
-		Game.session.event_received.disconnect(_on_net_event)
-		Game.session.state_received.disconnect(_on_net_state)
-		Game.session.session_ended.disconnect(_on_net_ended)
-		Game.session.end_session("left")
+	if online and Game.session != null and Game.session.app_paused() and Game.session.resume_allowed():
+		_net_left = true                 # the app closes in the background: the match stays to be rejoined
+		return
+	leave_session()
 
 
-# ---------------------------------------------------------------- match against another phone (Lan or Cloud)
+## This match's session is over for this arena: its handlers go and the other phone hears "bye".
+## The results' REMATCH calls it before a fresh challenge (or before accepting one): the session
+## that challenge starts is not this one, so leaving the tree later must not end it, and the next
+## arena reads Game.online from that challenge (set again when it starts).
+func leave_session() -> void:
+	if not online or _net_left:
+		return
+	_net_left = true
+	Game.online = false
+	for sig: String in ["event_received", "state_received", "session_ended", "peer_away_changed"]:
+		for c: Dictionary in Game.session.get_signal_connection_list(sig):
+			if (c.callable as Callable).get_object() == self:
+				Game.session.disconnect(sig, c.callable)
+	Game.session.end_session("left")
+
+
+# ---------------------------------------------------------------- match against another phone (Cloud)
 
 ## Both phones load the arena at their own pace: each says "ready", and the host starts the prep
 ## on both once it has heard the guest.
 func _net_setup() -> void:
+	_net_host = Game.session.is_host
 	Game.session.event_received.connect(_on_net_event)
 	Game.session.state_received.connect(_on_net_state)
 	Game.session.session_ended.connect(_on_net_ended)
+	Game.session.peer_away_changed.connect(_on_peer_away)
 	var queued: Array = Game.session.queue.duplicate()
 	Game.session.queue.clear()
+	if Game.session.resumed:
+		# Back after a restart: the match began long ago and was counted then (the file's note).
+		_resuming = true
+		_net_begun = true
+		_counted = bool(Game.session.resume_note.get("counted", false))
+		score.player = maxi(int(Game.session.resume_note.get("mine", 0)), 0)
+		score.bot = maxi(int(Game.session.resume_note.get("theirs", 0)), 0)
+		var n_round: Variant = Game.session.resume_note.get("round", 1)
+		_resume_round = clampi(int(n_round), 1, MAX_ROUNDS) if (n_round is int or n_round is float) else 1
+		picks = RoundRules.picks_from_text(String(Game.session.resume_note.get("picks", "")), Weapons.PICKABLE)
+		Game.mark("online match rejoined after a restart")
 	Game.session.send_event("ready")
 	for q: Array in queued:
 		_on_net_event(String(q[0]), q[1])
-	Game.mark("wifi match: " + ("host" if Game.session.is_host else "guest"))
+	Game.mark("online match: " + ("host" if Game.session.is_host else "guest"))
 
 
 func _net_begin() -> void:
@@ -164,9 +282,11 @@ func _net_begin() -> void:
 
 
 func _on_net_state(s: PackedFloat32Array) -> void:
-	# The last value is the sender's round: a packet from before a round's reset is dropped.
-	if s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index and phase != Phase.BREAK:
-		(bot as RemoteFighter).apply_state(s)
+	# The last value is the sender's round: a packet from before a round's reset is dropped. The
+	# other phone sends 20 a second; far more is a flood (each can switch the gun and the stance).
+	if s.size() == RemoteFighter.STATE_SIZE and int(s[s.size() - 1]) == round_index and phase != Phase.BREAK \
+			and _net_rate_ok("state", 30.0, 30.0):
+		(bot as RemoteFighter).apply_state(s, Game.session.last_state_sent_ms)
 
 
 func _on_net_event(kind: String, data: Array) -> void:
@@ -177,60 +297,424 @@ func _on_net_event(kind: String, data: Array) -> void:
 			if Game.session.is_host:
 				_net_begin()
 		"begin":
-			if not Game.session.is_host:
+			# (a resumed host sends it again: a guest that never heard the first one starts its prep)
+			if not Game.session.is_host and not _net_begun:
 				_net_begin()
+				_follow_host_clock()
 		"pick":
 			# Its pick for this round (late ones still count: both must hold the same gun).
+			# A gun on cooldown is replaced by the first free one, as the picker's phone does.
 			if data.size() == 2 and Weapons.PICKABLE.has(String(data[0])) and int(data[1]) == round_index \
-					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT):
-				_apply_pick(String(data[0]))
+					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT) and not rules.gun_forced():
+				_apply_pick(legal_pick(String(data[0])))
 		"shot":
-			if data.size() == 6:
-				remote.remote_shot(Vector3(float(data[0]), float(data[1]), float(data[2])), Vector3(float(data[3]), float(data[4]), float(data[5])))
+			# Its shots: muzzle flash, tracer, impact and sound here, while the round is fought and
+			# never faster than its gun (or fists) fire.
+			if data.size() == 6 and phase == Phase.FIGHT:
+				var origin := _net_vec(data, 0)
+				var dir := _net_vec(data, 3)
+				if _in_hall(origin) and dir.is_finite() and _remote_shot_allowed():
+					remote.remote_shot(origin, dir)
 		"hit":
-			if data.size() == 5 and String(data[1]) in ["head", "body", "limb"]:
-				player.take_damage(clampf(float(data[0]), 0.0, 2000.0), String(data[1]), remote, Vector3(float(data[2]), float(data[3]), float(data[4])))
+			# Only while the round is fought, never faster than this round's gun can fire, and never
+			# more than one bullet (pellet), punch or frag of it can do: a tampered phone cannot
+			# send fake damage.
+			if data.size() == 5 and String(data[1]) in ["head", "body", "limb"] and phase == Phase.FIGHT \
+					and _remote_hit_allowed():
+				var zone := String(data[1])
+				var hit_from := _net_vec(data, 2)
+				if not _in_hall(hit_from):
+					hit_from = remote.global_position
+				# A hit says where it came from: its shooter for a bullet or a punch, the blast for a
+				# frag (which lands away from the thrower), so the kill feed can name the frag.
+				var frag := zone == "body" and hit_from.distance_to(remote.global_position) > 2.5
+				player.take_damage(clampf(float(data[0]), 0.0, _max_remote_hit(zone)), zone, remote, hit_from, "frag" if frag else "")
 		"died":
-			if remote.alive and data.size() == 1:
-				player.stats.kills += 1
-				remote.die(player, bool(data[0]))
+			# Its player went down: [headshot, cause, round]. Only a hit of this phone's player
+			# ("gun", "frag") is a kill; the zone, a fall or leaving credit nobody.
+			if remote.alive and (data.size() == 1 or (data.size() == 3 and int(data[2]) == round_index)) \
+					and (phase == Phase.FIGHT or phase == Phase.BREAK):
+				var cause := String(data[1]) if data.size() == 3 else "gun"      # (1.1.0 sent only the headshot)
+				var by_me := cause in ["gun", "frag"]
+				remote.last_hit_cause = cause if cause in ["frag", "zone", "fall", "left", "self"] else ""
+				if by_me:
+					player.stats.kills += 1
+				remote.hp = 0.0                  # (its last state may still carry the HP before the final blow)
+				remote.die(player if by_me else null, bool(data[0]) and by_me)
+				if by_me:
+					hud.confirm_kill(remote.chest_position())     # the kill's sound and buzz, as against the bot
 		"grenade":
 			if data.size() == 6:
-				var g := Grenade.new()
-				g.thrower = remote
-				g.cosmetic = true          # the thrower's phone deals its damage
-				add_child(g)
-				g.global_position = Vector3(float(data[0]), float(data[1]), float(data[2]))
-				g.linear_velocity = Vector3(float(data[3]), float(data[4]), float(data[5])).limit_length(30.0)
+				var at := _net_vec(data, 0)
+				var vel := _net_vec(data, 3)
+				if vel.is_finite() and _remote_spawn_allowed("grenade", at):
+					var g := Grenade.new()
+					g.thrower = remote
+					g.cosmetic = true          # the thrower's phone deals its damage
+					add_child(g)
+					g.global_position = at
+					g.linear_velocity = vel.limit_length(30.0)
 		"wall":
 			if data.size() == 4:
-				var wall := ShieldWall.new()
-				add_child(wall)
-				var pos := Vector3(float(data[0]), float(data[1]), float(data[2]))
-				var yaw := float(data[3])
-				wall.global_position = pos
-				wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
-		"timeup":
-			if data.size() == 3 and not Game.session.is_host and int(data[2]) == round_index:
-				_timeout(float(data[0]), float(data[1]))
+				var pos := _net_vec(data, 0)
+				var yaw := float(data[3]) if (data[3] is float or data[3] is int) else NAN
+				if is_finite(yaw) and _remote_spawn_allowed("wall", pos):
+					var wall := ShieldWall.new()
+					add_child(wall)
+					wall.global_position = pos
+					wall.look_at(pos + Vector3(-sin(yaw), 0, -cos(yaw)), Vector3.UP)
+		"rend":
+			# The host's word on this round: [round, winner (1 the host, -1 this phone, 0 a draw),
+			# host's score, this phone's score, timed out, headshot, killer (1 / -1 / 0)].
+			if data.size() == 7 and not Game.session.is_host and int(data[0]) == round_index \
+					and (phase == Phase.FIGHT or phase == Phase.PREP):
+				var w := int(data[1])
+				var k := int(data[6])
+				score.player = maxi(int(data[3]), 0)
+				score.bot = maxi(int(data[2]), 0)
+				_end_round((bot as Fighter) if w == 1 else ((player as Fighter) if w == -1 else null), bool(data[5]), bool(data[4]),
+					(bot as Fighter) if k == 1 else ((player as Fighter) if k == -1 else null), true)
+				if phase == Phase.END:
+					_send_final()
+		"fin":
+			# The match is over on the other phone: its own player's numbers (_send_final). The
+			# host's also end this phone's match with its score if its last round left this one
+			# waiting for a next round (the host decides when the match ends, the round cap too).
+			var f := final_from(data, not _net_host)
+			if not f.is_empty() and _their_final.is_empty() and int(data[0]) == round_index \
+					and phase in [Phase.FIGHT, Phase.BREAK, Phase.END]:
+				_their_final = f
+				if not _net_host and phase != Phase.END:
+					_conclude_from_host()
+		"rm":
+			# After the match: the other player tapped REMATCH (the results screen asks this one);
+			# [whether their phone takes this one's challenges] (DUEL CHALLENGES FROM).
+			if phase == Phase.END and not rematch_wanted and data.size() <= 1:
+				rematch_wanted = true
+				rematch_they_take = not (data.size() == 1 and data[0] is bool and not bool(data[0]))
+				rematch_asked.emit()
 		"round":
 			# The host starts each next round and sends the score as it counts it.
 			if data.size() == 3 and not Game.session.is_host and phase == Phase.BREAK and int(data[0]) == round_index + 1:
 				score.player = int(data[2])
 				score.bot = int(data[1])
 				_next_round()
+				_follow_host_clock()
+		"back":
+			# The other player is back after being away: this phone's word on its fighter. A host
+			# that is itself back from a restart has no word yet: both apps were closed, so its
+			# own note decides (_resume_from_note); a guest in that state answers nothing.
+			if data.is_empty() and _net_rate_ok("back", 2.0, 3.0):
+				if _resuming and _net_host:
+					_resume_from_note()
+				_send_sync()
+		"sync":
+			_on_sync(data)
 
 
-func _on_net_ended(_reason: String) -> void:
+## The other phone's player went AWAY (frozen here, its HP and death decided here) or came back
+## (this phone's word on its fighter goes to it at once: "sync").
+func _on_peer_away(_id: String, away: bool) -> void:
+	if not online or _net_left:
+		return
+	(bot as RemoteFighter).set_away(away, true)
+	if not away:
+		_send_sync()
+
+
+## This phone's word on the other phone's fighter and on the match, for that phone back from being
+## away: [round, phase, prep left or fight time, this phone's score, the other's score, its HP,
+## alive, x, y, z, the round's gun, what took it out, the match's picks (RoundRules.picks_text: the
+## weapon cooldown)]. The fight time is the whole fight's, so both phones show the same stage of the
+## two-stage clock. The host's last word on a round that is over
+## here ("rend", and "fin" once the match is) goes again after it: the other phone missed it.
+func _send_sync() -> void:
+	if not session_up() or _resuming:
+		return                           # (a fresh arena back from a restart has only blanks to tell)
+	var r := bot as RemoteFighter
+	var at := r.global_position
+	Game.session.send_event("sync", [round_index, int(phase), prep_left if phase == Phase.PREP else elapsed, int(score.player),
+		int(score.bot), snappedf(r.hp, 0.1), r.alive, snappedf(at.x, 0.01), snappedf(at.y, 0.01), snappedf(at.z, 0.01),
+		picked_weapon, String(_down_cause.get(r, "")), RoundRules.picks_text(picks)])
+	if _net_host and _last_rend.size() == 7 and int(_last_rend[0]) == round_index and (phase == Phase.BREAK or phase == Phase.END):
+		Game.session.send_event("rend", _last_rend)
+		if phase == Phase.END:
+			_final_sent = false
+			_send_final()
+
+
+## The other phone's word ("sync", see _send_sync). The guest takes the host's picks (the weapon
+## cooldown) and follows the host's round as it stands (_follow_round); then either takes its own player's HP (never more than it has: no healing back
+## what it lost while away), its place and, gone down meanwhile, its death. The host answers with its
+## own word, so the guest follows its round.
+func _on_sync(data: Array) -> void:
+	if data.size() < 12 or data.size() > 13 or not _net_rate_ok("sync", 2.0, 4.0) or not data[6] is bool \
+			or typeof(data[10]) != TYPE_STRING or typeof(data[11]) != TYPE_STRING or (data.size() == 13 and typeof(data[12]) != TYPE_STRING):
+		return
+	for i: int in [0, 1, 2, 3, 4, 5, 7, 8, 9]:
+		if not (data[i] is float or data[i] is int) or not is_finite(float(data[i])):
+			return
+	var r := int(data[0])
+	var ph := int(data[1])
+	if r < 1 or r > MAX_ROUNDS or ph < 0 or ph > 3:
+		return
+	Game.session.rejoined()
+	if _resuming:
+		_resuming = false
+		if data.size() == 13:
+			picks = RoundRules.picks_from_text(String(data[12]), Weapons.PICKABLE)     # (the host's own were lost too)
+		_resume_into(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
+	elif not _net_host:
+		if data.size() == 13:
+			picks = RoundRules.picks_from_text(String(data[12]), Weapons.PICKABLE)     # the host's cooldowns
+		_follow_round(r, ph, float(data[2]), int(data[3]), int(data[4]), String(data[10]))
+	if r == round_index and ph == int(phase) and (phase == Phase.FIGHT or phase == Phase.PREP) and player.alive:
+		var pos := Vector3(float(data[7]), float(data[8]), float(data[9]))
+		if _in_hall(pos) and player.global_position.distance_to(pos) > 1.5:
+			player.global_position = pos           # where the others saw it stand meanwhile
+			player.velocity = Vector3.ZERO
+		var hp := clampf(float(data[5]), 0.0, Fighter.MAX_HP)
+		if bool(data[6]) and hp > 0.0:
+			player.hp = minf(player.hp, hp)
+		elif phase == Phase.FIGHT:
+			var cause := String(data[11])
+			player.last_hit_cause = cause if cause in ["frag", "zone", "fall", "self"] else ""
+			player.hp = 0.0
+			player.die(bot if cause in ["gun", "frag"] else null, false)
+	if _net_host:
+		_send_sync()
+
+
+## The guest back from being away: the host's round as it stands (it went on meanwhile, or this
+## phone went on alone): that round in the host's phase, with the host's score and gun.
+func _follow_round(r: int, ph: int, clock: float, host_score: int, my_score: int, gun: String) -> void:
 	if phase == Phase.END:
 		return
-	_forfeit = true
-	var remote := bot as RemoteFighter
-	if remote.alive and phase != Phase.BREAK:
-		remote.die(null, false)
+	score.bot = maxi(host_score, 0)
+	score.player = maxi(my_score, 0)
+	if r != round_index or (ph == int(Phase.FIGHT) and phase != Phase.FIGHT) or (ph == int(Phase.PREP) and phase != Phase.PREP):
+		_net_begun = true
+		round_index = r - 1
+		_next_round()                    # both back at their spawns, in that round's prep
+		if ph == int(Phase.FIGHT):
+			_start_fight()
+	if Weapons.PICKABLE.has(gun) and gun != picked_weapon:
+		_apply_pick(gun)
+	if phase == Phase.FIGHT and ph == int(Phase.FIGHT):
+		elapsed = clampf(clock, 0.0, round_time())
+		time_left = round_time() - elapsed
+	elif phase == Phase.PREP and ph == int(Phase.PREP):
+		prep_left = clampf(clock, 0.0, PREP_TIME)
+
+
+## A fresh arena after a restart (_resuming) enters the match where the other phone's word says it
+## stands: that round in that phase with the score, the gun and the clock (the host says "begin"
+## again: a guest still waiting for the first one, lost with the restart, starts too). In a break the host
+## starts the next round on both (its "round"), the guest waits for it; a match over on the other
+## phone ends here too (the host's last word, "rend" and "fin", comes after its "sync"). Back in a
+## running round (`quiet`), neither its ROUND / AREA band nor ZONE SHRINKING shows (_rejoined_quietly).
+func _resume_into(r: int, ph: int, clock: float, their_score: int, my_score: int, gun: String, quiet := true) -> void:
+	score.bot = maxi(their_score, 0)
+	score.player = maxi(my_score, 0)
+	Game.mark("rejoined: round %d, phase %d" % [r, ph])
+	if ph == int(Phase.BREAK):
+		round_index = r
+		if _net_host:
+			_next_round()
+		else:
+			_freeze_all()
+			phase = Phase.BREAK
+			_break_t = 0.0
+		return
+	if ph == int(Phase.END) and _net_host:
+		round_index = r
+		_freeze_all()
+		_conclude()
+		_show_match_end()
+		return
+	round_index = r - 1
+	_next_round()                        # that round's prep, both at their spawns
+	if Weapons.PICKABLE.has(gun):
+		_apply_pick(gun)
+		hud.close_weapon_pick()
+	if ph == int(Phase.PREP):
+		prep_left = clampf(clock, 0.5, PREP_TIME)
 	else:
-		_end_round(null)
-	hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+		_start_fight()
+		elapsed = clampf(clock, 0.0, round_time())
+		time_left = round_time() - elapsed
+	if quiet:
+		_rejoined_quietly()
+	if _net_host:
+		Game.session.send_event("begin")     # (a guest whose first "begin" was lost with this app's start)
+
+
+## A fighter back in a round that is already running (its prep or its fight): the round's ROUND /
+## AREA band is not shown, and a zone that already shrinks there does so without the ZONE
+## SHRINKING line (both were news to the others long ago); the next round's band shows as usual.
+func _rejoined_quietly() -> void:
+	_quiet_round = round_index           # (round 1's band, due at its fight's start, stays off too)
+	hud.skip_round_banner()
+	if phase == Phase.FIGHT and elapsed >= RoundRules.STAGE1_S and zone_state == "stationary":
+		zone_state = "shrinking"
+
+
+## Both apps were closed and opened again (the other phone, resuming too, asks for the match with
+## its own "back"): the host takes the round its file's note was on, from its prep, with the
+## note's score and picks; its "sync" then places the guest there. A round cut short is played
+## again; the match keeps its best-of.
+func _resume_from_note() -> void:
+	_resuming = false
+	Game.session.rejoined()
+	var r := mini(_resume_round, last_round())
+	var gun := String(picks.get(RoundRules.pick_round_of(r), ""))
+	_resume_into(r, int(Phase.PREP), PREP_TIME, int(score.bot), int(score.player), gun, false)     # (the round starts afresh)
+
+
+## The session ended before the match did. "left": the other phone said bye, or went silent while
+## this one still hears the relay: once the first fight began that is a forfeit, the match is
+## ours. "connection lost": THIS phone lost the relay (no signal, airplane mode, away in the
+## background about as long as the other phone waits), which is never a win: a counted match goes
+## into the profile as QUIT MATCH puts it (LEFT, a defeat). A match whose first fight had not begun
+## counts nowhere either way. Both of those end here and go back to the lobby, which says why.
+func _on_net_ended(reason: String) -> void:
+	if phase == Phase.END:
+		return
+	if reason == "left" and _counted:
+		_forfeit = true
+		var remote := bot as RemoteFighter
+		if remote.alive and phase != Phase.BREAK:
+			remote.last_hit_cause = "left"          # the kill feed says LEFT, nobody's kill
+			remote.die(null, false)
+		else:
+			_end_round(null)
+		hud.show_center("OPPONENT LEFT", 2.5, Color.WHITE, 80, "YOU WIN")
+		return
+	var lost := reason != "left"
+	var counts := _counted and not _invalid
+	close_pause()
+	record_left()
+	_called_off = true
+	phase = Phase.END
+	_end_t = 0.0
+	Engine.time_scale = 1.0
+	_freeze_all()
+	var title := "CONNECTION LOST" if lost else "OPPONENT LEFT"
+	var sub := "THE MATCH COUNTS AS LEFT" if counts else "THE MATCH DID NOT START"
+	hud.show_center(title, 2.6, UI.BAD if lost else Color.WHITE, 80, sub)
+	Game.match_notice = [title, ("The connection was lost: the match counts as LEFT (a defeat)." if counts
+		else ("The connection was lost before the match began. Nothing was counted." if lost
+		else "%s left before the match began. Nothing was counted." % bot.display_name))]
+
+
+## The most one reported hit can do in this zone: a bullet (one pellet) of this round's gun (or of
+## the sidearm while the other phone has it in hand) at point-blank range, a punch, or (on the
+## body) a frag at its centre, before the armour.
+func _max_remote_hit(zone: String) -> float:
+	var best := Weapons.hit_cap(_remote_arms(), zone)
+	if zone == "body":
+		best = maxf(best, Grenade.MAX_DAMAGE)
+	return best * 1.02
+
+
+func _round_gun() -> String:
+	return picked_weapon if Weapons.DEFS.has(picked_weapon) else Weapons.DEFAULT_PICK
+
+
+## The weapons whose numbers bound the other phone's reports (a hit does not say which weapon made
+## it): this round's gun (the same on both phones, not that fighter's own) and the fists always,
+## and the sidearm while that phone's states have it in hand or had it within
+## RemoteFighter.HELD_GRACE_MS. While honest states say the gun is held, the gun's cap is as before;
+## a phone that claims the sidearm gets at most the sidearm's own numbers on top.
+func _remote_arms() -> Array:
+	var out: Array = [Weapons.DEFS[_round_gun()], Weapons.DEFS.fists]
+	var remote := bot as RemoteFighter
+	if remote != null and remote.held_recently(Weapons.SIDE):
+		out.append(Weapons.DEFS[Weapons.SIDEARM])
+	return out
+
+
+## Hit reports may not come faster than the weapons it may hold fire (all their pellets), with
+## headroom for network bunching: a token bucket refilled at 1.5 x that rate (Weapons.hit_rate).
+func _remote_hit_allowed() -> bool:
+	var r := Weapons.hit_rate(_remote_arms())
+	return _net_rate_ok("hit", r.x, r.y)
+
+
+## Shot reports (one per trigger pull, pellets included): the fastest of the weapons it may hold,
+## with the same headroom.
+func _remote_shot_allowed() -> bool:
+	var interval := Weapons.min_interval(_remote_arms())
+	return _net_rate_ok("shot", 1.5 / maxf(interval, 0.05) + 2.0, 8.0)
+
+
+## A wall or grenade of the other phone's player: while the round is fought (or about to be: the
+## guest's prep ends a moment after the host's), at a real spot in the hall, within the items that
+## player has this round (spawn_cap) and no faster than a hand can use them. Anything else is
+## dropped: each one is a body, a mesh, effects and sounds on this phone, so a tampered phone could
+## otherwise flood it until it stalls.
+func _remote_spawn_allowed(kind: String, pos: Vector3) -> bool:
+	if not (phase == Phase.FIGHT or (phase == Phase.PREP and prep_left < 2.0)) or not _in_hall(pos):
+		return false
+	if int(_net_spawns.get(kind, 0)) >= spawn_cap(kind) or not _net_rate_ok(kind, 2.5, 3.0):
+		return false
+	_net_spawns[kind] = int(_net_spawns.get(kind, 0)) + 1
+	return true
+
+
+## The walls ("wall") or frags ("grenade") one player may use in a round: the round's starting
+## items, or a custom room's unlimited ones up to ROOM_SPAWN_CAP (this phone's player keeps to the
+## same number, see _apply_room_rules, so both phones show the same walls).
+func spawn_cap(kind: String) -> int:
+	return rules.throw_cap(kind, Fighter.START_SHIELDS if kind == "wall" else Fighter.START_GRENADES, ROOM_SPAWN_CAP)
+
+
+## A custom room's health, speed, jump and aim-assist rules on every fighter (RoomRules; today's
+## values in any other match).
+func _rules_to_fighters() -> void:
+	for f in fighters:
+		f.hp_max = rules.hp()
+		f.rule_speed = rules.speed_mult()
+		f.rule_jump = rules.jump_mult()
+		f.hp = minf(f.hp, f.hp_max)
+	if player is Player:
+		(player as Player).room_assist = rules.aim_assist()
+
+
+## A custom room's gun rule at a pick round: the gun every fighter gets without the pick panel
+## (RoomRules.forced_gun: ONE GUN, or RANDOM drawn alike on every phone), "" for the pick panel.
+func forced_pick() -> String:
+	if not rules.custom:
+		return ""
+	var what := "gun%d" % RoundRules.pick_round_of(round_index)
+	return rules.forced_gun(Game.session.match_seed(what) if online and Game.session != null else _rng.randi())
+
+
+## Token bucket per kind of message from the other phone: `burst` at once, then `rate` a second;
+## false (drop it) when they come faster.
+func _net_rate_ok(kind: String, rate: float, burst: float) -> bool:
+	var now := Time.get_ticks_msec()
+	var b: Array = _net_buckets.get(kind, [burst, now])
+	var tokens := minf(burst, float(b[0]) + float(now - int(b[1])) / 1000.0 * rate)
+	var ok := tokens >= 1.0
+	_net_buckets[kind] = [tokens - 1.0 if ok else tokens, now]
+	return ok
+
+
+## Three values of an event's data from index i on, as a point or a direction; NaN for what is not
+## a number, which every check rejects.
+static func _net_vec(data: Array, i: int) -> Vector3:
+	var out := Vector3()
+	for k in 3:
+		var v: Variant = data[i + k]
+		out[k] = float(v) if (v is float or v is int) else NAN
+	return out
+
+
+## A point the other phone may name: a real number inside the hall (with a margin), not far above
+## or below its floor.
+func _in_hall(p: Vector3) -> bool:
+	return p.is_finite() and map_rect.grow(2.0).has_point(Vector2(p.x, p.z)) and p.y > -3.0 and p.y < 15.0
 
 
 ## Called by RemoteFighter for every hit this phone's player lands on it.
@@ -245,11 +729,13 @@ func net_shot(origin: Vector3, dir: Vector3) -> void:
 
 func net_grenade(pos: Vector3, vel: Vector3) -> void:
 	if online:
+		_my_spawns["grenade"] = int(_my_spawns.get("grenade", 0)) + 1
 		Game.session.send_event("grenade", [pos.x, pos.y, pos.z, vel.x, vel.y, vel.z])
 
 
 func net_wall(pos: Vector3, fwd: Vector3) -> void:
 	if online:
+		_my_spawns["wall"] = int(_my_spawns.get("wall", 0)) + 1
 		Game.session.send_event("wall", [pos.x, pos.y, pos.z, atan2(-fwd.x, -fwd.z)])
 
 
@@ -312,13 +798,14 @@ func _spawn_fighters() -> void:
 	if online:
 		bot.display_name = String(Game.session.opponent.get("name", "PLAYER"))
 		bot_bundle = String(Game.session.opponent.get("bundle", "default"))
+		_enemy_id = String(Game.session.opponent.get("id", ""))
 	bot.setup_fighter(bot_bundle, pick)
 	bot.aim_yaw = map.spawn_a_yaw if guest else map.spawn_b_yaw
 	bot.configure(int(Game.settings.difficulty), player)
 	bot.hold_fire = true
 	bot.frozen = true
 	if practice:
-		bot.display_name = "TRAINING DUMMY"
+		bot.display_name = DUMMY_NAME
 		bot.endless_hp = true
 		player.endless_hp = true
 	fighters.append(bot)
@@ -381,22 +868,45 @@ func _render_minimap() -> void:
 
 # ---------------------------------------------------------------- settings
 
+## The graphics level and the visual effects on the match (at start and on Game.settings_changed).
+## Only a change of those two sets them up again: any other save (the gun pick saves last_pick, the
+## pause menu's sensitivity) leaves the frame-rate governor's lowered resolution and measurements
+## alone.
 func apply_graphics() -> void:
 	var g := int(Game.settings.graphics)
+	if hud:
+		hud.reload_layout()
+	apply_outlines()
+	var wanted := [g, bool(Game.settings.visual_effects)]
+	if wanted == _graphics_on:
+		return
+	_graphics_on = wanted
 	var vp := get_viewport()
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = [0.7, 0.85, 1.0, 1.0][clampi(g, 0, 3)]
+	PerfGovernor.attach(self, vp.scaling_3d_scale)       # lowers it while frames run long (and AUTO measures)
 	vp.msaa_3d = Viewport.MSAA_2X if g >= 2 else Viewport.MSAA_DISABLED
 	if sun:
 		sun.shadow_enabled = g >= 1
 	RenderingServer.directional_shadow_atlas_set_size(4096 if g >= 3 else 2048, true)
 	if env:
 		env.environment.glow_enabled = g >= 1
-	Effects.lights_enabled = g >= 2
+	Effects.configure(g, bool(Game.settings.visual_effects))
 	if map:
 		map.apply_quality(g)
-	if hud:
-		hud.reload_layout()
+
+
+## ENEMY OUTLINE (setting enemy_outline): the red outline on every fighter of the other side.
+func apply_outlines() -> void:
+	var on := bool(Game.settings.get("enemy_outline", true))
+	for f: Fighter in fighters:
+		if is_instance_valid(f) and f.model != null:
+			f.model.set_outline(on and is_enemy(f))
+
+
+## Whether `f` is on the other side from the player (the 1 vs 1: the other fighter).
+func is_enemy(f: Fighter) -> bool:
+	return f != player
 
 
 # ---------------------------------------------------------------- match flow
@@ -406,20 +916,46 @@ func apply_graphics() -> void:
 ## A custom room's rules: unlimited ammo, walls or frags top this phone's player up (each phone
 ## runs its own player; both got the same rules with the invite).
 func _apply_room_rules() -> void:
-	if not online or Game.room_rules.is_empty() or player == null:
+	if not rules.custom or player == null:
 		return
-	var r: Dictionary = Game.room_rules
-	if bool(r.get("walls", false)) and player.shields < 9:
-		player.shields = 9
-	if bool(r.get("frags", false)) and player.grenades < 9:
-		player.grenades = 9
+	if not rules.throwables():
+		if player.shields > 0:
+			player.shields = 0
+		if player.grenades > 0:
+			player.grenades = 0
+	var r: Dictionary = rules.rules
+	var walls := mini(9, spawn_cap("wall") - int(_my_spawns.get("wall", 0)))
+	if bool(r.get("walls", false)) and player.shields < walls:
+		player.shields = walls
+	var frags := mini(9, spawn_cap("grenade") - int(_my_spawns.get("grenade", 0)))
+	if bool(r.get("frags", false)) and player.grenades < frags:
+		player.grenades = frags
 	if bool(r.get("ammo", false)):
 		for w: WeaponState in player.weapons:
 			if not w.infinite() and w.reserve < 300:
 				w.reserve = 999
 
 
+## The zone as a round starts: over the whole hall and still. The prep resets it too, so the strip
+## and the map never show the round before's closing zone; the fight's start then draws the spot
+## it closes on (zone_final).
+func _reset_zone() -> void:
+	elapsed = 0.0
+	zone_radius = zone_start_radius
+	zone_state = "stationary"
+	zone_center = map.zone_center
+	zone_warning = ""
+	_update_zone_mesh()
+
+
 func _start_prep() -> void:
+	eliminated_by = {}
+	_reset_zone()
+	_round_deaths.clear()
+	_down_cause.clear()
+	_settle_t = -1.0
+	_net_spawns.clear()
+	_my_spawns.clear()
 	_apply_room_rules()
 	phase = Phase.PREP
 	var pick_round := (round_index - 1) % 2 == 0
@@ -431,19 +967,47 @@ func _start_prep() -> void:
 	bot.frozen = true
 	pick_note = ""
 	_bot_pick_t = -1.0
-	if pick_round:
+	var forced := forced_pick() if pick_round and not practice else ""
+	if forced != "":
+		_apply_pick(forced)
+		pick_note = "WEAPON: " + String(Weapons.DEFS[forced].name)
+	elif pick_round:
 		picked_weapon = ""
+		for f in fighters:
+			f.await_pick()               # (fists only until the pick: never the last pair's gun)
+		var strip := [] if practice else RoundRules.picker_rows(last_round(), not (online and not Game.session.is_host))
 		if _i_pick():
-			hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
+			hud.open_weapon_pick(Weapons.PICKABLE, preselected_pick(), prep_left - 1.0, _on_weapon_picked, pick_cooldowns(), strip)
 		else:
+			# The same panel read-only, until the other side's pick lands (the HUD watches
+			# picked_weapon); the line under PREPARE says it too once the panel is closed.
 			pick_note = "%s IS PICKING THE WEAPON" % bot.display_name
+			hud.watch_weapon_pick(Weapons.PICKABLE, prep_left - 1.0, bot.display_name, pick_cooldowns(), strip)
 			if not online:
-				_bot_pick_t = _rng.randf_range(1.5, 3.5)
+				_bot_pick_t = _rng.randf_range(2.5, 5.0)      # (long enough to see the panel it watches)
 	else:
 		pick_note = "WEAPON: " + String(player.gun().def.name)
-	if round_index == 1 and int(Game.profile.matches) < 3:
+	if round_index == 1 and int(Game.profile.matches) < 1:      # (the profile's first match only)
 		hud.tips_time = 9.0
 	Game.mark("prep started")
+
+
+## The guns on cooldown at this round's pick (gun -> rounds left; none against the target dummy).
+func pick_cooldowns() -> Dictionary:
+	return {} if practice else RoundRules.cooldowns(Weapons.PICKABLE, round_index, picks)
+
+
+## The gun the pick panel starts on and the one taken when nothing is chosen in time: the last one
+## this player picked, or the first free gun when that one rests.
+func preselected_pick() -> String:
+	return legal_pick(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+
+
+## `id` when it may be picked for this round, else the first free gun (both phones alike).
+func legal_pick(id: String) -> String:
+	if practice:
+		return id if Weapons.DEFS.has(id) else Weapons.DEFAULT_PICK
+	return RoundRules.legal_pick(id, Weapons.PICKABLE, round_index, picks)
 
 
 func _i_pick() -> bool:
@@ -455,6 +1019,7 @@ func _i_pick() -> bool:
 func _on_weapon_picked(id: String) -> void:
 	if not Weapons.DEFS.has(id):
 		id = Weapons.DEFAULT_PICK
+	id = legal_pick(id)
 	Game.settings.last_pick = id
 	Game.save_settings()
 	_apply_pick(id)
@@ -462,8 +1027,17 @@ func _on_weapon_picked(id: String) -> void:
 		Game.session.send_event("pick", [id, round_index])
 
 
+## The target dummy: the weapon pick opens again during the fight (the HUD's CHANGE GUN slot), so
+## guns can be compared without leaving the match; both fighters get the new gun at once.
+func repick() -> void:
+	if practice and phase == Phase.FIGHT and not hud.panels.pick_open:
+		hud.open_weapon_pick(Weapons.PICKABLE, _round_gun(), PREP_TIME, _on_weapon_picked)
+
+
 func _apply_pick(id: String) -> void:
 	picked_weapon = id
+	if not practice:
+		picks[RoundRules.pick_round_of(round_index)] = id      # (rests for the next rounds' picks)
 	for f in fighters:
 		f.set_loadout(id)
 	pick_note = "" if _i_pick() else "%s PICKED: %s" % [bot.display_name, String(Weapons.DEFS[id].name)]
@@ -473,46 +1047,66 @@ func _apply_pick(id: String) -> void:
 func _start_fight() -> void:
 	phase = Phase.FIGHT
 	_net_timeup_t = -1.0
-	if not practice and round_index == 1:
-		Game.count_match()
+	if not practice and round_index == 1 and not _counted:
+		Game.count_match(mode)
+		_counted = true
+	if online and session_up():
+		Game.session.note_match(_counted, int(score.player), int(score.bot), mode_name, round_index, RoundRules.picks_text(picks))     # (the session file)
 	if picked_weapon == "" and (round_index - 1) % 2 == 0 and _i_pick():
 		hud.close_weapon_pick()
-		_on_weapon_picked(String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)))
+		_on_weapon_picked(preselected_pick())
+	for f in fighters:
+		if f.awaiting_pick:
+			# The other phone's pick has not come yet (it still counts when it does): meanwhile
+			# the gun the hit checks assume (_round_gun), the same on both phones, never a fight
+			# with the fists only and never a gun from this phone's own settings.
+			f.set_loadout(_round_gun())
 	pick_note = ""
 	map.set_barriers(false)
 	for f in fighters:
 		f.hold_fire = false
 		f.frozen = false
-	time_left = ROUND_TIME
-	elapsed = 0.0
-	zone_radius = zone_start_radius
-	zone_state = "stationary"
+	time_left = round_time()
 	_zone_mesh.visible = not practice
-	_update_zone_mesh()
+	_reset_zone()
+	zone_final = zone_final_for(round_index)
 	Game.mark("match started")
 	if practice:
 		_place_dummy()
 		zone_radius = 999.0
-		hud.show_center("PRACTICE", 2.0, Color(1.0, 0.82, 0.22), 80, "THE DUMMY NEVER GOES DOWN")
-	else:
-		var point := rounds_to_win > 1 and maxi(int(score.player), int(score.bot)) == rounds_to_win - 1
-		hud.show_round_banner(round_index, map_name, "MATCH POINT!" if point else "")
+		hud.show_center(mode_name, 2.0, Color(1.0, 0.82, 0.22), 80, "TARGET DUMMY: IT NEVER GOES DOWN")
+	elif round_index == 1 and _quiet_round != round_index:
+		# (Later rounds show their band at the end of the break, before the prep: nothing covers
+		# the fight's start then. A rejoin into round 1's prep shows none.)
+		hud.show_round_banner(round_index, map_name, round_sub(round_index))
 	Audio.play("countdown_go", 0.0)
+
+
+## The sub-line of round `r`'s band from the score now: FINAL ROUND, MATCH POINT! or "".
+func round_sub(r: int) -> String:
+	return RoundRules.round_sub(r, last_round(), int(score.player), int(score.bot), rounds_to_win)
 
 
 func _physics_process(delta: float) -> void:
 	_apply_room_rules()
 	if online and phase != Phase.END:
 		_net_t += delta
-		if _net_t >= float(Game.session.state_interval):
+		if _net_t >= float(Game.session.state_interval) - 0.002:      # (3 ticks of 1/60 s add up to a hair under 0.05)
+			_back_t -= _net_t
 			_net_t = 0.0
-			Game.session.send_state(RemoteFighter.pack(player, round_index))
+			if not Game.session.rejoining():
+				Game.session.send_state(RemoteFighter.pack(player, round_index))
+			elif _back_t <= 0.0:
+				_back_t = 1.0                # back from being away: the other phone's word first ("sync")
+				Game.session.send_event("back")
 	match phase:
+		Phase.PREP when online and (not _net_begun or _resuming):
+			pass        # online the first prep starts on both phones together (_net_begin), never alone
 		Phase.PREP:
 			if _bot_pick_t > 0.0:
 				_bot_pick_t -= delta
 				if _bot_pick_t <= 0.0:
-					_apply_pick(String(Weapons.PICKABLE[_rng.randi() % Weapons.PICKABLE.size()]))
+					_apply_pick(_bot_choice())
 			prep_left -= delta
 			var n := ceili(prep_left)
 			if prep_left <= 3.0 and n != _last_count and n > 0:
@@ -529,11 +1123,16 @@ func _physics_process(delta: float) -> void:
 			else:
 				time_left -= delta
 				_update_zone(delta)
-				if time_left <= 0.0:
+				if _settle_t >= 0.0:
+					_settle_t -= delta
+					if _settle_t <= 0.0:
+						_net_decide()
+				elif time_left <= 0.0:
 					if online and not Game.session.is_host:
-						# The host's clock decides a time-out; decide alone if its word never comes.
+						# The host's clock decides a time-out ("rend"); decide alone only if its word
+						# never comes (the session ends long before, normally).
 						_net_timeup_t = maxf(_net_timeup_t, 0.0) + delta
-						if _net_timeup_t > 3.0:
+						if _net_timeup_t > 10.0:
 							_timeout()
 					else:
 						_timeout()
@@ -541,16 +1140,30 @@ func _physics_process(delta: float) -> void:
 			_end_t += delta / maxf(Engine.time_scale, 0.01)
 			if _end_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
-			if _end_t > 2.6 and not _result_shown:
+			if _called_off:
+				if _end_t > 2.6 and not _left_scene:
+					_left_scene = true
+					Game.goto_lobby()
+			elif _end_t > results_delay() and not _results_open and (not _awaits_final() or _end_t > RESULTS_DELAY_S + FINAL_WAIT_S):
 				_show_results()
 		Phase.BREAK:
 			_break_t += delta / maxf(Engine.time_scale, 0.01)
 			if _break_t > 1.0 and Engine.time_scale < 1.0:
 				Engine.time_scale = 1.0
 			# Online the host starts the next round; the guest goes on alone if that never comes.
-			var brk := BREAK_TIME + (SPECTATE_EXTRA if player != null and not player.alive else 0.0)
-			if (_break_t >= brk and (not online or Game.session.is_host)) or _break_t >= brk + 3.0:
+			if (_break_t >= BREAK_TIME and (not online or Game.session.is_host)) or _break_t >= BREAK_TIME + 8.0:
 				_next_round()
+
+
+## The bot's pick: any gun not on cooldown.
+func _bot_choice() -> String:
+	var free: Array = []
+	for g: String in Weapons.PICKABLE:
+		if RoundRules.cooldown_left(g, round_index, picks) == 0:
+			free.append(g)
+	if free.is_empty():
+		return legal_pick(Weapons.DEFAULT_PICK)
+	return String(free[_rng.randi() % free.size()])
 
 
 ## Both back at their spawns with full HP, items and ammo for the next round (stats carry over).
@@ -572,8 +1185,8 @@ func _next_round() -> void:
 	_start_prep()
 
 
-## Practice: the bot stands still in the open centre bay, facing the player's spawn, and takes
-## every hit without going down.
+## The target dummy (TRAINING GROUND's DUMMY): the bot stands still in the open centre bay, facing
+## the player's spawn, and takes every hit without going down.
 func _place_dummy() -> void:
 	bot.frozen = true
 	bot.hold_fire = true
@@ -582,46 +1195,114 @@ func _place_dummy() -> void:
 	bot.aim_yaw = atan2(-d.x, -d.z)
 
 
-## Practice: the gun never runs dry (the magazine still needs reloading).
+## Against the target dummy the gun and the sidearm never run dry (the magazine still needs reloading).
 func _refill_practice_ammo() -> void:
 	var w := player.weapon()
 	if not w.infinite() and w.reserve < int(w.def.mag):
 		w.reserve = int(w.def.get("reserve", 0))
 
 
-## Seconds until the zone changes state (for the HUD's "SAFE ZONE SHRINKS IN" text).
+## Stage 2's length (s): RoundRules.STAGE2_S; a SQUAD's is longer (team_arena.gd).
+func stage2_time() -> float:
+	return RoundRules.STAGE2_S
+
+
+## The whole fight of a round (s): stage 1 and stage 2.
+func round_time() -> float:
+	return RoundRules.fight_time(stage2_time())
+
+
+## The stage being fought (1 or 2; the HUD's clock and the checks read it).
+func stage() -> int:
+	return RoundRules.stage_at(elapsed)
+
+
+## What the top clock shows in the fight: the seconds left of the current stage.
+func stage_left() -> float:
+	return RoundRules.stage_left(elapsed, stage2_time())
+
+
+## Seconds until the zone changes state (for the HUD's "SAFE ZONE" strip): to the start of the
+## closing in stage 1, to its end in stage 2.
 func zone_next() -> float:
-	if zone_state == "stationary":
-		return maxf(ZONE_HOLD - elapsed, 0.0)
-	if zone_state == "shrinking":
-		return maxf(ZONE_HOLD + ZONE_SHRINK - elapsed, 0.0)
-	return 0.0
+	if zone_state == "closed":
+		return 0.0
+	return RoundRules.zone_next(elapsed, stage2_time())
+
+
+## Where the zone will be `t` s into this round's fight: [centre, radius] (the bot heads there).
+func zone_at(t: float) -> Array:
+	return [RoundRules.zone_center_at(t, map.zone_center, zone_final, stage2_time()),
+		RoundRules.zone_radius_at(t, zone_start_radius, stage2_time())]
+
+
+## Whether this arena applies the zone's damage to `f` (team_arena.gd: only fighters run here).
+func zone_hurts(f: Fighter) -> bool:
+	return f.alive
+
+
+## Whether stage 1 turns into stage 2 without a word: the 1 vs 1 (online and TRAINING GROUND)
+## announces nothing there (no SAFE ZONE SHRINKS IN n s band, no ZONE SHRINKING line, no beep;
+## the clock just starts stage 2 and the zone closes in); DUO / SQUAD keep them (team_arena.gd).
+## The red OUTSIDE THE SAFE ZONE warning shows in both.
+func quiet_stage_change() -> bool:
+	return true
 
 
 func _update_zone(delta: float) -> void:
-	var to_start := ZONE_HOLD - elapsed
-	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 else ""
-	if elapsed >= ZONE_HOLD:
+	if not rules.zone():
+		zone_warning = ""                # a custom room without the zone: it never closes
+		return
+	var to_start := RoundRules.STAGE1_S - elapsed
+	var quiet := quiet_stage_change()
+	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 and not quiet else ""
+	if elapsed >= RoundRules.STAGE1_S:
 		if zone_state == "stationary":
 			zone_state = "shrinking"
-			hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
-			Audio.play("countdown_beep", -6.0, 0.7)
-		var t := clampf((elapsed - ZONE_HOLD) / ZONE_SHRINK, 0.0, 1.0)
-		zone_radius = lerpf(zone_start_radius, ZONE_MIN, t)
-		if t >= 1.0:
+			if not quiet:
+				hud.show_center("ZONE SHRINKING", 1.6, Color(0.5, 0.75, 1.0), 64)
+				Audio.play("countdown_beep", -6.0, 0.7)
+		var z := zone_at(elapsed)
+		zone_center = z[0]
+		zone_radius = z[1]
+		if RoundRules.zone_t(elapsed, stage2_time()) >= 1.0:
 			zone_state = "closed"
 		_update_zone_mesh()
 	for f in fighters:
-		if f.alive and not in_zone(f.global_position):
+		if zone_hurts(f) and not in_zone(f.global_position):
 			_outside[f] = float(_outside[f]) + delta
 			var o: float = _outside[f]
 			var dps := 5.0 if o < 10.0 else (10.0 if o < 20.0 else 20.0)
-			f.take_damage(dps * delta, "zone", null, f.global_position)
+			f.take_damage(dps * delta, "zone", null, f.global_position, "zone")
 
 
 func _update_zone_mesh() -> void:
 	_zone_mesh.scale = Vector3(zone_radius, 1.0, zone_radius)
 	_zone_mesh.global_position = zone_center + Vector3.UP * 6.0
+
+
+## Where the safe zone closes in round `r`: a random spot of the hall's floor, the last circle inside
+## the walls (MapBuilder.HX / HZ less ZONE_EDGE and a margin) and its centre off the cover (the
+## obstacles), a new one every round. Online every phone gets the same (Cloud.match_seed: the room's
+## key and the round); TRAINING draws it at random. (The start circle, from the map's centre, always
+## holds the final one, and the circles of stage 2 are nested: the centre moves at most 18.9 m in
+## stage 2, less than the 46.5 m the radius shrinks.)
+func zone_final_for(r: int) -> Vector3:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = Game.session.match_seed("zone%d" % r) if online and Game.session != null else _rng.randi()
+	var mx := MapBuilder.HX - ZONE_EDGE - 1.0
+	var mz := MapBuilder.HZ - ZONE_EDGE - 1.0
+	var best := Vector3(map.zone_center.x, 0.0, map.zone_center.z)
+	for i in 16:
+		var p := Vector3(rng.randf_range(-mx, mx), 0.0, rng.randf_range(-mz, mz))
+		var free := true
+		for o: Rect2 in obstacles:
+			if o.grow(1.0).has_point(Vector2(p.x, p.z)):
+				free = false
+				break
+		if free:
+			return p
+	return best
 
 
 func in_zone(p: Vector3) -> bool:
@@ -631,11 +1312,12 @@ func in_zone(p: Vector3) -> bool:
 func _timeout(my_hp := -1.0, their_hp := -1.0) -> void:
 	if phase != Phase.FIGHT:
 		return
+	if online and Game.session.is_host and not _forfeit:
+		_net_decide(true)
+		return
 	if my_hp < 0.0:
 		my_hp = player.hp
 		their_hp = bot.hp
-		if online and Game.session.is_host:
-			Game.session.send_event("timeup", [their_hp, my_hp, round_index])     # as the guest sees it: its HP first
 	var winner: Fighter = null
 	if absf(my_hp - their_hp) >= 0.5:
 		winner = (player as Fighter) if my_hp > their_hp else (bot as Fighter)
@@ -653,59 +1335,301 @@ func _freeze_all() -> void:
 
 func _on_fighter_died(victim: Fighter, killer: Fighter, headshot: bool) -> void:
 	Game.mark("%s eliminated" % ("player" if victim == player else "bot"))
+	if victim == player:
+		_deaths += 1
+	_downs["player" if victim == player else "bot"] = int(_downs["player" if victim == player else "bot"]) + 1
+	var cause := death_cause(victim, killer)
+	_down_cause[victim] = cause
+	if victim == player:
+		_note_eliminated_by(cause, killer)
 	if online and victim == player:
-		Game.session.send_event("died", [headshot])
-	var weapon_icon := ""
-	var weapon_name := "ZONE"
-	if killer and is_instance_valid(killer):
-		weapon_icon = String(killer.weapon().def.icon)
-		weapon_name = String(killer.weapon().def.name)
-	hud.add_kill_feed(killer.display_name if killer else "ZONE", victim.display_name, weapon_name, weapon_icon, headshot, killer == player)
+		Game.session.send_event("died", [headshot and cause == "gun", cause, round_index])
+	if cause == "left":
+		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "LEFT")
+	elif cause == "zone" or cause == "fall":
+		hud.add_kill_feed(victim.display_name, "", "", "", false, false, "ELIMINATED")      # (nobody's kill: no killer)
+	elif cause == "self":
+		hud.add_kill_feed(victim.display_name, victim.display_name, "FRAG", "item_grenade", false, false)
+	else:
+		var frag := cause == "frag"
+		hud.add_kill_feed(killer.display_name, victim.display_name, "FRAG" if frag else String(killer.weapon().def.name),
+			"item_grenade" if frag else String(killer.weapon().def.icon), headshot, killer == player)
 	if phase == Phase.END or phase == Phase.BREAK:
 		return
-	var winner := killer if killer and killer != victim else ((player as Fighter) if victim == bot else (bot as Fighter))
+	if not (killer and is_instance_valid(killer) and killer != victim):
+		killer = null
+	if online and not _forfeit:
+		# The host decides the round (a moment later: a second death that close makes it a draw);
+		# the guest waits for its word.
+		if Game.session.is_host:
+			var trip := _one_way()
+			var late := 0.0 if victim == player else trip
+			_round_deaths["player" if victim == player else "bot"] = [killer, headshot, Time.get_ticks_msec() / 1000.0 - late]
+			if _settle_t < 0.0:
+				_settle_t = DEATH_SETTLE_S + trip - late
+		return
+	var winner := killer if killer else ((player as Fighter) if victim == bot else (bot as Fighter))
 	_end_round(winner, headshot, false, killer)
 
 
+## The ELIMINATED BY card's numbers when the player went down (see eliminated_by).
+func _note_eliminated_by(cause: String, killer: Fighter) -> void:
+	var by: Fighter = killer if killer != null and is_instance_valid(killer) and killer != player else bot
+	var gun_id := String(by.weapon().id) if cause == "gun" and by != null else ""
+	eliminated_by = {"cause": cause, "name": by.display_name if by != null else "",
+		"gun": "FRAG" if cause == "frag" else (String(by.weapon().def.name) if by != null else ""),
+		"gun_id": gun_id, "damage": roundi(float(player.round_taken.get(by, 0.0)))}
+
+
+## What took a fighter out: "gun" (or fists) and "frag" are the other fighter's kill; "zone",
+## "fall", "self" (its own frag) and "left" (it left the match) are nobody's.
+static func death_cause(victim: Fighter, killer: Fighter) -> String:
+	var c := victim.last_hit_cause
+	if c in ["left", "zone", "fall", "self"]:
+		return c
+	if killer == victim:
+		return "self"
+	if killer == null or not is_instance_valid(killer):
+		return "zone"
+	return "frag" if c == "frag" else "gun"
+
+
+## Online, the host: the round as it stands now (the deaths it learned of; at the time-out the
+## higher HP), decided here and sent to the guest ("rend"), which shows exactly this.
+func _net_decide(timed_out := false) -> void:
+	if phase != Phase.FIGHT:
+		return
+	_settle_t = -1.0
+	var me_dead := _round_deaths.has("player")
+	var they_dead := _round_deaths.has("bot")
+	if me_dead and they_dead:
+		# Both down: that close together a draw, else the first one down loses.
+		var dt := float(_round_deaths.player[2]) - float(_round_deaths.bot[2])
+		if absf(dt) > DEATH_SETTLE_S:
+			_round_deaths.erase("bot" if dt < 0.0 else "player")
+			me_dead = dt < 0.0
+			they_dead = not me_dead
+	var winner: Fighter = null
+	var info: Array = [null, false]
+	if me_dead != they_dead:
+		winner = (bot as Fighter) if me_dead else (player as Fighter)
+		info = _round_deaths["player" if me_dead else "bot"]
+		timed_out = false
+	elif me_dead:
+		timed_out = false                # both went down that close: a draw
+	elif absf(player.hp - bot.hp) >= 0.5:
+		winner = (player as Fighter) if player.hp > bot.hp else (bot as Fighter)
+	var killer: Fighter = info[0]
+	var hs := bool(info[1])
+	if timed_out:
+		Game.mark("time up")
+	_end_round(winner, hs, timed_out, killer)
+	_last_rend = [round_index, 1 if winner == player else (-1 if winner == bot else 0),
+		int(score.player), int(score.bot), timed_out, hs, 1 if killer == player else (-1 if killer == bot else 0)]
+	Game.session.send_event("rend", _last_rend)
+	if phase == Phase.END:
+		_send_final()                    # (after its "rend": the guest ends the match with it, then takes these)
+
+
+## The time a message takes from one phone to the other (s), at most 0.5 s: half the measured round
+## trip to it; before that is measured, this phone's round trip to the relay (phone, relay, phone);
+## else 0.15 s.
+func _one_way() -> float:
+	if int(Game.session.peer_rtt) > 0:
+		return clampf(float(Game.session.peer_rtt) / 2000.0, 0.0, 0.5)
+	if int(Game.session.relay_rtt) > 0:
+		return clampf(float(Game.session.relay_rtt) / 1000.0, 0.0, 0.5)
+	return 0.15
+
+
+## The guest's prep starts when the host's "begin" / "round" arrives, the one-way trip late: it is
+## shortened by that, so both fights (and their zones) start about together, on the host's clock.
+func _follow_host_clock() -> void:
+	if phase == Phase.PREP:
+		prep_left = maxf(prep_left - _one_way(), 0.5)
+
+
+## Whether the match is over after round `r` at `mine` : `theirs` rounds won, first to `goal`: a
+## side reached it, or that was its last round (the best-of, 2 x goal - 1 rounds, at most
+## MAX_ROUNDS; drawn rounds count, so rounds that keep ending in draws still end it).
+static func match_over_after(r: int, mine: int, theirs: int, goal: int) -> bool:
+	return mine >= goal or theirs >= goal or r >= mini(2 * goal - 1, MAX_ROUNDS)
+
+
+## The round this match ends with at the latest (FINAL ROUND on its banner).
+func last_round() -> int:
+	return mini(2 * rounds_to_win - 1, MAX_ROUNDS)
+
+
 ## A round is decided (an elimination, or the time-out: winner null = a draw). The score goes up;
-## the match is over at rounds_to_win wins, after the last round of the best-of (2 x rounds_to_win
-## - 1, drawn rounds count) or when the other phone left; otherwise the next round follows a break.
-func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: Fighter = null) -> void:
-	if winner != null:
+## the match is over once match_over_after says so or when the other phone left; otherwise the next
+## round follows a break. Online the host decides (_net_decide) and the guest shows its word.
+func _end_round(winner: Fighter, headshot := false, timed_out := false, killer: Fighter = null, synced := false) -> void:
+	_settle_t = -1.0
+	close_pause()                        # (online the menu is an overlay: the round's end closes it)
+	if winner != null and not synced and not _forfeit:      # (a forfeit keeps the real score)
 		score["player" if winner == player else "bot"] += 1
 	var mine := int(score.player)
 	var theirs := int(score.bot)
-	var decided := practice or _forfeit or mine >= rounds_to_win or theirs >= rounds_to_win or round_index >= 2 * rounds_to_win - 1
+	if online and session_up():
+		Game.session.note_match(_counted, mine, theirs, mode_name, round_index + 1, RoundRules.picks_text(picks))
+	var decided := practice or _forfeit or match_over_after(round_index, mine, theirs, rounds_to_win)
 	var line := "%d  -  %d" % [mine, theirs]
 	_freeze_all()
 	if decided:
-		phase = Phase.END
-		_draw = mine == theirs and not _forfeit
-		_winner = null if _draw else ((player as Fighter) if mine > theirs or _forfeit else (bot as Fighter))
-		Game.mark("match over: " + ("draw" if _draw else ("won" if _winner == player else "lost")))
+		_conclude()
 	else:
 		phase = Phase.BREAK
 		_break_t = 0.0
 		Game.mark("round over")
 	if not decided:
-		hud.show_round_result("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs)
+		hud.show_break("DRAW" if winner == null else ("VICTORY" if winner == player else "DEFEAT"), mine, theirs,
+			0 if winner == null else (1 if winner == player else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
-		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line)
-	elif _winner == player:
-		hud.show_center("VICTORY!", 2.5, UI.ACCENT, 110, line)
+		hud.show_result("TIME UP", ("DRAW" if winner == null else "HIGHER HP WINS: " + winner.display_name) + "    " + line, 0.0)
+	elif winner != player and winner != null and not player.alive:
+		hud.show_result("DEFEAT", "ELIMINATED %s    %s" % [_how_down(player, killer), line])
 	else:
-		hud.show_center("ELIMINATED", 2.5, UI.BAD, 100, "by %s    %s" % [killer.display_name if killer else "the zone", line])
+		_show_match_end()
+	# The kill plays at normal speed (the reference has no slow motion): the kill feed line, the
+	# small badge and the tag over the body, then the break's steps.
 	if not timed_out:
-		Engine.time_scale = 0.35
-		if winner == player:
+		if killer == player and winner == player:
 			hud.kill_banner(bot.display_name, headshot)
+		elif winner == player and not bot.alive:
+			# Nobody's kill (the zone, a fall, their own frag): no elimination badge, a line that says
+			# what took them out instead (a player who left: OPPONENT LEFT says it).
+			var cause := String(_down_cause.get(bot, death_cause(bot, killer)))
+			if cause in HUD.OUT_LINES:
+				hud.out_banner(bot.display_name, cause)
 	if winner == player:
 		Audio.play("victory_sting", 0.0)
 	elif winner != null:
 		Audio.play("defeat_sting", 0.0)
-	if decided and _winner == player:
+
+
+## How the player went down, for the ELIMINATED line: by the killer, or in the zone, a fall or by
+## their own frag.
+func _how_down(victim: Fighter, killer: Fighter) -> String:
+	match String(_down_cause.get(victim, death_cause(victim, killer))):
+		"gun", "frag":
+			return "by %s" % (killer.display_name if killer != null and is_instance_valid(killer) else bot.display_name)
+		"fall":
+			return "in a fall"
+		"self":
+			return "by your own frag"
+	return "in the zone"
+
+
+## The match is over (phase END): the most rounds won wins, level is a DRAW, a forfeit is a win.
+func _conclude() -> void:
+	phase = Phase.END
+	_end_t = 0.0
+	var mine := int(score.player)
+	var theirs := int(score.bot)
+	_draw = mine == theirs and not _forfeit
+	_winner = null if _draw else ((player as Fighter) if mine > theirs or _forfeit else (bot as Fighter))
+	Game.mark("match over: " + ("draw" if _draw else ("won" if _winner == player else "lost")))
+	if _winner == player:
 		player.model.play_victory()
 		player.victory_cam = true
+
+
+## The match's end on the result band near the top (as a round's end): VICTORY!, DEFEAT or DRAW
+## with the rounds.
+func _show_match_end() -> void:
+	var line := "%d  -  %d" % [int(score.player), int(score.bot)]
+	if _draw:
+		hud.show_result("DRAW", line)
+	elif _winner == player:
+		hud.show_result("VICTORY!", line)
+	else:
+		hud.show_result("DEFEAT", line)
+
+
+## Online, the guest: the host's "fin" says the match is over while this phone still waits for a
+## next round (or for the last round's word): it ends here too, with the host's score.
+func _conclude_from_host() -> void:
+	score.player = int(_their_final.guest_score)
+	score.bot = int(_their_final.host_score)
+	close_pause()
+	_freeze_all()
+	_conclude()
+	_show_match_end()
+	_send_final()
+
+
+## Online, once the match is over: this phone's own player's numbers to the other phone ("fin":
+## [round, match time, host's HP, guest's HP, host's rounds, guest's rounds, kills, damage,
+## headshots, shots, hits]; time, HP and rounds only from the host, -1 from the guest), so both
+## results show the same table.
+func _send_final() -> void:
+	if not online or _final_sent or _net_left or not Game.session.in_session:
+		return
+	_final_sent = true
+	var st := player.stats
+	var h := _net_host
+	Game.session.send_event("fin", [round_index, snappedf(match_time, 0.01) if h else -1.0, _shown_hp(player) if h else -1,
+		_shown_hp(bot) if h else -1, int(score.player) if h else -1, int(score.bot) if h else -1,
+		int(st.kills), roundi(st.damage), int(st.headshots), int(st.shots), int(st.hits)])
+
+
+## A "fin" from the other phone, checked: whole numbers in range ({} when anything is off). From the
+## host (`from_host`) the time, both HP and both scores must be there too.
+static func final_from(data: Array, from_host: bool) -> Dictionary:
+	if data.size() != 11:
+		return {}
+	for v: Variant in data:
+		if not (v is int or v is float) or not is_finite(float(v)):
+			return {}
+	var n := func(i: int) -> int: return roundi(float(data[i]))
+	var f := {"time": float(data[1]), "host_hp": n.call(2), "guest_hp": n.call(3), "host_score": n.call(4), "guest_score": n.call(5),
+		"kills": n.call(6), "damage": n.call(7), "headshots": n.call(8), "shots": n.call(9), "hits": n.call(10)}
+	var ok := int(f.kills) >= 0 and int(f.kills) <= 2 * MAX_ROUNDS and int(f.damage) >= 0 and int(f.damage) <= 100000 \
+		and int(f.headshots) >= 0 and int(f.shots) >= 0 and int(f.shots) <= 100000 and int(f.hits) >= 0 \
+		and int(f.hits) <= int(f.shots) and int(f.headshots) <= int(f.hits)
+	if from_host:
+		ok = ok and float(f.time) >= 0.0 and float(f.time) <= 3600.0 and int(f.host_hp) >= 0 and int(f.host_hp) <= int(Fighter.MAX_HP) \
+			and int(f.guest_hp) >= 0 and int(f.guest_hp) <= int(Fighter.MAX_HP) and int(f.host_score) >= 0 \
+			and int(f.host_score) <= MAX_ROUNDS and int(f.guest_score) >= 0 and int(f.guest_score) <= MAX_ROUNDS
+	return f if ok else {}
+
+
+## A fighter's HP as the results show it: 0 once down; online the guest shows the host's numbers
+## (those it decided the rounds with).
+func _shown_hp(f: Fighter) -> int:
+	if online and not _net_host and _their_final.has("host_hp") and int(_their_final.host_hp) >= 0:
+		return int(_their_final.guest_hp if f == player else _their_final.host_hp)
+	return roundi(f.hp) if f.alive else 0
+
+## The results' REMATCH: tells the other phone ("rm", with whether this phone takes their
+## challenges: `takes`) while the match's session is still up; false when it is not (the results
+## then send a fresh challenge).
+func ask_rematch(takes := true) -> bool:
+	if not session_up() or phase != Phase.END:
+		return false
+	if not _rematch_sent:
+		_rematch_sent = true
+		Game.session.send_event("rm", [takes])
+	return true
+
+
+## Whether this phone hosted the online match (its results send the fresh challenge of a rematch).
+func hosted() -> bool:
+	return online and _net_host
+
+
+## Whether the online match's session is still up (both phones on their results).
+func session_up() -> bool:
+	return online and not _net_left and Game.session != null and Game.session.in_session
+
+
+
+## Seconds from the match's end (phase END) to its results.
+func results_delay() -> float:
+	if _invalid:
+		return RESULTS_DELAY_VOID_S
+	return RoundRules.results_at(hud != null and hud.result_won())
 
 
 func _on_tampered(reason: String) -> void:
@@ -725,6 +1649,7 @@ func on_gunshot(shooter: Fighter) -> void:
 			(f as Bot).hear(shooter.global_position, 1.0)
 	if shooter != player and hud:
 		hud.reveal(shooter, 2.5)
+		hud.shot_heard(shooter)          # (the minimap: a fading mark where it fired, out of sight)
 
 
 func on_footstep(f: Fighter) -> void:
@@ -742,53 +1667,132 @@ func shake_camera(pos: Vector3, amount: float) -> void:
 		player.add_shake(amount * clampf(1.0 - d / 25.0, 0.0, 1.0))
 
 
-## Rows for the in-match scoreboard: you first, then the bot.
+## Online the results wait (FINAL_WAIT_S at most) for the other phone's own numbers ("fin"), so
+## both show the same table; not after a forfeit or once the other phone is gone.
+func _awaits_final() -> bool:
+	return online and not _forfeit and not _invalid and _their_final.is_empty() and not _net_left and Game.session.in_session
+
+
+## The player id behind fighter `f` that a friend request can go to: the opponent of an internet
+## match (not one without internet), else "" (a bot, this phone's own player).
+func watched_player_id(f: Fighter) -> String:
+	if not online or f == null or f != bot or Game.local_match() or not Game.is_player_id(_enemy_id):
+		return ""
+	return _enemy_id
+
+
+## Rows for the in-match scoreboard and the results: you first, then the opponent. Online, once the
+## match is over, the opponent's row has the numbers its own phone sent ("fin"), and the guest shows
+## the host's HP (_shown_hp). "deaths": the times this phone saw that fighter eliminated (K/D/A).
 func scoreboard_rows() -> Array:
 	var rows := []
 	for f in [player, bot]:
 		var st: Dictionary = f.stats
+		if f == bot and not _their_final.is_empty():
+			st = _their_final
 		var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
-		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": roundi(f.hp),
-			"kills": int(st.kills), "damage": int(st.damage), "headshots": int(st.headshots),
+		rows.append({"name": f.display_name, "me": f == player, "alive": f.alive, "hp": _shown_hp(f), "hp_max": f.hp_max,
+			"kills": int(st.kills), "damage": roundi(st.damage), "headshots": int(st.headshots),
 			"accuracy": roundi(acc), "rounds": int(score["player" if f == player else "bot"]),
-			"weapon": String(f.gun().def.name)})
+			"weapon": String(f.gun().def.name), "deaths": int(_downs["player" if f == player else "bot"])})
 	return rows
 
 
 # ---------------------------------------------------------------- results / pause
 
 func _show_results() -> void:
-	# Read the masked values first: a tamper flag raised by that read still voids the match.
-	var hp_left := roundi(player.hp)
-	_result_shown = true
+	close_pause()
 	Engine.time_scale = 1.0
-	var won := _winner == player and not _draw and not _invalid
-	var st := player.stats
-	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
-	var xp := 0
-	if not _invalid:
-		# capped: one opponent, at most one kill per round
-		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
-	result = {
-		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": int(st.damage),
-		"headshots": int(st.headshots), "accuracy": acc, "time": match_time, "xp": xp, "enemy": bot.display_name,
-		"mode": MODE_NAME, "map": map_name, "weapon": String(player.gun().def.name),
-		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
-		"difficulty": Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)], "taken": int(st.taken),
-	}
-	if not _invalid:
-		Game.record_match(result)
+	_results_open = true
+	_record_decided()
 	var screen := ResultsScreen.new()
 	pause_layer.add_child(screen)
 	screen.setup(result)
 	Game.mark("results shown")
 
 
+## The decided match goes into the profile once (Game.record_match; online the session file goes
+## with it: nothing left to rejoin or record later): when the results open, or sooner when the app
+## is sent to the background or closed during the wait before them (RESULTS_DELAY_S), so a match
+## decided there is never lost, nor recorded as LEFT on the next launch. The screen still opens.
+func _record_decided() -> void:
+	if _result_shown:
+		return
+	result = _final_result()
+	if not _invalid and _counted:          # (a match is counted when its first fight begins)
+		Game.record_match(result)
+	if online and Game.session != null:
+		Game.session.match_recorded()
+
+
+## The decided match's result (phase END); from here on it counts as shown (_result_shown).
+func _final_result() -> Dictionary:
+	# Read the masked values first: a tamper flag raised by that read still voids the match.
+	var hp_left := roundi(player.hp)
+	hp_left = _shown_hp(player)          # (0 once down; the guest: the host's number)
+	_result_shown = true
+	var won := _winner == player and not _draw and not _invalid
+	var st := player.stats
+	var xp := 0
+	if not _invalid and _counted:
+		# capped: one opponent, at most one kill per round
+		xp = 40 + (120 if won else 0) + mini(int(st.kills), 2 * Game.ROUNDS_TO_WIN - 1) * 30 + mini(int(float(st.damage) / 4.0), 250) + mini(int(st.headshots), 25) * 8
+	return _match_result(won, xp, hp_left)
+
+
+## The match as the results screen and Game.record_match read it (ResultsScreen.setup). "difficulty"
+## is the bot's level, or ONLINE (LOCAL: PLAY WITHOUT INTERNET) when the opponent is another player;
+## "local" marks a match on the local network (HISTORY shows it); "opponent_left": the other player
+## left during the match (a forfeit win). Online the guest's time is the host's ("fin").
+func _match_result(won: bool, xp: int, hp_left: int) -> Dictionary:
+	var st := player.stats
+	var acc := 0.0 if int(st.shots) == 0 else float(st.hits) / float(st.shots) * 100.0
+	var t := match_time
+	if online and not _net_host and float(_their_final.get("time", -1.0)) >= 0.0:
+		t = float(_their_final.time)
+	return {
+		"won": won, "draw": _draw, "invalid": _invalid, "kills": int(st.kills), "damage": roundi(st.damage),
+		"headshots": int(st.headshots), "accuracy": acc, "time": t, "xp": xp, "enemy": bot.display_name,
+		"mode": mode_name, "mode_id": mode, "map": map_name, "weapon": String(player.gun().def.name),
+		"score_player": int(score.player), "score_bot": int(score.bot), "hp_left": hp_left,
+		"difficulty": ("LOCAL" if Game.local_match() else "ONLINE") if online else Game.DIFFICULTY_NAMES[int(Game.settings.difficulty)],
+		"taken": int(st.taken), "shots": int(st.shots), "hits": int(st.hits), "deaths": _deaths, "enemy_id": _enemy_id,
+		"local": online and Game.local_match(), "opponent_left": _forfeit,
+	}
+
+
+## QUIT MATCH (the pause menu) leaves a counted match before its results: Game.count_match counted
+## it when its first fight began, so it goes into the profile now as LEFT, a defeat, with what was
+## played so far (rounds, kills, damage, time; no XP): HISTORY then shows the match that CAREER
+## counts. A match already decided (online the fight goes on under the pause menu) keeps its own
+## result. Not the target dummy (never counted), a voided match or one whose result is in.
+func record_left() -> void:
+	if not _counted or _result_shown or _invalid:
+		return
+	if online and Game.session != null:
+		Game.session.match_recorded()      # (the session file goes with the result recorded here)
+	if phase == Phase.END:
+		result = _final_result()
+		if not _invalid:
+			Game.record_match(result)
+		return
+	_result_shown = true
+	var r := _match_result(false, 0, roundi(player.hp))
+	r.left = true
+	Game.record_match(r)
+	Game.mark("match left")
+
+
+## The pause menu, once: online the tree is not paused, so an open menu is what says it is open (a
+## back press reaches it, and it closes; switching apps with it open does not stack a second one).
 func open_pause() -> void:
 	if phase == Phase.END or get_tree().paused:
 		return
+	for c in pause_layer.get_children():
+		if c is PauseMenu and not c.is_queued_for_deletion():
+			return
 	hud.release_all()
-	if not online:                      # a Wi-Fi match keeps running on the other phone
+	if not online:                      # an online match keeps running on the other phone
 		get_tree().paused = true
 	var menu := PauseMenu.new()
 	pause_layer.add_child(menu)
@@ -800,10 +1804,25 @@ func open_pause() -> void:
 		hud.reload_layout())
 
 
+## Closes an open pause menu (online it is an overlay: the end of a round or of the match closes it).
+func close_pause() -> void:
+	if pause_layer == null:
+		return
+	for c in pause_layer.get_children():
+		if c is PauseMenu and not c.is_queued_for_deletion():
+			c.call("_close")
+
+
 func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_CLOSE_REQUEST] and phase == Phase.END and not _called_off \
+			and not _left_scene and is_instance_valid(player):
+		_record_decided()                  # (the app may never come back to open the results)
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if phase != Phase.END:
 			open_pause()
 	elif what == NOTIFICATION_APPLICATION_PAUSED:
 		if phase == Phase.FIGHT and not get_tree().paused:
-			open_pause()
+			if online:
+				hud.release_all()       # the match runs on: a returning player sees it, not a menu
+			else:
+				open_pause()

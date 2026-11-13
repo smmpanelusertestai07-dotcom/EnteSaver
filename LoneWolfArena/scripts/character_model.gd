@@ -1,12 +1,14 @@
 class_name CharacterModel
 extends Node3D
-## Visual character: loads the rigged GLB (Blender/MPFB), merges the extra animation GLB
-## (reload, pump, heal, throw, prone), drives an AnimationTree (locomotion scaled to the real
-## speed, crouch and prone layers, jump, upper-body actions), outfit bundles, upper-body aim
-## and the held weapon. Falls back to a simple procedural mannequin if the GLB is missing.
+## Visual character: loads the rigged GLB (Blender/MPFB), merges the extra animation GLBs
+## (anims_extra: reload, pump, heal, throw, prone, fists, long-stride run; anims_extra2, made by
+## tools/anim/anim_extra2.py: the gun carried low at the hip, the sprint), drives an AnimationTree
+## (locomotion scaled to the real speed, the carry and sprint layers, crouch and prone layers,
+## jump, upper-body actions), outfit bundles, upper-body aim and the held weapon. Falls back to a
+## simple procedural mannequin if the GLB is missing.
 
 const GLB := "res://assets/character/character.glb"
-const EXTRA_GLB := "res://assets/character/anims_extra.glb"
+const EXTRA_GLBS := ["res://assets/character/anims_extra.glb", "res://assets/character/anims_extra2.glb"]
 const MANIFEST := "res://assets/character/manifest.json"
 
 const BUNDLE_INFO := [
@@ -17,13 +19,37 @@ const BUNDLE_INFO := [
 	{"id": "royal", "name": "ROYAL GOLD", "rarity": "legendary", "desc": "White and gold. Pure flex."},
 ]
 const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "crouch_idle", "crouch_fwd", "lobby_idle",
-	"victory", "heal", "prone_idle", "prone_fwd", "runx_fwd", "runx_back", "runx_left", "runx_right"]
+	"victory", "heal", "prone_idle", "prone_fwd", "runx_fwd", "runx_back", "runx_left", "runx_right", "carry_idle",
+	"sprint_fwd", "victory_pose"]
 ## Speeds (m/s) at which the in-place cycles were authored; playback is scaled to the real speed.
 ## The long-stride runx_* cycles (anims_extra) replace the base run_* jog when present.
 const RUN_AUTHORED := 2.0
 const RUNX_AUTHORED := 5.0
 const CROUCH_AUTHORED := 1.0
 const PRONE_AUTHORED := 0.30
+## sprint_fwd (anims_extra2): long strides, a strong forward lean, the arms pumping with the gun low.
+const SPRINT_AUTHORED := 5.5
+## The reference's hip carry: standing (idle, walk, run) the gun hangs low in the right hand
+## (carry_idle at rest, carry_run_a/b on the arms while moving) until the fighter fires or aims
+## (raise_gun / aiming); it goes back down READY_HOLD s after the last shot.
+const READY_HOLD := 2.0
+## jump_air (anims_extra2): a jump seeks it to 0 (take-off, tuck, legs reaching down, then held);
+## leaving the ground without a jump (a ledge) seeks it to JUMP_FALL. jump_land plays on a
+## touch-down from a real fall while (nearly) standing still; moving, the knees give through the
+## crouch dip (land_dip), which keeps the legs in step.
+const JUMP_FALL := 0.55
+const LAND_CLIP_MAX_SPEED := 1.5
+## prone_up (1 s): standing up from prone while not moving; moving or a shot cuts it short.
+const PRONE_UP_MAX_SPEED := 0.8
+const LOBBY_GESTURES := ["lobby_hip", "lobby_shift", "lobby_look"]
+const CARRY_BONES := ["clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
+## The moving cycle has the full blend weight from this share of the stance's base speed; below it
+## it is mixed with the idle, which shortens the stride by the same factor.
+const FULL_BLEND := 0.6
+## After a fall the knees give: a short dip toward the crouch pose; hops shorter than LAND_MIN_AIR
+## (a stair edge, a slope's flicker) land without one.
+const LAND_TIME := 0.34
+const LAND_MIN_AIR := 0.22
 ## Minimum time between two hit flinches, so automatic fire does not lock the upper body.
 const FLINCH_GAP := 0.6
 ## Medkit pack held in the left hand while healing (the clip presses it to the belly): offset in
@@ -89,7 +115,16 @@ var _prone_amt := 0.0
 var _air := 0.0
 var _heal_amt := 0.0
 var _fists_amt := 0.0
-var _holster: Node3D           # the gun on the back while the fists are out
+var _fwd_sign := 1.0                    # -1: crouch-walk / crawl play backwards (backing up)
+var _air_time := 0.0
+var _land_left := 0.0
+var _land_peak := 0.0
+var _holster: Node3D           # the gun on the back while the fists (or the sidearm) are out
+var _holster_model := ""
+## The round's gun's model (Fighter.set_loadout): on the back whenever another weapon (the sidearm,
+## the fists) is in hand. "" (a model with no kit: the lobby, the results): the gun last in hand
+## goes on the back while the hands are empty.
+var back_model := ""
 var _healing := false
 var _aim_dir := Vector3.FORWARD
 var _kick := 0.0
@@ -106,7 +141,41 @@ var _hand_to_gun_ready := false
 var _pending_equip: Array = []    # [model, tint]: swapped in at the lowest point of the swap clip
 var _kit: Node3D                  # medkit in the left hand while healing (built on first heal)
 var _equip_at := 0.0
+## The lobby's idle (play_lobby): lobby_idle at a pace that varies a little, and every few seconds
+## a gesture: the head looks round to one side and back, or (cheer) the arms go up once.
+var _lobby := false
+var _lobby_cheer := false
+var _gesture_in := 0.0
+var _cheer_left := 0.0
+var _look := 0.0
+var _look_to := 0.0
+var _look_hold := 0.0
+## In a match, on top of the clips: the body leans into a turn while it runs (a roll about the feet,
+## from the change of facing) and forward while it sprints (sprint: set by the fighter each tick).
+const LEAN_PER_TURN := 0.045     # rad of roll per rad/s of turn at a full run
+const LEAN_MAX := 0.12
+const SPRINT_LEAN := 0.14        # rad the chest bends forward at a sprint
+var sprint := false
+var _lean := 0.0
+var _sprint_lean := 0.0
+var _last_yaw := INF
 var _next_flinch := 0.0
+## Set by the fighter each tick (Fighter.ads): scoped in, the gun stays up.
+var aiming := false
+var _ready_until := 0.0      # the gun is up (aim pose) until then
+var _carry := 0.0            # 0 = aim pose, 1 = the gun carried low (arms layer and idle)
+var _carry_gun := 0.0        # how far the gun follows the hand instead of the aim (carry, sprint)
+var _sprint_amt := 0.0
+## The aim pose's muzzle, from spine_03 in the aim's frame (looking along _aim_dir), learnt standing
+## with the arms really up: muzzle_position while the arms are not, so it follows stance and pitch.
+var _aim_muzzle := Vector3.ZERO
+var _aim_muzzle_ok := false
+var _jumped := false              # on_jump since the last time on the floor
+var _was_floor := true
+var _land_clip := false           # this touch-down plays jump_land (no crouch dip)
+var _last_stance := -1
+var _prone_up_until := 0.0
+var _gesture_n := 0               # the lobby's gestures alternate: a look round, then a clip
 
 
 static func manifest() -> Dictionary:
@@ -126,25 +195,31 @@ static func bundle_info(id: String) -> Dictionary:
 	return BUNDLE_INFO[0]
 
 
-## Animations from anims_extra.glb (loaded once, shared by every character).
+## Animations from the EXTRA_GLBS (loaded once, shared by every character).
 static func extra_animations() -> Dictionary:
 	if not _extra_loaded:
 		_extra_loaded = true
-		if ResourceLoader.exists(EXTRA_GLB):
-			var ps: PackedScene = load(EXTRA_GLB)
-			if ps:
-				var inst := ps.instantiate()
-				for ap: AnimationPlayer in inst.find_children("*", "AnimationPlayer", true, false):
-					for a_name in ap.get_animation_list():
-						var a := ap.get_animation(a_name)
+		for path: String in EXTRA_GLBS:
+			if not ResourceLoader.exists(path):
+				continue
+			var ps: PackedScene = load(path)
+			if ps == null:
+				continue
+			var inst := ps.instantiate()
+			for ap: AnimationPlayer in inst.find_children("*", "AnimationPlayer", true, false):
+				for a_name in ap.get_animation_list():
+					var a := ap.get_animation(a_name)
+					# (the long-stride runs were made with the base clips' toe slip: fixed like them)
+					if not String(a_name).begins_with("runx_"):
 						a.set_meta("toes_fixed", true)
-						_extra_anims[String(a_name)] = a
-				inst.free()
+					_extra_anims[String(a_name)] = a
+			inst.free()
 	return _extra_anims
 
 
 func setup(bundle_id: String, with_weapon := true) -> void:
 	show_weapon = with_weapon
+	_ready_until = Time.get_ticks_msec() / 1000.0 + 0.5     # (the first frames learn the aim pose's grip)
 	if ResourceLoader.exists(GLB):
 		_load_glb()
 	if skeleton == null:
@@ -191,6 +266,7 @@ func _load_glb() -> void:
 		_build_tree()
 	aim_mod = AimSpineModifier.new()
 	aim_mod.name = "AimSpine"
+	set_process(false)                  # (only the lobby's idle has per-frame work of its own)
 	var chain: PackedInt32Array = []
 	var w: PackedFloat32Array = []
 	for role in ["spine1", "spine2", "spine3"]:
@@ -201,6 +277,11 @@ func _load_glb() -> void:
 		w.append(share)
 	aim_mod.bones = chain
 	aim_mod.weights = w
+	# The look round: a little in the chest, most in the neck and the head.
+	for pair in [["spine2", 0.15], ["spine3", 0.15], ["neck", 0.3], ["head", 0.4]]:
+		if bone_idx.has(pair[0]):
+			aim_mod.twist_bones.append(bone_idx[pair[0]])
+			aim_mod.twist_weights.append(float(pair[1]))
 	skeleton.add_child(aim_mod)
 	skeleton.skeleton_updated.connect(_on_skeleton_updated)
 
@@ -217,7 +298,8 @@ func _detect_track_prefix() -> void:
 ## The base clips in character.glb bend the toes the wrong way in heel-up frames (a sign slip in
 ## tools/character/animate.py legs(); the toe tips went up to 12 cm into the floor while running).
 ## Flips each ball bone's rotation about its own X axis, once per clip (the clips are shared by
-## every character). Clips from anims_extra.glb are authored right and carry the same mark.
+## every character). Clips from the extra GLBs are authored right and carry the same mark, except
+## anims_extra's runx_* cycles, made with the same slip (their toe tips went 6 cm into the floor).
 func _fix_base_toes() -> void:
 	var balls := {}
 	for b in ["ball_l", "ball_r"]:
@@ -290,10 +372,110 @@ func _fix_materials(mi: MeshInstance3D) -> void:
 			mi.set_surface_override_material(s, sm)
 
 
+## ENEMY OUTLINE (round 8): an inverted hull drawn after each outer body surface (next_pass) in
+## red: unshaded, front faces culled, pushed out along the normals a few mm and at least about
+## 1 px on screen, so a dark outfit on a dark container still reads. Only the skin (Body_*) and
+## outfit (Outfit_*) meshes get it, never the eyes, brows, lashes, hair or any alpha-cut surface
+## (OUTLINE_SKIP). Its depth is pushed back depth_back_m (screen position unchanged), so the
+## hull shows only against what lies well behind the fighter: never through its own face, fingers
+## or clothes. The arena turns it on for the other side's fighters only (never teammates, never
+## the lobby or the results).
+const OUTLINE_SHADER := """
+shader_type spatial;
+render_mode unshaded, cull_front, shadows_disabled, depth_draw_opaque, fog_disabled;
+uniform vec4 color : source_color = vec4(0.95, 0.12, 0.1, 1.0);
+uniform float grow_m = 0.0025;
+uniform float min_px = 1.0;
+uniform float depth_back_m = 0.12;
+void vertex() {
+	VERTEX += NORMAL * grow_m;
+	vec4 view = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
+	vec4 clip = PROJECTION_MATRIX * view;
+	vec3 n = mat3(MODELVIEW_MATRIX) * NORMAL;
+	vec2 dir = (PROJECTION_MATRIX * vec4(n, 0.0)).xy;
+	if (length(dir) > 0.0001) {
+		clip.xy += normalize(dir) * min_px * (VIEWPORT_SIZE.y / 720.0) * 2.0 / VIEWPORT_SIZE * clip.w;
+	}
+	// Depth as if the hull sat depth_back_m further away (x/y unchanged): it loses to the
+	// fighter's own nearby surfaces and wins only against the background.
+	vec4 back = PROJECTION_MATRIX * vec4(view.xy, view.z - depth_back_m, 1.0);
+	clip.z = back.z / back.w * clip.w;
+	POSITION = clip;
+}
+void fragment() {
+	ALBEDO = color.rgb;
+}
+"""
+static var _outline_mat: ShaderMaterial
+var outlined := false
+
+
+static func outline_material() -> ShaderMaterial:
+	if _outline_mat == null:
+		var sh := Shader.new()
+		sh.code = OUTLINE_SHADER
+		_outline_mat = ShaderMaterial.new()
+		_outline_mat.shader = sh
+		_outline_mat.render_priority = -1
+	return _outline_mat
+
+
+## Meshes that never carry the outline (small inner parts and alpha-cut cards: a hull round them
+## would ring the eyes or paint the brows red).
+const OUTLINE_SKIP := ["Eyes", "Eyebrows", "Eyelashes", "Hair", "Teeth", "Tongue"]
+
+
+## True for a mesh that forms the fighter's outer silhouette (skin or outfit) and may be outlined.
+static func outline_mesh_ok(mesh_name: String) -> bool:
+	for k: String in OUTLINE_SKIP:
+		if mesh_name.begins_with(k):
+			return false
+	return mesh_name.begins_with("Body_") or mesh_name.begins_with("Outfit_")
+
+
+## Turns the enemy outline on or off on the outer body surfaces (weapons, kit, eyes, brows, lashes,
+## hair and alpha-cut surfaces stay plain).
+func set_outline(on: bool) -> void:
+	if on == outlined:
+		return
+	outlined = on
+	var mat: Material = outline_material() if on else null
+	for n in meshes:
+		var mi: MeshInstance3D = meshes[n]
+		if mi == null or mi.mesh == null:
+			continue
+		var ok := outline_mesh_ok(String(n))
+		for i in mi.mesh.get_surface_count():
+			var m := mi.get_surface_override_material(i)
+			if m is BaseMaterial3D:
+				var bm := m as BaseMaterial3D
+				bm.next_pass = mat if ok and bm.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED else null
+	if fallback:
+		for c in find_children("*", "MeshInstance3D", true, false):
+			var fm := (c as MeshInstance3D).material_override
+			if fm is BaseMaterial3D and c != weapon_node and not (weapon_node != null and weapon_node.is_ancestor_of(c)):
+				(fm as BaseMaterial3D).next_pass = mat
+
+
 func _anim_node(a_name: String) -> AnimationNodeAnimation:
 	var n := AnimationNodeAnimation.new()
 	n.animation = StringName(a_name if anim.has_animation(a_name) else "idle")
 	return n
+
+
+## The locomotion's rest point: the rifle-ready idle, or (carry, see READY_HOLD) the relaxed
+## carry_idle with the gun low; parameters/loco/idle/carry/blend_amount.
+func _idle_mix() -> AnimationRootNode:
+	if not anim.has_animation("carry_idle"):
+		return _anim_node("idle")
+	var bt := AnimationNodeBlendTree.new()
+	bt.add_node("ready", _anim_node("idle"), Vector2(0, 0))
+	bt.add_node("relaxed", _anim_node("carry_idle"), Vector2(0, 150))
+	bt.add_node("carry", AnimationNodeBlend2.new(), Vector2(200, 50))
+	bt.connect_node("carry", 0, "ready")
+	bt.connect_node("carry", 1, "relaxed")
+	bt.connect_node("output", 0, "carry")
+	return bt
 
 
 func _filter(node: AnimationNode, bones: Array) -> void:
@@ -321,7 +503,7 @@ func _build_tree() -> void:
 	var loco := AnimationNodeBlendSpace2D.new()
 	var run := "runx" if anim.has_animation("runx_fwd") else "run"
 	_run_authored = RUNX_AUTHORED if run == "runx" else RUN_AUTHORED
-	loco.add_blend_point(_anim_node("idle"), Vector2.ZERO, -1, &"idle")
+	loco.add_blend_point(_idle_mix(), Vector2.ZERO, -1, &"idle")
 	loco.add_blend_point(_anim_node(run + "_fwd"), Vector2(0, 1), -1, &"fwd")
 	loco.add_blend_point(_anim_node(run + "_back"), Vector2(0, -1), -1, &"back")
 	loco.add_blend_point(_anim_node(run + "_left"), Vector2(-1, 0), -1, &"left")
@@ -333,6 +515,10 @@ func _build_tree() -> void:
 		crouch.add_blend_point(_anim_node("crouch_fwd"), p, -1, StringName("move%d" % k))
 		k += 1
 	var prone := AnimationNodeBlendSpace1D.new()
+	# Every cycle keeps running at weight 0, so a change of direction blends legs in step (no pop).
+	loco.sync = true
+	crouch.sync = true
+	prone.sync = true
 	prone.add_blend_point(_anim_node("prone_idle" if anim.has_animation("prone_idle") else "crouch_idle"), 0.0, -1, &"idle")
 	prone.add_blend_point(_anim_node("prone_fwd" if anim.has_animation("prone_fwd") else "crouch_fwd"), 1.0, -1, &"move")
 	root.add_node("loco", loco, Vector2(0, 0))
@@ -340,16 +526,26 @@ func _build_tree() -> void:
 	root.add_node("crouch", crouch, Vector2(0, 200))
 	root.add_node("crouch_ts", AnimationNodeTimeScale.new(), Vector2(150, 200))
 	root.add_node("crouch_blend", AnimationNodeBlend2.new(), Vector2(300, 100))
+	# The sprint: its own full-body cycle over the run, time-scaled to the speed like the run.
+	var stand := "loco_ts"
+	if anim.has_animation("sprint_fwd"):
+		root.add_node("sprint", _anim_node("sprint_fwd"), Vector2(0, -200))
+		root.add_node("sprint_ts", AnimationNodeTimeScale.new(), Vector2(150, -200))
+		root.add_node("sprint_blend", AnimationNodeBlend2.new(), Vector2(250, -100))
+		root.connect_node("sprint_ts", 0, "sprint")
+		root.connect_node("sprint_blend", 0, "loco_ts")
+		root.connect_node("sprint_blend", 1, "sprint_ts")
+		stand = "sprint_blend"
 	root.add_node("prone", prone, Vector2(0, 400))
 	root.add_node("prone_ts", AnimationNodeTimeScale.new(), Vector2(150, 400))
 	root.add_node("prone_blend", AnimationNodeBlend2.new(), Vector2(450, 200))
-	root.add_node("jump", _anim_node("jump"), Vector2(300, 550))
+	root.add_node("jump", _anim_node("jump_air" if anim.has_animation("jump_air") else "jump"), Vector2(300, 550))
 	root.add_node("jump_seek", AnimationNodeTimeSeek.new(), Vector2(450, 550))
 	root.add_node("air_blend", AnimationNodeBlend2.new(), Vector2(600, 300))
 	root.connect_node("loco_ts", 0, "loco")
 	root.connect_node("crouch_ts", 0, "crouch")
 	root.connect_node("prone_ts", 0, "prone")
-	root.connect_node("crouch_blend", 0, "loco_ts")
+	root.connect_node("crouch_blend", 0, stand)
 	root.connect_node("crouch_blend", 1, "crouch_ts")
 	root.connect_node("prone_blend", 0, "crouch_blend")
 	root.connect_node("prone_blend", 1, "prone_ts")
@@ -357,6 +553,31 @@ func _build_tree() -> void:
 	root.connect_node("air_blend", 0, "prone_blend")
 	root.connect_node("air_blend", 1, "jump_seek")
 	var last := "air_blend"
+	# Full-body one-shots over the stance layers: the landing and the stand-up from prone.
+	for clip in ["jump_land", "prone_up"]:
+		if not anim.has_animation(clip):
+			continue
+		var fs := AnimationNodeOneShot.new()
+		fs.fadein_time = 0.05 if clip == "jump_land" else 0.12
+		fs.fadeout_time = 0.15 if clip == "jump_land" else 0.25
+		root.add_node(clip, _anim_node(clip), Vector2(600, 1200))
+		root.add_node(clip + "_shot", fs, Vector2(650, 300))
+		root.connect_node(clip + "_shot", 0, last)
+		root.connect_node(clip + "_shot", 1, clip)
+		last = clip + "_shot"
+	# The gun carried low while moving: carry_run_a <-> b on the arms with the stride (like the fists).
+	if anim.has_animation("carry_run_a"):
+		var cb := AnimationNodeBlend2.new()
+		_filter(cb, CARRY_BONES)
+		root.add_node("carry_a", _anim_node("carry_run_a"), Vector2(450, 1000))
+		root.add_node("carry_b", _anim_node("carry_run_b"), Vector2(450, 1100))
+		root.add_node("carry_swing", AnimationNodeBlend2.new(), Vector2(600, 1050))
+		root.add_node("carry_blend", cb, Vector2(700, 300))
+		root.connect_node("carry_swing", 0, "carry_a")
+		root.connect_node("carry_swing", 1, "carry_b")
+		root.connect_node("carry_blend", 0, last)
+		root.connect_node("carry_blend", 1, "carry_swing")
+		last = "carry_blend"
 	# Fists out: the arms move like a runner's, swinging against the legs (fists_run_a <-> b with the
 	# stride, see _stride_phase), or hang relaxed at rest; the gun rides on the back.
 	if anim.has_animation("fists_run_a"):
@@ -405,8 +626,8 @@ func _build_tree() -> void:
 	root.connect_node("output", 0, last)
 	tree.tree_root = root
 	tree.active = true
-	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "punch_r_ts", "punch_l_ts", "hit_react_ts"]:
-		if anim.has_animation(ts.trim_suffix("_ts")) or ts in ["loco_ts", "crouch_ts", "prone_ts"]:
+	for ts in ["loco_ts", "crouch_ts", "prone_ts", "sprint_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "punch_r_ts", "punch_l_ts", "hit_react_ts"]:
+		if anim.has_animation(ts.trim_suffix("_ts")) or ts in ["loco_ts", "crouch_ts", "prone_ts"] or (ts == "sprint_ts" and anim.has_animation("sprint_fwd")):
 			tree.set("parameters/%s/scale" % ts, 1.0)
 
 
@@ -446,28 +667,38 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	var speed := v.length()
 	_speed = lerpf(_speed, speed, 1.0 - exp(-10.0 * delta))
 	var dir := v / speed if speed > 0.05 else Vector2.ZERO
-	var ref := Fighter.RUN_SPEED
-	if stance == Fighter.Stance.CROUCH:
-		ref = Fighter.CROUCH_SPEED
-	elif stance == Fighter.Stance.PRONE:
-		ref = Fighter.PRONE_SPEED
-	_loco = _loco.lerp(dir * clampf(speed / (ref * 0.6), 0.0, 1.0), 1.0 - exp(-10.0 * delta))
+	_loco = _loco.lerp(dir * gait_weight(speed, stance, _run_authored), 1.0 - exp(-10.0 * delta))
+	# Crouch-walk and crawl only have a forward cycle: backing up plays it backwards (no moonwalk);
+	# the sign eases through 0, so a reversal slows the legs down instead of popping them.
+	if speed > 0.15:
+		_fwd_sign = move_toward(_fwd_sign, -1.0 if v.y < -0.3 * speed else 1.0, delta * 6.0)
+	_track_landing(on_floor, delta)
+	_stance_clips(stance, on_floor)
 	_crouch_amt = move_toward(_crouch_amt, 1.0 if stance == Fighter.Stance.CROUCH else 0.0, delta * 5.0)
 	_prone_amt = move_toward(_prone_amt, 1.0 if stance == Fighter.Stance.PRONE else 0.0, delta * 2.6)
 	_air = move_toward(_air, 0.0 if on_floor else 1.0, delta * 6.0)
 	_heal_amt = move_toward(_heal_amt, 1.0 if _healing else 0.0, delta * 4.0)
+	_update_carry(stance, on_floor, delta)
 	if tree and tree.active:
 		tree.set("parameters/loco/blend_position", _loco)
-		tree.set("parameters/crouch/blend_position", _loco)
-		tree.set("parameters/prone/blend_position", clampf(_speed / PRONE_AUTHORED, 0.0, 1.0))
-		tree.set("parameters/crouch_blend/blend_amount", _crouch_amt)
+		# (standing, the crouch space only shows through a landing dip: its idle, bent knees)
+		tree.set("parameters/crouch/blend_position", _loco if _crouch_amt > 0.02 else Vector2.ZERO)
+		tree.set("parameters/prone/blend_position", gait_weight(_speed, Fighter.Stance.PRONE, _run_authored))
+		tree.set("parameters/crouch_blend/blend_amount", maxf(_crouch_amt, 0.0 if _land_clip else land_dip()))
 		tree.set("parameters/prone_blend/blend_amount", _prone_amt)
 		tree.set("parameters/air_blend/blend_amount", _air)
-		# (the long strides also slow down for a walk, the short jog only speeds up)
-		var run_scale := clampf(_speed / _run_authored, 0.6, 1.6) if _run_authored > RUN_AUTHORED else clampf(_speed / RUN_AUTHORED, 1.0, 3.2)
-		tree.set("parameters/loco_ts/scale", run_scale if _speed > 0.3 else 1.0)
-		tree.set("parameters/crouch_ts/scale", clampf(_speed / CROUCH_AUTHORED, 1.0, 2.4) if _speed > 0.2 else 1.0)
-		tree.set("parameters/prone_ts/scale", clampf(_speed / PRONE_AUTHORED, 0.6, 2.6) if _speed > 0.08 else 1.0)
+		# The feet cover the real speed (any weapon class, the fists, walk to sprint).
+		tree.set("parameters/loco_ts/scale", gait_scale(_speed, Fighter.Stance.STAND, _run_authored))
+		tree.set("parameters/crouch_ts/scale", gait_scale(_speed, Fighter.Stance.CROUCH, _run_authored) * _fwd_sign)
+		tree.set("parameters/prone_ts/scale", gait_scale(_speed, Fighter.Stance.PRONE, _run_authored) * _fwd_sign)
+		if anim.has_animation("carry_idle"):
+			tree.set("parameters/loco/idle/carry/blend_amount", _carry)
+		if anim.has_animation("sprint_fwd"):
+			tree.set("parameters/sprint_blend/blend_amount", _sprint_amt)
+			tree.set("parameters/sprint_ts/scale", clampf(_speed / SPRINT_AUTHORED, 0.5, 1.6))
+		if anim.has_animation("carry_run_a"):
+			tree.set("parameters/carry_blend/blend_amount", _carry * maxf(gait_weight(_speed, Fighter.Stance.STAND, _run_authored), _air) * (1.0 - _sprint_amt))
+			tree.set("parameters/carry_swing/blend_amount", _stride_phase())
 		if anim.has_animation("heal"):
 			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
 		if anim.has_animation("fists_run_a"):
@@ -479,14 +710,125 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	elif fallback:
 		_animate_fallback(delta)
 	_kick = move_toward(_kick, 0.0, delta * 0.6)
+	_update_lean(delta, on_floor)
 	if aim_mod:
-		aim_mod.kick = _kick
-		aim_mod.pitch_scale = 1.0 - 0.7 * _prone_amt
+		aim_mod.kick = _kick - _sprint_lean
+		# (the gun low or pumping in a sprint: the chest hardly follows the camera's pitch)
+		aim_mod.pitch_scale = (1.0 - 0.7 * _prone_amt) * (1.0 - 0.8 * maxf(_carry, _sprint_amt))
 	var now := Time.get_ticks_msec() / 1000.0
 	var want_follow := 1.0 if (now < _follow_until or _healing) else 0.0
 	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
 	if weapon_node and weapon_id != "":
 		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
+
+
+## The hip carry and the sprint layer (READY_HOLD, sprint_fwd): the arms ease down to the carry
+## (about 0.35 s) and snap up to the aim (about 0.1 s); the gun follows the hand while carried.
+func _update_carry(stance: int, on_floor: bool, delta: float) -> void:
+	var up := gun_up()
+	var standing := stance == Fighter.Stance.STAND and weapon_id != "" and not _healing and not standing_up()
+	var want := 0.0 if up or not standing else 1.0
+	_carry = move_toward(_carry, want, delta * (3.0 if want > _carry else 10.0))
+	var sprint_on := sprint and standing and on_floor and _speed > Fighter.RUN_SPEED * 0.8 and anim != null and anim.has_animation("sprint_fwd")
+	_sprint_amt = move_toward(_sprint_amt, 1.0 if sprint_on else 0.0, delta * (4.0 if sprint_on else 6.0))
+	_carry_gun = 0.0 if up else maxf(_carry, _sprint_amt)
+
+
+## The gun is up in the aim pose (a shot within READY_HOLD s, scoped in), not carried low.
+func gun_up() -> bool:
+	return aiming or Time.get_ticks_msec() / 1000.0 < _ready_until
+
+
+## Up with the gun now (a shot, FIRE): the gun points along the aim at once and the arms follow it
+## up in about 0.1 s; it stays up READY_HOLD s.
+func raise_gun() -> void:
+	_ready_until = Time.get_ticks_msec() / 1000.0 + READY_HOLD
+	_carry_gun = 0.0
+
+
+## The lean into turns and the sprint's forward bend (see LEAN_PER_TURN).
+func _update_lean(delta: float, on_floor: bool) -> void:
+	var yaw := global_rotation.y
+	var rate := 0.0 if _last_yaw == INF or delta <= 0.0 else wrapf(yaw - _last_yaw, -PI, PI) / delta
+	_last_yaw = yaw
+	var run := clampf((_speed - 2.0) / 2.6, 0.0, 1.0) * (1.0 - _crouch_amt) * (1.0 - _prone_amt) * (1.0 if on_floor else 0.4)
+	var want := clampf(-rate * LEAN_PER_TURN * run, -LEAN_MAX, LEAN_MAX)
+	_lean = lerpf(_lean, want, 1.0 - exp(-8.0 * delta))
+	_sprint_lean = move_toward(_sprint_lean, SPRINT_LEAN * run if sprint else 0.0, delta * 0.8)
+	if root_scene:
+		root_scene.rotation.z = _lean
+
+
+## Speed (m/s) at which a stance's moving cycle was authored (x), and the speed from which it has
+## the full blend weight (y).
+static func gait_speeds(stance: int, run_authored: float) -> Vector2:
+	match stance:
+		Fighter.Stance.CROUCH:
+			return Vector2(CROUCH_AUTHORED, Fighter.CROUCH_SPEED * FULL_BLEND)
+		Fighter.Stance.PRONE:
+			return Vector2(PRONE_AUTHORED, PRONE_AUTHORED)
+	return Vector2(run_authored, Fighter.RUN_SPEED * FULL_BLEND)
+
+
+## Share of the moving cycle in the blend at a speed (the rest is the idle).
+static func gait_weight(speed: float, stance: int, run_authored: float) -> float:
+	return clampf(speed / gait_speeds(stance, run_authored).y, 0.0, 1.0)
+
+
+## Time scale of the moving cycle: weight x scale x authored speed = speed, so the feet neither
+## slide nor skate at any speed; close to standstill it eases back to 1 (the idle's own pace).
+static func gait_scale(speed: float, stance: int, run_authored: float) -> float:
+	var g := gait_speeds(stance, run_authored)
+	return lerpf(1.0, minf(maxf(speed, g.y) / g.x, 3.5), clampf(speed / 0.4, 0.0, 1.0))
+
+
+## Counts the time off the floor; touching down after a real fall starts the landing dip.
+func _track_landing(on_floor: bool, delta: float) -> void:
+	if not on_floor:
+		_air_time += delta
+		return
+	if _air_time >= LAND_MIN_AIR:
+		_land_left = LAND_TIME
+		_land_peak = clampf(0.2 + _air_time * 0.45, 0.25, 0.6)
+		_land_clip = _speed < LAND_CLIP_MAX_SPEED and tree != null and tree.active and anim.has_animation("jump_land")
+		if _land_clip:
+			tree.set("parameters/jump_land_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	_air_time = 0.0
+	_land_left = maxf(_land_left - delta, 0.0)
+	if _land_left <= 0.0:
+		_land_clip = false
+
+
+## The jump's fall part when the body leaves the ground without a jump; the stand-up from prone.
+func _stance_clips(stance: int, on_floor: bool) -> void:
+	if tree == null or not tree.active:
+		return
+	if _was_floor and not on_floor and not _jumped and anim.has_animation("jump_air"):
+		tree.set("parameters/jump_seek/seek_request", JUMP_FALL)
+	if on_floor:
+		_jumped = false
+	_was_floor = on_floor
+	var now := Time.get_ticks_msec() / 1000.0
+	if anim.has_animation("prone_up"):
+		if _last_stance == Fighter.Stance.PRONE and stance == Fighter.Stance.STAND and _speed < PRONE_UP_MAX_SPEED:
+			tree.set("parameters/prone_up_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+			_prone_up_until = now + anim.get_animation("prone_up").length
+		elif now < _prone_up_until and (_speed > PRONE_UP_MAX_SPEED or stance != Fighter.Stance.STAND or gun_up()):
+			tree.set("parameters/prone_up_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
+			_prone_up_until = 0.0
+	_last_stance = stance
+
+
+## Getting up from prone (prone_up playing).
+func standing_up() -> bool:
+	return Time.get_ticks_msec() / 1000.0 < _prone_up_until
+
+
+## 0..~0.6: how far the knees give right now (a smooth bump over LAND_TIME, no pop in or out).
+func land_dip() -> float:
+	if _land_left <= 0.0:
+		return 0.0
+	return _land_peak * sin(PI * (1.0 - _land_left / LAND_TIME))
 
 
 ## 0..1: which fist leads (0 = the left one). Read from the feet, so the arms swing against
@@ -501,6 +843,9 @@ func _stride_phase() -> float:
 ## The gun of the round on the back while the fists are out (the reference look), diagonal
 ## across it with the muzzle up over the left shoulder.
 func _set_holster(model_name: String) -> void:
+	if _holster != null and model_name == _holster_model:
+		return
+	_holster_model = model_name
 	if _holster:
 		_holster.queue_free()
 		_holster = null
@@ -522,7 +867,7 @@ func _set_holster(model_name: String) -> void:
 func _place_holster() -> void:
 	if _holster == null or skeleton == null:
 		return
-	_holster.visible = not _dead and weapon_id == "" and show_weapon
+	_holster.visible = not _dead and weapon_id != _holster_model and show_weapon
 	var fwd := -global_basis.z
 	var right := fwd.cross(Vector3.UP).normalized()
 	var z := -(Vector3.UP * 0.75 - right * 0.66).normalized()     # gun models point their muzzle along -z
@@ -541,6 +886,7 @@ func set_aim(pitch: float, aim_dir: Vector3) -> void:
 
 
 func on_fire() -> void:
+	raise_gun()
 	_kick = minf(_kick + 0.035, 0.09)
 	if weapon_id == "weapon_sg" and tree and anim.has_animation("pump"):
 		tree.set("parameters/pump_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
@@ -548,6 +894,7 @@ func on_fire() -> void:
 
 ## A jab, the right and left hand in turn (from a guard before the chin).
 func on_punch() -> void:
+	raise_gun()
 	_kick = minf(_kick + 0.08, 0.14)
 	_punch_left = not _punch_left
 	var clip := "punch_l" if _punch_left else "punch_r"
@@ -556,8 +903,10 @@ func on_punch() -> void:
 
 
 func on_jump() -> void:
+	_jumped = true
 	if tree and tree.active:
 		tree.set("parameters/jump_seek/seek_request", 0.0)
+		_air = maxf(_air, 0.5)            # (the take-off is short: no slow fade into it)
 
 
 ## Upper-body reload, stretched to the weapon's reload time; the gun follows the hand.
@@ -638,6 +987,7 @@ func play_throw() -> void:
 
 
 func play_death() -> void:
+	_end_lobby()
 	_dead = true
 	if weapon_node:
 		weapon_node.visible = false
@@ -658,8 +1008,10 @@ func play_death() -> void:
 
 ## On its feet again for the next round (undoes play_death and play_victory).
 func revive() -> void:
+	_end_lobby()
 	_dead = false
 	show_weapon = true
+	_ready_until = Time.get_ticks_msec() / 1000.0 + 0.5
 	if anim:
 		anim.stop()
 	if tree:
@@ -668,19 +1020,35 @@ func revive() -> void:
 		(_fb.hips as Node3D).rotation.x = 0.0
 
 
-func play_victory() -> void:
+## clip: "victory" (the cheer, the match's end) or "victory_pose" (the results: fist up, hand on hip).
+func play_victory(clip := "victory") -> void:
+	_end_lobby()
 	if weapon_node:
 		weapon_node.visible = false
 	show_weapon = false
 	if aim_mod:
 		aim_mod.pitch = 0.0
-	if anim and anim.has_animation("victory"):
+	if anim and not anim.has_animation(clip):
+		clip = "victory"
+	if anim and anim.has_animation(clip):
 		if tree:
 			tree.active = false
-		anim.play("victory", 0.25)
+		anim.play(clip, 0.25)
 
 
-func play_lobby() -> void:
+## The lobby gesture the player chose in WARDROBE > LOBBY POSE (a LOBBY_GESTURES clip), "" = a
+## random one each time (set by the lobby, scripts/lobby.gd).
+var pose_choice := ""
+
+
+func play_lobby(cheer := false) -> void:
+	_lobby = true
+	_lobby_cheer = cheer
+	_gesture_in = randf_range(3.0, 5.5)
+	_gesture_n = 0
+	_cheer_left = 0.0
+	_look_to = 0.0
+	set_process(true)
 	show_weapon = false
 	if weapon_node:
 		weapon_node.visible = false
@@ -689,6 +1057,53 @@ func play_lobby() -> void:
 			tree.active = false
 		var a := "lobby_idle" if anim.has_animation("lobby_idle") else "idle"
 		anim.play(a, 0.2)
+
+
+func _end_lobby() -> void:
+	if not _lobby:
+		return
+	_lobby = false
+	set_process(false)
+	_look = 0.0
+	if aim_mod:
+		aim_mod.twist = 0.0
+	if anim:
+		anim.speed_scale = 1.0
+
+
+func _process(delta: float) -> void:
+	if not _lobby or anim == null:
+		set_process(false)
+		return
+	var base := "lobby_idle" if anim.has_animation("lobby_idle") else "idle"
+	if _cheer_left > 0.0:
+		_cheer_left -= delta
+		if _cheer_left <= 0.0:
+			anim.play(base, 0.5)
+	_gesture_in -= delta
+	if _gesture_in <= 0.0 and _cheer_left <= 0.0 and absf(_look) < 0.02:
+		_gesture_in = randf_range(5.0, 9.0)
+		anim.speed_scale = randf_range(0.88, 1.1)     # the weight shifts at a pace of their own
+		_gesture_n += 1
+		var clips: Array = LOBBY_GESTURES.filter(func(c: String) -> bool: return anim.has_animation(c))
+		if _lobby_cheer and anim.has_animation("victory") and randf() < 0.3:
+			anim.play("victory", 0.4)
+			_cheer_left = anim.get_animation("victory").length / anim.speed_scale - 0.2
+		elif _gesture_n % 2 == 0 and not clips.is_empty():
+			# a gesture clip (the hand on the hip, the weight over, a look round), then the idle again
+			var g: String = pose_choice if clips.has(pose_choice) else clips[randi() % clips.size()]
+			anim.play(g, 0.4)
+			_cheer_left = anim.get_animation(g).length / anim.speed_scale - 0.35
+		else:
+			_look_to = randf_range(0.45, 0.75) * (1.0 if randf() < 0.5 else -1.0)
+			_look_hold = randf_range(1.2, 2.0)
+	if _look_to != 0.0 and absf(_look - _look_to) < 0.02:
+		_look_hold -= delta
+		if _look_hold <= 0.0:
+			_look_to = 0.0
+	_look = lerpf(_look, _look_to, 1.0 - exp(-3.0 * delta))
+	if aim_mod:
+		aim_mod.twist = _look
 
 
 ## Direction the top of the head points (used to place the head hitbox; matters when prone).
@@ -702,11 +1117,21 @@ func head_up() -> Vector3:
 
 # ---------------------------------------------------------------- weapon
 
+## Nothing in the hands and nothing on the back (a pick round before its pick, Fighter.await_pick).
+func empty_hands() -> void:
+	_pending_equip = []
+	equip_weapon("")
+	_set_holster("")
+
+
 func equip_weapon(model_name: String, tint := Color.WHITE) -> void:
 	if weapon_node:
 		weapon_node.queue_free()
 		weapon_node = null
-	_set_holster(weapon_id if model_name == "" else "")
+	if back_model != "":
+		_set_holster(back_model if model_name != back_model else "")
+	else:
+		_set_holster(weapon_id if model_name == "" else "")
 	weapon_id = model_name
 	# _hand_to_gun stays valid: every gun model's origin is its grip point.
 	if model_name == "":
@@ -776,7 +1201,11 @@ func _fallback_gun(model_name: String) -> Node3D:
 	return g
 
 
+## Where shots leave from. While the gun is carried low (or pumping in a sprint) a shot leaves
+## from where the muzzle is in the aim pose (the model raises the gun with it), not from the hip.
 func muzzle_position() -> Vector3:
+	if not arms_up() and _aim_muzzle_ok and is_inside_tree():
+		return bone_position("spine3") + _aim_basis() * _aim_muzzle
 	if weapon_node and weapon_node.is_inside_tree():
 		return weapon_node.global_transform * muzzle_local
 	if bone_idx.has("hand_r"):
@@ -784,8 +1213,28 @@ func muzzle_position() -> Vector3:
 	return global_position + Vector3.UP * 1.4
 
 
+## The arms are in the aim pose (not carried, not pumping in a sprint, not on the way up).
+func arms_up() -> bool:
+	return _carry < 0.01 and _sprint_amt < 0.01 and _carry_gun < 0.001
+
+
+## The aim's frame: looking along _aim_dir (forward if it has none yet).
+func _aim_basis() -> Basis:
+	var dir := _aim_dir.normalized()
+	if dir.length() < 0.5:
+		dir = -global_basis.z
+	return Basis.looking_at(dir, Vector3.UP if absf(dir.y) < 0.97 else global_basis.z)
+
+
 func _hand_xf() -> Transform3D:
 	return skeleton.global_transform * skeleton.get_bone_global_pose(bone_idx["hand_r"])
+
+
+## Puts the gun at the hand along the aim now (not at the next skeleton update), e.g. after the
+## body turned to the crosshair in this frame.
+func place_gun() -> void:
+	raise_gun()
+	_on_skeleton_updated()
 
 
 func _on_skeleton_updated() -> void:
@@ -796,20 +1245,22 @@ func _on_skeleton_updated() -> void:
 	var hand := bone_position("hand_r")
 	var fore := bone_position("lowerarm_r")
 	var grip := hand + (hand - fore).normalized() * 0.055
-	var dir := _aim_dir.normalized()
-	if dir.length() < 0.5:
-		dir = -global_basis.z
-	var up := Vector3.UP if absf(dir.y) < 0.97 else global_basis.z
-	var aimed := Transform3D(Basis.looking_at(dir, up), grip)
+	var aimed := Transform3D(_aim_basis(), grip)
 	var hand_xf := _hand_xf()
-	if _hand_follow < 0.001:
-		# Remember how the gun sits in the hand while aiming, for reload/heal hand-following.
-		_hand_to_gun = hand_xf.affine_inverse() * aimed
-		_hand_to_gun_ready = true
+	var follow := maxf(_hand_follow, _carry_gun)
+	if follow < 0.001:
 		weapon_node.global_transform = aimed
+		if arms_up():
+			# Remember how the gun sits in the hand while aiming, for reload/heal/carry hand-following,
+			# and (standing) where its muzzle is (muzzle_position while the arms are not up).
+			_hand_to_gun = hand_xf.affine_inverse() * aimed
+			_hand_to_gun_ready = true
+			if bone_idx.has("spine3") and ((_crouch_amt < 0.01 and _prone_amt < 0.01) or not _aim_muzzle_ok):
+				_aim_muzzle = aimed.basis.inverse() * (aimed * muzzle_local - bone_position("spine3"))
+				_aim_muzzle_ok = true
 		return
 	var followed := hand_xf * _hand_to_gun if _hand_to_gun_ready else aimed
-	weapon_node.global_transform = aimed.interpolate_with(followed, clampf(_hand_follow, 0.0, 1.0))
+	weapon_node.global_transform = aimed.interpolate_with(followed, clampf(follow, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------- anchors (hitboxes, camera)

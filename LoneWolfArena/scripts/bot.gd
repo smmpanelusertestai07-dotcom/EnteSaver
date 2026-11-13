@@ -4,16 +4,34 @@ extends Fighter
 ## reaction time and tracking error, strafing, cover, healing and shield walls.
 
 enum S { SEARCH, ENGAGE, CHASE, COVER, HEAL }
+## How long a bot walks its sidestep when it gets stuck on cover (_start_detour).
+const DETOUR_S := 0.8
+## Seconds without getting closer to the zone's centre before the bot tries another way in.
+const ZONE_REROUTE_S := 2.5
 
+## The levels EASY, NORMAL, HARD. NORMAL is for a casual player on a phone (one lost 0-5 in 2.5
+## minutes to its earlier, sharper numbers): it sits nearer EASY than HARD in reaction and aim.
+## Every number keeps EASY <= NORMAL <= HARD in strength (tests/match_unit_check.gd).
 const DIFF := [
 	{"reaction": 0.85, "error": 6.5, "head": 0.06, "burst_min": 3, "burst_max": 5, "pause": 0.75, "turn": 150.0, "strafe": 0.55, "shield": 0.2, "crouch": 0.0, "hear": 30.0, "sg_range": 5.0, "jump": 0.0, "grenade": 0.0},
-	{"reaction": 0.5, "error": 4.0, "head": 0.16, "burst_min": 4, "burst_max": 8, "pause": 0.45, "turn": 240.0, "strafe": 0.8, "shield": 0.45, "crouch": 0.15, "hear": 45.0, "sg_range": 7.0, "jump": 0.12, "grenade": 0.35},
+	{"reaction": 0.68, "error": 5.4, "head": 0.1, "burst_min": 3, "burst_max": 6, "pause": 0.6, "turn": 185.0, "strafe": 0.65, "shield": 0.3, "crouch": 0.08, "hear": 38.0, "sg_range": 6.0, "jump": 0.06, "grenade": 0.2},
 	{"reaction": 0.24, "error": 2.0, "head": 0.3, "burst_min": 6, "burst_max": 12, "pause": 0.28, "turn": 380.0, "strafe": 1.0, "shield": 0.75, "crouch": 0.35, "hear": 60.0, "sg_range": 9.0, "jump": 0.25, "grenade": 0.6},
 ]
-## The zone keeps closing: stay this far inside its edge (m), and start moving in this many
-## seconds before the shrink begins.
+## The zone keeps closing: stay this far inside the edge (m) of where it will be ZONE_AHEAD_S from
+## now (Arena.zone_at). The circles of stage 2 are nested, so a spot inside that one stays inside
+## the zone meanwhile; the bot starts heading in that long before the closing begins.
 const ZONE_MARGIN := 2.5
-const ZONE_EARLY := 6.0
+## EASY / NORMAL: how far over the chest point a chest-aimed shot may stray (under the head box).
+const HEAD_CLEAR_M := 0.12
+const ZONE_AHEAD_S := 8.0
+## Where the zone is going is this small (m): the bot walks straight to its centre and stands there.
+const ZONE_HOLD_R := 3.0
+## ... and walks the last this many metres straight (the navigation path ends 0.9 m short).
+const ZONE_STEP_M := 1.5
+## The sidearm (_choose_arm): drawn when the gun's magazine runs empty with the enemy in sight this
+## close (m), instead of a reload in the open; put away for the gun past SIDEARM_KEEP_M.
+const SIDEARM_DRAW_M := 8.0
+const SIDEARM_KEEP_M := 12.0
 
 var target: Fighter
 var state := S.SEARCH
@@ -38,12 +56,35 @@ var cover_point := Vector3.INF
 var wander_point := Vector3.INF
 var _stuck_timer := 0.0
 var _last_pos := Vector3.ZERO
+## A short sidestep around whatever snagged the bot (see _check_stuck): the point and the time left.
+var _detour := Vector3.INF
+var _detour_t := 0.0
+## Zone approach progress: the closest the bot got to the centre, how long it has not got closer,
+## and the angle its goal is turned around the centre to try another way in (see _zone_pressure).
+var _zone_best := INF
+var _zone_progress_t := 0.0
+var _zone_turn := 0.0
 var _shield_cooldown := 0.0
 var _decision_timer := 0.0
 var _grenade_timer := 0.0
 var _zone_goal := Vector3.INF
+var _zone_hold := false         # _zone_goal is the zone's last spot, walked to straight (_zone_pressure)
 var _zone_goal_timer := 0.0
 var nav_ready := false
+## DUO / SQUAD (TeamArena sets them; empty in the 1 vs 1, where `target` stays the one opponent):
+## the other team's fighters and this bot's teammates. Every RETARGET_S the bot turns to the UP
+## enemy it sees nearest, else the one that hit it in the last 3 s, else the nearest one left (a
+## knocked enemy only when no UP one is in sight). With nobody in sight it revives a knocked
+## teammate nearby (REVIVE_QUIET_S of quiet, within REVIVE_SEEK_M) and keeps near a human
+## teammate (FOLLOW_M), never while the zone presses.
+var enemies: Array[Fighter] = []
+var allies: Array[Fighter] = []
+const RETARGET_S := 0.5
+const REVIVE_QUIET_S := 1.5
+const REVIVE_SEEK_M := 15.0
+const FOLLOW_M := 7.0
+var _retarget_t := 0.0
+var _following := false
 
 
 func _ready() -> void:
@@ -83,6 +124,10 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_grenade_timer = 0.0
 	_zone_goal = Vector3.INF
 	_zone_goal_timer = 0.0
+	_detour_t = 0.0
+	_zone_best = INF
+	_zone_progress_t = 0.0
+	_zone_turn = 0.0
 
 
 # ---------------------------------------------------------------- perception
@@ -112,6 +157,11 @@ func _perceive() -> void:
 			reaction = float(p.reaction) * rng.randf_range(0.8, 1.25)
 			track_time = 0.0
 			aim_head = rng.randf() < float(p.head)
+			# A first sight of a player who has not fired yet: a moment more before the first shot
+			# (NORMAL 0.6-0.9 s, EASY longer; HARD as before), so an idle newcomer is not dropped at GO.
+			if difficulty < 2 and _now() - target.last_shot_time > 3.0:
+				var lo := 0.6 if difficulty == 1 else 0.9
+				reaction = maxf(reaction, rng.randf_range(lo, lo + 0.3))
 
 
 func hear(pos: Vector3, loudness: float) -> void:
@@ -128,6 +178,20 @@ func hear(pos: Vector3, loudness: float) -> void:
 func _think(delta: float) -> void:
 	if p.is_empty():
 		configure(1, target)
+	if knocked:
+		_crawl(delta)
+		return
+	if not enemies.is_empty():
+		_retarget_t -= delta
+		if _retarget_t <= 0.0:
+			_retarget_t = RETARGET_S
+			_retarget()
+	if reviving != null:
+		# Reviving a teammate (TeamArena runs it): still, unless shot at.
+		move_dir = Vector2.ZERO
+		if _now() - last_attacked_time < 0.3 and arena and arena.has_method("cancel_revive"):
+			arena.cancel_revive(self)
+		return
 	perceive_timer -= delta
 	if perceive_timer <= 0.0:
 		perceive_timer = 0.1
@@ -137,6 +201,12 @@ func _think(delta: float) -> void:
 	reaction -= delta
 	if see_target:
 		track_time += delta
+	if _throwing:
+		# The throw's wind-up (Fighter.THROW_RELEASE): stand still and keep facing, so the frag
+		# leaves the hand from where the bot solved its arc (not from a step into cover).
+		move_dir = Vector2.ZERO
+		sprinting = false
+		return
 	_decide(delta)
 	if _zone_pressure(delta):
 		# Get inside the safe zone first; keep shooting on the way if the enemy is in sight.
@@ -144,16 +214,30 @@ func _think(delta: float) -> void:
 			cancel_heal()
 		if state == S.HEAL or state == S.COVER:
 			state = S.ENGAGE if see_target else S.CHASE
-		_move_to(_zone_goal, delta)
+		if _zone_hold:
+			# Straight onto the zone's last spot (it is off the cover), and stand still there.
+			var to := _zone_goal - global_position
+			to.y = 0.0
+			_set_move_world(to if to.length() > 0.2 else Vector3.ZERO)
+			sprinting = false
+		else:
+			_move_to(_zone_goal, delta)
 		if see_target:
 			_aim_and_shoot(delta)
 		else:
 			_face_point(_zone_goal + Vector3.UP * 1.5, delta, 0.6)
+		_arm_up()
 		if weapon().ammo <= 0 and not weapon().reloading:
 			start_reload()
 		_check_stuck(delta)
 		return
 	_maybe_grenade()
+	if (state == S.SEARCH or state == S.CHASE) and not allies.is_empty() and _team_errand(delta, state == S.SEARCH):
+		_arm_up()
+		if weapon().ammo <= 0 and not weapon().reloading:
+			start_reload()
+		_check_stuck(delta)
+		return
 	match state:
 		S.ENGAGE:
 			_engage(delta)
@@ -167,12 +251,13 @@ func _think(delta: float) -> void:
 			if see_target:
 				_face_point(target.chest_position(), delta, 0.8)
 			if not healing:
-				if hp < MAX_HP and medkits > 0 and not start_heal():
+				if hp < hp_max and medkits > 0 and not start_heal():
 					state = S.ENGAGE
-				elif hp >= MAX_HP or medkits <= 0:
+				elif hp >= hp_max or medkits <= 0:
 					state = S.ENGAGE
 		_:
 			_search(delta)
+	_arm_up()
 	if weapon().ammo <= 0 and not weapon().reloading:
 		start_reload()
 	_zone_clamp_move()
@@ -181,7 +266,7 @@ func _think(delta: float) -> void:
 
 func _decide(delta: float) -> void:
 	_decision_timer -= delta
-	var low := hp < MAX_HP * 0.42
+	var low := hp < hp_max * 0.42
 	if state == S.HEAL:
 		if see_target and _now() - last_attacked_time < 0.5:
 			cancel_heal()
@@ -217,30 +302,49 @@ func _decide(delta: float) -> void:
 		state = S.SEARCH
 
 
-## True while the bot should head into the safe zone; keeps _zone_goal (a nav point well inside).
+## True while the bot should head into the safe zone; keeps _zone_goal (a nav point well inside
+## the circle the zone will be ZONE_AHEAD_S from now, on the bot's own side of its centre).
 func _zone_pressure(delta: float) -> bool:
 	if arena == null or arena.get("phase") != 1:
 		return false
-	var c: Vector3 = arena.zone_center
+	var ahead: Array = arena.zone_at(float(arena.get("elapsed")) + ZONE_AHEAD_S)
+	var c: Vector3 = ahead[0]
+	var r: float = ahead[1]
 	var flat := Vector2(global_position.x - c.x, global_position.z - c.z).length()
-	var r: float = arena.zone_radius
-	var st := String(arena.zone_state)
-	if st == "stationary":
-		if float(arena.zone_next()) > ZONE_EARLY:
-			if flat <= r - 0.5:
-				return false
-		r = minf(r, float(arena.zone_start_radius) * 0.7)
-	elif st == "shrinking":
-		r = maxf(r - 4.0, 3.0)     # where the edge will be in a few seconds
+	if r <= ZONE_HOLD_R:
+		# The last seconds: the zone ends on a spot, so go and stand on it: along the navigation
+		# path (around the cover) until it is a step away, then straight onto it.
+		var close := flat < ZONE_STEP_M
+		if close or flat > r - minf(ZONE_MARGIN, r * 0.3):
+			_zone_goal = Vector3(c.x, global_position.y, c.z) if close else arena.closest_nav_point(c)
+			_zone_hold = close
+			return true
 	var need := flat > r - minf(ZONE_MARGIN, r * 0.3)
+	_zone_hold = false
 	if not need:
 		_zone_goal = Vector3.INF
+		_zone_best = INF
+		_zone_turn = 0.0
 		return false
+	# Moving about without getting closer to the centre (a snag the path keeps leading into):
+	# after ZONE_REROUTE_S, aim for a spot turned around the centre so the path takes another way.
+	if flat < _zone_best - 0.5:
+		_zone_best = flat
+		_zone_progress_t = 0.0
+	else:
+		_zone_progress_t += delta
+		if _zone_progress_t > ZONE_REROUTE_S:
+			_zone_progress_t = 0.0
+			_zone_best = flat
+			_zone_turn = 0.4 * PI if _zone_turn == 0.0 else -signf(_zone_turn) * minf(absf(_zone_turn) + 0.4 * PI, PI)
+			_zone_goal_timer = 0.0
 	_zone_goal_timer -= delta
 	if _zone_goal == Vector3.INF or _zone_goal_timer <= 0.0 or global_position.distance_to(_zone_goal) < 1.2:
 		_zone_goal_timer = 2.0
 		# A spot inside on the bot's own side of the centre (no detours around central cover).
 		var out := Vector3(global_position.x - c.x, 0.0, global_position.z - c.z)
+		if _zone_turn != 0.0:
+			out = out.rotated(Vector3.UP, _zone_turn)
 		var keep := clampf(r * 0.45, 0.5, 8.0)
 		var spot := c + (out.normalized() * keep if out.length() > 0.1 else Vector3.ZERO)
 		spot += Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)) * minf(keep * 0.3, 2.0)
@@ -287,11 +391,9 @@ func _engage(delta: float) -> void:
 	var to := tpos - global_position
 	to.y = 0.0
 	var dist := to.length()
-	# One gun per round (Lone Wolf): keep the range that suits it; fists only when it is dry.
-	if current != 0 and (gun().ammo > 0 or gun().reserve > 0):
-		switch_weapon(0)
-	elif current == 0 and gun().ammo <= 0 and gun().reserve <= 0 and not gun().reloading:
-		switch_weapon(1)
+	# One gun per round (Lone Wolf): keep the range that suits it; the sidearm when the gun runs
+	# empty up close, the fists only when both are dry.
+	_choose_arm(dist)
 	# Strafe left/right, keep a comfortable distance.
 	strafe_timer -= delta
 	if strafe_timer <= 0.0:
@@ -338,6 +440,10 @@ func _aim_and_shoot(delta: float) -> void:
 		var err_m := tan(deg_to_rad(err_deg)) * dist
 		aim_err = aim_err.lerp(Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.6, 0.8), rng.randf_range(-1, 1)).normalized() * err_m * rng.randf(), 0.6)
 	var goal := aim_point + aim_err
+	if difficulty < 2 and not aim_head:
+		# EASY / NORMAL aiming at the chest: the spread stays under the neck, so headshots come
+		# only from the few bursts aimed at the head (p.head), at most about a quarter of hits.
+		goal.y = minf(goal.y, aim_point.y + HEAD_CLEAR_M)
 	var facing_ok := _face_point(goal, delta, 1.0)
 	if reaction > 0.0 or not facing_ok:
 		return
@@ -352,9 +458,55 @@ func _aim_and_shoot(delta: float) -> void:
 		var origin := eye_position()
 		var dir := (goal - origin).normalized()
 		if perform_shot(origin, dir):
+			if net_local and arena and arena.has_method("net_shot_by"):
+				arena.net_shot_by(self, origin, dir)
 			burst_left -= 1
 			if burst_left <= 0:
 				burst_pause = float(p.pause) * rng.randf_range(0.7, 1.4)
+
+
+## Which weapon of the kit to hold in a fight with the enemy `dist` m away: the gun while it has
+## rounds; its magazine empty with the enemy within SIDEARM_DRAW_M, the sidearm instead of a reload
+## in the open (unless the reload is nearly done); back to the gun (which _think then reloads) once
+## the sidearm's magazine is empty (even with its reload begun: the gun's reserve first) or the
+## enemy is past SIDEARM_KEEP_M (out of sight, or the fight over: _arm_up); the fists only when
+## the gun and the sidearm are both dry.
+func _choose_arm(dist: float) -> void:
+	var g := gun()
+	var sa := sidearm()
+	var gun_dry := g.ammo <= 0 and g.reserve <= 0 and not g.reloading
+	var side_dry := sa == null or (sa.ammo <= 0 and sa.reserve <= 0 and not sa.reloading)
+	match current:
+		Weapons.SIDE:
+			if not gun_dry and (sa.ammo <= 0 or dist > SIDEARM_KEEP_M):
+				switch_weapon(Weapons.GUN)
+			elif gun_dry and side_dry:
+				switch_weapon(Weapons.FISTS)
+		Weapons.GUN:
+			if g.ammo <= 0 and dist <= SIDEARM_DRAW_M and sa != null and sa.ammo > 0 \
+					and not (g.reloading and g.reload_progress() > 0.6):
+				switch_weapon(Weapons.SIDE)
+			elif gun_dry:
+				switch_weapon(Weapons.FISTS if side_dry else Weapons.SIDE)
+		_:
+			if not gun_dry:
+				switch_weapon(Weapons.GUN)
+			elif not side_dry:
+				switch_weapon(Weapons.SIDE)
+
+
+## The kit at the end of every path of _think, just before its reload of an empty magazine: in a
+## fight with the enemy in sight, _choose_arm (so a magazine emptied this frame is answered now:
+## the sidearm drawn up close, or the gun back for an emptied sidearm, never a reload of the
+## sidearm while the gun has rounds); otherwise (fight broken off, healing, heading into the zone,
+## on a team errand) the sidearm goes away for the gun, reloaded out of sight.
+func _arm_up() -> void:
+	if state == S.ENGAGE and see_target and target != null:
+		var to := target.global_position - global_position
+		to.y = 0.0
+		_choose_arm(to.length())
+	elif current == Weapons.SIDE and (gun().ammo > 0 or gun().reserve > 0 or gun().reloading):
+		switch_weapon(Weapons.GUN)
 
 
 ## Preferred fighting distance (min, max) for the round's gun.
@@ -440,7 +592,10 @@ func _find_cover() -> Vector3:
 	return best
 
 
-func _move_to(point: Vector3, _delta: float) -> void:
+func _move_to(point: Vector3, delta: float) -> void:
+	if _detour_t > 0.0:
+		_detour_t -= delta
+		point = _detour
 	# Sprint when the destination is far and nothing is in sight (like players running in).
 	sprinting = not see_target and global_position.distance_to(point) > 8.0 and stance == Stance.STAND and not healing
 	if not nav_ready:
@@ -478,6 +633,23 @@ func _blocked(dir: Vector3) -> bool:
 	return not res.is_empty()
 
 
+## Sets a detour point about 2.5 m to the side of the way the bot was trying to go (the side
+## flips each time it gets stuck), walked to for DETOUR_S before the path is asked again.
+func _start_detour() -> void:
+	if arena == null:
+		return
+	var ahead := Vector3.ZERO
+	if nav_ready and not agent.is_navigation_finished():
+		ahead = agent.get_next_path_position() - global_position
+	ahead.y = 0.0
+	if ahead.length() < 0.1:
+		ahead = Basis(Vector3.UP, aim_yaw) * Vector3.FORWARD
+	ahead = ahead.normalized()
+	var side := Vector3(-ahead.z, 0.0, ahead.x) * (1.0 if float(strafe_dir) >= 0.0 else -1.0)
+	_detour = arena.closest_nav_point(global_position + side * 2.5 - ahead * 0.5)
+	_detour_t = DETOUR_S
+
+
 func _check_stuck(delta: float) -> void:
 	if move_dir.length() < 0.2:
 		_stuck_timer = 0.0
@@ -488,7 +660,103 @@ func _check_stuck(delta: float) -> void:
 		if global_position.distance_to(_last_pos) < 0.5:
 			strafe_dir = -strafe_dir
 			wander_point = arena.random_nav_point() if arena else wander_point
-			if is_on_floor() and rng.randf() < 0.3:
+			# Step sideways around the snag for a moment instead of pushing into the same corner,
+			# and hop it at once while the zone is closing (a stuck bot there loses HP every second).
+			_start_detour()
+			if is_on_floor() and (_zone_goal != Vector3.INF or rng.randf() < 0.3):
 				want_jump = true
+			_zone_goal_timer = 0.0      # and pick a fresh spot inside the zone
 		_stuck_timer = 0.0
 		_last_pos = global_position
+
+
+# ---------------------------------------------------------------- teams (DUO / SQUAD)
+
+## Picks whom to fight (see `enemies`).
+func _retarget() -> void:
+	var best: Fighter = null
+	var best_d := INF
+	for e: Fighter in enemies:
+		if e.alive and not e.knocked:
+			var d := global_position.distance_to(e.global_position)
+			if d < best_d and d < 85.0 and (can_see(e.chest_position()) or can_see(e.head_position())):
+				best = e
+				best_d = d
+	if best == null and last_attacker != null and is_instance_valid(last_attacker) and last_attacker.alive \
+			and _now() - last_attacked_time < 3.0 and last_attacker in enemies:
+		best = last_attacker
+	if best == null:
+		for e: Fighter in enemies:
+			if e.alive and e.knocked:
+				var d := global_position.distance_to(e.global_position)
+				if d < best_d and can_see(e.chest_position()):
+					best = e
+					best_d = d
+	if best == null:
+		for e: Fighter in enemies:
+			if e.alive:
+				var d := global_position.distance_to(e.global_position) + (30.0 if e.knocked else 0.0)
+				if d < best_d:
+					best = e
+					best_d = d
+	if best != null and best != target:
+		target = best
+		see_target = false               # a new face: the reaction time again
+		track_time = 0.0
+
+
+## With no enemy in sight: revive a knocked teammate nearby, or (may_follow) keep near a human
+## teammate. True when it moved the bot.
+func _team_errand(delta: float, may_follow: bool) -> bool:
+	if _now() - last_seen_time > REVIVE_QUIET_S and _now() - last_attacked_time > REVIVE_QUIET_S:
+		var down: Fighter = null
+		var down_d := REVIVE_SEEK_M
+		for a: Fighter in allies:
+			if a.alive and a.knocked and (a.revived_by == null or a.revived_by == self):
+				var d := global_position.distance_to(a.global_position)
+				if d < down_d:
+					down = a
+					down_d = d
+		if down != null:
+			if down_d <= Fighter.REVIVE_RANGE - 0.4:
+				move_dir = Vector2.ZERO
+				sprinting = false
+				_face_point(down.global_position + Vector3.UP * 0.3, delta, 0.8)
+				if arena and arena.has_method("start_revive"):
+					arena.start_revive(self, down)
+			else:
+				_move_to(down.global_position, delta)
+				_face_point(down.global_position + Vector3.UP * 1.2, delta, 0.6)
+			return true
+	if not may_follow:
+		return false
+	for a: Fighter in allies:
+		if a.alive and not a.knocked and (a is Player or a is RemoteFighter):
+			var d := global_position.distance_to(a.global_position)
+			if d > FOLLOW_M or (_following and d > 4.0):
+				_following = true
+				var behind := a.global_position + Basis(Vector3.UP, a.aim_yaw) * Vector3(1.2 if slot % 2 == 0 else -1.2, 0.0, 3.0)
+				var goal: Vector3 = arena.closest_nav_point(behind) if arena else behind
+				_move_to(goal, delta)
+				_face_point(goal + (goal - global_position) + Vector3.UP * 1.4, delta, 0.5)
+				return true
+			break
+	_following = false
+	return false
+
+
+## Knocked: crawl toward the nearest teammate still UP (no gun, no items).
+func _crawl(delta: float) -> void:
+	var best: Fighter = null
+	var best_d := INF
+	for a: Fighter in allies:
+		if a.alive and not a.knocked:
+			var d := global_position.distance_to(a.global_position)
+			if d < best_d:
+				best = a
+				best_d = d
+	if best == null or best_d < 1.5 or revived_by != null:
+		move_dir = Vector2.ZERO
+		return
+	_move_to(best.global_position, delta)
+	_face_point(best.global_position + Vector3.UP * 0.4, delta, 0.5)

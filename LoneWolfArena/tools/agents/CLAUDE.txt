@@ -17,11 +17,19 @@ app (Ente Saver) and must not be touched for game work.
 - Reference screenshots of other games are for private analysis only: keep them outside the
   repo (or in a git-ignored `reference_private/` folder) and never ship or commit them.
 - No servers of our own, no accounts, no ads/analytics SDKs, no downloads at runtime: everything
-  ships inside the APK. The owner-requested 1 vs 1 with friends has two transports: SAME WI-FI
-  (scripts/lan.gd, phone to phone on the local network) and ONLINE (scripts/cloud.gd: free
-  public MQTT brokers only relay messages; everything in a match is end-to-end encrypted on the
-  phones; the lobby shows only a random id, the name, the outfit and a public key). Hence the
-  APK's INTERNET (Android needs it for any socket) and Wi-Fi state/multicast permissions.
+  ships inside the APK. The owner-requested 1 vs 1 against other players (the LONE WOLF mode)
+  has two transports: ONLINE (scripts/cloud.gd: free public MQTT brokers only relay messages;
+  everything in a match is end-to-end encrypted on the phones; the lobby shows only a random id,
+  the name, the outfit and a public key) and PLAY WITHOUT INTERNET (scripts/lan.gd, owner's request
+  2026-11: two phones on the same Wi-Fi or one phone's hotspot, found by UDP broadcast, paired with
+  a short code the host shows, the match end-to-end encrypted over a direct connection; nothing
+  leaves the local network). Hence the APK's permissions are exactly VIBRATE, INTERNET (Android
+  needs it for any socket), ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE and CHANGE_WIFI_MULTICAST_STATE
+  (the multicast lock that lets a phone hear the other's broadcast, held only while HOST or JOIN
+  is open) and RECORD_AUDIO (push-to-talk voice in a match, scripts/net_voice.gd: asked for only
+  when the player turns VOICE CHAT on, the microphone runs only while TALK is held, the sound is
+  end-to-end encrypted and never stored); CI and tools/build_apk.sh fail on any other. Chat
+  (scripts/net_chat.gd) is end-to-end encrypted too.
 
 ## Originality (legal)
 - The game should FEEL like popular mobile battle-royale "Lone Wolf" modes (layout, flow,

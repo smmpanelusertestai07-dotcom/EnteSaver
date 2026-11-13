@@ -10,6 +10,17 @@ signal hit_landed(target: Fighter, amount: float, headshot: bool, pos: Vector3, 
 signal fired(w: WeaponState)
 signal weapon_switched
 signal stance_changed(stance: int)
+## DUO / SQUAD (TeamArena, PLAN_TEAMS): a fighter whose HP runs out while a teammate still stands is
+## knocked down (on the floor, crawling at KNOCK_SPEED, no gun or items) with KNOCK_HP that runs out
+## over BLEED_S, until a teammate revives it (REVIVE_S next to it, within REVIVE_RANGE: back up with
+## REVIVE_HP) or it is finished. TeamReferee decides; team -1 (the 1 vs 1) never knocks.
+@warning_ignore("unused_signal")
+signal knocked_down(victim: Fighter, killer: Fighter, headshot: bool)
+@warning_ignore("unused_signal")
+signal revived(victim: Fighter, by: Fighter)
+## Team modes: a KNOCKED fighter's knock HP ran out (finished off by a hit or the zone, or bled out:
+## killer null, last_hit_cause "bleed"). It stays down until the referee's word (TeamArena).
+signal knock_finished(victim: Fighter, killer: Fighter, headshot: bool)
 
 enum Stance { STAND, CROUCH, PRONE }
 
@@ -23,11 +34,13 @@ const MASK_SIGHT := LAYER_WORLD | LAYER_SHIELD
 const MAX_HP := 200.0
 const GRAVITY := 22.0
 const JUMP_V := 7.6              # apex ~1.3 m: a 1.2 m crate can be jumped onto
-const RUN_SPEED := 5.0
-const SPRINT_SPEED := 6.0
-const WALK_SPEED := 2.0
-const CROUCH_SPEED := 1.75
-const PRONE_SPEED := 0.75
+## Base speeds (m/s) with a rifle in hand, what the M4A1 always ran at; Weapons.CLASS_MOVE scales
+## them per weapon class (fists 1.15 x, an SMG a little faster, the heavy guns slower).
+const RUN_SPEED := 4.6
+const SPRINT_SPEED := 5.5
+const WALK_SPEED := 1.85
+const CROUCH_SPEED := 1.6
+const PRONE_SPEED := 0.7
 const ADS_MULT := 0.7
 const HEAL_MULT := 0.6
 const HEAL_WINDUP := 1.0
@@ -45,6 +58,15 @@ const PRONE_HEIGHT := 0.7
 const STANCE_TIME := [0.0, 0.2, 0.45]
 const MELEE_RANGE := 2.0
 const THROW_RELEASE := 0.43      # s from the throw input to the grenade leaving the hand
+const START_MEDKITS := 2         # the items every round starts with
+const START_SHIELDS := 3
+const START_GRENADES := 1
+const KNOCK_HP := 100.0
+const BLEED_S := 30.0
+const KNOCK_SPEED := 0.8
+const REVIVE_S := 5.0
+const REVIVE_HP := 50.0
+const REVIVE_RANGE := 2.0
 
 var display_name := "PLAYER"
 var is_player := false
@@ -56,6 +78,7 @@ var hp: float:
 var alive := true
 var weapons: Array[WeaponState] = []
 var current := 0
+var awaiting_pick := false        # a pick round before its pick: fists only (await_pick)
 var stance := Stance.STAND
 var crouching: bool:
 	get:
@@ -89,7 +112,8 @@ var want_jump := false
 var frozen := false
 var round_over := false        # the result is decided: no more shots or damage (a grenade in the air)
 var endless_hp := false        # practice: hits land and show their damage, HP never drops
-var stats := {"shots": 0, "hits": 0, "headshots": 0, "damage": 0.0, "kills": 0, "taken": 0.0, "healed": 0.0}
+var stats := {"shots": 0, "hits": 0, "headshots": 0, "damage": 0.0, "kills": 0, "taken": 0.0, "healed": 0.0,
+	"knocks": 0, "revives": 0}
 var model: CharacterModel
 var arena: Node
 var hitboxes: Array[Area3D] = []
@@ -101,12 +125,34 @@ var last_shot_time := -99.0
 var invulnerable := false
 var stance_lock := 0.0           # s until the stance change finishes (can't fire meanwhile)
 var hold_fire := false           # prep phase: may move, may not shoot or use items
+var last_hit_cause := ""         # the last damage's cause when not a gun ("frag": see take_damage)
+var team := -1                   # DUO / SQUAD: 0 or 1 (-1: no teams, the 1 vs 1)
+var slot := -1                   # DUO / SQUAD: the roster slot (Game.team_match)
+var knocked := false             # down on the floor, waiting for a revive (team modes only)
+var knock_hp := 0.0              # what is left of KNOCK_HP while knocked
+var knocked_by: Fighter          # who knocked it (the kill goes to them when nobody finishes it)
+var reviving: Fighter            # the knocked teammate this fighter is reviving (null: none)
+var revive_t := 0.0              # s of that revive done so far
+## Run on this phone in an online team match (the player; on the host also the bots): its hits on a
+## fighter the other phone runs (RemoteFighter) are sent there, and its shots, frags and walls go
+## through arena.net_shot_by / net_grenade_by / net_wall_by (TeamArena) instead of the 1 vs 1 calls.
+var net_local := false
+var revived_by: Fighter          # the teammate reviving this knocked fighter now (null: nobody; it bleeds)
+var last_attacker: Fighter       # the last enemy whose damage landed (bots in teams turn to it)
+## The damage each other fighter dealt this one this round (attacker -> HP), for the ELIMINATED BY
+## card; cleared by reset_for_round.
+var round_taken := {}
+## A custom room's rules (RoomRules, set by the arena; 1.0 / MAX_HP otherwise): the health a round
+## starts with and heals stop at, and factors on the movement speed and the jump's take-off speed.
+var hp_max := MAX_HP
+var rule_speed := 1.0
+var rule_jump := 1.0
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
-var _medkits := SecureNum.new(2)
-var _shields := SecureNum.new(2)
-var _grenades := SecureNum.new(1)
+var _medkits := SecureNum.new(START_MEDKITS)
+var _shields := SecureNum.new(START_SHIELDS)
+var _grenades := SecureNum.new(START_GRENADES)
 var _heal_t := 0.0
 var _heal_used := false
 var _throwing := false
@@ -146,15 +192,20 @@ func setup_fighter(bundle: String, weapon_id := Weapons.DEFAULT_PICK) -> void:
 		_exclude.append(hb.get_rid())
 
 
-## The round's gun in slot 0 and fists in slot 1 (Lone Wolf: both players get the same gun).
+## The kit, the same in every mode: the round's gun at Weapons.GUN (0), the fists at FISTS (1) and
+## the sidearm at SIDE (2), all full, the gun in hand (Lone Wolf: both players get the same gun).
+## It ends await_pick. The gun's model goes on the back while another weapon is in hand.
 func set_loadout(weapon_id: String) -> void:
 	if not Weapons.DEFS.has(weapon_id):
 		weapon_id = Weapons.DEFAULT_PICK
+	awaiting_pick = false
 	weapons.clear()
 	weapons.append(WeaponState.new(weapon_id))
 	weapons.append(WeaponState.new("fists"))
-	current = 0
+	weapons.append(WeaponState.new(Weapons.SIDEARM))
+	current = Weapons.GUN
 	if model:
+		model.back_model = String(weapons[0].def.model)
 		model.equip_weapon(String(weapons[0].def.model), weapons[0].def.get("tint", Color.WHITE))
 	weapon_switched.emit()
 
@@ -270,6 +321,21 @@ func aim_forward() -> Vector3:
 	return -b.z
 
 
+## A 1 vs 1 pick round before its pick lands (Arena._start_prep): the fists in hand, and the gun
+## still in slot 0 (the last pair's, or the last match's) neither held, holstered on the back nor
+## drawable, so neither phone shows a gun that is not this pair's; set_loadout (the pick) ends it.
+## The other phone's copy follows by the weapon index its state carries (1: the fists). The
+## sidearm comes with the gun: until the pick only the fists can be in hand.
+func await_pick() -> void:
+	if weapons.size() > Weapons.FISTS:
+		weapon().cancel_reload()
+		current = Weapons.FISTS
+	awaiting_pick = true
+	if model:
+		model.empty_hands()
+	weapon_switched.emit()
+
+
 func weapon() -> WeaponState:
 	return weapons[current]
 
@@ -278,18 +344,62 @@ func gun() -> WeaponState:
 	return weapons[0]
 
 
+## Whether weapon `index` of the kit is in hand (RemoteFighter: or was, a moment ago).
+func held_recently(index: int) -> bool:
+	return index == current
+
+
+## The weapons whose numbers bound this fighter's hits as the other phone reports them
+## (TeamArenaNet.max_hit_by, _hit_rate_ok): its gun and the fists always, the sidearm while it
+## is (or was a moment ago) in hand. A reported hit does not say which weapon made it.
+func net_arms() -> Array:
+	var out: Array = [gun().def, Weapons.DEFS.fists]
+	if held_recently(Weapons.SIDE):
+		out.append(Weapons.DEFS[Weapons.SIDEARM])
+	return out
+
+
+## The kit's sidearm (Weapons.SIDE); null on a fighter that has no kit yet.
+func sidearm() -> WeaponState:
+	return weapons[Weapons.SIDE] if weapons.size() > Weapons.SIDE else null
+
+
+## The weapon SWITCH draws next (Weapons.CYCLE): gun -> sidearm -> fists -> gun, past what cannot
+## be drawn now (the gun and the sidearm before the pick: then it stays on the fists).
+func next_weapon() -> int:
+	var at := Weapons.CYCLE.find(current)
+	for k in range(1, Weapons.CYCLE.size() + 1):
+		var i: int = Weapons.CYCLE[(at + k) % Weapons.CYCLE.size()]
+		if can_draw(i):
+			return i
+	return current
+
+
+## Whether weapon `index` of the kit may be taken in hand: before the pick (awaiting_pick) only
+## the fists.
+func can_draw(index: int) -> bool:
+	return index >= 0 and index < weapons.size() and (not awaiting_pick or index == Weapons.FISTS)
+
+
 # ---------------------------------------------------------------- damage
 
-func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3) -> float:
+## cause: what dealt it when it was not the attacker's gun ("frag"); the kill feed names it.
+## Returns the HP it really took (what the damage numbers, the stats and the results count): a hit
+## after armour in whole points (hit_points), never more than the HP that was left.
+func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause := "") -> float:
 	if not alive or round_over or (invulnerable and not OS.has_feature("template")):     # invulnerable: a test switch only
 		return 0.0
-	# Armour is read from the constants (a per-fighter value could be frozen in memory).
-	var dmg := clampf(Weapons.after_armor(amount, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION), 0.0, INF if endless_hp else hp)
+	if attacker != null and ally_of(attacker):
+		return 0.0                       # friendly fire is off (a fighter's own frag still hurts it)
+	if knocked:
+		return _take_knock_damage(amount, zone, attacker, from_pos, cause)
+	last_hit_cause = cause
+	var dmg := clampf(hit_points(amount, zone), 0.0, INF if endless_hp else hp)
 	if endless_hp:
 		stats.taken += dmg
 		last_damage_time = _now()
 		damaged.emit(dmg, from_pos, zone == "head", attacker)
-		if attacker != null and dmg > 0.0:
+		if attacker != null and dmg > 0.0 and model:
 			model.play_hit()
 		return dmg
 	hp -= dmg
@@ -297,15 +407,120 @@ func take_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vecto
 	last_damage_time = _now()
 	if attacker != null:
 		last_attacked_time = last_damage_time
+		if attacker != self:
+			last_attacker = attacker
+			round_taken[attacker] = float(round_taken.get(attacker, 0.0)) + dmg
 	if healing and zone != "zone":
 		cancel_heal()
 	damaged.emit(dmg, from_pos, zone == "head", attacker)
 	if hp <= 0.001:
 		hp = 0.0
-		die(attacker, zone == "head")
-	elif attacker != null and dmg > 0.0:
+		if team >= 0:
+			knock(attacker, zone == "head")       # team modes: down first, the referee decides (TeamArena)
+		else:
+			die(attacker, zone == "head")
+	elif attacker != null and dmg > 0.0 and model:
 		model.play_hit()
 	return dmg
+
+
+## A hit on a KNOCKED fighter takes its knock HP; at 0 it is finished (knock_finished), and stays
+## down until the referee's word.
+func _take_knock_damage(amount: float, zone: String, attacker: Fighter, from_pos: Vector3, cause: String) -> float:
+	if knock_hp <= 0.0:
+		return 0.0
+	last_hit_cause = cause
+	var dmg := clampf(hit_points(amount, zone), 0.0, knock_hp)
+	knock_hp -= dmg
+	stats.taken += dmg
+	last_damage_time = _now()
+	damaged.emit(dmg, from_pos, zone == "head", attacker)
+	if knock_hp <= 0.001:
+		knock_hp = 0.0
+		knock_finished.emit(self, attacker, zone == "head")
+	return dmg
+
+
+## Team modes: HP gone, down on the floor (prone, crawling at KNOCK_SPEED, no gun, items, jump or
+## stance change) with KNOCK_HP that bleeds out over BLEED_S unless a teammate revives it.
+## knocked_down tells the arena (which reports it to the referee). Also applied to the other phone's
+## fighters by the referee's "ko" (TeamArena._apply_decision).
+func knock(by: Fighter, headshot := false) -> void:
+	if knocked or not alive:
+		return
+	hp = 0.0
+	cancel_heal()
+	ads = false
+	sprinting = false
+	want_jump = false
+	_throwing = false
+	if not weapons.is_empty():
+		weapon().cancel_reload()
+	if _capsule != null:
+		set_stance(Stance.PRONE, true)
+	else:
+		stance = Stance.PRONE
+	knocked = true
+	knock_hp = KNOCK_HP
+	knocked_by = by if by != self else null
+	_stop_reviving()
+	revived_by = null
+	knocked_down.emit(self, by, headshot)
+
+
+## Stops the revive this fighter was doing (knocked, out): the teammate bleeds again.
+func _stop_reviving() -> void:
+	if reviving != null and is_instance_valid(reviving) and reviving.revived_by == self:
+		reviving.revived_by = null
+	if reviving != null and model and not healing:
+		model.play_heal(false)
+	reviving = null
+	revive_t = 0.0
+
+
+## Revived: up again with `with_hp` HP (Fighter.REVIVE_HP), crouched (a stand needs head room).
+func stand_up(with_hp: float, by: Fighter) -> void:
+	if not knocked or not alive:
+		return
+	knocked = false
+	knock_hp = 0.0
+	knocked_by = null
+	revived_by = null
+	hp = clampf(with_hp, 1.0, hp_max)
+	last_hit_cause = ""
+	if _capsule != null and not set_stance(Stance.STAND, true):
+		set_stance(Stance.CROUCH, true)
+	revived.emit(self, by)
+
+
+## Team modes: bullets and sight lines pass through these (teammates).
+func ignore_fighters(others: Array) -> void:
+	for o: Fighter in others:
+		if o == null or o == self:
+			continue
+		for rid: RID in [o.get_rid()] + o.hitboxes.map(func(hb: Area3D) -> RID: return hb.get_rid()):
+			if not rid in _exclude:
+				_exclude.append(rid)
+
+
+## What a hit of `amount` (before armour) takes in this zone: after the armour (armor_mult), and a
+## bullet, pellet, punch or frag in whole points, so the numbers shown add up to the HP lost (the
+## zone and falls keep their fractions: they hurt a little every frame).
+func hit_points(amount: float, zone: String) -> float:
+	var dmg := amount * armor_mult(zone)
+	return dmg if zone == "zone" or zone == "fall" else roundf(dmg)
+
+
+## The share of a hit's damage that gets through this fighter's armour in a zone. Lone Wolf gives
+## both fighters level 2 helmet and vest every round; read from the constants (a per-fighter value
+## could be frozen in memory). Tests override it for a fighter without armour.
+func armor_mult(zone: String) -> float:
+	return Weapons.after_armor(1.0, zone, Weapons.VEST_REDUCTION, Weapons.HELMET_REDUCTION)
+
+
+## Set by the online paths that put a fighter down without a scene (a rejoin's or a restart's
+## restore of who is already out): no ELIMINATED tag or burst then, and none for a player who LEFT.
+var quiet_death := false
 
 
 func die(killer: Fighter, headshot := false) -> void:
@@ -323,7 +538,14 @@ func die(killer: Fighter, headshot := false) -> void:
 	set_deferred("collision_mask", LAYER_WORLD)
 	for hb in hitboxes:
 		hb.collision_layer = 0
-	model.play_death()
+	knocked = false
+	knock_hp = 0.0
+	_stop_reviving()
+	revived_by = null
+	if model:
+		model.play_death()
+	if is_inside_tree() and not quiet_death and last_hit_cause != "left":
+		Effects.eliminated(self, global_position)
 	died.emit(self, killer, headshot)
 
 
@@ -332,15 +554,22 @@ func die(killer: Fighter, headshot := false) -> void:
 func reset_for_round(pos: Vector3, yaw: float) -> void:
 	alive = true
 	round_over = false
+	knocked = false                  # (before the stance: a knocked fighter may not change it)
+	knock_hp = 0.0
+	knocked_by = null
+	_stop_reviving()
+	revived_by = null
+	last_attacker = null
+	round_taken.clear()
 	cancel_heal()
 	_stop_heal_sound()
 	healing = false
 	_throwing = false
 	_throw_target = Vector3.INF
-	hp = MAX_HP
-	medkits = 2
-	shields = 2
-	grenades = 1
+	hp = hp_max
+	medkits = START_MEDKITS
+	shields = START_SHIELDS
+	grenades = START_GRENADES
 	ads = false
 	sprinting = false
 	move_dir = Vector2.ZERO
@@ -358,6 +587,11 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	set_loadout(weapons[0].id if not weapons.is_empty() else Weapons.DEFAULT_PICK)
 	last_damage_time = -99.0
 	last_attacked_time = -99.0
+
+
+## On the same team (team modes only; never itself).
+func ally_of(other: Fighter) -> bool:
+	return team >= 0 and other != null and other != self and other.team == team
 
 
 func _now() -> float:
@@ -409,7 +643,7 @@ func is_firing_recently() -> bool:
 ## (camera-aligned for the player, eyes for bots). Returns true if a shot happened.
 func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	var w := weapon()
-	if not w.can_fire() or healing or not alive or stance_lock > 0.0 or hold_fire or round_over:
+	if not w.can_fire() or healing or not alive or stance_lock > 0.0 or hold_fire or round_over or knocked or reviving != null:
 		return false
 	if sprinting:
 		sprinting = false
@@ -421,11 +655,7 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	last_shot_time = _now()
 	var d := w.def
 	var muzzle := model.muzzle_position()
-	var total := 0.0
-	var any_head := false
-	var killed := false
-	var hit_target: Fighter = null
-	var last_pos := Vector3.ZERO
+	var tally := new_tally()
 	var pellets := int(d.pellets)
 	for i in pellets:
 		var dir := Weapons.spread_dir(base_dir, spread, rng)
@@ -454,22 +684,18 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 			var zone: String = col.get_meta("zone")
 			var dist := ray_origin.distance_to(end_pos)
 			var dmg := Weapons.damage_at(d, float(d.damage), dist) * Weapons.zone_mult(d, zone, dist) * Weapons.pen_mult(d, zone)
-			var dealt := target.take_damage(dmg, zone, self, global_position)
+			land(tally, target, zone, dmg, end_pos)
 			Effects.hit_spark(self, end_pos, -dir, zone == "head")
-			if dealt > 0.0:
-				total += dealt
-				hit_target = target
-				last_pos = end_pos
-				if zone == "head":
-					any_head = true
-				if not target.alive:
-					killed = true
 		elif col != null and col.has_method("take_bullet"):
 			col.take_bullet(Weapons.damage_at(d, float(d.damage), ray_origin.distance_to(end_pos)), self)
 			Effects.shield_hit(self, end_pos, normal)
 		else:
 			Effects.impact(self, end_pos, normal)
-	_after_shot(w, hit_target, total, any_head, last_pos, killed)
+			if i == 0:
+				Effects.impact_sound(self, end_pos, col)
+	if not is_player and arena != null and arena.get("player") is Fighter:
+		_near_miss(arena.get("player") as Fighter, ray_origin, base_dir, tally)
+	_after_shot(w, tally)
 	model.on_fire()
 	Effects.muzzle_flash(self, muzzle, aim_forward(), int(d.pellets) > 1)
 	var pitch := float(d.get("pitch", 1.0))
@@ -482,16 +708,71 @@ func perform_shot(ray_origin: Vector3, base_dir: Vector3) -> bool:
 	return true
 
 
-func _after_shot(w: WeaponState, hit_target: Fighter, total: float, any_head: bool, last_pos: Vector3, killed: bool) -> void:
-	if hit_target != null:
+## One shot's (or punch's) damage so far: what its pellets took from the fighter they hit, the body
+## part (arms and legs too) and the head part apart, where each part last landed, and whether the
+## shot killed.
+static func new_tally() -> Dictionary:
+	return {"target": null, "body": 0.0, "head": 0.0, "body_pos": Vector3.ZERO, "head_pos": Vector3.ZERO, "killed": false}
+
+
+## A pellet (bullet, punch) that met `target`: `amount` is its damage before armour; the tally gets
+## what the target's HP really lost (take_damage). Returns that.
+func land(tally: Dictionary, target: Fighter, zone: String, amount: float, pos: Vector3) -> float:
+	var dealt := target.take_damage(amount, zone, self, global_position)
+	if dealt > 0.0:
+		var part := "head" if zone == "head" else "body"
+		tally.target = target
+		tally[part] = float(tally[part]) + dealt
+		tally[part + "_pos"] = pos
+		if not target.alive:
+			tally.killed = true
+	return dealt
+
+
+## A shot's hits as [target, zone, damage before armour, point] (the screen-free path of a shot:
+## the unit tests' way to land exactly these hits).
+func land_hits(hits: Array) -> void:
+	var tally := new_tally()
+	for h: Array in hits:
+		land(tally, h[0], String(h[1]), float(h[2]), h[3])
+	_after_shot(weapon(), tally)
+
+
+## Counts a shot and reports what it took: hit_landed once for its head part (shown orange-red,
+## the headshot marker) and once for its body part, each the HP really lost, so a shotgun shell
+## with one pellet on the head shows that pellet as the headshot and the rest as a body hit; the
+## kill goes with the last report.
+func _after_shot(w: WeaponState, tally: Dictionary) -> void:
+	var target: Fighter = tally.target
+	if target != null:
+		var body := float(tally.body)
+		var head := float(tally.head)
+		var killed := bool(tally.killed)
 		stats.hits += 1
-		stats.damage += total
-		if any_head:
+		stats.damage += body + head
+		if head > 0.0:
 			stats.headshots += 1
-		if killed:
-			stats.kills += 1
-		hit_landed.emit(hit_target, total, any_head, last_pos, killed)
+		if killed and team < 0:
+			stats.kills += 1             # (team modes: TeamArena counts the referee's eliminations)
+		if head > 0.0:
+			hit_landed.emit(target, head, true, tally.head_pos, killed and body <= 0.0)
+		if body > 0.0:
+			hit_landed.emit(target, body, false, tally.body_pos, killed)
 	fired.emit(w)
+
+
+## A shot of another fighter that passed within 1.5 m of the player's head without hitting it:
+## the near-miss whiz there (round 8).
+func _near_miss(me: Fighter, from: Vector3, dir: Vector3, tally: Dictionary) -> void:
+	if not me.alive or not me.is_inside_tree() or tally.get("target") == me:
+		return
+	var head := me.head_position()
+	var along := (head - from).dot(dir)
+	if along < 2.0:
+		return
+	var closest := from + dir * along
+	if closest.distance_to(head) <= 1.5 and closest.distance_to(head) > 0.25:
+		Audio.play_at("bullet_whiz", closest, -6.0, rng.randf_range(0.92, 1.1), 30.0)
 
 
 func _melee(w: WeaponState, base_dir: Vector3) -> bool:
@@ -500,34 +781,29 @@ func _melee(w: WeaponState, base_dir: Vector3) -> bool:
 	stats.shots += 1
 	var origin := eye_position()
 	var res := trace(origin, base_dir, MELEE_RANGE)
-	var hit_target: Fighter = null
-	var total := 0.0
-	var head := false
-	var killed := false
-	var pos := origin + base_dir * MELEE_RANGE
+	var tally := new_tally()
 	if not res.is_empty() and res.collider is Area3D and (res.collider as Area3D).has_meta("fighter"):
-		hit_target = (res.collider as Area3D).get_meta("fighter")
+		var hit_target: Fighter = (res.collider as Area3D).get_meta("fighter")
 		var zone: String = (res.collider as Area3D).get_meta("zone")
-		head = zone == "head"
-		pos = res.position
-		total = hit_target.take_damage(float(w.def.damage) * Weapons.zone_mult(w.def, zone) * Weapons.pen_mult(w.def, zone), zone, self, global_position)
-		killed = not hit_target.alive
-		Effects.hit_spark(self, pos, -base_dir, head)
-	if total <= 0.0:
-		hit_target = null
+		var pos: Vector3 = res.position
+		land(tally, hit_target, zone, float(w.def.damage) * Weapons.zone_mult(w.def, zone) * Weapons.pen_mult(w.def, zone), pos)
+		Effects.hit_spark(self, pos, -base_dir, zone == "head")
 	model.on_punch()
-	Audio.play_at("jump", global_position, -8.0, 1.5)
-	_after_shot(w, hit_target, total, head, pos, killed)
+	Audio.play_at("punch_swish", global_position, -8.0, rng.randf_range(0.95, 1.08))
+	if not res.is_empty() and res.collider is Area3D and (res.collider as Area3D).has_meta("fighter"):
+		Audio.play_at("punch_hit", global_position, -4.0, rng.randf_range(0.95, 1.05))
+	_after_shot(w, tally)
 	return true
 
 
 func start_reload() -> bool:
-	if healing or not alive:
+	if healing or not alive or knocked:
 		return false
 	var w := weapon()
 	if w.start_reload():
 		Audio.play_at("reload_mag" if int(w.def.pellets) == 1 else "reload_shell", global_position, -4.0 if is_player else -8.0)
-		model.play_reload(float(w.def.reload))
+		if model:
+			model.play_reload(float(w.def.reload))
 		return true
 	return false
 
@@ -538,21 +814,22 @@ func _on_reload_done() -> void:
 
 
 func switch_weapon(index: int) -> void:
-	if index == current or index < 0 or index >= weapons.size() or not alive:
+	if index == current or not can_draw(index) or not alive or knocked:
 		return
 	weapon().cancel_reload()
 	current = index
 	var w := weapon()
 	w.cooldown = maxf(w.cooldown, float(w.def.equip))
-	model.play_swap(String(w.def.model), w.def.get("tint", Color.WHITE), float(w.def.equip))
-	Audio.play_at("ui_select", global_position, -10.0)
+	if model:
+		model.play_swap(String(w.def.model), w.def.get("tint", Color.WHITE), float(w.def.equip))
+	Audio.play_at("weapon_draw", global_position, -6.0 if is_player else -10.0)
 	weapon_switched.emit()
 
 
 # ---------------------------------------------------------------- items
 
 func start_heal() -> bool:
-	if healing or medkits <= 0 or hp >= MAX_HP or not alive:
+	if healing or medkits <= 0 or hp >= hp_max or not alive or knocked or reviving != null:
 		return false
 	healing = true
 	sprinting = false
@@ -589,11 +866,11 @@ func _update_heal(delta: float) -> void:
 		if not _heal_used:
 			_heal_used = true
 			medkits -= 1
-		var add := minf(HEAL_RATE * delta, MAX_HP - hp)
+		var add := minf(HEAL_RATE * delta, hp_max - hp)
 		if add > 0.0:
 			hp += add
 			stats.healed += add
-	if _heal_t >= HEAL_TIME or hp >= MAX_HP - 0.001:
+	if _heal_t >= HEAL_TIME or hp >= hp_max - 0.001:
 		healing = false
 		model.play_heal(false)
 		_stop_heal_sound()
@@ -621,7 +898,7 @@ func shield_spot(toward := Vector3.ZERO, dist := 2.0) -> Array:
 
 
 func deploy_shield(toward := Vector3.ZERO, dist := 2.0) -> bool:
-	if shields <= 0 or not alive or hold_fire:
+	if shields <= 0 or not alive or hold_fire or knocked or reviving != null:
 		return false
 	var spot := shield_spot(toward, dist)
 	if spot.is_empty():
@@ -633,14 +910,16 @@ func deploy_shield(toward := Vector3.ZERO, dist := 2.0) -> bool:
 	wall.global_position = pos
 	wall.look_at(pos + fwd, Vector3.UP)
 	shields -= 1
-	if is_player and arena and arena.has_method("net_wall"):
+	if net_local and arena and arena.has_method("net_wall_by"):
+		arena.net_wall_by(self, pos, fwd)
+	elif is_player and arena and arena.has_method("net_wall"):
 		arena.net_wall(pos, fwd)
 	return true
 
 
 ## Throws along the aim; with a target point (bots) the arc is solved to land there.
 func throw_grenade(target := Vector3.INF) -> bool:
-	if grenades <= 0 or not alive or healing or hold_fire or _throwing:
+	if grenades <= 0 or not alive or healing or hold_fire or _throwing or knocked or reviving != null:
 		return false
 	grenades -= 1
 	sprinting = false
@@ -662,7 +941,7 @@ func grenade_launch() -> Array:
 
 func _release_grenade() -> void:
 	_throwing = false
-	if not alive or not is_inside_tree():
+	if not alive or knocked or not is_inside_tree():
 		return
 	var g := Grenade.new()
 	g.thrower = self
@@ -677,7 +956,9 @@ func _release_grenade() -> void:
 		var grav := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)) * g.gravity_scale
 		g.linear_velocity = (to / t + Vector3.UP * 0.5 * grav * t).limit_length(22.0)
 	Audio.play_at("grenade_throw", global_position, -4.0)
-	if is_player and arena and arena.has_method("net_grenade"):
+	if net_local and arena and arena.has_method("net_grenade_by"):
+		arena.net_grenade_by(self, g.global_position, g.linear_velocity)
+	elif is_player and arena and arena.has_method("net_grenade"):
 		arena.net_grenade(g.global_position, g.linear_velocity)
 
 
@@ -686,7 +967,7 @@ func _release_grenade() -> void:
 func set_stance(s: Stance, instant := false) -> bool:
 	if s == stance:
 		return true
-	if not alive:
+	if not alive or knocked:
 		return false
 	# Standing/crouching up needs head room.
 	var h := _stance_height(s)
@@ -725,6 +1006,8 @@ func _think(_delta: float) -> void:
 
 
 func move_speed() -> float:
+	if knocked:
+		return KNOCK_SPEED               # crawling, whatever the gun
 	var deflect := clampf(move_dir.length(), 0.0, 1.0)
 	var speed := RUN_SPEED
 	match stance:
@@ -735,17 +1018,19 @@ func move_speed() -> float:
 		_:
 			if sprinting and move_dir.y > 0.3:
 				speed = SPRINT_SPEED
-			elif deflect < 0.6:
-				speed = WALK_SPEED * deflect / 0.6
+			elif deflect < 0.45:
+				speed = WALK_SPEED * deflect / 0.45      # a light push walks, a normal push runs
 	var d := weapon().def
-	speed *= float(d.get("move", 1.0))
+	speed *= Weapons.move_mult(d)
 	if ads:
 		speed *= ADS_MULT
 	if is_firing_recently():
 		speed *= float(d.get("fire_move", 0.85))
 	if healing:
 		speed *= HEAL_MULT
-	return speed
+	if reviving != null:
+		speed = 0.0                      # a revive is done standing still (moving cancels it)
+	return speed * rule_speed
 
 
 func _physics_process(delta: float) -> void:
@@ -757,6 +1042,12 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 	stance_lock = maxf(stance_lock - delta, 0.0)
+	if knocked and not frozen and revived_by == null and knock_hp > 0.0:
+		# Bleeding out: KNOCK_HP over BLEED_S while nobody revives it.
+		knock_hp = maxf(knock_hp - KNOCK_HP / BLEED_S * delta, 0.0)
+		if knock_hp <= 0.0:
+			last_hit_cause = "bleed"
+			knock_finished.emit(self, null, false)
 	if not frozen:
 		_think(delta)
 	else:
@@ -779,11 +1070,11 @@ func _physics_process(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, target_v.x, accel * delta)
 	velocity.z = move_toward(velocity.z, target_v.z, accel * delta)
 	if on_floor:
-		if want_jump and not healing:
+		if want_jump and not healing and not knocked:
 			if stance != Stance.STAND:
 				set_stance(Stance.STAND)
 			else:
-				velocity.y = JUMP_V
+				velocity.y = JUMP_V * rule_jump
 				_peak_y = global_position.y
 				Audio.play_at("jump", global_position, -9.0)
 				model.on_jump()
@@ -798,25 +1089,36 @@ func _physics_process(delta: float) -> void:
 	if now_floor:
 		_peak_y = global_position.y
 	_was_air = not now_floor
-	_footsteps(delta)
-	var local_v := flat.inverse() * velocity
+	_footsteps(delta, now_floor)
+	var local_v := Basis(Vector3.UP, drawn_yaw()).inverse() * velocity
+	model.sprint = sprinting
+	model.aiming = ads
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, now_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
+
+
+## The yaw the model is drawn at (locomotion plays relative to it): the aim's, except while the
+## player's free look holds the body still (Player.drawn_yaw).
+func drawn_yaw() -> float:
+	return aim_yaw
 
 
 func _land() -> void:
 	var drop := _peak_y - global_position.y
 	Audio.play_at("land", global_position, -9.0)
 	if drop > FALL_SAFE:
-		take_damage((drop - FALL_SAFE) * FALL_DMG_PER_M, "fall", null, global_position)
+		take_damage((drop - FALL_SAFE) * FALL_DMG_PER_M, "fall", null, global_position, "fall")
 
 
 func _process(_delta: float) -> void:
 	_update_hitboxes()
 
 
-func _footsteps(delta: float) -> void:
-	if not is_on_floor():
+## Step sounds (and, for anyone but this phone's player, the minimap's footprints) at the pace of
+## the horizontal speed; on_floor: the fighter stands on something (an online opponent's comes
+## with its state, it never runs move_and_slide here).
+func _footsteps(delta: float, on_floor: bool) -> void:
+	if not on_floor:
 		return
 	var hs := horizontal_speed()
 	if hs < 1.4:

@@ -116,6 +116,19 @@ func stop_music() -> void:
 	_music.stop()
 
 
+var _ducked_db := 0.0
+
+
+## The music lowered by `db` (negative; 0 brings it back): the lobby's search ducks it 6 dB. Relative
+## to where the music is, so a duck and its undo cancel out.
+func duck_music(db: float) -> void:
+	var by := db - _ducked_db
+	_ducked_db = db
+	if absf(by) < 0.01:
+		return
+	create_tween().tween_property(_music, "volume_db", _music.volume_db + by, 0.4)
+
+
 func play_ambience(sound_name: String, volume_db := -10.0) -> void:
 	var s := stream(sound_name)
 	if s == null:

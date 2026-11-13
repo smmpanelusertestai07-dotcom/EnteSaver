@@ -13,7 +13,7 @@ import numpy as np
 
 from dsp import (SR, bp, env_ad, env_adsr, fade, finalize, fm, hp, lp, make_ir, modal,
                  mtof, normalize, ns, peq, ramp_exp, reson, reverb, sat, saw, shelf,
-                 sine, smear, square, svf, sweep_exp, triangle, tvec, white, colored,
+                 sine, smear, square, supersaw, svf, sweep_exp, triangle, tvec, white, colored,
                  write_wav, place)
 
 REGISTRY: list[tuple[str, str, callable]] = []
@@ -257,6 +257,115 @@ def pump():
     place(out, normalize(c2), 0.205, 1.0)
     out = reverb(out, room(rng, 0.25), wet=0.13)
     return finalize(out, max_len=0.36, fout=0.07)
+
+
+# ----------------------------------------------------------------------------
+# round 8: the match's missing moments (weapon handling, punches, near misses, impacts, grunts)
+# ----------------------------------------------------------------------------
+@sfx("weapon_draw", "Weapon draw: cloth rustle, a short metal slide and a light latch click.")
+def weapon_draw():
+    rng = np.random.default_rng(2101)
+    n = ns(0.45)
+    out = np.zeros(n)
+    place(out, normalize(bp(white(ns(0.12), rng), 500, 3000) * env_ad(ns(0.12), 0.02, 0.04)), 0.0, 0.3)
+    place(out, scrape(rng, 0.08, 1500, 3400, 2.6, 0.6), 0.06, 0.45)
+    place(out, metal_click(rng, ns(0.08), 2900, 0.01), 0.16, 0.7)
+    place(out, thud(ns(0.06), 240, 140, 0.02, 0.015), 0.16, 0.25)
+    out = reverb(out, room(rng, 0.18), wet=0.1)
+    return finalize(out, max_len=0.35, fout=0.06)
+
+
+@sfx("punch_swish", "Punch swing: a fast airy whoosh, rising then falling band of noise.")
+def punch_swish():
+    rng = np.random.default_rng(2102)
+    m = ns(0.24)
+    t = tvec(m)
+    w = svf(white(m, rng), ramp_exp(m, 600, 2600, 0.09), 1.4, "bp")
+    w *= np.clip(t / 0.07, 0, 1) ** 1.5 * np.exp(-np.maximum(t - 0.07, 0) / 0.045)
+    return finalize(normalize(w), max_len=0.22, fout=0.05)
+
+
+@sfx("punch_hit", "Punch landing: a dull low body thump with a short slap on top.")
+def punch_hit():
+    rng = np.random.default_rng(2103)
+    n = ns(0.3)
+    out = 0.9 * sat(thud(n, 140, 60, 0.04, 0.045, 0.001), 2.0)
+    out += 0.5 * normalize(bp(white(n, rng), 900, 4500) * env_ad(n, 0.0002, 0.006))
+    out += 0.3 * normalize(lp(white(n, rng), 400, 2) * env_ad(n, 0.001, 0.03))
+    out = reverb(normalize(out), room(rng, 0.15), wet=0.06)
+    return finalize(out, max_len=0.25, fout=0.06)
+
+
+@sfx("dry_click", "Empty magazine: a small hollow trigger click, no shot.")
+def dry_click():
+    rng = np.random.default_rng(2104)
+    out = metal_click(rng, ns(0.1), 3200, 0.006, noise_gain=0.3)
+    out = 0.8 * normalize(out) + 0.3 * thud(ns(0.1), 600, 380, 0.01, 0.006)
+    return finalize(normalize(out), max_len=0.09, fout=0.03)
+
+
+@sfx("bullet_whiz", "Near miss: a short doppler zip of a round passing close by.")
+def bullet_whiz():
+    rng = np.random.default_rng(2105)
+    m = ns(0.22)
+    t = tvec(m)
+    f = ramp_exp(m, 3400, 900, 0.12)
+    w = svf(white(m, rng), f, 6.0, "bp") + 0.35 * sine(f * 0.5, m)
+    w *= np.exp(-((t - 0.06) / 0.035) ** 2)
+    return finalize(normalize(w), max_len=0.2, fout=0.04)
+
+
+def _impact(seed, ratios, base, decay, body, grit):
+    rng = np.random.default_rng(seed)
+    n = ns(0.35)
+    out = 0.6 * normalize(hp(white(n, rng), 1800, 2) * env_ad(n, 0.0001, 0.004))
+    out += body * normalize(modal(n, base * np.array(ratios), [decay, decay * 0.6, decay * 0.4], [1.0, 0.6, 0.35]))
+    out += grit * normalize(grains(rng, n, 18, 0.0, 0.05, 1500, 6500))
+    out = reverb(normalize(out), room(rng, 0.2), wet=0.08)
+    return finalize(out, max_len=0.3, fout=0.08)
+
+
+@sfx("impact_metal", "Bullet on metal: a sharp ping with a ringing tail.")
+def impact_metal():
+    return _impact(2106, (1.0, 2.41, 3.87), 1900, 0.09, 0.9, 0.2)
+
+
+@sfx("impact_wood", "Bullet on wood: a hollow knock with splinter crackle.")
+def impact_wood():
+    return _impact(2107, (1.0, 1.7, 2.6), 420, 0.025, 0.8, 0.6)
+
+
+@sfx("impact_concrete", "Bullet on concrete: a dry crack with gritty debris.")
+def impact_concrete():
+    return _impact(2108, (1.0, 1.4, 2.2), 900, 0.008, 0.4, 1.0)
+
+
+def _grunt(seed, f0, f1):
+    rng = np.random.default_rng(seed)
+    m = ns(0.35)
+    tm = tvec(m)
+    src = colored(m, rng, 1.0) * (1 + 0.5 * np.sin(2 * np.pi * 85 * tm))
+    fm_ = ramp_exp(m, f0, f1, 0.2)
+    g = svf(src, fm_, 4.5, "bp") + 0.5 * svf(src, fm_ * 2.3, 5.0, "bp")
+    g *= env_ad(m, 0.012, 0.07)
+    g = lp(g, 1600, 2)
+    g = hp(g, 90, 2)
+    return finalize(normalize(g), max_len=0.3, fout=0.08)
+
+
+@sfx("grunt_1", "Hurt grunt 1: a short breathy formant 'uh' (noise, no voice).")
+def grunt_1():
+    return _grunt(2111, 520, 360)
+
+
+@sfx("grunt_2", "Hurt grunt 2: a lower clipped formant 'oh' (noise, no voice).")
+def grunt_2():
+    return _grunt(2112, 430, 300)
+
+
+@sfx("grunt_3", "Hurt grunt 3: a higher short formant 'eh' (noise, no voice).")
+def grunt_3():
+    return _grunt(2113, 640, 420)
 
 
 # ----------------------------------------------------------------------------
@@ -629,6 +738,117 @@ def ui_back():
         place(out, lp(v, 3000) * env_ad(m, 0.002, tau), st, a)
     out = reverb(out, room(rng, 0.25), wet=0.08)
     return finalize(out, max_len=0.17, fout=0.05)
+
+
+
+@sfx("ui_invite", "Invite ring (0.5 s): two soft bell tones alternating twice (B5 / E6), like a small phone ring.")
+def ui_invite():
+    rng = np.random.default_rng(2626)
+    n = ns(0.7)
+    out = np.zeros(n)
+    for i, mn in enumerate([83, 88, 83, 88]):
+        m = ns(0.25)
+        f = mtof(mn)
+        v = sine(f, m) + 0.3 * sine(2.0 * f, m) + 0.08 * sine(3.01 * f, m)
+        place(out, v * env_ad(m, 0.003, 0.05), i * 0.11, 0.9 if i % 2 == 0 else 0.75)
+    out = reverb(out, room(rng, 0.3), wet=0.1)
+    return finalize(out, max_len=0.5, fout=0.06)
+
+
+@sfx("ui_msg", "Message pop (0.12 s): a soft rounded pop with a quick upward pitch glide.")
+def ui_msg():
+    rng = np.random.default_rng(2727)
+    n = ns(0.2)
+    f = np.linspace(700.0, 1300.0, n)
+    out = sine(f, n) * env_ad(n, 0.002, 0.025)
+    out += 0.25 * sine(2.0 * f, n) * env_ad(n, 0.001, 0.012)
+    out = reverb(lp(out, 5000), room(rng, 0.15), wet=0.05)
+    return finalize(out, max_len=0.12, fout=0.03)
+
+
+@sfx("match_found", "Match found (0.6 s): a rising three-note sting (D5, A5, D6) over a soft swell.")
+def match_found():
+    rng = np.random.default_rng(2828)
+    n = ns(0.9)
+    out = np.zeros(n)
+    for mn, st, tau, a in [(74, 0.0, 0.06, 0.7), (81, 0.09, 0.07, 0.85), (86, 0.18, 0.22, 1.0)]:
+        m = ns(0.5)
+        f = mtof(mn)
+        v = sine(f, m) + 0.35 * triangle(2.0 * f, m) + 0.12 * saw(f, m)
+        place(out, lp(v, 4500) * env_ad(m, 0.004, tau), st, a)
+    swell = lp(white(n, rng), 1800) * env_ad(n, 0.25, 0.12) * 0.12
+    out += swell
+    out = reverb(out, room(rng, 0.45), wet=0.14)
+    return finalize(out, max_len=0.6, fout=0.12)
+
+INTRO_HIT = 0.90    # where the intro sting's impact lands (sync the emblem's landing to it)
+
+
+@sfx("intro_sting", "Intro sting (~2.4 s, impact at 0.90 s): a noise whoosh, a bright air swell, an F# drone "
+     "rising an octave and accelerating metal ticks build up, a short suck, then a sub boom with punch "
+     "and a low F# braam stab, a struck-metal clang and a shimmering high ring with sparkles in a large room.")
+def intro_sting():
+    rng = np.random.default_rng(2626)
+    hit = INTRO_HIT
+    n = ns(3.6)
+    dry = np.zeros(n)           # low end: stays out of the reverb so it ends tight
+    wet = np.zeros(n)
+    # -- build-up, cut 35 ms before the hit (the suck makes the impact land harder)
+    m = ns(hit)
+    tm = tvec(m)
+    k = tm / hit
+    gate = np.clip((hit - 0.035 - tm) / 0.025, 0, 1)
+    whoosh = svf(white(m, rng), 180 * (5200 / 180) ** (k ** 1.3), 1.2 + 2.3 * k, "bp")
+    place(wet, normalize(whoosh * k ** 2.2 * gate), 0.0, 0.5)
+    air = hp(white(m, rng), 3500, 2) * np.exp((tm - hit) / 0.16) * gate
+    place(wet, normalize(air), 0.0, 0.26)
+    f = mtof(30) * 2 ** (k ** 1.6)                      # F#1 gliding up to F#2
+    drone = saw(f * 1.004, m, 0.1) + saw(f * 0.996, m, 0.6) + 0.6 * sine(f / 2, m)
+    drone = svf(drone, 160 + 1600 * k ** 2, 1.0, "lp", poles=4) * k ** 1.8 * gate
+    place(wet, normalize(drone), 0.0, 0.34)
+    st, gap, i = 0.22, 0.17, 0
+    while st < hit - 0.07:
+        tick = metal_click(rng, ns(0.05), 2500 * 1.06 ** i, 0.007, noise_gain=0.4)
+        place(wet, tick, st, 0.05 + 0.13 * (st / hit) ** 2)
+        st += gap
+        gap = max(0.04, gap * 0.8)
+        i += 1
+    # -- the hit: a short sub (phone speakers barely play it) under a mid-band body burst that
+    # carries the impact on small speakers
+    m = ns(2.6)
+    tm = tvec(m)
+    place(dry, sat(sine(sweep_exp(m, 120, 38, 0.09), m) * env_ad(m, 0.002, 0.34), 2.2), hit, 0.6)
+    place(dry, sat(thud(ns(0.4), 220, 70, 0.03, 0.06), 1.8), hit, 0.5)
+    place(dry, normalize(bp(white(m, rng), 140, 1400) * env_ad(m, 0.001, 0.07)), hit, 0.42)
+    place(dry, normalize(lp(white(m, rng), 1200, 4) * env_ad(m, 0.001, 0.045)), hit, 0.45)
+    place(dry, normalize(lp(colored(m, rng, 2.0), 180, 4) * env_ad(m, 0.01, 0.4)), hit, 0.22)
+    place(wet, normalize(hp(white(ns(0.05), rng), 2500, 2) * env_ad(ns(0.05), 0.0001, 0.004)), hit, 0.3)
+    braam = np.zeros(m)
+    for mn, a in ((30, 1.0), (37, 0.7), (42, 0.6)):          # F#1, C#2, F#2
+        braam += a * supersaw(mtof(mn), m, voices=5, detune_cents=12, rng=rng)
+    cut = 180 + 2200 * np.exp(-tm / 0.12) * (1 - np.exp(-tm / 0.01))
+    braam = svf(braam, cut, 0.9, "lp", poles=4) * env_adsr(m, 0.006, 0.22, 0.45, 0.35, 0.3)
+    place(wet, sat(normalize(braam), 1.6), hit, 0.4)
+    # -- metallic shimmer: an inharmonic struck plate (beating mode pairs), a high ring, sparkles
+    ratios = np.array([1.0, 1.003, 2.32, 2.326, 3.86, 5.14, 6.78, 8.53])
+    clang = modal(m, mtof(78) * ratios, [1.2, 1.1, 0.8, 0.75, 0.5, 0.35, 0.25, 0.16],
+                  [1.0, 0.8, 0.6, 0.5, 0.4, 0.3, 0.2, 0.12], phases=rng.random(8) * 2 * np.pi)
+    clang = normalize(clang) * env_ad(m, 0.0008, 0.85) + 0.4 * normalize(hp(white(m, rng), 5000) * env_ad(m, 0.0002, 0.006))
+    place(wet, normalize(clang), hit + 0.004, 0.55)
+    ring = np.zeros(m)
+    for mn, a in ((90, 1.0), (97, 0.7), (102, 0.45), (106, 0.25)):   # F#6, C#7, F#7, A#7
+        ring += a * (sine(mtof(mn), m) + 0.7 * sine(mtof(mn) * 1.0045, m, 0.37))
+    ring *= (1 + 0.3 * np.sin(2 * np.pi * 7.5 * tm)) / 1.3 * np.clip(tm / 0.06, 0, 1) * np.exp(-tm / 0.55)
+    place(wet, normalize(ring), hit + 0.02, 0.28)
+    for _ in range(18):
+        st = hit + 0.04 + rng.exponential(0.25)
+        if st < hit + 1.2:
+            note = mtof(rng.choice([97, 100, 102, 104, 106, 109]))
+            place(wet, bell(ns(0.3), note, 0.05, bright=0.7), st, 0.07 + 0.05 * rng.random())
+    ir = make_ir(1.8, rng, predelay=0.02, hf_ratio=0.45, buildup=0.02, bright=1.1)
+    out = hp(dry, 28, 2)
+    out = out + reverb(wet, ir, wet=0.3)[:n]
+    return finalize(sat(normalize(out), 1.3), max_len=2.5, fout=0.65, fin=0.002)
 
 
 def build(out_dir):

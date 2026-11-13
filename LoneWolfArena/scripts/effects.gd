@@ -1,17 +1,38 @@
 class_name Effects
 extends RefCounted
 ## Lightweight visual effects (tracers, impacts, muzzle flashes, explosions).
-## Everything is created on demand and frees itself.
+## Everything is created on demand and frees itself, but the bullet holes: one MultiMesh per scene
+## holds them all (one draw call), the oldest overwritten, each cleared after HOLE_LIFE_S.
 
 const MAX_HOLES := 40
+const HOLE_LIFE_S := 12.0
+const HIDDEN_HOLE := Transform3D(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0, -1000, 0))   # an empty slot: no size, far below
 
 static var _mats := {}
 static var _meshes := {}
-static var _holes: Array = []
+static var _hole_mmi: MultiMeshInstance3D
+static var _hole_born := PackedInt64Array()   # tick (ms) each hole was made, -1 when its slot is empty
+static var _hole_next := 0
 static var _hole_mat: StandardMaterial3D
 static var muzzle_tex: Texture2D
 static var glow_tex: Texture2D
 static var lights_enabled := true
+## The player's hit splash (round 8): a few red splat sprites reused in turn, never made per hit.
+const SPLASH_POOL := 4
+const SPLASH_LIFE := 0.25
+static var _splash: Array[Sprite3D] = []
+static var _splash_next := 0
+static var splash_tex: Texture2D
+## Share of each burst's particles that are made (they are CPU-simulated), see configure().
+static var particle_share := 1.0
+
+
+## The graphics level and the VISUAL EFFECTS setting (full): lights on muzzle flashes and explosions
+## from HIGH up and only with the effects on; particle bursts at half on LOW and at half again with
+## the effects off (a burst keeps 2 particles at least, so hits still spark).
+static func configure(level: int, full: bool) -> void:
+	lights_enabled = level >= 2 and full
+	particle_share = (0.5 if level <= 0 else 1.0) * (1.0 if full else 0.5)
 
 
 static func _mat(color: Color, additive := true, tex: Texture2D = null, billboard := false) -> StandardMaterial3D:
@@ -68,6 +89,8 @@ static func load_textures() -> void:
 		muzzle_tex = load("res://assets/textures/muzzle_flash.png")
 	if glow_tex == null and ResourceLoader.exists("res://assets/textures/glow.png"):
 		glow_tex = load("res://assets/textures/glow.png")
+	if splash_tex == null and ResourceLoader.exists("res://assets/ui/icons/v_splat.png"):
+		splash_tex = load("res://assets/ui/icons/v_splat.png")
 
 
 static func tracer(ctx: Node, from: Vector3, to: Vector3) -> void:
@@ -121,7 +144,7 @@ static func _burst(parent: Node, pos: Vector3, normal: Vector3, color: Color, am
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.explosiveness = 1.0
-	p.amount = amount
+	p.amount = maxi(roundi(amount * particle_share), 2)
 	p.lifetime = life
 	p.local_coords = false
 	p.mesh = _box(Vector3(size, size, size * 3.0))
@@ -147,19 +170,94 @@ static func impact(ctx: Node, pos: Vector3, normal: Vector3) -> void:
 		return
 	_burst(parent, pos + normal * 0.02, normal, Color(1.0, 0.75, 0.35, 1), 7, 5.0, 0.025, 0.22)
 	_burst(parent, pos + normal * 0.05, normal, Color(0.55, 0.52, 0.48, 0.55), 4, 1.2, 0.09, 0.45, 0.5)
-	var hole := MeshInstance3D.new()
-	hole.mesh = _quad(Vector2(0.07, 0.07))
-	hole.material_override = _hole_material()
-	hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	parent.add_child(hole)
 	var up := Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT
-	hole.global_transform = Transform3D(Basis.looking_at(-normal, up), pos + normal * 0.012)
-	_holes.append(hole)
-	while _holes.size() > MAX_HOLES:
-		var old: Variant = _holes.pop_front()
-		if is_instance_valid(old):
-			(old as Node).queue_free()
-	_free_after(hole, 12.0)
+	var mm := _hole_layer(parent).multimesh
+	mm.set_instance_transform(_hole_next, Transform3D(Basis.looking_at(-normal, up), pos + normal * 0.012))
+	_hole_born[_hole_next] = Time.get_ticks_msec()
+	_hole_next = (_hole_next + 1) % MAX_HOLES
+
+
+## The bullet's impact sound by what it hit (round 8): metal (containers, barrels, the forklift),
+## wood (crates, pallets) or concrete (walls, floor, anything else): a group "metal" / "wood" on
+## the collider or its parent first, else its name. At most one every IMPACT_GAP_MS.
+const IMPACT_GAP_MS := 70
+static var _impact_ms := 0
+static func impact_kind(col: Object) -> String:
+	var n := col as Node
+	if n == null:
+		return "concrete"
+	for node: Node in [n, n.get_parent()]:
+		if node == null:
+			continue
+		if node.is_in_group("metal"):
+			return "metal"
+		if node.is_in_group("wood"):
+			return "wood"
+		var nm := String(node.name).to_lower()
+		for k: String in ["container", "barrel", "tank", "fork", "metal", "cabinet", "rail", "truss", "shelf"]:
+			if k in nm:
+				return "metal"
+		for k: String in ["crate", "pallet", "wood", "box", "plank"]:
+			if k in nm:
+				return "wood"
+	return "concrete"
+
+
+static func impact_sound(ctx: Node, pos: Vector3, col: Object) -> void:
+	if ctx == null or not ctx.is_inside_tree():
+		return
+	var now := Time.get_ticks_msec()
+	if now - _impact_ms < IMPACT_GAP_MS:
+		return
+	_impact_ms = now
+	Audio.play_at("impact_" + impact_kind(col), pos, -8.0, randf_range(0.92, 1.08), 40.0)
+
+
+## Every bullet hole of the scene is an instance of one MultiMesh (one draw call, not one each): a
+## ring of MAX_HOLES, the oldest overwritten; a hole goes after HOLE_LIFE_S (a timer clears it).
+static func _hole_layer(parent: Node) -> MultiMeshInstance3D:
+	if is_instance_valid(_hole_mmi) and _hole_mmi.get_parent() == parent:
+		return _hole_mmi
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = _quad(Vector2(0.07, 0.07))
+	mm.instance_count = MAX_HOLES
+	_hole_mmi = MultiMeshInstance3D.new()
+	_hole_mmi.name = "BulletHoles"
+	_hole_mmi.multimesh = mm
+	_hole_mmi.material_override = _hole_material()
+	_hole_mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(_hole_mmi)
+	_hole_born.resize(MAX_HOLES)
+	_hole_born.fill(-1)
+	_hole_next = 0
+	for i in MAX_HOLES:
+		mm.set_instance_transform(i, HIDDEN_HOLE)
+	var t := Timer.new()
+	t.wait_time = 1.0
+	t.autostart = true
+	t.timeout.connect(_clear_old_holes)
+	_hole_mmi.add_child(t)
+	return _hole_mmi
+
+
+static func _clear_old_holes() -> void:
+	if not is_instance_valid(_hole_mmi):
+		return
+	var now := Time.get_ticks_msec()
+	for i in _hole_born.size():
+		if _hole_born[i] >= 0 and now - _hole_born[i] > int(HOLE_LIFE_S * 1000.0):
+			_hole_born[i] = -1
+			_hole_mmi.multimesh.set_instance_transform(i, HIDDEN_HOLE)
+
+
+## The bullet holes showing now (tests, the draw-call budget sweep).
+static func hole_count() -> int:
+	var n := 0
+	if is_instance_valid(_hole_mmi):
+		for b in _hole_born:
+			n += 1 if b >= 0 else 0
+	return n
 
 
 ## Bullet hole: a dark round core with a soft edge and a faint chipped rim, lit like the surface
@@ -190,6 +288,49 @@ static func hit_spark(ctx: Node, pos: Vector3, normal: Vector3, headshot: bool) 
 		return
 	var c := Color(1.0, 0.25, 0.2, 1) if not headshot else Color(1.0, 0.9, 0.3, 1)
 	_burst(parent, pos, normal, c, 10 if headshot else 6, 3.5, 0.03, 0.25)
+	if ctx is Player:
+		hit_splash(ctx, pos, headshot)
+
+
+## The player's hit: a small red splash where the bullet landed (own splat sprite, from a pool of
+## SPLASH_POOL, grows and fades in SPLASH_LIFE s; drawn over the body so it reads at range).
+static func hit_splash(ctx: Node, pos: Vector3, headshot := false) -> void:
+	var parent := _scene(ctx)
+	if parent == null:
+		return
+	load_textures()
+	if splash_tex == null:
+		return
+	var live: Array[Sprite3D] = []
+	for old in _splash:
+		if is_instance_valid(old) and old.get_parent() == parent:
+			live.append(old)
+	_splash = live
+	var sp: Sprite3D
+	if _splash.size() < SPLASH_POOL:
+		sp = Sprite3D.new()
+		sp.texture = splash_tex
+		sp.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sp.shaded = false
+		sp.no_depth_test = true
+		sp.render_priority = 2
+		sp.pixel_size = 0.3 / float(splash_tex.get_width())
+		sp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		parent.add_child(sp)
+		_splash.append(sp)
+	else:
+		sp = _splash[_splash_next % _splash.size()]
+		_splash_next += 1
+	sp.global_position = pos
+	sp.rotation.z = randf() * TAU
+	sp.visible = true
+	var k := 1.25 if headshot else 1.0
+	sp.scale = Vector3.ONE * 0.5 * k
+	sp.modulate = Color(1.0, 0.12, 0.08, 0.95) if headshot else Color(0.92, 0.1, 0.08, 0.9)
+	var tw := sp.create_tween().set_parallel()
+	tw.tween_property(sp, "scale", Vector3.ONE * 1.15 * k, SPLASH_LIFE).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(sp, "modulate:a", 0.0, SPLASH_LIFE).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(sp.hide)
 
 
 static func shield_hit(ctx: Node, pos: Vector3, normal: Vector3) -> void:
@@ -205,6 +346,38 @@ static func shield_break(ctx: Node, pos: Vector3) -> void:
 		return
 	_burst(parent, pos + Vector3.UP, Vector3.UP, Color(0.78, 0.93, 1.0, 1), 46, 6.5, 0.07, 0.9)
 	_burst(parent, pos + Vector3.UP * 0.8, Vector3.UP, Color(0.85, 0.95, 1.0, 0.3), 14, 1.6, 0.4, 1.0, 0.4)
+
+
+## A fighter eliminated (on every phone, whoever it is): a small "ELIMINATED" tag over the body for
+## ELIMINATED_S, which fades out, over one short white burst (the reference: a label over the body
+## and a white shatter, no big effect; the burst follows particle_share like every other).
+const ELIMINATED_S := 1.6
+
+
+static func eliminated(ctx: Node, pos: Vector3) -> void:
+	var parent := _scene(ctx)
+	if parent == null:
+		return
+	_burst(parent, pos + Vector3.UP * 1.0, Vector3.UP, Color(1, 1, 1, 0.85), 12, 2.6, 0.05, 0.5, -4.0)
+	var l := Label3D.new()
+	l.name = "EliminatedTag"
+	l.text = "ELIMINATED"
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.fixed_size = true
+	l.pixel_size = 0.0009
+	l.font_size = 28
+	l.outline_size = 8
+	l.modulate = Color(1.0, 0.86, 0.3)
+	l.outline_modulate = Color(0.12, 0.05, 0.02, 0.9)
+	l.font = UI.font("italic")
+	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(l)
+	l.global_position = pos + Vector3.UP * 1.9
+	var tw := l.create_tween()
+	tw.tween_property(l, "modulate:a", 0.0, 0.4).set_delay(ELIMINATED_S - 0.45)
+	tw.parallel().tween_property(l, "outline_modulate:a", 0.0, 0.4).set_delay(ELIMINATED_S - 0.45)
+	_free_after(l, ELIMINATED_S + 0.1)
 
 
 ## A wall forming: frozen foam bursts up along its base, with a puff of cold mist.
@@ -265,6 +438,7 @@ static func warm_up(ctx: Node) -> void:
 	impact(ctx, p, Vector3.UP)
 	hit_spark(ctx, p, Vector3.UP, false)
 	hit_spark(ctx, p, Vector3.UP, true)
+	hit_splash(ctx, p)
 	shield_hit(ctx, p, Vector3.UP)
 	shield_break(ctx, p)
 	shield_form(ctx, Transform3D(Basis(), p))

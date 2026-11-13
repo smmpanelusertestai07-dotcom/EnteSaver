@@ -1,0 +1,229 @@
+class_name RoundRules
+extends RefCounted
+## The rules of a round that every arena (1 vs 1, DUO, SQUAD) and both phones of an online match
+## work out alike, kept as pure functions so the unit tests can check them:
+##  - the TWO-STAGE CLOCK: a round's fight is stage 1 (STAGE1_S) and then stage 2 (the arena's
+##    stage2 length: STAGE2_S, SQUAD_STAGE2_S); fighting is allowed in both, the top clock counts
+##    each stage down on its own, and at the end of stage 2 the time-out decides;
+##  - the SAFE ZONE: through stage 1 it covers the whole hall and stays put; from the first second
+##    of stage 2 it closes continuously and evenly to ZONE_FINAL_R exactly when stage 2 ends, its
+##    centre sliding from the map's centre to the round's final centre;
+##  - the BREAK between two rounds: one timer (s since the round was decided) that both phones run,
+##    BREAK_S long, in steps: a beat (the elimination at normal speed: the kill feed line, a small
+##    badge, the tag over the body; no slow motion, as the reference), the result band near the
+##    top, a dimmed screen with the two score plates (the winner's number counts up from the old
+##    score at BREAK_TICK_AT), then the next round's band; the prep follows (5 s, or the 15 s pick),
+##    so a round without a pick starts about 15.5 s after the kill;
+##  - the 1 vs 1 WEAPON COOLDOWN: a gun picked for a pair of rounds cannot be picked again for the
+##    next COOLDOWN_ROUNDS rounds, whoever picks.
+
+const STAGE1_S := 20.0
+const STAGE2_S := 90.0              # the 1 vs 1 and DUO
+const SQUAD_STAGE2_S := 120.0
+const ZONE_FINAL_R := 0.5           # m: the zone's radius when stage 2 ends
+const COOLDOWN_ROUNDS := 4
+const PICK_ROUNDS := 2              # one pick holds for this many rounds
+const BREAK_S := 10.5               # the whole break, from the round's decision to the next prep
+const BREAK_RESULT_AT := 2.5        # the result band (VICTORY / DEFEAT / DRAW) near the top
+const BREAK_SCORE_AT := 5.0         # the dimmed screen with the two score plates
+const BREAK_TICK_AT := 6.0          # ... where the winner's number goes up
+const BREAK_BAND_AT := 8.0          # the next round's band (ROUND n / AREA), to the end of the break
+
+
+## The whole fight of a round (s): both stages.
+static func fight_time(stage2: float) -> float:
+	return STAGE1_S + stage2
+
+
+## The stage (1 or 2) at `elapsed` s into the fight.
+static func stage_at(elapsed: float) -> int:
+	return 1 if elapsed < STAGE1_S else 2
+
+
+## What the top clock shows at `elapsed` s into the fight: the seconds left of the current stage.
+static func stage_left(elapsed: float, stage2: float) -> float:
+	if elapsed < STAGE1_S:
+		return STAGE1_S - elapsed
+	return maxf(STAGE1_S + stage2 - elapsed, 0.0)
+
+
+## How far the zone has closed at `elapsed` (0 through stage 1, 1 when stage 2 ends).
+static func zone_t(elapsed: float, stage2: float) -> float:
+	return clampf((elapsed - STAGE1_S) / maxf(stage2, 0.01), 0.0, 1.0)
+
+
+## The zone's starting radius on a map (round 8): outside the walls, 0.58 x the diagonal of
+## map_rect, so the circle comes onto the whole-arena minimap some way into stage 2; `fallback`
+## (the map's own, MapBuilder.ZONE_START_R) for a map without a rect, and ONLINE (cloud or local):
+## each phone works the zone out itself and the session carries no app version, so a 1.9.x phone
+## (fallback) and this build must agree; the new start goes online only once both phones can say
+## they have it (a protocol field), until then training alone uses it.
+const ZONE_START_DIAG := 0.58
+static func zone_start_for(map_rect: Rect2, fallback: float, online := false) -> float:
+	if online or not map_rect.has_area():
+		return fallback
+	return ZONE_START_DIAG * map_rect.size.length()
+
+
+## The zone's radius at `elapsed`: `start` (the whole hall) through stage 1, then evenly down to
+## ZONE_FINAL_R at the end of stage 2.
+static func zone_radius_at(elapsed: float, start: float, stage2: float) -> float:
+	return lerpf(start, ZONE_FINAL_R, zone_t(elapsed, stage2))
+
+
+## The zone's centre at `elapsed`: `from` (the map's centre) through stage 1, then evenly to `to`.
+static func zone_center_at(elapsed: float, from: Vector3, to: Vector3, stage2: float) -> Vector3:
+	return from.lerp(to, zone_t(elapsed, stage2))
+
+
+## Seconds until the zone changes state: to the start of the closing in stage 1, to the end of the
+## closing in stage 2, 0 once closed.
+static func zone_next(elapsed: float, stage2: float) -> float:
+	if elapsed < STAGE1_S:
+		return STAGE1_S - elapsed
+	return maxf(STAGE1_S + stage2 - elapsed, 0.0)
+
+
+## THE MATCH'S END (round 8), `t` s after the deciding round: the beat (the kill), the result band
+## at y 0.15 from MATCH_BAND_AT; a win then turns it into a big glowing gold VICTORY! across the
+## middle (VICTORY_WORD_AT, VICTORY_WORD_S long) and moves the band to the top with the score band
+## under it (VICTORY_TOP_AT) until the results open (RESULTS_WIN_AT); a loss or a draw keeps the
+## band and opens the results RESULTS_LOSS_AFTER s after it came.
+const MATCH_BAND_AT := 2.5
+const VICTORY_WORD_AT := 3.3
+const VICTORY_WORD_S := 1.5
+const VICTORY_TOP_AT := VICTORY_WORD_AT + VICTORY_WORD_S
+const RESULTS_WIN_AT := 6.0
+const RESULTS_LOSS_AFTER := 1.6
+
+
+## When the results open after the match's last round (s): a win after its VICTORY! sequence, a
+## loss or a draw 1-2 s after its band.
+static func results_at(won: bool) -> float:
+	return RESULTS_WIN_AT if won else MATCH_BAND_AT + RESULTS_LOSS_AFTER
+
+
+## The match end's step `t` s after the deciding round: "beat", "band", (a win:) "word", "top",
+## then "results".
+static func match_end_step(t: float, won: bool) -> String:
+	if t >= results_at(won):
+		return "results"
+	if t < MATCH_BAND_AT:
+		return "beat"
+	if not won or t < VICTORY_WORD_AT:
+		return "band"
+	return "word" if t < VICTORY_TOP_AT else "top"
+
+
+## The step of the break `t` s after the round was decided: "beat", "result", "score", "band",
+## then "done" (the next prep).
+static func break_step(t: float) -> String:
+	if t < BREAK_RESULT_AT:
+		return "beat"
+	if t < BREAK_SCORE_AT:
+		return "result"
+	if t < BREAK_BAND_AT:
+		return "score"
+	return "band" if t < BREAK_S else "done"
+
+
+## What a score plate shows `t` s into the break: the score before the round until BREAK_TICK_AT,
+## then the one after it.
+static func break_score(t: float, before: int, after: int) -> int:
+	return before if t < BREAK_TICK_AT else after
+
+
+## The sub-line of round `r`'s band: "FINAL ROUND" (the match's last possible round), "MATCH
+## POINT!" (a side is one round from `goal`), else "" (the band names the area).
+static func round_sub(r: int, last: int, mine: int, theirs: int, goal: int) -> String:
+	if goal <= 1:
+		return ""
+	if r >= last:
+		return "FINAL ROUND"
+	return "MATCH POINT!" if maxi(mine, theirs) == goal - 1 else ""
+
+
+## The round that opens the pick pair round `r` belongs to (1, 3, 5, ...).
+static func pick_round_of(r: int) -> int:
+	return r - (r - 1) % PICK_ROUNDS
+
+
+## The rounds the pick of round `r` holds for, as the pick panel's header names them: "ROUNDS 3-4",
+## or "ROUND 9" when the pair's second round would be past the match's `last` round.
+static func pick_span(r: int, last: int) -> String:
+	var first := pick_round_of(r)
+	var second := mini(first + PICK_ROUNDS - 1, maxi(last, first))
+	return "ROUND %d" % first if second <= first else "ROUNDS %d-%d" % [first, second]
+
+
+## Rounds a gun still waits before it can be picked again, at the pick of round `r`: `picks` maps
+## each earlier pick round to the gun picked for it. A gun picked for rounds p and p + 1 is out for
+## rounds p + 2 .. p + 1 + COOLDOWN_ROUNDS (shown as 4 ROUNDS at the next pick, 2 at the one after).
+static func cooldown_left(gun: String, r: int, picks: Dictionary) -> int:
+	var left := 0
+	for p: int in picks:
+		if String(picks[p]) != gun or p >= r:
+			continue
+		var last_out := p + PICK_ROUNDS - 1 + COOLDOWN_ROUNDS
+		if r <= last_out:
+			left = maxi(left, last_out - r + 1)
+	return left
+
+
+## The guns of `options` on cooldown at the pick of round `r`: gun -> rounds left.
+static func cooldowns(options: Array, r: int, picks: Dictionary) -> Dictionary:
+	var out := {}
+	for g: String in options:
+		var n := cooldown_left(g, r, picks)
+		if n > 0:
+			out[g] = n
+	return out
+
+
+## The first gun of `options` that is free at round `r` (the first option if none is).
+static func first_free(options: Array, r: int, picks: Dictionary) -> String:
+	for g: String in options:
+		if cooldown_left(g, r, picks) == 0:
+			return g
+	return String(options[0]) if not options.is_empty() else ""
+
+
+## The gun a pick of `gun` for round `r` gives: itself when it is one of `options` and free, else
+## the first free one (both phones replace a pick that breaks the cooldown alike).
+static func legal_pick(gun: String, options: Array, r: int, picks: Dictionary) -> String:
+	if options.has(gun) and cooldown_left(gun, r, picks) == 0:
+		return gun
+	return first_free(options, r, picks)
+
+
+## The rounds strip of the pick panel: for each round of the match (up to `last`), whether this
+## player picks its gun, given whether it picks for the first pair (the picks alternate by pair).
+static func picker_rows(last: int, i_pick_first: bool) -> Array:
+	var out := []
+	for r in range(1, last + 1):
+		var first_pair := ((r - 1) / PICK_ROUNDS) % 2 == 0
+		out.append(first_pair == i_pick_first)
+	return out
+
+
+## "a:b,c:d" of a picks dictionary (pick round -> gun), for the online "sync".
+static func picks_text(picks: Dictionary) -> String:
+	var parts := PackedStringArray()
+	var keys := picks.keys()
+	keys.sort()
+	for p: int in keys:
+		parts.append("%d:%s" % [p, String(picks[p])])
+	return ",".join(parts)
+
+
+## The picks dictionary back from picks_text; entries that are not a round and a known gun of
+## `options` are left out.
+static func picks_from_text(text: String, options: Array) -> Dictionary:
+	var out := {}
+	for part in text.split(",", false):
+		var kv := part.split(":")
+		if kv.size() == 2 and kv[0].is_valid_int() and options.has(kv[1]):
+			var p := int(kv[0])
+			if p >= 1 and p <= 99:
+				out[p] = kv[1]
+	return out

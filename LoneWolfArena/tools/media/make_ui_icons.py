@@ -127,6 +127,23 @@ ICONS["headshot"] = svg(dot(64, 52, 22) + path("M28 112 C28 88 44 78 64 78 C84 7
                         + ring(64, 52, 36, 5) + line(64, 4, 64, 20, 5) + line(12, 52, 28, 52, 5) + line(100, 52, 116, 52, 5))
 # Alive / player count.
 ICONS["player"] = svg(dot(64, 38, 24) + path("M20 116 C20 84 40 70 64 70 C88 70 108 84 108 116 Z"))
+# Guest (PLAY AS GUEST): a head-and-shoulders bust inside a round frame that cuts it off at the
+# bottom like an avatar picture (the frame keeps it apart from "player" and "headshot").
+ICONS["guest"] = svg('<defs><clipPath id="frame"><circle cx="64" cy="64" r="45"/></clipPath></defs>'
+                     + ring(64, 64, 54, 9)
+                     + '<g clip-path="url(#frame)">' + dot(64, 50, 18)
+                     + path("M24 116 C24 88 42 76 64 76 C86 76 104 88 104 116 Z") + "</g>")
+# Profile / ID card: a card with a photo window (bust inside) and three text lines.
+ICONS["profile"] = svg('<rect x="6" y="20" width="116" height="88" rx="12" fill="%s"/>' % W
+                       + '<rect x="17" y="32" width="44" height="64" rx="7" fill="#000"/>'
+                       + dot(39, 53, 10) + path("M22 96 C22 80 29 71 39 71 C49 71 56 80 56 96 Z")
+                       + '<rect x="71" y="44" width="40" height="9" rx="4.5" fill="#000"/>'
+                       + '<rect x="71" y="60" width="40" height="9" rx="4.5" fill="#000"/>'
+                       + '<rect x="71" y="76" width="27" height="9" rx="4.5" fill="#000"/>')
+# Add friend: a bust with a plus sign beside its head.
+ICONS["friend_add"] = svg(dot(50, 40, 21) + path("M10 114 C10 84 28 70 50 70 C72 70 90 84 90 114 Z")
+                          + '<rect x="97" y="34" width="12" height="40" rx="3" fill="%s"/>' % W
+                          + '<rect x="83" y="48" width="40" height="12" rx="3" fill="%s"/>' % W)
 # Timer.
 ICONS["timer"] = svg(ring(64, 70, 44, 8) + '<rect x="54" y="8" width="20" height="12" rx="3" fill="%s"/>' % W
                      + line(64, 70, 64, 42, 8) + line(64, 70, 84, 82, 8))
@@ -149,8 +166,6 @@ ICONS["trophy"] = svg(path("M34 14 H94 V44 C94 66 80 80 64 80 C48 80 34 66 34 44
                       + '<rect x="56" y="78" width="16" height="18" fill="%s"/><rect x="38" y="96" width="52" height="16" rx="4" fill="%s"/>' % (W, W))
 # Crosshair glyph (settings preview).
 ICONS["crosshair"] = svg(dot(64, 64, 7) + line(64, 14, 64, 44, 8) + line(64, 84, 64, 114, 8) + line(14, 64, 44, 64, 8) + line(84, 64, 114, 64, 8))
-# Coin (offline reward currency).
-ICONS["coin"] = svg(dot(64, 64, 52) + ring(64, 64, 38, 6).replace(W, "#000") + path("M64 40 L76 64 L64 88 L52 64 Z").replace(W, "#000"))
 # Star (XP / level).
 star = [(64 + (52 if k % 2 == 0 else 22) * math.cos(math.radians(-90 + k * 36)),
          66 + (52 if k % 2 == 0 else 22) * math.sin(math.radians(-90 + k * 36))) for k in range(10)]
@@ -190,7 +205,38 @@ ICONS["prone"] = svg(dot(96, 70, 11) + path("M84 78 L52 84 L14 88", False, 15) +
 ICONS["chevron"] = svg(path("M22 84 L64 42 L106 84", False, 16))
 # Tick (selected weapon card).
 ICONS["tick"] = svg(path("M20 66 L50 96 L108 34", False, 18))
+# Friends (the lobby's FRIENDS button): two busts, the one in front cut free of the one behind.
+ICONS["friends"] = svg(dot(86, 36, 18) + path("M54 106 C54 80 68 68 86 68 C104 68 118 80 118 106 Z")
+                       + '<circle cx="46" cy="46" r="28" fill="#000"/>'
+                       + '<path d="M2 124 C2 86 22 70 46 70 C70 70 90 86 90 124 Z" fill="#000"/>'
+                       + dot(46, 46, 21) + path("M10 118 C10 90 26 78 46 78 C66 78 82 90 82 118 Z"))
+# Online (the lobby's ONLINE 1 VS 1): a globe, its meridian and three parallels.
+ICONS["online"] = svg(ring(64, 64, 50, 7)
+                      + '<ellipse cx="64" cy="64" rx="21" ry="50" fill="none" stroke="%s" stroke-width="6"/>' % W
+                      + line(14, 64, 114, 64, 6) + line(24, 40, 104, 40, 5) + line(24, 88, 104, 88, 5))
 
+
+
+def _splat():
+    """An irregular blob with a few droplets around it (round 8: the hit splash on the target and the
+    zone-damage splats at the screen edges, tinted red where drawn). Seeded, so it never changes."""
+    import random
+    rnd = random.Random(808)
+    pts = []
+    n = 22
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        r = 30 + rnd.uniform(-6, 7) + (16 if i % 4 == 1 else 0) * rnd.uniform(0.4, 1.0)
+        pts.append((64 + r * math.cos(a), 64 + r * math.sin(a)))
+    body = poly(pts)
+    for _ in range(7):
+        a = rnd.uniform(0, 2 * math.pi)
+        d = rnd.uniform(46, 58)
+        body += dot(64 + d * math.cos(a), 64 + d * math.sin(a), rnd.uniform(3, 6.5))
+    return svg(body)
+
+
+ICONS["splat"] = _splat()
 
 # Coloured badge for the elimination banner (kept in colour, not converted to white).
 BADGE = svg(

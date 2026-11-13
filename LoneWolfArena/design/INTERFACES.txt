@@ -7,60 +7,218 @@ listed here. If a part needs something new from the core, add it in its own file
 ## Arena (scripts/arena.gd) -> read by HUD / menus
 - `phase` (Phase.PREP=0, FIGHT=1, END=2 (match over), BREAK=3 (between rounds)), `prep_left` (s),
   `time_left` (s), `elapsed` (s, this round), `match_time` (s), `round_index`, `rounds_to_win`
-  (5; LW_ROUNDS_TO_WIN in test builds), `score` {"player": int, "bot": int}, `picked_weapon` (id),
+  (`Game.rounds_to_win(online)`: 5, a custom room's own 1-7 online, LW_ROUNDS_TO_WIN in test
+  builds), `score` {"player": int, "bot": int}, `picked_weapon` (id),
   `pick_note` (prep line: who picks the gun, or which it is)
-- zone: `zone_state` ("stationary" | "shrinking" | "closed"), `zone_next()` (s until it
-  changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text or "")
+- the match's mode: `mode` ("training" | "lonewolf", a key of `Game.MODE_NAMES`), `mode_name`
+  (what the HUD, scoreboard, pause menu and results show: TRAINING GROUND against the bot or the
+  target dummy, LONE WOLF online), `practice` (the target dummy: endless HP, no zone, the clock
+  counts up, nothing recorded), `online` (the opponent is another phone)
+- the round's clock (scripts/round_rules.gd, `RoundRules`, pure functions the unit tests check):
+  the fight is stage 1 (`RoundRules.STAGE1_S` 20 s) then stage 2 (`stage2_time()`: 90 s, a
+  SQUAD's 120 s); `round_time()` both, `stage()` 1 / 2, `stage_left()` what the top clock shows
+  (each stage counted down on its own); `time_left` / `elapsed` stay the whole fight's.
+- zone: `zone_state` ("stationary" stage 1 | "shrinking" stage 2 | "closed"), `zone_next()` (s
+  until it changes), `zone_radius`, `zone_center` (Vector3), `in_zone(pos)`, `zone_warning` (text
+  or ""; always "" in the 1 vs 1: `quiet_stage_change()` true there, so its stage change shows no
+  band, no ZONE SHRINKING line and plays no beep; TeamArena returns false and keeps them), `zone_at(t)` ([centre, radius] t s into the fight: the whole hall through stage 1, then
+  closing evenly to `RoundRules.ZONE_FINAL_R` 0.5 m at the end of stage 2, the centre sliding to
+  `zone_final`, a new spot every round from `zone_final_for(round)`, alike on both phones)
+- 1 vs 1 weapon cooldown: `picks` (pick round -> gun), `pick_cooldowns()` (gun -> rounds left,
+  `RoundRules.cooldowns`), `preselected_pick()`, `legal_pick(id)` (a gun that rests is replaced by
+  the first free one: the picker's phone, the other phone on its "pick", and the bot alike); the
+  online "sync" carries them as its 13th field (`RoundRules.picks_text`), which the guest adopts
+- `eliminated_by` ({} until the 1 vs 1 player goes down in a round, then {"cause", "name", "gun",
+  "gun_id", "damage"}: the HUD's ELIMINATED BY card at the bottom left while it spectates; the
+  damage is `Fighter.round_taken[killer]`, what that fighter dealt the player this round)
+- `watched_player_id(f)` -> the player id a friend request can go to for fighter `f` (the opponent
+  of an internet match, "" for a bot, a match without internet or the own player): the HUD's
+  SPECTATING card shows ADD FRIEND for it (`HUD.spectate_friend_state(who)`: "add" / "sent" /
+  "friends" / "", `HUD.spectate_add_friend()` sends `Cloud.request_friend`) and a row with
+  `Player.kit_at_death` ({"walls", "frags", "medkits"} carried when eliminated)
 - `fighters` (Array[Fighter]), `player`, `bot`, `map_name` ("CARGO CAGE"), `map_rect` (Rect2,
   world X/Z area of the minimap), `minimap_texture` (Texture2D rendered once from above, may be
   null for the first frames), `obstacles` (Array[Rect2] footprints, X/Z)
-- `scoreboard_rows()` -> [{name, me, alive, hp, kills, damage, headshots, accuracy, rounds, weapon}]
-- `open_pause()`; the HUD emits `pause_pressed` for it.
+- `scoreboard_rows()` -> [{name, me, alive, hp, kills, damage, headshots, accuracy, rounds, weapon, deaths}]
+- `open_pause()`; the HUD emits `pause_pressed` for it. `record_left()`: the pause menu's QUIT
+  MATCH puts a counted match into the profile as LEFT, a defeat (HISTORY result "left"), with what
+  was played so far; a match already decided keeps its own result.
+- An online session that ends before the match (Cloud `session_ended(reason)`): "left" (the other
+  phone said bye or went silent) is a forfeit win once the first fight began; "connection lost"
+  (this phone lost the relay, or was away about as long as the other waits: `Cloud.AWAY_MS`) is a
+  LEFT as with QUIT MATCH. Either way a match whose first fight had not begun counts nowhere; those
+  go back to the lobby, which shows `Game.match_notice` ([title, text]) once. What the other
+  phone's events may make here is capped (`spawn_cap(kind)`: its walls and frags per round).
+- Online the HOST decides every round: each phone reports its own player's death ("died":
+  [headshot, cause, round], cause `Arena.death_cause()`: "gun" / "frag" (the other's kill: the
+  only kill credit), "zone", "fall", "self" (its own frag), "left"); the host decides `DEATH_SETTLE_S` after the first
+  death it learns of (both down by then: a draw) or at its time-out (higher HP), and sends "rend"
+  [round, winner, host score, guest score, timed out, headshot, killer]; the guest shows exactly
+  that (score, banner, the match's end) and starts each round on the host's "begin" / "round",
+  one-way trip earlier (`peer_rtt` / 2, or `relay_rtt` before that is measured). The host takes
+  that trip off the guest's death reports, so "first one down" is fair. A forfeit win keeps the
+  real score (no round added). The match ends when `Arena.match_over_after(round, mine, theirs,
+  goal)` says so: first to `goal`, or after `Arena.MAX_ROUNDS` (9) rounds at most, drawn rounds
+  counted (the most rounds won wins, level is a DRAW). At its end each phone sends "fin" [round,
+  time, host HP, guest HP, host rounds, guest rounds, kills, damage, headshots, shots, hits] (time,
+  HP and rounds from the host only, else -1; `Arena.final_from` checks it): the results wait for
+  it (`FINAL_WAIT_S`), the opponent's row shows its own phone's numbers and the guest the host's
+  TIME and HP LEFT, so both tables match; the host's "fin" also ends a guest match that still
+  waited for a next round.
+- Cloud: a frame gap while a match loads or in the first `Cloud.LOAD_STALL_MS` after its arena
+  listens is the load (shader compiles), not this phone away (`Cloud.load_stall`); an app pause
+  still counts. The other phone, told by "ka" keep-alives that it loads, waits that much longer.
+- Cloud away rules: a player silent `AWAY_AFTER_MS` is AWAY (frozen, its HP decided on the other
+  phone), LEFT only after `grace_ms()` (`AWAY_GRACE_MS` 90 s; checks shorten it with
+  LW_AWAY_GRACE_MS, read only outside a release build); this phone away `self_grace_ms()` (1.5 s
+  less) has dropped out ("connection lost"). A "ka" keep-alive (or a direct-link "dh" / "dc") does
+  not end AWAY, in the message nor in the frame check (`Cloud.LOAD_KINDS`: a phone back after a
+  restart says them while its arena loads; its fighter stays frozen and hittable meanwhile), in a
+  1 vs 1 and in an all-human match alike (there per member: `_multi.live`).
+- Rejoining after the app was closed (a 1 vs 1 or an all-human DUO / SQUAD over the relay; never
+  PLAY WITHOUT INTERNET or a two-phone TEAM INVITE match): Cloud keeps the live session in `Cloud.resume_path()` (sealed
+  AES-256-CBC + HMAC-SHA256 with keys from the install's private identity key and the player id;
+  this phone's counter `SEQ_RESERVE` ahead; the "last in the match" time every `RESUME_SAVE_MS`;
+  the arena's `note_match(counted, mine, theirs, mode, round_on, picks)`), deleted whenever the session ends and
+  once the match's result is in the profile (`match_recorded()`: the results screen, QUIT MATCH's
+  LEFT; no file is written for that session again, so a close on the results adds nothing). The
+  lobby calls `try_resume()` when it opens: in time, REJOINING MATCH... (LEAVE MATCH) until the
+  relay is up, then `session_started` loads the arena as a challenge does; `Cloud.resumed` tells
+  the arena it is fresh: it does not count the match again, holds its prep and, on the other
+  phone's "sync", enters the match where it stands (`Arena._resume_into`: round, phase, clock,
+  score, gun, cooldowns; HP never above the other's word), the host included. A resuming arena
+  sends no "sync" of its own blanks; both apps closed, the resumed host takes the guest's "back"
+  as its cue and enters its note's round from the prep (`Arena._resume_from_note`). Too late (or
+  LEAVE MATCH, or lost before the arena is up), a counted match goes into HISTORY as LEFT, once;
+  the other phone's "bye" meanwhile records nothing here (`Cloud.rejoin_notice` says what ended it);
+  in an all-human match the host's "bye" or silence meanwhile is the host's doing: ENDED when
+  counted, never LEFT ("THE HOST LEFT"). Every session end clears `resumed` and `resume_note`.
+  An all-human match's file adds "multi" (`Cloud.multi_from_file`: the roster as
+  `NetGroup.pack_roster`, the host's id, the size, every member's counter, the ids of members who
+  already left, rewritten when one leaves) and its note
+  `note_match(..., mode_id)` ("duo" / "squad", TeamArenaNet._note at each fight and round end);
+  `try_resume` puts session_multi, session_roster, session_host_id and session_team back and the
+  session is on at once (no "join"); the lobby loads it as `TeamArena.link_roster` (REJOINING
+  MATCH... says "Your team match"). TeamArenaNet then enters the match: a member from the host's
+  "sync" for its slot and "all"; the host from its stand-in's "sync" and the members' "rep" (see
+  the team match section).
 
 ## Arena -> HUD calls (scripts/hud.gd must implement all of these)
 - `bind(player: Player, arena: Node)`, `reload_layout()`, `release_all()`
 - `show_center(text, seconds, color := Color.WHITE, size := 96, sub := "")`
-- `show_round_banner(round_index: int, area: String)`  (blue->orange band "ROUND 1 / AREA: ...")
-- `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id))`
+- `show_round_banner(round_index: int, area: String, sub := "")`  (blue->orange band "ROUND 1 / AREA: ...";
+  only round 1 at its fight's start: later rounds' bands end the break)
+- `show_break(title, mine, theirs, won: int (1 / -1 / 0), next_round: int, area: String, sub := "")`: a round
+  that does not end the match; the HUD plays RoundRules' break steps on its own clock from this call
+  (`break_step()`: "beat", "result", "score", "band"; `break_score(mine)` the plates' numbers) while
+  the arena is in Phase.BREAK (BREAK_TIME = RoundRules.BREAK_S, the same on both phones)
+- `show_result(title, sub := "", delay := RoundRules.BREAK_RESULT_AT)`: the match's end (VICTORY! /
+  DEFEAT / DRAW with the rounds) or a deciding TIME UP (delay 0) on the break's result band near the
+  top until the results (`result_title()`: the title while it shows, else ""). No game speed change
+  anywhere in a kill (Engine.time_scale stays 1; only the checks speed matches up) and no camera
+  orbit at a win (`Player.victory_cam` keeps the view where it was)
+- `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id),
+  cooldown := {} (gun -> rounds left: greyed, not pickable), strip := [] (per round of the match:
+  true when this player picks; the ROUNDS strip))`
   must call `on_pick` exactly once (tap SELECT, or the timer runs out -> current choice);
-  `close_weapon_pick()` closes it without a callback.
-- `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool)`
-- `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills)
-- `reveal(f: Fighter, seconds)` (enemy shows on the minimap), `match_over: bool`, `tips_time: float`
+  `close_weapon_pick()` closes it without a callback. The header names the rounds the pick holds
+  for (`HudPanels.pick_header`, `RoundRules.pick_span`: "PICK FOR ROUNDS 1-2").
+- `watch_weapon_pick(options, seconds, picker: String, cooldown := {}, strip := [])`: the 1 vs 1
+  side that does not pick sees the same panel read-only ("WAITING FOR <NAME> TO PICK FOR ROUNDS
+  3-4", no choice, nothing to tap, SELECT dimmed, the countdown ring); the HUD closes it once
+  `arena.picked_weapon` is set or the prep is over (`panels.watching()` while it is open).
+  Until a pick round's pick lands, `Fighter.await_pick()` leaves both fighters with the fists only
+  (`awaiting_pick`, only the fists can be drawn: `can_draw(i)`; `set_loadout` ends it, the fight's start gives a pick
+  that never came the preselected gun meanwhile) and `weapon_picking()` puts the weapon panel in
+  its PICKING... state.
+- `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
+  (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
+- `kill_banner(victim_name: String, headshot: bool)` (a small still elimination badge with ELIMINATED /
+  HEADSHOT and the name at y 0.17 for KILL_BANNER_TIME (2.3 s) when the player kills, gone once a
+  result band shows),
+  `out_banner(victim_name, cause)` (the opponent went down by itself: cause "zone", "fall" or "self"
+  in `HUD.OUT_LINES`; no badge, no red X, a line in its place), `banner_kind()` ("", "kill" or the cause),
+  `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
+  kill, which the other phone reports as its death)
+- the weapon panel (`_draw_weapon_panel`): the main slot is about `_panel_weapon()` (the gun or the
+  sidearm in hand, the gun while the fists are out); small slots "weapons:0..2" = `Weapons.CYCLE`
+  (gun, sidearm, fists), a tap draws that one
+- the target dummy (`arena.practice`): a CHANGE GUN plate left of the small slots
+  (`HudLayout.weapon_repick`, hit id "weapons:repick") calls `arena.repick()`, which opens the
+  weapon pick during the fight
+- `reveal(f: Fighter, seconds)` (an enemy heard), `shot_heard(f)` (an enemy's shot out of sight: a
+  fading minimap mark where it fired, `shots_heard`, HUD.SHOT_SHOW s; in sight the minimap draws it
+  as an arrowhead, HudMinimap.enemy_marks), `feed_lines` (kill feed lines: 1 in the 1 vs 1, 3 in teams), `match_over: bool`, `tips_time: float`
 - `editor_mode`, `selected_id`, `layout` (used by the HUD editor)
 - read by the screenshot tours: `panels` (HudPanels: weapon pick + scoreboard), `seen`
   ({Fighter: bool} line of sight, refreshed 10x per second)
 - helpers live in their own files: `hud_draw.gd` (HudDraw: icons, buttons, text, shapes shared
-  with the editor), `hud_minimap.gd` (HudMinimap), `hud_panels.gd` (HudPanels)
+  with the editor), `hud_minimap.gd` (HudMinimap: `view_xform(pp, yaw, side, map_rect, turn)` maps
+  world X/Z to minimap pixels, turned with the view while the setting `minimap_turns` is on (the
+  default; `HudMinimap.turns()`), north up otherwise; `ally_marks` / `enemy_marks` take that
+  transform), `hud_panels.gd` (HudPanels)
+- online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
+  round trip of the match's path beside the gear (a wifi mark and a plain number, NetPing; right of a
+  gear on the left, the default, at `HudLayout.ping_box(gear, vs, score)`, about `HudNet.PING_AT`
+  (0.278, 0.031) and kept clear of the score bar, compact when it must be; under the weapon panel when
+  the player moved the gear to the right), round SPEAKER / MIC buttons at HudLayout's
+  "speaker" / "mic" (keys in DEFAULTS, not in ORDER: HudNet owns their touches; in the column beside
+  the minimap under the gear; SPEAKER toggles OFF/back, MIC opens `VoiceButtons.open_popup(.., "mic", .., true)`,
+  node "VoicePopup"), TALK under MIC with PUSH TO TALK, the players speaking now under them, then
+  CHAT / MUTE (NetChat) in the next column (under the gear when there are no voice buttons and the
+  gear sits in that column), the chat feed under the score bar (`feed`, `add_line`, `send`),
+  the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
+  Its buttons take their touches before the HUD (a child's _input runs first). Every other match
+  (TRAINING GROUND) gets it too with `net` false (`HudNet.attach(hud, false)`): only the ping chip,
+  the relay's round trip while connected (`Cloud.relay_ping()`), else a grey "--", no tag.
 
-## HUD layout (scripts/hud_layout.gd, version 3)
+## HUD layout (scripts/hud_layout.gd, version 5)
 - A movable widget is a Dictionary {x, y, s, o, a}: `x` centre in widths of the 20:9 reference
   screen, `y` centre and `s` size in screen heights, `o` opacity 0.1..1, `a` anchor "l" | "c" |
   "r" (keeps the distance to that edge, in screen heights, from 16:9 to 22:9). Defaults
-  (`HudLayout.DEFAULTS`) are the reference phone's places.
+  (`HudLayout.DEFAULTS`) are the reference's 16:9 places (STYLE_SPEC section 3: the gear right of the
+  minimap, the weapon panel in the corner, FIRE / JUMP / SCOPE / CROUCH / PRONE / GRENADE / WALL as
+  the reference's; the frame's (0.185, 0.11) and (0.185, 0.182) left free for the voice lane's
+  "speaker" / "mic"); no two default touch areas overlap from 16:10 to 22:9. A saved layout keeps
+  every widget as saved; `size_range(id)` (the clamp of a saved size) covers the default and the
+  older default (`OLD_SIZES`), so sizes saved before keep.
+  RELOAD (`reload`, up and left of SCOPE; grey on a full magazine, without reserve or with the fists
+  out) and SWITCH (`swap`, right beside RELOAD on its left:
+  `select_weapon(next_weapon())`, gun -> sidearm -> fists -> gun, showing the next one; a layout saved with it at its old place under the panel takes the new).
+  `HUD.button_enabled(id)`: the settings left_fire (2 = OFF), reload_button, switch_button and
+  freelook_button turn those buttons off in a match; the editor still places them (label "OFF").
 - `HudLayout.resolve(overrides)` -> full clamped layout (unknown ids and wrongly typed values
-  dropped), `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
+  dropped; a widget saved exactly at an old default place in `MOVED` takes the new one),
+  `current()` (from `Game.hud_layout`, ignored unless its `_v` is `HudLayout.VERSION`),
   `to_save(layout)` -> what `Game.save_hud_layout()` stores.
 - Pixels: `center(w, vs)`, `place(w, pos, vs)` (picks the anchor from the screen third),
-  `hit_rect(id, w, vs)`, `touch_radius(w, vs)` (round buttons, at least `MIN_TOUCH` = 0.036 h),
-  `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
+  `hit_rect(id, w, vs)`, `touch_radius(w, vs)` (round buttons, at least `MIN_TOUCH` = 0.036 h;
+  a tap counts to 1.15 x it), `minimap_rect()`, `weapon_main()` / `weapon_slots()` (weapon panel).
+  `HudLayout.inset` (canvas px, x left, y right): a camera cutout's sides, which the HUD keeps up
+  to date from `UI.safe_margins(viewport)`; edge-anchored widgets move in by it.
+- The HUD draws the weapon panel, then the round buttons, then the gear, and a tap goes to what is
+  drawn on top (a button the player put over the panel takes the taps there); the editor
+  (scripts/hud_editor.gd) picks widgets the same way.
 
 ## Android log lines (read by tools/ci/emulator_test.sh)
-- `[LoneWolf] boot screen`, `boot loaded <n> files in <s>s` (or `boot timeout` and
-  `boot timeout: <n> files still loading`), `lobby ready`,
+- `[LoneWolf] boot screen`, `intro sting`, `intro done`, `boot loaded <n> files in <s>s` (or
+  `boot timeout` and `boot timeout: <n> files still loading`), `login ready`, `profile setup`,
+  `profile created` (the first-run guest login), `lobby ready`,
   `prep started`, `weapon picked: <id>`, `match started`, `player fired`,
   `player moved`, `pause opened`, `pause closed`, `<player|bot> eliminated`, `time up`,
   `round over`, `round <n>`, `match over: <won|lost|draw>`, `results shown`,
-  `wifi match: <host|guest>` (a Wi-Fi 1 vs 1, see scripts/lan.gd),
+  `online match: <host|guest>` (a LONE WOLF 1 vs 1 against another phone, online through
+  scripts/cloud.gd or PLAY WITHOUT INTERNET through scripts/lan.gd),
   `signature <state>` (Guard, "ok" when the package manager confirms a signer listed in the
   build's res://build_keys.gd).
 - `Game.mark_ui(name, item, local_point)` logs `[LoneWolf] ui <name> <x> <y>` in screen pixels
-  (start, fire, joystick) so the test taps controls where the current layout puts them.
+  (guest, name_field, confirm, start, fire, joystick) so the test taps controls where the current
+  layout puts them.
 
 ## Player (scripts/player.gd) -> called by the HUD's touch controls
 - movement `move_dir: Vector2` (joystick, length 0..1, y forward), `set_sprint(on)`
 - `add_look(rel_px: Vector2, from_fire_button: bool)`, `set_firing(on)`, `toggle_ads()`,
-  `do_jump()`, `toggle_crouch()`, `toggle_prone()`, `do_reload()`, `select_weapon(i)` (0 gun, 1 fists),
+  `do_jump()`, `toggle_crouch()`, `toggle_prone()`, `do_reload()`, `select_weapon(i)` (a kit index: 0 gun, 1 fists, 2 sidearm),
   `use_medkit()`, `use_shield()`, `use_grenade()`
 - state: `hp` (0..Fighter.MAX_HP=200), `alive`, `weapons[i]` (WeaponState: `def`, `ammo`,
   `reserve`, `reloading`, `reload_progress()`, `infinite()`), `current`, `stance`
@@ -68,13 +226,90 @@ listed here. If a part needs something new from the core, add it in its own file
   ("reddot" | "sniper" | "none"), `healing`, `heal_progress()`, `medkits`, `shields`,
   `grenades`, `crosshair_on_target` (crosshair turns red), `current_spread()` (deg),
   `camera`, `firing`, `assist_target`, `hold_fire` (prep: cannot shoot)
-- signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`
+- camera: over the right shoulder (`Player.CAM_SHOULDER` right of the head and `CAM_RAISE` up, in
+  the view's axes, `CAM_DIST` behind); a sphere of `CAM_RADIUS` swept from the head to that pivot
+  and by the spring arm behind it, against `CAM_MASK` (the map and deployed walls), keeps it out
+  of walls; the own model is hidden with the camera within `HEAD_CLEAR` of the head (and in the
+  scope) and see-through within `FADE_DIST` or while `covers_crosshair()` (a hit zone or the gun
+  within `COVER_GAP` of the crosshair's ray: it would hide what the crosshair is on)
+- free look with no button (the default camera, as the reference's): the look drag always turns
+  the camera and the aim together; while `body_holds()` (alive, standing still under
+  `BODY_HOLD_SPEED`, not firing, aiming, sprinting, throwing or holding an item) the drawn body keeps
+  its facing and `body_turn` (= drawn yaw - aim yaw, also `model.rotation.y`; the player sets its
+  own `rotation.y = aim_yaw` in `_process` as well, so at 90 / 120 FPS the held body's world yaw
+  stays fixed on frames without a physics tick) takes the turn, so
+  the camera goes round to the character's face; the head looks toward the aim up to
+  `HEAD_FOLLOW` (`AimSpineModifier.twist`); the held body's gun (`model.set_aim` direction) points
+  the way the drawn body faces, not along the camera. `face_aim()` zeroes it at once and puts the
+  gun on the crosshair (`model.place_gun()`) (FIRE, SCOPE, an item in hand, a new round: the shots
+  leave along the crosshair from that muzzle, the camera stays); moving eases it to 0
+  at `BODY_TURN_RATE`. The hit zones follow the drawn bones. `Fighter.drawn_yaw()` (the player's:
+  aim + body_turn) is what locomotion plays against. Online the other phone sees the body face
+  the aim (body_turn is not sent). The eye button (`freelook_button`, off by default:
+  `start_free_look` / `add_free_look` / `end_free_look`) still turns only the camera (`_free`),
+  also while running, and FIRE snaps it back.
+- signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`;
+  a shot reports `hit_landed` once for its head part (headshot true) and once for its body part,
+  each the HP the target really lost, `killed` with the last (`Fighter.land_hits(hits)` lands
+  [target, zone, damage before armour, point] hits without a scene: the unit tests)
+- `Fighter.take_damage(amount, zone, attacker, from_pos, cause := "")` returns the HP it really took:
+  `hit_points(amount, zone)` (after `armor_mult(zone)`, whole points but for the zone and falls),
+  never more than was left; a `RemoteFighter` returns what the hit will take on the other phone as
+  this phone's hits leave its HP (`hp_left`). Cause "frag" for a frag
+  (kept as `last_hit_cause`; the kill feed then reads FRAG). `Player.drawn_position()`: where the
+  body is drawn this frame (between the last two physics ticks at 90 / 120 FPS; the camera and the
+  own model follow it).
 - `Weapons.HELMET_REDUCTION` / `VEST_REDUCTION` (Lv2 armour; show level 2 icons)
 
 ## Weapons (scripts/weapons.gd)
 - `Weapons.DEFS[id]` with `name`, `class` (AR/SMG/SG/PISTOL/SNIPER/MELEE), `icon` (texture name in
   res://assets/ui/icons/, e.g. "weapon_ar"; missing icons fall back to the AR), `mag`, `reserve`,
   `crosshair` ("ring" | "wide" | "dot"), `scope`, `auto`. `Weapons.PICKABLE` = pick-grid order.
+  Movement by class: `Weapons.CLASS_MOVE` / `move_mult(def)` x `Fighter.RUN_SPEED` etc. (the rifle's
+  speeds): fists 1.15, SMG 1.06, rifle and pistol 1.0, shotgun 0.97, marksman 0.95, sniper 0.92.
+- The kit (`Fighter.set_loadout(gun_id)`, every mode): `weapons` = [the gun, fists, the sidearm],
+  indexes `Weapons.GUN` 0, `FISTS` 1, `SIDE` 2 (the fists stay at 1 so an older build reads the gun
+  and the fists; it shows index 2 as the fists). `Weapons.SIDEARM` = "sidearm" (WREN 9, not in
+  PICKABLE, the same whatever the gun). `Fighter.sidearm()`, `next_weapon()` (SWITCH's order
+  `Weapons.CYCLE` = [GUN, SIDE, FISTS], skipping what `can_draw(i)` refuses: before a pick only the
+  fists), `CharacterModel.back_model` (the gun on the back while the sidearm or the fists are out).
+- Procedural animation on top of the clips (CharacterModel): `sprint` (set by the fighter each
+  tick) bends the chest forward `SPRINT_LEAN`; a running turn rolls `root_scene` about the feet
+  (`LEAN_PER_TURN`, at most `LEAN_MAX`); `play_lobby(cheer := false)`: lobby_idle at a varying pace
+  with a gesture every 5-9 s, alternately the look round (twist) and one of `LOBBY_GESTURES`
+  (lobby_hip, lobby_shift, lobby_look clips), and with cheer the victory clip now and then; it ends
+  on `play_victory(clip := "victory")` / `play_death` / `revive`. `AimSpineModifier`: `pitch` +
+  `kick` about `axis_world` on the spine, then `twist` about world up on chest, neck and head.
+- Clips (`CharacterModel.EXTRA_GLBS` merged into the character's player, loaded once and preloaded
+  by the boot screen): anims_extra.glb (tools/character/anim_extra.py) and anims_extra2.glb
+  (tools/anim/anim_extra2.py, Blender 4.5, our own keyframes). Hip carry: standing with a gun, the
+  gun hangs low in the right hand (the idle point of the `loco` blend space mixes idle with
+  carry_idle, parameters/loco/idle/carry/blend_amount; moving, carry_run_a/b on `CARRY_BONES` with
+  the stride) unless `gun_up()`: `aiming` (= Fighter.ads, set each tick, remotes too) or a shot
+  within `READY_HOLD` s (`raise_gun()`, called by `on_fire`, `on_punch` and `place_gun`: the gun
+  points along the aim at once, the arms follow in ~0.1 s). While carried the gun follows the hand.
+  Until `arms_up()` (no carry, no sprint arms, also on the way up) `muzzle_position()` is the aim
+  pose's muzzle: learnt standing with the arms up, kept from `spine3` in the aim's frame, so it
+  follows stance and pitch (shots and cover checks unchanged; the grip `_hand_to_gun` is learnt
+  only with the arms up too). A RemoteFighter calls `on_jump` when its states leave the floor
+  rising (a step off a ledge: the fall). Sprint
+  (`sprint` + standing + fast): sprint_fwd full body at `_speed / SPRINT_AUTHORED` (5.5 m/s).
+  Jump: the `jump` node plays jump_air (seek 0 on `on_jump`, `JUMP_FALL` when leaving the ground
+  without one); a touch-down after `LAND_MIN_AIR` below `LAND_CLIP_MAX_SPEED` fires jump_land (no
+  crouch dip), faster keeps the in-step `land_dip`. PRONE -> STAND below `PRONE_UP_MAX_SPEED` fires
+  prone_up (1 s, `standing_up()`), cut short by moving, another stance or `gun_up()`. The results'
+  win plays `play_victory("victory_pose")`. The runx_* cycles get the base clips' toe fix.
+- Online hit checks (a hit does not say which weapon made it): `Fighter.net_arms()` = the gun and
+  the fists, + the sidearm while `held_recently(Weapons.SIDE)` (a RemoteFighter: its states had
+  index 2 now or within `RemoteFighter.HELD_GRACE_MS`); `Weapons.hit_cap(defs, zone)`,
+  `hit_rate(defs)`, `min_interval(defs)` bound the damage, the hit and the shot rate
+  (`Arena._remote_arms()`: the round's gun, the fists, the sidearm when held; TeamArenaNet
+  `max_hit_by`, `_hit_rate_ok`, `_shot_rate_ok` per sender). The gun's cap is not loosened while
+  the gun is held. The bot draws the sidearm on an empty magazine within `Bot.SIDEARM_DRAW_M`
+  (`_choose_arm`), and goes back to the gun past `SIDEARM_KEEP_M`, on an empty sidearm magazine
+  (reloading or not, while the gun has rounds) or when the fight breaks off; `_arm_up` runs that
+  choice at the end of every path of `_think` (the zone run and team errands too) before the
+  reload of an empty magazine.
 
 ## Map (scripts/map_builder.gd) -> used by arena.gd
 - `build(parent: Node3D)` creates the environment (`env: WorldEnvironment`, `sun: DirectionalLight3D`),
@@ -94,33 +329,934 @@ listed here. If a part needs something new from the core, add it in its own file
 - Main scene: `scenes/loading.tscn` (`Loading`, scripts/loading.gd). The boot screen preloads
   the character, animation and prop GLBs, the sounds and the lobby on worker threads, keeps
   them referenced by the root node `LoadingCache` (meta `resources`) for the app's lifetime,
-  then calls `Game.goto_lobby()` (after `TIMEOUT_S` at the latest; loads still running then are
+  then calls `Game.goto_login()` (after `TIMEOUT_S` at the latest; loads still running then are
   handed to the `LoadingCache` node, a `Loading.Cache`, which collects them as they finish).
   Automated runs skip it; `Loading.hold_for_test = true` keeps it up for a screenshot tour.
-- `Loading.start_match(host)`: match-loading overlay (CanvasLayer 100, mode + map card) that
-  loads the arena on a thread, then `Game.goto_arena()`. Used by START and PLAY AGAIN.
+  Once the loads are in, a `ShaderWarmup` (scripts/shader_warmup.gd, under the root) draws the
+  arena and a fighter off-screen for a few frames so their shaders compile there, not in a
+  match's first frames (`ShaderWarmup.kept` holds the materials; not in automated or headless runs).
+- `IntroSting` (scripts/intro_sting.gd): the launch sting, `IntroSting.play_over(host)` puts it
+  over the boot screen in its own CanvasLayer `IntroLayer` (layer 90) while the boot loads run;
+  the boot screen leaves only once `IntroSting.playing(host)` is false. 2.4 s (`LENGTH`), synced
+  to intro_sting.wav (impact `HIT` 0.90 s); a tap or back after 0.4 s skips it; at the end the
+  lockup lands on the boot screen's logo. Automated runs skip it unless
+  `IntroSting.show_for_test`; `hold_at(t)` freezes it for screenshots.
+- `Loading.start_match(host)`: match-loading overlay (CanvasLayer 100, mode + map card
+  `MatchCard`: `MatchMode`, `MatchChips`; the texts come from the static
+  `Loading.match_info(online, opponent, dummy, difficulty, rounds)`: TRAINING GROUND "FIRST TO
+  n / 1 VS BOT / BOT: <level>" or "TARGET DUMMY", LONE WOLF "FIRST TO n / 1 VS 1 ONLINE / VS
+  <name>") that loads the arena on a thread, then `Game.goto_arena()`. Used by START, an online
+  challenge and PLAY AGAIN.
 - `ResultsScreen.new()` (Control): `setup(result: Dictionary)` - keys: won, draw, invalid, kills,
-  damage, headshots, accuracy, time, xp, enemy, mode, map, weapon, score_player, score_bot,
-  hp_left, difficulty, taken. Hides the arena's `hud` while shown; the opponent's orange row
-  (`EnemyRow`) comes from the current scene's `scoreboard_rows()`. Buttons: PLAY AGAIN (match
-  overlay, then `Game.goto_arena`), LOBBY (`Game.goto_lobby`); Android back = LOBBY (ignored while
-  PLAY AGAIN loads). `ResultsScreen.honour(result)` (static) picks the honour tag.
-- `PauseMenu.new()` (Control, works while paused): signal `closed`. Hides `arena.hud` while open
-  (restored on close and exit). It ignores a back request in the frame it opens (the engine hands
-  the request that opened it to it as well); a second back closes it. Opens `SettingsPanel` with
-  `in_match = true`.
+  damage, headshots, accuracy, time, xp, enemy, mode (the name shown), mode_id ("training" |
+  "lonewolf", the profile counts the match there), map, weapon, score_player, score_bot,
+  hp_left, difficulty (the bot's level, or "ONLINE"), taken, opponent_left (the other player left: the
+  VICTORY screen says so, `OpponentLeft`, their row reads LEFT); shots, hits, deaths and enemy_id (the
+  online opponent's player id, else "") go to the profile only (`Game.record_match`). Hides the arena's `hud` while
+  shown; the opponent's orange row
+  (`EnemyRow`) comes from the current scene's `scoreboard_rows()` (its "deaths" make the K/D/A).
+  Two pages (`page`, `show_page(n)`): `Page1` = `HeroView` (a CharacterModel `HeroModel` with the
+  profile's bundle in its own SubViewport world: victory pose for a win, the lobby stand otherwise),
+  `Title` + `Tagline` (`ResultsScreen.tagline(kind, seed)`), `HeroPlate` (name, `HeroKills`,
+  `HeroDamage`), honour + XP, and `Continue`; `Page2` = `SideScore` ("<side> a VS b <side>",
+  `SideName_0/1` from `ResultsScreen.side_names(seed)`: two different names of SIDE_NAMES; online
+  the seed is `Game.session.match_seed("sides")`; `ResultsScreen.sides_for`: a DUO / SQUAD names
+  sides by team, BLUE (team 0) the first, the 1 vs 1's host's side takes the first) and the
+  tables (`Stats`: `SideHead_0`, YourRow, `SideHead_1`, EnemyRow; columns COLUMNS = K/D/A, DAMAGE,
+  HEADSHOTS, ACCURACY, TIME, HP LEFT, labels `ResultsScreen.value_name(column)`), and `Lobby`.
+  `Head` (mode, map) and PLAY AGAIN / `Rematch` / `PlayAgainTogether` with `RematchStatus` show on
+  both pages. Buttons: PLAY AGAIN (match overlay, then `Game.goto_arena`), CONTINUE (page 2), LOBBY
+  (`Game.goto_lobby`); Android back on page 2 = page 1, on page 1 = LOBBY (ignored while PLAY AGAIN
+  loads). The arena opens the results `Arena.RESULTS_DELAY_S` (5.5 s) after the last round ends (`RESULTS_DELAY_VOID_S`, 3.2 s, for a match the integrity check voided; `results_delay()`); the
+  app sent to the background or closed in that wait records the decided match at once
+  (`_record_decided`: Game.record_match, online `session.match_recorded`), the screen still opens once. `ResultsScreen.honour(result)` (static) picks the honour tag. An internet LONE
+  WOLF match (enemy_id, not local) has `Rematch` in PLAY AGAIN's place, `AddFriend` on the head of
+  the opponent's table on page 2 (not friends yet: `Cloud.request_friend`) and the line `RematchStatus`: REMATCH while the session is up sends
+  "rm" [takes their challenges] (`Arena.ask_rematch`; the other screen says "<NAME> WANTS A
+  REMATCH", `Arena.rematch_asked` / `rematch_wanted` / `rematch_they_take`); once both want it both
+  call `Arena.leave_session()` (the arena then leaves the new session alone and Game.online to it)
+  and a fresh `Cloud.invite` goes from the phone whose challenge the other takes (the old host when
+  both do, `Arena.hosted()`), which the other screen takes (`Cloud.invited` there: the old
+  opponent's challenge is the rematch, anyone else's is declined); `session_started` loads the
+  match. With the session gone a tap sends the fresh challenge itself. Off after a forfeit.
+  An online DUO / SQUAD result does the same with the other phone's player
+  (`ResultsScreen.other_player(Game.team_match)`; offered when `ResultsScreen.team_again_offered`:
+  not after a forfeit, a row LEFT, ended / left): `PlayAgainTogether` (co-op, "<NAME> WANTS TO PLAY
+  AGAIN") or `Rematch` (against them, "<NAME> WANTS A REMATCH"), with `RematchStatus`; "rm" goes
+  through TeamArenaNet; the results set `Cloud.play_again` while they offer the button; once both want it only the old host sends
+  `Cloud.team_invite(id, size, coop)` (not quick: the same roles and sides), and `session_started`
+  sets `Game.team_match = LobbyFriends.session_team_match(cloud)` before the load (team_arena_net).
+- `PauseMenu.new()` (Control, works while paused): the in-match menu behind the HUD's gear and
+  Android back, signal `closed`. It is the settings at once (`settings`, a `SettingsPanel` with
+  `in_match = true`, added at the end of the frame it opens in) with `Quit` (QUIT MATCH: TRAINING
+  GROUND quits at one tap; any other match, online or a DUO / SQUAD against bots, asks first,
+  `PauseMenu.asks_before_quit` / `PauseMenu.quit_question`, in the panel's own
+  question `Confirm` (`SettingsPanel.ask`) with ConfirmCancel / ConfirmOk "QUIT": a counted match
+  is a defeat, LEFT in HISTORY; back closes the question first) at the foot of
+  their tab column, and `edit_hud` set: the HUD page's CUSTOM (`EditHud`) opens `HudEditor` (scripts/
+  hud_editor_overlay.gd: the lobby's editor, BACK or back closes it to the settings; SAVE reloads
+  the match HUD's layout) over the match. The settings' X or back closes the menu (saved; also
+  when the arena closes it). Hides `arena.hud` while open (restored on close and exit; a hidden HUD
+  ignores touches). It ignores a back request in the frame it opens (the engine hands the request
+  that opened it to it as well). `Arena.open_pause()` opens one at most and pauses a TRAINING
+  GROUND match while it is open; online the tree is not paused (an open menu is what blocks a
+  second one): the match runs on, and the end of a round or of the match closes it
+  (`Arena.close_pause()`, also before the results). Leaving the app in a fight opens the menu in
+  a TRAINING GROUND match only: online the held controls are released and no menu opens, so a
+  returning player sees the running match at once.
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
-  `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics
-  change emits `Game.settings_changed` so the arena re-applies its quality at once. With
-  `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD becomes a
-  note (`EditHudNote`): leaving for the editor would abandon the match.
-- Lobby Android back closes the top layer (popup, settings, wardrobe), then shows a quit
-  dialog (`QuitDialog`, `QuitCancel`, `QuitConfirm`); it is ignored during the START overlay.
+  `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
+  visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
+  once. Pages (`TABS`, indices used by `_show_tab(i)`): 0 DISPLAY, 1 SENSITIVITY, 2 CONTROLS, 3 SOUND,
+  4 ONLINE, 5 ACCOUNT (scripts/settings_account.gd: the player ID, CLEAR CACHE, and along the
+  bottom DELETE MY DATA, TERMS OF USE, PRIVACY NOTICE), 6 HUD, 7 VIBRATION; `MENU` puts them in
+  the tab column: IN-MATCH (sub-tabs `SubTabs`, buttons `Sub_<PAGE>`: HUD, CONTROLS, SENSITIVITY,
+  VIBRATION), DISPLAY, SOUND, ONLINE, ACCOUNT; it opens on HUD (`HudTile`: the player's own
+  layout, `SettingsPanel.draw_layout(ci, rect)` over arena.png, redrawn when `Game.hud_layout` is
+  saved again while it shows). CONTROLS and SENSITIVITY
+  (`PREVIEW_TABS`) show `Preview` (our HUD picture, the selected row's button ringed) and
+  `PreviewText`; their rows are `Row_<id>`, `_select(id)` / `preview_info()` ({pic, spot,
+  callout, value, text}); a row selects on a tap (released within `UI.SCROLL_DEADZONE`), never on
+  a drag that scrolls, and through its own controls. Sensitivity rows read 0-100: `sens_shown(key,
+  stored)` / `sens_value(key, shown)` map to the stored 1-200 (`SENS_SHOWN`: where the default
+  sits); `sens_stored` stores a preset's exact value for the number that preset shows, and the
+  DEFAULT / HIGH presets are matched on the shown scale.
+  Graphics tiles `GraphicsTiles`, minimap tiles `Toggle_minimap_turns` (child index = choice).
+  Pictures: `PIC_DIR` (assets/ui/settings/, made by tests/shots_settings_pics.gd), `SPOTS` (the
+  HUD widgets' places in them). `TAB_KEYS` lists each page's settings (its RESET, node `Reset`;
+  HUD and ACCOUNT have none and no RESET), `NOT_SHOWN` the rest; RESET, EXTREME, CLEAR CACHE
+  (ACCOUNT, `ClearCache`: `CacheCleaner.scan()` / `clear()` delete only the shader and pipeline
+  caches, old logs and the saves' leftover .tmp / older .bak, never a save or the identity key;
+  the row's note then says what was freed) and DELETE MY DATA ask first in a `Confirm` layer
+  (`ConfirmOk`, `ConfirmCancel`; back closes it). Under the tabs `HowToPlay` opens HOW TO PLAY
+  (`open_help()`: `HowToPlay.page()`, scripts/how_to_play.gd) as a page over the panel
+  (`open_sheet(title)`: node `Sheet`, its header X `Close`; `open_doc(title, sections)` adds
+  `DocScroll` and `SheetOk`); back closes a question, then a page, then the panel. `busy` (DELETE
+  MY DATA running): back and the X do nothing. With `in_match` (also detected when the current scene has `open_pause()`), the HUD page's CUSTOM
+  (`EditHud`) calls `edit_hud` (a Callable the in-match menu sets: the editor over the match);
+  without one it is a note (`EditHudNote`): the lobby's editor would abandon the match; DELETE MY
+  DATA becomes `DeleteNote`. A finger drag that starts
+  on a row scrolls a tab (its sliders keep their own drags). `covered()`: a visible Control was
+  put on top of it (a lobby popup that came in meanwhile), which then takes Android back.
+- DELETE MY DATA (`SettingsAccount`, ACCOUNT's `DeleteData`, lobby only): asked twice, then a
+  waiting screen (`Erasing`: `EraseText`, `EraseOk`): a relay still connecting is waited for
+  (`RELAY_WAIT_S`), `SettingsAccount.forget_everything()` (the relay's copies through
+  `Cloud.forget_me()`, which also forgets the key and id; PLAY WITHOUT INTERNET's copy; settings
+  `Game.reset_settings()`, profile, HUD layout, chats and the session's choices as on a new
+  install), `FLUSH_S` later `SettingsAccount.erase_files(root)` (every save, backup, leftover and
+  key at the top of user://, and the caches; never in automated runs); `EraseOk` opens
+  scenes/login.tscn. `Cloud.forget_me()` -> bool (told the relay): empty retained messages over
+  the card ROOT/p/<id>, friend requests and answers either way (ROOT/fr, ROOT/fa) and friends'
+  chat messages either way (ROOT/fm), then DISCONNECT.
+- Touch targets are `UI.TOUCH_MIN` (56 canvas px) at least: buttons, the settings' segmented
+  choices and -/+ steppers, the lobby's opponent chips and menu rows, the pause and results
+  buttons, the login's links.
+- Camera cutout: `UI.safe_margins(viewport)` is the screen's left and right sides a cutout covers
+  (canvas px; zero on desktop builds; `UI.margins_for_test` stands in for one in checks);
+  `UI.keep_clear_of_cutout(control)` keeps a full-screen Control's content clear of it (the
+  lobby's main UI, the pause band's content; the results screen and the HUD do the same);
+  `UI.pad_clear_of_cutout(margin_container, left, right)` pads a panel's content instead, where
+  the panel's background runs to the screen's edge (the lobby's chat panel, its "Safe").
+- Performance: `PerfGovernor.attach(scene, level_scale, dynamic := true)` (scripts/perf_governor.gd)
+  from `Arena.apply_graphics()` (dynamic 3D resolution, 0.6 at the least) and the lobby's
+  `_apply_quality()` (measuring only). AUTO graphics: `Game.start_auto_graphics()` (a first guess
+  from `PerfGovernor.device_level()`, then `Game.auto_graphics_pending` until a scene's governor
+  measured the frames and called `Game.finish_auto_graphics(level)`), `Game.stop_auto_graphics()`.
+  Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`;
+  the bullet holes are one MultiMesh per scene (`Effects.MAX_HOLES`, `hole_count()`).
+  `Effects.eliminated(ctx, pos)` (Fighter.die, on every phone for every fighter): a small
+  "ELIMINATED" Label3D (`EliminatedTag`, no pop, no rise) over the body for `Effects.ELIMINATED_S`
+  (1.6 s) over one short white burst (particle_share applies). The arena
+  sets the graphics up again only when the graphics level or visual effects change (another save,
+  such as the gun pick's, keeps the governor's state).
+- Aim settings on `Player`: `sight_of(def)` ("sniper", "2x", "reddot", "none"), `sens_key(def,
+  aiming)` (the sensitivity setting a view turns with), `assist_allowed(aim_precision, aiming)`.
+- Lobby Android back closes the top layer (popup: `dialogs.back()`, the popup's own way back;
+  settings, PROFILE, wardrobe), then shows a quit dialog (`QuitDialog`, `QuitCancel`,
+  `QuitConfirm`); it is ignored during the START overlay.
+- The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, the bottom bar `BottomBar` with WARDROBE
+  `BundlesButton`, PROFILE `ProfileButton` and ONLINE 1 VS 1 `OnlineButton`, the chat strip above it
+  `ChatStrip` (UI.TOUCH_MIN tall, its icon and ticker centred; `chat_strip_width()`: CHAT_W, shorter with
+  group members so the voice pill's place under the hero's feet stays free, also with a cutout; its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
+  `AddFriendButton` on the right (FRIENDS on PLAYERS), FRIENDS `FriendsButton` and the gear
+  `SettingsButton` top-right, mode card, START, settings, input; the reference's layout: no text
+  menu, stats chips, name plate or version) makes four helpers that build under its `ui` and reach
+  it through their `lobby`:
+  `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
+  open popup (its column `Frame`), `open_page(title)` (a full page in `modal` too, meta "page":
+  returns {tabs, foot, body, title}; nodes `PageTabs`, `PageFoot`, `PageBody`, `PageTitle`, X
+  `Close`), signal `modal_closed`, `back()` (its X and Android back: the
+  popup's meta "on_back" Callable, else close),
+  `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`),
+  `notice(title, text)` (one OK: `NoticeText`, `NoticeOk`); SELECT
+  MODE `select_mode()` with TRAINING GROUND's opponent chips, the name editor, the quit dialog),
+  `friends`
+  (`LobbyFriends`: the FRIENDS page `open(kind, back)`, kind friends / requests / online (PLAYERS) /
+  room / local, boxed tabs `Tab_<kind>`, BLOCKED `FriendsBlocked` (PROFILE's BLOCKED), on FRIENDS
+  `RequestsLink` and the search `FriendSearch` + `FriendSearchGo`, rows `plain_row` (picture
+  `RowAvatar`, `RowStatus`), empty lists `EmptyState`; its list in `NetScroll`
+  (back: reopened under a closing player card, the list scrolls back to where it was), custom
+  rooms, the online service's signals; `challenge(id)`, `add_friend(id)`; DUEL CHALLENGE has
+  BLOCK (`ChallengeBlock`, asked first), DECLINE (`DeclineButton`, also its X and back) and
+  ACCEPT (`AcceptButton`), and waits while the open popup is busy (a question, a text being typed)
+  until `modal_closed`; a friend's REMOVE (`FriendRemove`) asks first; ACCEPT / DECLINE of a
+  friend request need the relay; a text field being typed in lifts the popup into the top fifth,
+  clear of the on-screen keyboard), `wardrobe_ui`
+  (`LobbyWardrobe`: WARDROBE, every outfit free; `LobbyWardrobe.outfit_color(id)`) and
+  `profile_ui` (`LobbyProfile`, below). Their scrolling lists (PROFILE's tabs, `NetScroll`, HOW TO PLAY,
+  WARDROBE's outfits) go
+  through `UI.drag_scroll(scroll, content)` each time their rows are built: a finger drag that
+  starts on a row scrolls them (rows and their buttons pass the touch on; a tap still presses).
+  Tours read `model`, `ui`, `start_btn`, `mode_card`,
+  `_modal`, `wardrobe`, `_preview_bundle` and `profile_ui` from the lobby and call its
+  `_open_wardrobe()`, `_close_wardrobe()`, `_open_profile()` and `_open_settings()`;
+  `refresh_player_card()` redraws the player card top-left (name, profile picture).
+- PROFILE (`LobbyProfile`, scripts/lobby_profile.gd): `PlayerCard` opens it (`open(tab)`,
+  `close()`, `layer` = the Control `Profile`; `ProfileClose` or back closes it). Tabs
+  `ProfileTab_<career|history|namecard|blocked>`: CAREER (`career_stats(profile)`: rates and
+  averages "-" without data; `Career_<key>`, `CareerMode_<mode>`), HISTORY (`HistoryRow_<n>`,
+  `HistoryEmpty`), NAME CARD (`Banner_<id>`, `Avatar_<id>`, saved at once), BLOCKED
+  (`BlockedRow_<code>`: `LobbyProfile.who_label(id)`, the name kept with the block else `#CODE`;
+  `Unblock_<code>` asks first, `BlockedEmpty`; it follows blocks made elsewhere, and while it or a
+  card opened from PROFILE shows, `Cloud.start_directory("profile")` gets the player cards). The
+  name card (`NameCard`): `CardAvatar`,
+  `CardName` + `CardEditName`, `CardLevel` + `CardXp`, `CardId` + `CardCopy` (the whole id to the
+  clipboard), `CardSignature` + `CardEditSignature` (`SignatureEdit`, `SignatureOk`), `CardOutfit`,
+  `CardSince`.
+- The player card: `profile_ui.open_player(id, back_to)` (a `Modal`, `PlayerCardPopup`), opened by
+  `Player_<code>` (`LobbyProfile.player_button`) in the ONLINE window's lists and in BLOCKED: their
+  `Cloud.directory` card, `PlayerStatus` (online now / last seen), `PlayerId` + `PlayerCopy`,
+  `PlayerDuel` (online only, `LobbyFriends.challenge`), `PlayerFriend` (ADD FRIEND / REQUEST SENT /
+  REMOVE FRIEND), `PlayerBlock` (BLOCK / UNBLOCK: `Game.block` / `Game.unblock`); both ask first.
+  X and back reopen the ONLINE tab `back_to` ("" just closes). BLOCK first calls
+  `Cloud.drop_player(id)`: the challenge sent to them is called off (they could still accept it),
+  theirs is dropped, they lose their seat in the hosted room and the friend request sent to them
+  is taken back (`withdraw_request(id, notify)`: offline its deletion on the relay waits in the
+  profile's "withdrawn" until the next connection); Cloud ignores a blocked player's challenge,
+  acceptance, friend request, room request and room "join".
+- Modes (both 1 vs 1 on CARGO CAGE): `Game.mode` is "training" (TRAINING GROUND, vs a bot or the
+  target dummy, the default) or "lonewolf" (LONE WOLF, online 1 vs 1), kept as the setting
+  "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
+  `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
+  `ModeFormat`: `Lobby.mode_format()`, "BOT: <level>  ·  FIRST TO n", "TARGET DUMMY" or "1 VS 1
+  ONLINE") opens SELECT MODE (`LobbyDialogs.select_mode()`: a full page, `open_page("", false)`
+  with no side tabs, in `Modal`: the tab bar `ModeTabs` / `ModeTab` "MODES", the cards
+  `Mode_training` / `Mode_lonewolf` in `ModeCards` (`ModeTitle`, `ModeStart`: "CARGO CAGE · START:
+  <LobbyDialogs.start_line(m)>"), the bottom row `ModeWays` with `ModeWay_room` / `ModeWay_local`
+  (FRIENDS on CUSTOM ROOM / PLAY WITHOUT INTERNET) and `ModeWay_help` (`how_to_play()`: HOW TO PLAY
+  as a page, X and back return to SELECT MODE); X and back close it; a group member gets a notice
+  instead; each card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
+  (scripts/mode_help.gd: `ModeHelp.PAGES`, `pages_of(m)`, `show_page(i)`, `turn(step)`, nodes
+  HelpPicture, HelpTitle, HelpText, HelpDots / HelpDot_<i>, HelpPrev, HelpNext; X and back return to
+  SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the TEAM panel above
+  the card (`LobbyDialogs.open_size_box(fade)`, `size_box`, `refresh_size_box()` on group_changed,
+  nodes SizeBox / SizeBoxPanel / SizeTile_<1|2|4> (picture tiles), `size_tile_text(m, n, members)`,
+  `size_box_allowed(member, searching)`: not during a search; a member's is read-only); in LONE WOLF
+  with online teams and not in a room (`team_rows_shown(m, grouped, in_room)`) it also has the
+  GroupCodeRow (`LobbyTeam.code_row`) or GroupCodeNote (`LobbyTeam.code_note`), the tick
+  GroupCodeSwitch (JOIN BY CODE = `Cloud.set_code_join`) and, for the leader or a solo, the tick
+  TeamFillTick (FILL EMPTY PLACES = setting `team_fill`, default true; off, `Lobby.start_group`
+  refuses a DUO / SQUAD START that needs strangers in the group's own team: `Lobby.fill_needed(size,
+  group_n)`, true when group_n < `NetGroup.per_team(size)` (a solo, a SQUAD group of 2 or 3); a
+  whole team still searches for opponents; not in a room): a tile and SELECT MODE's
+  size chips both go through `LobbyDialogs.pick_size(m, n)`); the
+  opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) are on the TRAINING GROUND card:
+  a tap picks TRAINING GROUND with that opponent and closes SELECT MODE; DUMMY sets
+  `Game.practice` (session only, an online match ignores it). START: TRAINING
+  GROUND -> `Loading.start_match` (caption LOADING); LONE WOLF -> `friends.open("online")`.
+  `Game.count_match(mode)` and `Game.record_match(result)` count the totals and
+  `profile.modes[mode]` (matches, wins, kills); the target dummy counts nowhere.
+- Saves (profile.json, settings.json, hud_layout.json) go through `Game.write_json(path, data)`:
+  a temporary file, checked whole, then renamed over the old one, which stays as `<path>.bak`;
+  `Game.read_json(path)` falls back to it when the file does not read (a write cut short on a
+  full phone). Their keys: the settings keys are `Game.DEFAULT_SETTINGS` (`SETTING_RANGES`, `BOOL_SETTINGS`; older
+  files are migrated by settings_version: version 6 dropped the FPS counter, crosshair colour and
+  size, fire-button drag and master volume, made show_fps / sens_fire `FIXED_SETTINGS` and gave
+  the reference's defaults: joystick DYNAMIC, free look button off; version 7 added
+  `minimap_turns`, true (TURNS WITH VIEW) for every older file), the profile keys
+  `Game.DEFAULT_PROFILE` (signed as a whole; older profiles are migrated by profile_version).
+  Crosshair (fixed): `Game.crosshair_color()` (white), `Game.crosshair_scale()`. Vibration:
+  `Game.vibrate(ms, kind)` / `Game.vibration_on(kind)`, kind a key of `Game.VIBRATE_KEYS`:
+  "footsteps" (an enemy's step within `HUD.STEP_BUZZ_M`), "damage" (taking a hit), "shooting"
+  (heavy shots, a kill), "lobby" (a challenge or friend request: the setting "vibration").
+  `Game.reset_settings()`: a new install's settings. Blocks: profile "blocked" = [{id, name ("" when unknown), t}], oldest
+  first, `Game.MAX_BLOCKED` = 50 (`Game.block(id, name)` lifts the oldest when full:
+  `Game.block_lifts()`; `Game.unblock(id)`, `Game.is_blocked(id)`, `Game.blocked_ids()`; a bare id
+  saved by an earlier build loads as a block without a name). "withdrawn": ids whose friend request
+  was taken back offline (Cloud deletes it on the relay at the next connection). Profile version 3
+  adds "history" (`Game.MAX_HISTORY` = 20 entries,
+  newest first: {result won|lost|draw, mode, enemy, id, score, enemy_score, kills, damage,
+  headshots, t}; result "left": quit with QUIT MATCH), added by `Game.record_match` and checked
+  entry by entry on load; a row with an opponent's id opens their card; a version 2
+  profile starts it empty.
+- Public player card v3 (cloud.gd, retained on ROOT/p/<id>): {"t": "card", "v": 3, id, name,
+  bundle, avatar, banner, level, signature, career, pk, ts, sig, sig2, sig3}; career is
+  `Cloud.career_summary(profile)` ({matches, wins, kills, kd (x100, -1 unknown), hs (% per hit, -1
+  unknown)}) while the setting show_career (SHOW MY CAREER) is on, else {}; sig3 signs
+  "card3|id|name|bundle|avatar|banner|level|signature|<career_text>|ts" (`Cloud.card3_text`), sig2
+  the v2 text "card2|id|name|bundle|avatar|banner|level|signature|ts" (`Cloud.card2_text`, what
+  v2 builds check), sig the v1 text "card|id|name|bundle|ts" (cards without "v" are v1, "v" 2 has
+  no career: both still accepted). The directory entry's "career" ({} hidden or older) feeds the
+  player card's CAREER block (`LobbyNet.career_block`).
+  `Cloud.my_card()` is everything public; the cards are listened to while anyone wants them
+  (`Cloud.start_directory(by)` / `stop_directory(by)`: the ONLINE window "window", PROFILE
+  "profile"); `_check_card` checks every field (types, size, no "|",
+  avatar / banner known else the default, level 1..CARD_LEVEL_MAX, `Game.clean_text` signature).
+  The Privacy Notice (`Login.privacy_sections`) lists these fields.
 - No credits screen: `Licences.publish()` prints the licence notices the shipped parts need
   (Godot's licence and third-party list read from the engine, CC0 character, fonts' OFL, also in
   assets/fonts/LICENSE.txt) to the system log at start (`Licences.text()` builds them).
-- Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`.
+- PLAY WITHOUT INTERNET (`Lan`, scripts/lan.gd, `Game.lan_service()`): a `Cloud` whose room runs
+  over the local network (same Wi-Fi or one phone's hotspot), so `Game.session` is a Lan for these
+  matches and the arena, HUD, chat, voice and ping use Cloud's own session code. `host()` (a
+  `code` of `Lan.CODE_DIGITS` digits, the beacon on UDP `DISCOVERY_PORT`), `seek()` (`hosts`,
+  signal `hosts_changed`), `join(host_id, code)` (signal `pair_failed(why)`: "code", "busy",
+  "gone"), `stop()`; `read_beacon`, `pairing_key`, `room_keys`, `pair_message`, `check_pair` are
+  what the unit tests (tests/lan_unit_check.gd) drive. `Game.local_match()`: the arena's
+  `mode_name` is "LONE WOLF · LOCAL", the result and its HISTORY entry carry "local": true (the
+  row reads LONE WOLF · LOCAL), the match card reads 1 VS 1 LOCAL, the results' opponent row
+  LOCAL. The lobby's tab is `LobbyLan` (scripts/lobby_lan.gd, the ONLINE window's `Tab_local`:
+  `LanHost`, `LanJoin`, `LanStop`, `LanCode`, `LanHost_<n>`, `LanCodeField`, `LanConnect`).
+- QUICK MATCH `NetMatch` (scripts/net_match.gd, node "NetMatch" under the lobby; LONE WOLF's START:
+  `NetMatch.open(lobby)`): `Cloud.seek_start()` / `seek_stop()` listen to `Cloud.SEEK_TOPIC`
+  (ROOT/mm/seek), `Cloud.send_seek(saw)` says {t "seek", id, saw} every `NetMatch.SEEK_S` (not
+  retained), `Cloud.seeker_seen(id, saw)` reports another seeker (never this phone or a blocked
+  one; `Cloud.quick_seen`). When the other's `saw` lists this phone, the lower id calls
+  `Cloud.invite(id, {"quick": true})`; a quick challenge is accepted at once only while seeking,
+  from a seeker in `quick_seen`, proven and allowed by DUEL CHALLENGES FROM, else declined at once
+  (never shown). While a DUEL CHALLENGE, TEAM INVITE or GROUP INVITE waits for this player's answer
+  (`Cloud.answer_waiting()`), the search neither challenges (NetMatch and `Cloud.invite` with
+  "quick" both refuse) nor takes a quick challenge (declined); ACCEPT ends the search
+  (`Cloud.answer` / `answer_group_invite` call `seek_stop`), DECLINE lets it go on. No popup and no time limit (it runs until cancelled): the lobby's search tab
+  (`SearchTab`, scripts/lobby_search.gd, `Lobby.search_tab` on its own CanvasLayer `SearchLayer` over
+  the lobby's windows) drops from the top centre: `SearchLine` ("ESTIMATED 0:10" for the first
+  `SearchTab.ESTIMATE_S` s, then "STILL SEARCHING..."; `NetMatch.status_line()` CONNECTING... /
+  OPPONENT FOUND), `SearchTimer` (m:ss counting up), `SearchPlayers` ("PLAYERS n/N", DUO / SQUAD
+  only), `SearchCancel` (the X; a group member's tab has none). `Lobby.search_kind()` ("quick",
+  "group": Cloud.search_needed > 0, or "") drives it; START is replaced by the greyed `MatchingPlate`
+  "MATCHING..."; the lobby stays usable (WARDROBE, SETTINGS, PROFILE, FRIENDS, chat), a tap on the
+  mode card says "CANCEL THE SEARCH FIRST", Android back cancels only with no window open
+  (`Lobby.cancel_search`), and the session that starts closes any open window
+  (`Lobby.close_layers`, from LobbyFriends._on_net_session). Test: tests/quick_check.gd.
+- Online extras: ping `NetPing` (a wifi mark + a plain number, white < GOOD_MS, yellow < FAIR_MS,
+  red, grey "--"; `NetPing.lobby_chip()` "PingChip", the last item of the lobby top bar's right
+  group, after the gear: `Cloud.relay_rtt`, MQTT PINGREQ -> PINGRESP every `Cloud.PING_S`; in a match
+  `Cloud.peer_rtt`, an encrypted room ping every `Cloud.PEER_PING_S` (an all-human match: members
+  ping the host and the host the members, answers "po" carry "to" = whose ping); `Cloud.match_ping()` is the
+  direct round trip while the direct path is up, and HudNet's tag says DIRECT or RELAY). Direct path
+  `NetDirect` (scripts/net_direct.gd, setting direct_connect, last row of the ONLINE tab; it sends
+  to the best address the other phone answered from: `NetDirect.path_rank`, same network > IPv6 >
+  carrier-NAT IPv4 > IPv4, `best_path` within PATH_FRESH_MS): one UDP
+  socket per match, candidates (own addresses + STUN `NetDirect.STUN_SERVERS`) swapped in the room
+  ("dh" hello, "dc" candidates, only when both have it on), sealed packets (direction byte, sequence,
+  AES + HMAC with keys derived from the room's), the state over it while it works both ways
+  (`Cloud.direct_up()`), back on the relay after `NetDirect.TIMEOUT_MS` of silence; events, chat and
+  voice stay on the relay; LW_DIRECT=local (tests) = loopback only, no STUN; a Cloud subclass whose
+  room already runs over the local network overrides `Cloud.direct_allowed()` to false. Match state: 20 a second
+  (`Cloud.state_interval`), `Cloud.compact_state`, unchanged states skipped (`STATE_IDLE_MS`), the
+  sender's clock "t" (`Cloud.last_state_sent_ms`) for `RemoteFighter.apply_state(s, sent_ms)`, drawn
+  by `NetSmoother` (DELAY_MS behind, EXTRAP_MS at most across a gap). Chat `NetChat` (text rules,
+  QUICK, the friends' messages kept in user://chat.json): in a match `Cloud.send_chat(text)` /
+  signal `chat_received(text)`; friends `Cloud.send_friend_chat(id, text)` (RSA to the friend's key,
+  signed, retained on ROOT/fm/<to>/<from> until read) / signal `friend_chat_changed(id)`; the
+  lobby's chat panel and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`:
+  the panel from the left in `dialogs.modal`, "ChatWindow", its "Frame" (to the screen's edge; the
+  content in "Safe", clear of a left cutout), "ChatOutside" (the whole screen behind the panel: a
+  tap beside it goes back, nothing in the lobby under it can be pressed), "ChatTab_friends", "Close",
+  the friends column "ChatPeople" with "ChatPerson_<code>" (metas "unread", "online"; filled again on
+  every friend_chat_changed and peers_changed), the conversation "ChatConv" (typing pads it from
+  below, LobbyFriends._apply_lift: only the input row and the quick phrases rise, the panel and its
+  header stay), "ChatField", "ChatSend", quick phrases "Quick_<n>", "FriendChat", message
+  rows "ChatMine_<n>" / "ChatTheirs_<n>", `time_text(ts, now, tz_s)`).
+  Lobby notices (lobby only, never in a match): `LobbyNet.toast(lobby, text, caption, on_tap,
+  icon)` ("LobbyToast" in the lobby's CanvasLayer "NoticeLayer", layer 20, TOAST_S): a friend's
+  message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while the
+  chat panel is open (another friend's message only sounds there), a match loads, FRIENDS CHAT is off or they are blocked) and a friend request that
+  comes while a popup is open (the tap opens FRIENDS); `LobbyNet.set_badge(row, n)` ("UnreadBadge")
+  puts `NetChat.unread_total()` on the lobby's FRIENDS button (`FriendsButton`). Voice: one
+  `NetVoice.hub()` (node "NetVoiceHub" under the root, made by Cloud._ready; IMA ADPCM 8 kHz frames
+  of 100 ms, bus "VoiceIn" for the microphone, one generator per talker on the bus "Voice", setting
+  vol_voice). Settings mic_mode / speaker_mode (`NetVoice.OFF` 0 / `ALL` 1 / `GROUP` 2; defaults OFF /
+  ALL) and push_to_talk (false); 1.8's voice_chat true becomes mic ALL + push to talk (migration by
+  key, no version bump). `NetVoice.channel()`: "match" (Game.session in session) / "group"
+  (`Cloud.voice_group_ready()`) / ""; `sends(mode, channel, mates)`, `hears(mate, mode, muted)`,
+  `gate_next(state, rms, need)` (GATE_FRAMES loud frames in a row from `need` open it, GATE_HANG
+  quiet ones close it; `gate_need()`: GATE_ECHO while another player's voice played here within
+  ECHO_MS (the own voice close to the phone gets through, the loudspeaker's quieter echo does not,
+  so a talker who never stops cannot shut the others out), GATE_LOUD while the SFX / Voice bus
+  peaked over OUT_LOUD_DB, else GATE_OPEN), `speaking(id)` ("" = this phone),
+  `set_muted(id, on)` / `is_muted(id)` (session; blocked always), `hub().set_mic_mode(m)` (asks
+  RECORD_AUDIO; refused: OFF + `mic_refused`), `set_speaker_mode(m)`, `toggle_speaker()`,
+  `set_push_to_talk(on)`, `ptt_held`, `test_loop` (MIC TEST), `level`, `tone_source`; the app's
+  pause stops the microphone at once and lets TALK go, the resume starts it afresh
+  (LW_VOICE_TONE=1, debug builds: a tone instead of the microphone, and a "VOICE ..." log line every
+  3 s). Cloud: `send_voice(frame, group_only)` (match room "vo" {"a"} everyone / "vg" {"s"} own
+  team; a 1.8 phone plays "vo" with its VOICE CHAT on and ignores "vg", "vp", "vk"),
+  `send_group_voice(frame, group_only)` (topic ROOT/g/<gid>/v, sealed with the group keys,
+  {"k": "gv", "a"} or {"k": "gv", "g": true, "s"}; listened to while the SPEAKER is on or the MIC is
+  GROUP: `_sync_group_voice`; 1.8 phones never subscribe). GROUP frames ("s") are sealed under the
+  sender's own key (`_vk_sync`, `_vk_seal` / `_vk_open`: AES-256-CBC + HMAC-SHA256 over the sender
+  id, 64 random bytes per channel, new when a teammate stops being one), which it gives each
+  teammate RSA-encrypted to that player's public key ({"k": "vk", "to", "s"}); the public keys come
+  from the lobby (peers, directory) or {"k": "vp", "pk"} in the channel (answered once by each
+  newcomer). The other team holds the room's keys, never these. `voice_from(frame, from_id, mate)`
+  (every voice frame, after the rate limit, blocks and the GROUP filter), `voice_mate(id)`,
+  `voice_mates()`; `voice_received(frame)` stays for the 1 vs 1. Lobby: `VoiceButtons.lobby_pill`
+  (node "VoicePill" [mic | speaker] under the character; popups "MicModeBox" / "SpeakerBox" with
+  Mic_OFF / Mic_ALL / Mic_GROUP (Speaker_...), "PushToTalk", and a "Voice_<id>" row with "Mute" per
+  player of the channel; "LobbyTalk", the TALK button right of the pill while PUSH TO TALK, the mic
+  on and the channel "group": `VoiceButtons.talk_wanted()`). Settings tab ONLINE (scripts/settings_online.gd): chat,
+  friend_chat, show_career, direct_connect (NetDirect), vibration
+  (out of a match: the lobby's buzz for a challenge or a friend request), challenges_from
+  (`Game.CHALLENGES_EVERYONE` / `_FRIENDS` / `_NOBODY`: `Cloud.challenge_allowed(from)`, the others
+  declined at once, never shown) and friend_requests (off: `Cloud.requests_allowed()` false, new
+  requests ignored and their waiting copies deleted, no popup). SOUND: vol_sfx, vol_music,
+  then VOICE CHAT: push_to_talk ("Toggle_push_to_talk"), vol_voice and MIC TEST ("MicTest":
+  `VoiceButtons.mic_test()`, the own voice back through the codec, a level meter), each applied at once (`Game.apply_settings`: buses SFX, Music, Voice; no master
+  setting, the Master bus stays at full volume).
+- Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
+  `Game.goto_login()` opens scenes/login.tscn (`Login`) until `profile.guest_ok`, the lobby after
+  that and always in automated runs.
+- `Login` (scripts/login.gd): GUEST LOGIN (PLAY AS GUEST, the Terms of Use and Privacy Notice as
+  in-game popups, Android back = quit dialog) then CREATE PROFILE (name, picture, name card,
+  preview, player ID; back returns to the guest login). CONFIRM = `Login.create_profile(name,
+  avatar, banner)`: name (`Game.clean_name`: A-Z, 0-9, space, _ - . with accented Latin letters
+  as plain ones, the rest left out; the lobby's name editor shows the result as it is typed in
+  `NamePreview` and keeps an empty one open), `name_set`, `guest_ok`, `avatar`, `banner`, then
+  `Game.save_profile()`; WELCOME, then `Game.goto_lobby()`. Shared art helpers:
+  `Login.avatar_texture(id)` (the emblem or an outfit portrait's head) and
+  `Login.banner_texture(id)` (`Game.BANNERS[i]` = assets/ui/banners/banner_<i+1>.png). The
+  Privacy Notice (`Login.privacy_sections()`) states what cloud.gd shares (the player card's
+  fields, Cloud.BROKERS hosts, the card and request ages): change it with them
+  (tests/login_check.gd checks it). The player ID comes from `Cloud.prepare_identity()` (the key
+  made or loaded without going online). Node names: GuestButton, TermsLink, PrivacyLink, Modal,
+  ModalOk, DocScroll, QuitDialog, QuitCancel, QuitConfirm, BackButton, NameField, NameRandom,
+  NameHint, Avatar_<id>, Banner_<id>, NameCard, PlayerId, GuestBadge, ConfirmButton, Welcome.
 - Every button that the screenshot walkthrough (scripts/autotest.gd) uses keeps its node name:
-  `StartButton`, `SettingsButton`, `BundlesButton`, `Bundle_<id>`, `EquipButton`,
-  `PlayerCard` (opens the name editor), `PlayerName`, `Logo`, `Modal`, `PlayAgain`, `Lobby`,
-  `Close`, `SaveButton`.
+  `StartButton`, `ModeCard`, `Mode_<mode>`, `Diff_<chip>`, `SettingsButton`, `BundlesButton`
+  (WARDROBE), `OnlineButton` (ONLINE 1 VS 1), `FriendsButton` (FRIENDS), `Bundle_<id>`,
+  `EquipButton`, `PlayerCard` (opens PROFILE; its pencil `EditName`,
+  a 56 px touch target around its plate, the name editor), `PlayerName`,
+  `Logo`, `Modal`, `PlayAgain`, `Lobby`, `Close`, `SaveButton`.
+
+## DUO / SQUAD: lobby (WP-B1: SELECT MODE sizes, START routing, TEAM bar and invites, TeamMatch, records)
+- Records (autoload/game.gd): `Game.RECORD_MODES` {training, lonewolf, duo, squad} (id -> name: TRAINING
+  GROUND, LONE WOLF, LONE WOLF DUO, LONE WOLF SQUAD) is the one list `_sanitize_profile`,
+  `_history_entry`, `_mode_counts` and `mode_name()` use; START's `MODE_NAMES` stays {training,
+  lonewolf}. `DEFAULT_PROFILE.modes` has all four; a profile from before loads duo / squad as zeros.
+  A result's `mode_id` ("training" for TRAINING DUO / SQUAD, "duo" / "squad" online or for a team
+  search that found nobody) picks the numbers it counts in.
+- `record_match` reads, besides today's keys: `team` (true for a team match: HISTORY then keeps
+  `size` = `team_size` (2 / 4), `bots` (count) and `with` = the other human on the player's team,
+  from the result's `with` or else `Game.team_match`'s roster via `Game.team_mate_name()`), and
+  `ended` (true: the match could not go on, e.g. the coop guest whose host left after the first
+  fight: HISTORY result "ended", no win). `HISTORY_RESULTS` += "ended". 1 vs 1 entries keep their
+  ten keys. PROFILE: CAREER rows `CareerMode_<record mode>`; HISTORY rows read "DUO · VS BOTS",
+  "SQUAD · WITH <NAME>", "DUO · VS <NAME>" (`LobbyProfile.history_texts`), result word ENDED.
+- `Game.TEAMS_ONLINE` (const, true): the off switch. false hides the TEAM bar
+  (`LobbyTeam.bar_shown`), declines incoming team invites in the lobby (LobbyFriends._on_net_invited),
+  gives no team match for a session (`LobbyFriends.session_team_match` -> {}), and LONE WOLF with
+  DUO / SQUAD shows "ONLINE DUO / SQUAD: NEXT UPDATE" (START: a notice). TRAINING DUO / SQUAD play.
+- `Game.team_size` (setting team_size 1 / 2 / 4): SELECT MODE's chips `Size_1` SOLO, `Size_2` DUO,
+  `Size_4` SQUAD on both mode cards (a tap picks the card's mode and the size; DUO / SQUAD unset the
+  dummy, `Diff_DUMMY` is disabled in them: "DUMMY IS SOLO ONLY"). Mode card line:
+  `Lobby.mode_format()`; SELECT MODE card lines: `LobbyDialogs.mode_lines(m, size)`.
+- START (`Lobby.start_route(mode, size)`): training SOLO -> today's match (`Game.team_match = {}`);
+  training DUO / SQUAD -> `Game.team_match = TeamArena.offline_match(size, "training",
+  settings.difficulty)` then `Lobby.load_match()` (Game.online false, Loading.start_match);
+  lonewolf SOLO -> `Game.team_match = {}`, NetMatch.open; lonewolf DUO / SQUAD -> `TeamMatch.open
+  (lobby, size)`; online teams off -> a notice.
+- `Game.team_match` is set only by START, TeamMatch's fill and LobbyFriends._on_net_session
+  (`session_team_match`: `TeamArena.link_match(size, coop, host, guest, cloud.is_host,
+  (host_id + guest_id).hash())`, host / guest = {"id", "name", "bundle"} from the profile and
+  `Cloud.opponent`); it is cleared ({}) in Lobby._ready, every SOLO START, every session with an
+  empty `Cloud.session_team` (duels, the 1 vs 1 QUICK MATCH, custom rooms) and the LAN session
+  start (LobbyLan._on_session). Results' PLAY AGAIN (B2) keeps it: an offline team match replays.
+- TeamMatch (scripts/net_team_match.gd): `open(lobby, size)` starts (or brings back) the search:
+  `Cloud.team_seek_start(size)`, `send_seek(saw)` every SEEK_S but only while `Cloud.seek_team ==
+  size` (never on the 1 vs 1 topic), `seeker_seen` -> the lower id calls `Cloud.team_invite(id, size,
+  false, true)`; `Cloud.in_session` -> stop (the lobby loads it). After `TeamMatch.fill_s()`
+  (FILL_S 25, LW_FILL_S in tests) with no opponent, no invite out and none in: `Game.team_match =
+  TeamArena.offline_match(size, "duo" | "squad", 1)` and the match loads; its loading card says
+  "NO PLAYER FOUND: YOUR TEAM VS BOTS" (`Loading.team_info`, node MatchDesc). Popup nodes:
+  TeamStatus, TeamTimer, TeamFill ("BOTS IN 0:nn"), TeamNote, TeamCancel (X / back cancel).
+- TEAM bar (scripts/lobby_team.gd, `Lobby.team`): TeamBar under the player card, TeamHead "YOUR
+  DUO", TeamInvite ("+ INVITE"; "WAITING..." + the name while an invite waits), TeamBot_<3|4>. INVITE
+  -> TeamInviteList: profile friends (never blocked ones), the ones in `Cloud.peers` first with
+  TeamAsk_<code> -> `Cloud.team_invite(id, Game.team_size, true)` (false: "<NAME> COULD NOT BE
+  REACHED", TeamListNote); offline rows greyed, INVITE disabled; a friend whose lobby announce
+  ("hi", `Cloud.hello_msg`) carries "im" (in a match: `Cloud.peer_in_match`, no more about the match;
+  older builds send none and read ONLINE) reads IN A MATCH with INVITE greyed (GroupAsk_<code>), and
+  in the FRIENDS / ONLINE lists with DUEL 1 VS 1 greyed (Duel_<code>) until it is back in the lobby; no friends: a note and TeamFriends
+  (opens FRIENDS). Then TeamWait "WAITING FOR <NAME>" + TeamWaitCancel (`Cloud.cancel_invite`); a no
+  (`Cloud.invite_answered(false, name)`, also the 25 s time-out) reads "<NAME> DECLINED" (LobbyFriends
+  hands answers on: `LobbyTeam.on_answered`).
+- Incoming TEAM INVITE: `LobbyFriends.invite_team(cloud)` = `Cloud.invite_from().team` ({} for a
+  duel); the challenge popup is
+  titled TEAM INVITE, ChallengeText "<NAME> wants you in their DUO team: YOU TWO VS BOTS" (SQUAD: "...
+  their SQUAD: YOU TWO AND 2 BOTS VS BOTS"); ACCEPT / DECLINE / BLOCK and waiting behind an open
+  popup as a duel (`LobbyFriends.challenge_text`).
+- Needs from WP-N (Cloud): `session_team` set on BOTH phones before `session_started`;
+  `seek_team` = the size while team-seeking; `invite_from()` -> {"id", "name", "team"}; a declined or
+  timed-out team invite emits `invite_answered(false, name)` like a duel's.
+- Needs from WP-C: `TeamArena.TEAM_ROUNDS_TO_WIN` (the loading card's FIRST TO n via
+  `Loading.team_rounds_to_win()`, LW_ROUNDS_TO_WIN in tests); the result keys above.
+- Checks: tests/team_lobby_unit.gd (unit), tests/team_lobby_check.gd (one copy, LW_FILL_S=3,
+  LW_MQTT_URL=ws://127.0.0.1:9 so nothing leaves the machine; "TEAM LOBBY CHECK DONE bad=N").
+
+## DUO / SQUAD: match HUD and results (WP-B2: HudTeam, kill feed, minimap, scoreboard, results)
+- HUD.bind attaches `HudTeam` (node "HudTeam", `hud.team`) when HudTeam.wanted(arena): the arena has
+  `team_size` > 1. A 1 vs 1 HUD has none (`hud.team == null`).
+- HudTeam reads only TeamArena's read API (duck-typed, so a stand-in works): `player`, `my_team`,
+  `members(t)` (slot order: the panel's badge 1..n), `status_of(f)` ("up" / "knocked" / "out" /
+  "left"), `revive_candidate(player)`, `start_revive(player, target)`, `cancel_revive(player)`,
+  `revive_progress(f)` (-1: nobody revives), `spectated()`, `spectate_next()`; and the fighters'
+  `knocked`, `knock_hp`, `reviving`, `team`, `hp`, `alive`, `display_name`.
+- REVIVE: shown while revive_candidate(player) is not null, or while `player.reviving` is set (then
+  it reads STOP: a tap calls cancel_revive). A tap calls hud.release_all() first, then start_revive.
+  Its place: HudTeam.revive_center() (beside FIRE, the first spot clear of every other control).
+- The team list's place: HudTeam.panel_rect() (under the minimap's zone strip, the reference's place;
+  else right of the minimap, else beside / under HudNet's buttons: the first free one); its rows:
+  `team_rows()` ({n, name, me, leader, status, hp, bleed, revive}); member colours
+  `HudTeam.slot_color(n)` (SLOT_COLORS: 1 cyan, 2 orange, 3 pink, 4 purple; also the tags over the
+  teammates' heads and their minimap dots); the leader's flag: `leader()` (the arena's optional
+  `team_leader(t)`: TeamArena gives the group's leader online (the host, when on that team), else
+  the team's first non-bot). SPECTATING + NEXT: spectate_rects().
+  blocked_rects() lists what they keep clear of (the tours check it).
+- HUD calls for the arena (C): add_team_feed(killer, killer_ally, victim, victim_ally, weapon_name,
+  weapon_icon, headshot, mine, verb) with verb "KNOCKED" / "REVIVED" / "LEFT" / "" (REVIVED: killer
+  = the reviver, victim = the revived; LEFT: killer = who left, victim ""); knock_banner(name) when
+  the player knocks an enemy (banner_kind() "knock"). The 1 vs 1 calls are unchanged.
+- Score bar: `score` {"player", "bot"} as today (TeamArena mirrors team_score); the two HP bars show
+  each team's HP still standing (HudTeam.team_hp). The prep line lists members(my_team) as BLUE and
+  the others as ORANGE.
+- Scoreboard (team arena): scoreboard_rows() rows need "ally" (or "me"), "status", "knocks",
+  "revives", "deaths" besides today's keys; my team first. Shorter rows: a SQUAD board fits 720 px.
+- Results: `result.team == true` switches the screen: plates YOUR TEAM : result.enemy; TeamTables
+  with TeamTable_0 (rows with "ally" true) and TeamTable_1 (page 2, each under its side name);
+  TeamRow_<n>, n = the row's index in result.rows (else the scene's scoreboard_rows()), values
+  K/D/A, DAMAGE, KNOCKS, REVIVES, HS, ACC (Value_0..5; row keys kills, deaths, assists (0 when
+  absent), damage, knocks, revives, headshots, accuracy; sub-line YOU / BOT / LEFT / PLAYER
+  from "me", "bot", "status"). PLAY AGAIN only when the match was on this phone (result.online,
+  else Game.online or Game.team_match.online). Online: PLAY AGAIN TOGETHER (`PlayAgainTogether`,
+  co-op) or REMATCH (`Rematch`, against the other player) in its place (see ResultsScreen above),
+  ADD FRIEND on the orange table's head while not friends; after a forfeit or once a player left
+  only LOBBY, plus ADD FRIEND (on the orange table's head) when result.enemy_id is another player's
+  id and not yet a friend.
+- Pause menu: PauseMenu.host_of_team() (Game.team_match online + host, coop or multi): QUIT MATCH's
+  question also holds QuitWarning, PauseMenu.HOST_WARNING (coop) / HOST_WARNING_ALL (all-human).
+- Tests: tests/team_hud_unit.gd (stand-in arena); the HUD tour's team part
+  (`LW_TOUR=team tools/qa/capture.sh <dir> 1280x720 script:res://tests/shots_hud.gd` runs it alone;
+  the full tour runs it after the 1 vs 1 part).
+
+## DUO / SQUAD: gameplay (WP-C: team_arena, team_referee, fighter knock/revive, bots in teams)
+- Rules: TeamReferee (scripts/team_referee.gd) is pure logic: down() / revive() / leave() return
+  the decisions, winner() / timeout_winner() the round. TeamArena (scripts/team_arena.gd) applies
+  them; its header lists the rules (knock, bleed, revive, friendly fire off, rounds, picks).
+- Round flow: PREP (TEAM_PREP_S 10 s, every fighter picks its own gun: the player's panel, bots
+  after 1.5-3.5 s where they run here) -> FIGHT (the 1 vs 1's two stages: stage2_time() DUO 90 s,
+  SQUAD 120 s; the zone as the 1 vs 1's, zone_hurts(f) only for fighters run here) -> the referee: a team with nobody UP, DEATH_SETTLE_S later "rend" (or the
+  time-out's HP sums) -> BREAK -> the referee's "round" -> PREP, or END (first to
+  team_rounds_to_win(): 4, LW_ROUNDS_TO_WIN in tests). open_pause() is the base's (offline it
+  pauses the tree; TeamArenaNet has online = true, so it never does).
+- SEAMS as TeamArena calls them (TeamArenaNet overrides them):
+  - _fighter_for(entry): once per roster entry from _spawn_fighters, after roster, my_slot, mode
+    and rounds_to_win are set. The arena then sets team, slot, name, display_name, arena, adds it to
+    the tree, places it in its alcove (spawn_spot), setup_fighter(bundle, last_pick), aim_yaw,
+    hold_fire; every Bot (RemoteFighter too) gets configure(diff, first enemy), enemies / allies
+    and frozen. Each fighter's died -> _on_team_died (bookkeeping only), knocked_down -> _on_knocked,
+    knock_finished -> _on_knock_finished. The 1 vs 1's _on_fighter_died is not connected.
+  - _net_tick(delta): first thing in _physics_process, in every phase.
+  - runs_here(f): only these take the zone's damage here, run revives, pick guns as bots, and
+    report downs. (A Fighter bleeds in its own _physics_process; RemoteFighter overrides that.)
+  - _report_down(f, killer, headshot, cause, finished): from knocked_down (HP gone, finished
+    false) and knock_finished (knock HP gone, finished true; cause "bleed" for bleeding out) of
+    fighters that run here, only during FIGHT and never while a decision is being applied. Base:
+    if is_referee(): referee_down(slot, killer slot or -1, ...). The host calls referee_down() for
+    a checked "dn" too.
+  - _report_revive(reviver, target): a revive by a fighter that runs here reached REVIVE_S. Base:
+    if is_referee(): referee_revive(reviver slot, target slot). The host calls referee_revive()
+    for a checked "rvd". referee_leave(slot): a member left (OUT now and every later round).
+  - _announce(kind, data): every referee decision ("ko", "el", "rv", "rend", "round") right before
+    _apply_decision applies it; every pick of a fighter that runs here ("pick" [slot, gun,
+    round]: the player's, and the bots' on the referee); revive start / stop by a fighter that runs
+    here ("rvs" [reviver, target], "rvx" [reviver]: shown only; the receiver sets
+    puppet.reviving / revive_t and target.revived_by, or calls _end_revive(puppet)).
+  - _apply_decision(kind, data): "ko" / "el" / "rv" / "rend" / "round" / "pick" with the layouts in
+    the seams' comment. Repeats are harmless: ko / el / rv skip fighters already in that state,
+    "rend" only for the current round during FIGHT, "round" only when it is newer, "pick" only for
+    the current round. It knocks (Fighter.knock), takes out (Fighter.die) and stands up
+    (Fighter.stand_up) the fighters the other phone runs too.
+  - Rounds, time-outs and next rounds are gated on is_referee(); the guest moves on alone 8 s
+    after a break should have ended, as the 1 vs 1.
+- Stats: kills are counted when the referee takes a fighter out ("el": the killer, if an enemy);
+  Fighter._after_shot and Grenade count kills only in the 1 vs 1 (team -1). "knocks" at "ko",
+  "revives" at "rv", "deaths" at died. final_stats[slot] (filled by WP-N from "fin": kills,
+  knocks, revives, damage, headshots, shots, hits, deaths) wins over a fighter's own stats in
+  slot_stats() and scoreboard_rows().
+- Fighter (team >= 0 only): knock(by, headshot) (prone, KNOCK_HP, no gun / items / jump / stance
+  change, crawl at KNOCK_SPEED), stand_up(hp, by), signal knock_finished(victim, killer, headshot),
+  revived_by (the teammate reviving it: no bleeding meanwhile), last_attacker, ignore_fighters()
+  (bullets and sight pass through teammates; take_damage from an ally does nothing). net_local
+  fighters call arena.net_shot_by / net_grenade_by / net_wall_by (bots' shots too) when the arena
+  has them, else the 1 vs 1's net_shot / net_grenade / net_wall for the player.
+- Bots (team modes, Bot.enemies / allies set by TeamArena): retarget every 0.5 s (UP enemies in
+  sight, nearest first; else who hit it in the last 3 s; else a knocked enemy in sight; else the
+  nearest left), revive a knocked teammate within 15 m after 1.5 s without an enemy in sight
+  (never while the zone presses), keep near a human teammate (go 3 m behind when over 7 m away),
+  crawl toward a teammate when knocked.
+- Performance (R12), measured against the 1 vs 1 with the Xvfb renderer (llvmpipe, so frame times
+  are only rough): SQUAD draws about twice the draw calls (LOW 190 / 95, MEDIUM 349 / 159 at the
+  spawn); frame and physics times were within the noise. Cuts applied: at LOW and MEDIUM the other
+  fighters farther than TeamArena.SHADOW_CUT_M (15 m) from the camera cast no shadow (MEDIUM in a
+  fight: 283), and bots' looks around and target choices are staggered across frames.
+- HUD / results API (WP-B2): members(), slot_fighter(), status_of(), revive_candidate(),
+  start_revive(), cancel_revive(), revive_progress(), spectate_next(), spectated(),
+  slot_stats(), scoreboard_rows() (my team first, me first; keys "team", "ally", "slot", "status",
+  "knocks", "revives", "bot" added), round_time(), team_score; the result adds "team", "team_size",
+  "rows", "knocks", "revives", "bots", mode_id "training" / "duo" / "squad", enemy "ORANGE TEAM" (vs:
+  the other player's name) and enemy_id.
+
+## DUO / SQUAD: between two phones (WP-N: team_arena_net, Cloud team invites and seeks, RemoteFighter)
+- Cloud (additive; the 1 vs 1 paths are unchanged):
+  - `team_invite(peer_id, size, coop, quick := false) -> bool`: like `invite()` (needs the peer
+    listed, nothing going out, connected; this phone hosts). Inbox JSON {"t": "tinv", "from",
+    "name", "bundle", "sec", "pk", "sig"}: the same fields as a duel challenge. The RSA part is the
+    80 key bytes plus one team byte (`Cloud.team_byte`: size | coop << 3 | quick << 4;
+    `team_from_byte` reads it back, {} for anything else), so the relay never sees the size.
+    `sig` signs `Cloud.team_invite_text(from, to, sec)` ("tinv|..."): required, and a duel's
+    signature does not pass for it (nor the other way round). acc / dec / can are the duel's.
+  - Receiving one (`_on_team_invite`): unsigned, blocked, or no team byte: ignored. Busy: "dec" at
+    once. quick: taken at once only while `seeking`, `seek_team == size`, the sender in
+    `quick_seen` and `NetMatch.allowed`; else "dec". coop: only from a friend that DUEL
+    CHALLENGES FROM lets through (`NetMatch.allowed`) and while `invited` has a listener (the
+    lobby); else "dec". Shown through `invited` like a duel; `invite_from()` now also returns
+    "team": {} for a duel, {"size", "coop"} for a TEAM INVITE.
+  - `play_again`: {"id", "size", "coop"} while this phone's results offer another team match with
+    that player (set when they show PLAY AGAIN TOGETHER / REMATCH, cleared when they load it, close
+    or say it cannot be), else {}. Then that player's non-quick "tinv" with that size and coop
+    (`play_again_wanted(from, team)`) is shown through `invited` (the results show ACCEPT, or take
+    it after the tap) even from a non-friend; every other check above still applies. The results
+    take an invite only by `ResultsScreen.is_rematch_invite` (after a 1 vs 1: a duel only).
+  - `session_team`: {"size", "coop"} on both phones of a session a "tinv" started (set when it
+    goes out / is accepted, so it is there on `session_started`); {} for a duel; cleared by
+    `cancel_invite` (before the session), `invite()` and `end_session`.
+  - `team_seek_start(size)` / `team_seek_stop()`: the search on ROOT/mm/t<size> (`seek_team`);
+    `send_seek(saw)` publishes on the running search's topic and only that topic's seeks are heard
+    (`seeker_seen`, `quick_seen`). `seek_start()` (1 vs 1) leaves a team search first; a 1 vs 1
+    quick challenge is never taken during a team search. `quick_seen` keeps at most
+    `Cloud.QUICK_SEEN_MAX` (64) seekers: the one heard longest ago makes room.
+- Privacy Notice (Login.privacy_sections): names TEAM INVITES (size encrypted) and the random-match
+  searches (player ID and the seen IDs); tests/team_net_unit.gd checks the wording.
+- TeamArenaNet (scripts/team_arena_net.gd, scenes/team_arena_net.tscn): Game.team_match from
+  TeamArena.link_match (the lobby builds it from Cloud.session_team when the session starts),
+  Game.online true, Game.session the Cloud. `am_host` (Cloud.is_host), `coop`, `guest_slot` (1 in
+  coop, `size` against the other player); `runs_slot(slot)`: the host runs every slot but the
+  guest's. Seams: is_referee() = am_host; _fighter_for gives a RemoteFighter for the other phone's
+  slots and sets net_local on the rest; _net_tick sends the player's state (Cloud.send_state) and on
+  the host one "tk" a state tick (pack_bots: "slot:x,y,z,yaw,pitch,stance,flags,weapon,hp;...",
+  at most TK_MAX, a SQUAD's six bots about 300 characters; idle bots go twice, then every
+  Cloud.STATE_IDLE_MS); the guest's _report_down / _report_revive become "dn" / "rvd"; _announce
+  sends the host's decisions and picks, and from the guest only its own player's "pick" / "rvs" /
+  "rvx"; net_*_by send "shot" / "grenade" / "wall" / "hit" with the slot first. "ready" / "begin"
+  are Arena's. The host checks "dn" (the guest's own slot, this round, UP for a fresh down and
+  KNOCKED for a finished one, never a teammate's kill) and "rvd" (an "rvs" seen REVIVE_S - 0.6 s
+  before, both UP / KNOCKED on one team, within REVIVE_RANGE + 1 m) and then calls the base
+  (referee_down / referee_revive); a guest report that wipes a team starts the settle a one-way
+  trip shorter. Hits: see the trust notes at the top of the script (max_hit_by, per-slot buckets).
+- RemoteFighter: takes hits from the player or a net_local fighter (never a teammate) and sends
+  them through arena.net_hit_by when the arena has it (else the 1 vs 1's net_hit). pack() adds
+  flags 16 knocked (the hp number is then the knock HP) and 32 reviving; apply_state shows them
+  (the reviving motion is the healing one). 1 vs 1 packets and behaviour are unchanged. AWAY and
+  decided here (`decided_here`: the host, for a member's or the guest's fighter), it takes hits and
+  the zone as a fighter's own and, knocked, bleeds out (knock_finished, "bleed") as one run here.
+  All-human, the HOST away: its fighter is decided by the STAND-IN (`TeamArenaNet.stand_in_id()`:
+  the present member of the host's own team whose fighter is UP, the lowest id of those; none, and
+  nobody decides it meanwhile; never a member of the other team): hits (from "hit", bounded as the host
+  bounds them) and the zone take it there, it bleeds out there, and the stand-in sends "ko" (a
+  teammate still UP) or "el" for it; every member takes those two from the stand-in only for that
+  fighter while the host is away (`_stand_in_word`). The host back says "back" [slot] once a second
+  while it rejoins; the stand-in answers "sync" for the host's fighter (also at once when it hears
+  the host again; with no stand-in the present teammate, else member, with the lowest id:
+  `_sync_giver_id`), flags | 4 when it stood in (the host away, or back less than STOOD_IN_MS ago).
+  The host takes it only from a teammate (from another member, after a restart, only the round,
+  phase, clock and score), while `Cloud.rejoining()` or, with flag 4, also when it never noticed
+  its own absence; HP only down, knocked / out through referee_down only with flag 4. A "ko" on a
+  fighter already knocked is ignored (no double credit).
+  Back after a restart (Cloud.resumed): a member's arena takes the host's "sync" (round, phase,
+  clock, score, its HP / knock / out, place; a BREAK waits for the host's "round") and "all"
+  [round, "slot:flags:gun;..."] (flags 1 knocked, 2 out, 4 left; set without kill feed). A resumed
+  host enters from its stand-in's "sync" and takes every member's "rep" [slot, round, HP, flags,
+  gun] for RESUME_REP_S, rebuilding its referee from what they said (a team left with nobody UP is
+  wiped, "el"); until RESUME_REP_S is over it decides nothing on the round (no wipe, settle or
+  time-out: `TeamArena._referee_waits`), then rebuilds the referee once more. Members who left
+  before the restart stay LEFT (the file's "left", `Cloud.left_members()`), out with no kill feed.
+- The end: once phase END (not called off) each phone sends "fin" for every fighter it runs;
+  final_stats[slot] fills from the other phone's, and the results wait for all of them
+  (FINAL_WAIT_S at most). The session ending (_on_net_ended): "connection lost" or before the first
+  fight: as the 1 vs 1 (the notice names the other player); against the other player: a forfeit
+  win; coop, on the host: referee_leave(guest_slot), "<NAME> LEFT", the bots play on; coop, on the
+  guest: back to the lobby, "THE HOST LEFT - THE MATCH ENDED", recorded with result["ended"].
+- Not done: PLAY AGAIN TOGETHER ("rm" is ignored in team matches); rejoin after an app restart of a
+  two-phone TEAM INVITE match (only the 1 vs 1 and all-human matches keep a session file; such a
+  phone back from an absence inside the grace still rejoins with "back" / "sync").
+- Checks: tests/team_net_unit.gd (invites, searches, the notice, stand-in arenas for hits / dn /
+  decisions / tk / fin); tests/team_online_check.gd (step team_online, mock port 47820: coop invite
+  vs bots with a knock and a revive across the phones, a random DUO with the guest's pause menu and
+  quit, a plain duel after them; both tables must match and every relay state must arrive).
+
+## GROUPS in the lobby: GROUP CODE and the DUEL in a group of two (1.6)
+- GROUP CODE (`Cloud.group_code()`: `Cloud.CODE_LEN` = 10 digits, 2 bucket + 8 secret, shown by
+  `Cloud.code_display` as "12 3456 7890", checked by `Cloud.is_group_code`; a solo's own `Cloud.my_code`, a member's the leader's
+  from "groster"'s "code", the leader's switch in its "cj" = `Cloud.code_open()`; none in a CUSTOM
+  ROOM): `GroupCodeRow` in the TEAM bar's panel and the mode card's TEAM panel (a member's only while
+  `code_open()`, else the line `GroupCodeNote` "THE LEADER SHARES THE GROUP CODE"; `GroupCode`,
+  `GroupCodeCopy`); the mode card's TEAM panel's tick `GroupCodeSwitch` "JOIN BY CODE" =
+  `Cloud.set_code_join` (the leader's or a solo's; a member sees the leader's greyed), `Cloud.code_join`
+  OFF at the start of every run; `GroupCodeCopy` turns it on. JOIN BY CODE: the social panel's
+  GROUP CODE keypad (`CodePad`, LobbySocial.open_pad) calls
+  `Cloud.join_group_code(code)` (spaces allowed; "" = asking, else the notice: 10 digits, own code,
+  EXIT YOUR GROUP FIRST, CANCEL THE SEARCH FIRST in QUICK MATCH or a DUO / SQUAD search, offline, TOO MANY TRIES: WAIT A MINUTE after `Cloud.CODE_TRIES_MAX` a minute) and follows
+  `Cloud.code_state` ("asking", "in" JOINING THE GROUP... until the roster has it, then "", "full"
+  THE GROUP IS FULL, "none" NO GROUP WITH THIS CODE after `Cloud.CODE_WAIT_MS`, "blocked", "failed"
+  COULD NOT JOIN: TRY AGAIN when the leader never lets it in within `Cloud.JOIN_TIMEOUT_MS` or its
+  answer cannot be taken; JOIN asks again, the same code while still waiting asks afresh):
+  `LobbyTeam.code_state_text`. Wire: see Cloud's GROUP CODE
+  comment and design/GROUPS.txt 7 ("gask" on ROOT/gc/<the code's 2 bucket digits>, "gin" / "gno" in
+  the inbox, tagged with the code's stretched key; the group's keys RSA-wrapped for the joiner;
+  answered only for players `NetMatch.allowed` lets in and not REMOVEd this run). A group made or
+  joined ends a QUICK MATCH search (`Cloud.seek_stop`, NetMatch stops when `Cloud.seeking` is false);
+  leaving the lobby ends a leader's or solo's DUO / SQUAD search (`LobbyFriends.on_lobby_exit`).
+- DUEL: in a group of exactly 2, SELECT MODE's `Size_1` reads "DUEL · YOU VS <NAME>"
+  (`LobbyDialogs.size_chip_text`), `Lobby.start_route(m, size, teams_online, group_n)` gives "duel"
+  and the leader's START calls `Lobby.start_duel()` -> `Cloud.group_duel()`: a plain duel challenge
+  (`invite`) with "gd" = `Cloud.group_duel_tag(leader)` (HMAC with the group's MAC key), which the
+  member's phone takes at once from its leader only. The usual 1 vs 1 match and results; the group
+  stays. A group of 3 or 4 with SOLO keeps the notice. Tests: tests/group_lobby_unit.gd (_group_code,
+  _duel), tests/group_lobby_check.gd (the member's search tab, plate and TEAMS never overlap).
+
+## Custom rooms: rules, create page, room chat (1.9, scripts/room_rules.gd, room_create.gd)
+- `RoomRules` (scripts/room_rules.gd): the one object the arenas play a room's rules by. Keys and
+  choices in its header; DEFAULTS are today's rules. `RoomRules.active()` = Game.room_rules online
+  (set from Cloud.session_rules when a room's session starts), else DEFAULTS (`custom` false).
+  `sanitize`, `text` / `parse` (what the room's messages carry), `needs_new` (an older build would
+  play a SOLO room's rules differently; a team room lets it in only when `is_classic(r, true)`), `is_classic` / `classic(size, name)`, `summary(rules, team)`.
+- Arena (both arenas): `rules` (RoomRules, from _ready); `spawn_cap(kind)` = rules.throw_cap;
+  `_rules_to_fighters()` sets Fighter.hp_max (start and heal cap; every HP bar, label and the
+  low-health edge measure against it: Hud.hp_label() "HP 100/100"), rule_speed, rule_jump and
+  Player.room_assist; `forced_pick()` = ONE GUN / RANDOM's gun for a pick round (Cloud.match_seed
+  "gun<pick round>", alike on every phone; the pick panel stays closed and the other side's "pick"
+  is ignored); `_update_zone` does nothing without the zone. TeamArena: rounds_to_win = the room's,
+  `_apply_room_rules()` each frame and at the prep, the forced gun for every fighter.
+- Fighter: `hp_max` (MAX_HP unless a room says less), `rule_speed`, `rule_jump`; Player:
+  `room_assist`. The HUD's HP bar still reads Fighter.MAX_HP (a room's HP 100 shows a half bar).
+- Cloud: `room_rules` (hosted), `joined_rules` (the joined room's, from the host's roster "rr"),
+  `room_rules_now()`, `rules_from(v)` = RoomRules.sanitize; GROUPS.txt 6 has the wire.
+- Create page (FRIENDS > CUSTOM ROOM, RoomCreate.build): left tabs RoomPage_room / RoomPage_game;
+  ROOM: RoomName, RoomPin, RoomGameMode (LONE WOLF), RoomMode_<1|2|4>, RoomPlayers; GAME:
+  RoomPreset_<classic|custom>, fields Rule_<rounds|hp|speed|jump> (a tap steps the choice),
+  Rule_gun_<pick|fixed|random> (+ Rule_gun_id), rows Rule_<key> with Rule_<key>_<yes|no> and
+  RoomHelp_<key> (its help on the status line); RoomCreate. The draft: LobbyFriends.room_draft.
+  The room tab's content scrolls in NetList. The open room shows SlotPanel.rules_strip (RoomRules,
+  RoomName, RuleTag_<n>) for the host and, once the roster brought them, for a player.
+- TEAM / ROOM chat (NetChat.group_*, Cloud.send_group_chat, signal group_chat_changed): the chat
+  panel (LobbyNet) shows ChatTab_team (ChatTab_room in a custom room) first while in a group, then
+  ChatTab_friends; `LobbyNet.open_group(lobby)`; its column lists the members (ChatMember_<n>),
+  the empty state is ChatEmpty; the lobby's chat strip shows "[TEAM] NAME: text" and opens it; the
+  unread lines count on the strip's badge. A match's chat stays the match room's (HudNet).
+- Social panel (LobbySocial, Lobby.social): SocialArrow at the right edge opens SocialPanel
+  (SocialTab_<friends|recent>, SocialStatus, SocialRefresh, SocialSearch, SocialGroupCode,
+  SocialRow_<code> with SocialInvite_<code> (a friend: `LobbyTeam.ask_friend`, a toast when it
+  cannot go out) or, for a RECENT player who is no friend, SocialAdd_<code> (ADD FRIEND /
+  ASKED: `Cloud.request_friend`), SocialEmpty / SocialAddFriends; every target 56 px); GROUP CODE's keypad
+  CodePad (CodePadShown, CodeKey_<0-9>, CodeKeyBack, CodeKeyPaste, CodeKeyGo, CodePadState; it
+  closes once the join it started let the player in; a player already in a group reads EXIT YOUR
+  GROUP FIRST and the pad stays).
+- TEAM bar (LobbyTeam, 1.9): no left GROUP column any more. In a group (not a room) `TeamBar`
+  under the player card opens `TeamPanel` from the left (`LobbyTeam.open_panel()`, x 0-0.36 W, at
+  least PANEL_MIN_W; TeamOutside / TeamPanelClose / back close it; drawn again on group_changed):
+  GroupHead "TEAM n/4", GroupCodeRow or GroupCodeNote, GroupMember_<n> (the level:
+  `LobbyTeam.member_level(m)` from Cloud.directory, the name, LEADER / YOU, LeaderTag (a flag) on
+  the leader, SpeakMark_<n>: an empty 24 px place for the voice's speaking mark, GroupRemove_<n>
+  for the leader), GroupInvite "+ INVITE" (opens the social panel; greyed for a member and in a
+  full group), GroupTeams (size > 1), GroupExit or GroupDisband (asked first). No "+" plate on
+  the podium: with members `Lobby.hero_x()` = HERO_X_GROUP (the camera moves, the hero stands
+  further left) and the members stand to its right (`Lobby.MEMBER_SPOTS`).
+- Match HUD: the ping chip beside the gear (`HudLayout.ping_box(gear, vs, avoid)`: moved left
+  before the score bar, compact (the number under the bars) beside the gear where even that does
+  not fit; its rect is in `HudTeam.blocked_rects()`). `TeamArena.team_leader(t)` is null (no flag)
+  for a team without the host in an all-human match (`TeamArena.all_human`).
+  Setting team_status (0 JOIN ME ANYTIME: a GROUP INVITE is taken at once; 1 ONLINE; 2 BUSY:
+  declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
+- FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,
+  DUEL DUEL_W; on MY FRIENDS CHAT CHAT_W and REMOVE REMOVE_W), empty places held by ColumnGap.
+
+ROUND 8 - OUT OF THE MATCH
+- PUBLIC custom rooms (scripts/net_rooms.gd, class NetRooms; `NetRooms.hub()` is the one list):
+  topic Cloud.ROOT + "/rm/<host id>", a retained message, subscribed as "/rm/+" together with the
+  player cards ("/p/+": Cloud.start_directory / stop_directory and on CONNACK), dispatched in
+  Cloud._on_publish to `NetRooms.hub().take(topic id, payload, now, my_id)` (room_changed when
+  the list changed). Card (`NetRooms.card_json(fields, id, pk, ts, key)`): {"t": "room", "v": 1,
+  "id", "pk", "host", "name", "size" 1|2|4, "filled", "total" = 2 x size, "rules" (two summary
+  tags, <= 48), "pw" (bool: a password is needed; the password never leaves the host), "code" (6
+  digits), "ts", "sig"}; sig = RSA-SHA256 over `NetRooms.card_text(d)` =
+  "room|id|name|host|size|filled|total|rules|pw 1/0|code|ts" with the host's player key.
+  `NetRooms.check(payload, topic_id, now, me)`: types, lengths (name <= RoomRules.NAME_MAX, host and
+  rules <= FIELD_MAX 48, pk <= 1024), no "|" in the signed text fields, id = sha256(pk)[0:32] =
+  the topic's id, not this phone's own, ts within MAX_AGE_S 120 (and <= now + 60), not a blocked
+  host, the signature (Cloud.verify_signed). One card per host (the topic; a newer ts replaces it, an
+  empty message removes it), at most MAX_CARDS 200 (the oldest go). `list(now)` newest first,
+  `quick_pick(now)` the newest with a free place and no password, `by_code(code, now)`.
+  The host: `Cloud.publish_room_card(fields)` ({} clears the retained card); `NetRooms.hub().host(code)`
+  after Cloud.open_room for a PUBLIC room, `process(delta, cloud)` (from LobbyFriends.process) every
+  CARD_EVERY_S 30 s and at once when what it says changes (`NetRooms.my_fields(cloud)`), cleared
+  when the room closes / changes and in LobbyFriends.on_lobby_exit (`stop(cloud)`).
+- CUSTOM ROOM / PLAY WITHOUT INTERNET are pages of their own (LobbyFriends.open("rooms" | "room" |
+  "local"): open_page(title, false), no side tabs; FRIENDS keeps Tab_friends / Tab_requests /
+  Tab_online). "rooms": PublicRoom_<code> rows (a tap joins: `join_public(code, pin)`, a room with a
+  password asks first: RoomPinAsk / RoomPinJoin), RoomsBar (RoomsIdField, RoomsPinField shown only
+  when the typed ID's room needs one or is not listed, RoomsJoin, RoomsQuick, RoomsCreate -> "room").
+  "room": the create form (room_draft gains "public": false; RoomPublic_<yes|no>; a PUBLIC room may
+  have no password; RoomMap: the CARGO CAGE tile) or the room this phone is in, as before. SELECT
+  MODE's ModeWay_rooms opens "rooms".
+- Profile keys (Game.DEFAULT_PROFILE, sanitised in _sanitize_profile): "lobby_pose" (Game.LOBBY_POSES:
+  "" random, lobby_hip, lobby_shift, lobby_look), "victory_pose" (Game.VICTORY_POSES: "", victory,
+  victory_pose); unknown values read "". CharacterModel.pose_choice (the lobby sets it from
+  lobby_pose) makes the lobby gesture pick that clip; the results page 1 plays
+  `Game.profile.victory_pose` for a win ("" = the clip victory_pose).
+- HISTORY entry: "left_by_them": true on a win because the opponent left (record_match keeps it from
+  the arena's result "opponent_left" when won; old entries have none: false). The row shows VICTORY
+  over a grey OPPONENT LEFT (node OpponentLeft) instead of the rounds.
+- UI helpers: `UI.page_corner(parent, title, on_close) -> [X "Close", "PageTitle"]` (open_page,
+  PROFILE: ProfileClose, WARDROBE: WardrobeClose); `UI.help_button(text)` (node "Help": a "?" that
+  opens `UI.show_tooltip` -> layer "HelpTip" with HelpTipText, a tap anywhere closes);
+  `UI.blur_shade(dim)` (BlurShade: the screen blurred and darkened; "Shade" plain at LOW graphics):
+  behind open_modal popups, the quit popup and PROFILE; `LobbyDialogs.quit_popup(parent, on_cancel,
+  on_quit, text)` (QuitDialog, QuitCancel, QuitConfirm) for the lobby and the login.
+- Lobby: name plates (scripts/lobby_plate.gd, LobbyPlate): HeroPlate (always; leader flag and the
+  leave glyph in a group: `LobbyTeam.ask_leave()`), MemberPlate_<1..3>; Lobby._place_plates lifts
+  overlapping plates. The members' NamePlate / LeaderMark Label3D stay as data (render layers 0).
+  AddFriendButton hides while the size box is open. PingChip: the wifi mark only, `show_number()` /
+  a tap shows the number for 4 s. STAGE_QUALITY MEDIUM = [1.0, MSAA_2X], LOW gets FXAA.
+- WARDROBE (LobbyWardrobe): `kind` outfit / lobby / victory (WardTab_<kind>), Bundle_<id> or
+  Pose_<clip|random>, WardrobeTag, EquipButton (disabled grey EQUIPPED for the saved item; `equip()`
+  saves and stays open), BackButton / WardrobeClose / Android back -> `close()` puts the saved outfit
+  and lobby pose back.
+- FRIENDS rows: no REMOVE (the player card has REMOVE FRIEND); the name button carries the player's
+  banner (`LobbyFriends.banner_cell(button, card)`, LV in its corner); RowStatus is the presence
+  alone. `LobbyFriends.plain_row(id, cloud)` is unchanged (the social panel's rows).
+- Player card: the outfit as its wardrobe picture (`LobbyProfile.outfit_thumb(id)`, node
+  PlayerOutfit). Match loading: TeachHead (TeachTitle, TeachSub), MatchCard (MatchMode,
+  MatchChips, MatchDesc), MatchLogo, TeachCard (topic zone | wall | rounds; `Loading.topic_for_test`),
+  ProgressLine / ProgressPct / ProgressStatus ("LOADING <MODE> (CARGO CAGE)...") / ProgressTip.
+
+ROUND 8 - THE MATCH
+- Settings (Game.DEFAULT_SETTINGS, SETTINGS_VERSION 8; on / off in Game.BOOL_SETTINGS_R8): wall_quick
+  (QUICK WALL, CONTROLS > ITEMS: one tap on WALL places the wall at once, Player.quick_wall; off:
+  the old take-in-hand, FIRE places it; online the same "wall" event), hit_ring (HIT MARKER RING /
+  TICKS), enemy_outline (CharacterModel.set_outline: Body_* / Outfit_* meshes only, outline_mesh_ok;
+  Arena.apply_outlines / is_enemy; TeamArena:
+  the other team only; SettingsPanel.SCENE_KEYS emits settings_changed for it), gunshot_alerts
+  (HUD.gun_alert, GUN_ALERT_M 60 m, GUN_ALERT_S 1.2 s), kill_badges; damage_numbers and
+  dynamic_crosshair are settings now (no longer FIXED_SETTINGS). left_fire defaults to 1 (WHEN
+  AIMING). _migrate_settings v8: a file older than v8 with left_fire 0 (the old default) reads 1;
+  damage_numbers / dynamic_crosshair of an older file are dropped (start on).
+- SETTINGS > IN-MATCH > INFORMATION (TABS index 8, MENU IN-MATCH [6, 2, 1, 7, 8], a preview page):
+  rows damage_numbers, hit_ring (Toggle_hit_ring RING / TICKS), dynamic_crosshair (DYNAMIC / FIXED),
+  enemy_outline, gunshot_alerts, kill_badges; pictures info_hit.png / info_outline.png /
+  info_gunshot.png (SettingsPanel.INFO_PIC, tests/shots_settings_pics.gd), hud.png until made.
+- HUD: hp_subject() (the player alive; out of a 1 vs 1 round the spectated fighter; else none: no HP
+  block of a dead player); hp_geometry(vs, u).x0 = the first armour icon; death_card_rect(vs, u)
+  ends 0.01u before it. Damage numbers: one per burst (DMG_MERGE 0.3 s while younger than
+  DMG_MERGE_MAX 1 s), 0.032u-0.05u, up-left of the target's head (dmg_offset), DMG_RISE 0.25 m/s,
+  DMG_LIFE 0.7 s. Hit marker: HIT_T 0.22 s, the ring grows in HIT_BLOOM 0.18 s to
+  hit_bloom_radius(vs, head) (1/16 of the width across); Effects.hit_splash (pooled, SPLASH_LIFE
+  0.25 s, sprite assets/ui/icons/v_splat.png). controls_shown(): through the round break for a
+  living player, for everyone from RoundRules.BREAK_BAND_AT, never at the match's end. The 1 vs 1
+  kill feed: two lines (solo_feed_y: 0.767, a second under it at 0.80), FEED_LIFE_SOLO 3.5 s; a
+  zone / fall death reads "<NAME> ELIMINATED" (no killer). Zone damage: red splats round the edges
+  (ZONE_SPLATS). Kill badge: the plate names the player; streak_word(n, teams, head) DOUBLE / TRIPLE
+  in DUO / SQUAD. zoom_label(def): the scope button's 1X / 2X / 8X. Tips (TIPS): the profile's
+  first match only, under MOVE / FIRE / WALL. The pick ring shows HudPanels.ring_seconds() (the prep
+  clock while in the prep).
+- Minimap: HudMinimap.view_m(map_rect) = the long side x 1.05 (VIEW_M 28 m only past WHOLE_MAP_MAX
+  80 m), view_center keeps at most ~10 % of the view outside the map, a white wall outline always,
+  a dark slate (0.16, 0.17, 0.19) outside.
+- RoundRules: zone_start_for(map_rect, fallback, online) = 0.58 x the diagonal in training
+  (Arena.zone_start_radius); online (cloud or local) the map's own MapBuilder.ZONE_START_R, as on
+  1.9.x (each phone works out the zone itself and no app version travels; tests/sync_check.gd);
+  the match's end: MATCH_BAND_AT 2.5, VICTORY_WORD_AT 3.3, VICTORY_WORD_S 1.5, VICTORY_TOP_AT,
+  RESULTS_WIN_AT 6.0, RESULTS_LOSS_AFTER 1.6; results_at(won), match_end_step(t, won): beat, band,
+  (a win:) word, top, results. Arena.results_delay() = results_at(hud.result_won()). The break's
+  score step: a near-black screen and one split band (HUD.split_band_rect: x 0.12-0.93 W), the
+  changed number flashing with sparks at BREAK_TICK_AT.
+- Bot: EASY / NORMAL wait 0.6-0.9 s (EASY 0.9-1.2 s) more before the first shot at a player who
+  has not fired for 3 s; their chest-aimed spread stays under HEAD_CLEAR_M over the chest.
+- Results page 1: HeroView centred (x 0.3-0.7, y 0.2-0.99) on a bright stage (HeroBackdrop),
+  HeroPlate over the chest (x 0.42-0.58, y 0.57-0.67), Title / Tagline above (y 0.07-0.23), Medal at
+  x 0.85; the header line is VS <opponent> · <level> (no gun). REMATCH after an opponent left keeps
+  its yellow for REMATCH_GREY_MS 5 s, then greys with OPPONENT LEFT. Page 2: ResultsScreen.left_mark()
+  (LeftMark) in front of a row whose player left.
+- Sounds (tools/media/make_sfx.py, synthesised): weapon_draw (Fighter.switch_weapon), punch_swish /
+  punch_hit (Fighter._melee), dry_click (Player.set_firing on an empty magazine), bullet_whiz
+  (Fighter._near_miss: another fighter's shot within 1.5 m of the player's head), impact_metal /
+  impact_wood / impact_concrete (Effects.impact_sound by Effects.impact_kind: group "metal" /
+  "wood" or the collider's name), grunt_1..3 (HUD._on_damaged, about 1 hit in 3).
+- Weapons: the .50 pistol is BRUTE .50.
+
+==================================================================================================
+ROUND 8 - NETWORK AND TALK (lane X)
+==================================================================================================
+Direct pair links (all-human DUO / SQUAD, scripts/cloud.gd "An all-human match's pairs", net_direct.gd 7.)
+  - Cloud._pairs: member id -> NetDirect, one per other live member (PAIRS_MAX 7), opened in _multi_start and
+    when a resumed all-human match is entered from the session file, only while NetDirect.mode() != "off";
+    closed when that member LEFT or is blocked, and with the session (_multi_reset / _direct_end).
+  - NetDirect.new(dir_low, room_mac, local, pair_label): pair_label = NetDirect.pair_label_for(a, b) (lower id
+    first); keys HMAC-SHA256(room_mac, "lonewolf-direct-aes|" + label) / ("lonewolf-direct-mac|" + label);
+    the lower id sends direction 0. pair_label "" is the 1 vs 1's path, byte-identical to 1.9.1.
+  - Signalling in the match room, each addressed to ONE member ("to"; everyone else ignores it):
+    "dh" {"to"} (hello, up to 5, 2 s apart), "dc" {"to", "c": [[ip, port]...]} (candidates, only to a member
+    whose hello or candidates came: a player with DIRECT CONNECTION off never sends or gets an address).
+  - What a pair carries: "st" (states; Cloud.send_state sends through every pair that can_send and ONE relay
+    "st" unless every live member's pair is up; _on_multi_state drops the copy that is not newer), and
+    voice "vo" / "vg" (X10). States from a pair go to _on_multi_state(d, id, true) with the PAIR's id and
+    the same MULTI_RATE bucket; they also count as signs of life (heard / live).
+  - Cloud.link_tag(): "DIRECT" (all live pairs up), "DIRECT n/m", "RELAY"; link_tag_for(up, live) static.
+    match_ping(): a member its pair with the host, the host the slowest of its up pairs, else NetPing.
+  - Tests: pair_up(id), pairs(), pair_states_in, state_counts (id -> [relay, pair]), relay_voice_out.
+  - 1 vs 1: "dh" / "dc" now carry "v": 2; voice goes over the 1 vs 1's direct path only to such a phone
+    (_direct_voice), so a 1.9.1 opponent still gets voice through the relay.
+Voice over the direct paths (X10): Cloud.send_voice sends a frame over the direct path(s) when every phone it
+  is for has one up (all live members for "vo", the live teammates for "vg"; the 1 vs 1's direct_up), else
+  through the relay only, never both. Received frames pass every existing check (_on_multi_voice / _on_voice_msg).
+Team chat and quick talk (cloud.gd _on_talk, hud_net.gd):
+  - "tc" {"s"}: a TEAM line sealed under the sender's GROUP key (_vk_seal; team_line_open on the receiver,
+    only from a voice_mate). Cloud.send_chat(text, team_only := false) -> "", "WAIT", "OFF", "EMPTY", "NO TEAM",
+    "OLD TEAM" (no live teammate takes TEAM lines). A 1.10 phone gives its GROUP key with "vk" {..., "v": 2};
+    Cloud.team_line_mates() -> [live teammates, those that said v 2]; 1.9.1 drops "tc" / "tq" / "tm". HudNet's
+    chat starts on ALL and goes to TEAM by itself once every teammate takes TEAM lines (unless picked).
+  - To ALL a quick phrase goes as "chat" {"x": its text, "i": id} and a sticker as "chat" {"x": its name,
+    "stk": id}: 1.9.1 shows "x"; 1.10 takes them as "qc" / "stk" by the id (Cloud._talk_kind). "tq" {"s": sealed
+    id}: a TEAM phrase (NetChat.quick_text: QUICK 0.., TEAM_QUICK from TEAM_BASE 100); stickers NetChat.STICKERS
+    0..5. Each phone shows its own copy of the phrase; the chat's rate (NetChat.RATE_S, receiver bucket "c"+id).
+    Cloud.send_quick(id, team_only), send_sticker(id).
+  - "tm" {"s": sealed "x,y,z"}: a teammate's map marker; Cloud.send_marker(pos) at most one per MARKER_EVERY_MS
+    (2 s), Cloud.markers id -> {"p", "t"}, live_markers() drops them after MARKER_MS (15 s).
+  - Signals: chat_from(text, from_id, team_only) (chat_received stays for old listeners), sticker_from(id,
+    from_id), marker_from(from_id, pos).
+  - HudLayout DEFAULTS (voice block, not ORDER): "quickchat" {0.61, 0.355, s 0.055, a "c"}, "marker" {0.66, 0.354,
+    s 0.06, a "c"}; HudNet draws and handles both (MARKER only with human teammates).
+GROUP CODE ask (JOIN BY CODE off): the leader listens on its code's bucket while it leads in the lobby; a valid
+  "gask" with JOIN BY CODE off becomes Cloud.code_asks[from] (one per joiner, CODE_ASKS_MIN 3 a minute, blocked
+  askers dropped silently), signal code_asked(from_id, from_name), and the joiner gets "gwait" {rt} (code_state
+  "waiting": ASKED THE LEADER...). Cloud.answer_code_ask(id, yes): yes runs the normal "gin", no (or
+  CODE_ASK_WAIT_MS 20 s) sends "gno" {"no": true} (code_state "said_no": THE LEADER SAID NO). LobbySocial.pad_text.
+Microphone (net_voice.gd): perm_state not_asked / waiting / granted / denied / denied_forever; the OS seam
+  NetVoice.os_granted / os_request / on_android (tests replace them); restart_input() after the grant and on
+  focus back; no_input (NO_INPUT_NOTE after NO_INPUT_MS of silence, one restart); take_capture(buf, rate) and
+  source_rate() (the bus mix rate the capture runs at).
+Lobby: LobbySocial refreshes its open rows on peers_changed / directory_changed / friends_changed / group_changed
+  (signature, scroll kept; rebuilds counter for tests) and lists PLAYERS ONLINE (online_players, at most 5).
+  LobbyNet.ask_toast(lobby, text, seconds, on_accept, on_decline), LobbyNet.alert(invite) (ui_invite + vibration
+  "lobby" / ui_msg); the chat's quick phrases behind ChatQuickButton (ChatQuickList). Audio.duck_music(db).
+  Sounds: assets/audio/ui_invite.wav, ui_msg.wav, match_found.wav (tools/media/make_sfx.py).

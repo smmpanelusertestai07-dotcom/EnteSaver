@@ -5,7 +5,8 @@ extends Control
 ## icon textures loaded once):
 ##  - multi-touch controls: floating joystick (sprint by pushing past the ring) + sprint button,
 ##    look area, right / left FIRE (drag to aim while firing), scope, jump, crouch, prone,
-##    reload, medkit, wall, grenade, settings (pause) and scoreboard buttons, the weapon panel;
+##    RELOAD, SWITCH (gun <-> fists), medkit, wall, grenade, settings (pause) and scoreboard
+##    buttons, the weapon panel;
 ##  - crosshair: spread ring / wide ring / dot by gun, red on target, red dot when aiming, full
 ##    sniper scope, reload and heal progress rings;
 ##  - feedback: damage numbers, hit marker, headshot icon, the elimination X and badge, damage
@@ -15,31 +16,46 @@ extends Control
 
 signal pause_pressed
 
-const BUTTONS := ["fire_r", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook", "settings"]
+const BUTTONS := ["fire_r", "fire_l", "scope", "jump", "crouch", "prone", "sprint", "medkit", "wall", "grenade", "freelook",
+	"reload", "swap", "settings"]
 const GLYPHS := {
-	"fire_r": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
+	"fire_r": "v_fire", "fire_l": "v_fire", "scope": "v_scope", "jump": "stance_jump", "crouch": "stance_crouch",
 	"prone": "stance_prone", "sprint": "stance_sprint", "medkit": "v_medkit", "wall": "v_wall",
-	"grenade": "item_grenade", "settings": "v_settings", "freelook": "v_eye",
+	"grenade": "item_grenade", "settings": "v_settings", "freelook": "v_eye", "reload": "v_mag", "swap": "v_fist",
 }
 const GLYPH_FALLBACK := {"prone": "v_prone", "sprint": "v_sprint", "jump": "v_chevron"}
 const GLYPH_SCALE := {
-	"fire_r": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
-	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56,
+	"fire_r": 0.54, "fire_l": 0.54, "scope": 0.58, "jump": 0.72, "crouch": 0.72, "prone": 0.84, "sprint": 0.72,
+	"medkit": 0.52, "wall": 0.54, "grenade": 0.62, "settings": 0.56, "freelook": 0.56, "reload": 0.4, "swap": 0.5,
 }
 const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_zone", "badge_elim", "v_tick",
-	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sniper", "v_skull"]
-const SHORT_LABELS := {"settings": "MENU"}
-const DMG_LIFE := 0.95
-const DMG_MERGE := 0.32            # hits on the same target within this much GAME time add up into one number
+	"weapon_ar", "weapon_smg", "weapon_sg", "weapon_sg_lever", "weapon_pistol", "weapon_sidearm", "weapon_sniper", "v_skull", "v_splat"]
+const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
+const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming, 2 off
+const DMG_LIFE := 0.7
+const HIT_T := 0.22                # the hit marker's life
+const HIT_BLOOM := 0.18            # the hit ring's growth
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
-const KILL_BANNER_TIME := 2.8
+## The elimination badge stays through the break's beat only (the result band follows at
+## RoundRules.BREAK_RESULT_AT), small and without a pop, like the reference's streak icon.
+const KILL_BANNER_TIME := 2.3
 const KILL_X_TIME := 0.9
-const SPRINT_PUSH := 1.12          # joystick deflection (in ring radii) that counts as past the ring
-const SPRINT_HOLD := 0.3           # seconds past the ring before the sprint locks
+## The first match's tips (our words): small yellow labels under the buttons they name.
+const TIPS := [["joystick", "MOVE"], ["fire_r", "HOLD TO FIRE · DRAG TO AIM"], ["wall", "TAP: SHIELD WALL"]]
+const SPRINT_PUSH := 1.0           # joystick deflection (in ring radii) that counts as past the ring
+const SPRINT_HOLD := 0.12          # seconds past the ring before the sprint locks (pushing further = run)
 const JOY_ZONE_X := 0.4            # floating joystick: the left 40 % of the screen
 const FIRE_TRAVEL := 1.25          # how far a held FIRE button follows the finger (x its radius)
 const FEED_Y := [0.853, 0.81, 0.767]
+const FEED_Y_SOLO := 0.767         # the 1 vs 1's line: the reference's place, over the bottom row
+const FEED_Y_SOLO2 := 0.80         # ... and a second line at the same time stacks under it
+const FEED_LIFE_SOLO := 3.5        # the 1 vs 1's lines stay a short while (team lines FEED_LIFE)
+## An opponent who went down by itself (nobody's kill): what out_banner says took them out.
+const OUT_LINES := {"zone": "CAUGHT IN THE ZONE", "fall": "DOWN FROM A FALL", "self": "HIT BY THEIR OWN FRAG"}
+const OUT_ICONS := {"zone": "v_zone", "fall": "v_skull", "self": "item_grenade"}
+## The team kill feed's verbs in their colours (add_team_feed).
+const FEED_VERB_COLORS := {"KNOCKED": Color(1.0, 0.5, 0.3), "REVIVED": Color(0.45, 0.9, 0.5), "LEFT": Color(0.7, 0.72, 0.76)}
 
 var player: Player
 var arena: Node
@@ -50,9 +66,11 @@ var match_over := false
 var tips_time := 0.0
 var minimap: HudMinimap
 var panels: HudPanels
+var team: HudTeam                  # DUO / SQUAD: the team layer (HudTeam.attach in bind), null in a 1 vs 1
 var seen := {}                     # fighter -> in sight (refreshed 10x per second)
 
 var _touches := {}                 # touch index -> {"kind": joy|look|fire|ui, "id": String}
+var _spec_friend_rect := Rect2()     # ADD FRIEND on the SPECTATING card (empty while not drawn)
 var _joy_touch := -1
 var _joy_center := Vector2.ZERO
 var _joy_vec := Vector2.ZERO       # finger offset in ring radii (can exceed 1)
@@ -64,21 +82,32 @@ var _pressed := {}                 # widget id -> seconds of press highlight
 var _held := {}                    # fire buttons held down
 var _hit_t := 0.0
 var _hit_head := false
+var _hit_tick := -1                # physics frame of the last hit report (a shot reports its head and body parts)
 var _head_icon_t := 0.0
 var _kill_x_t := 0.0
 var _kill_x_pos := Vector3.ZERO
 var _dmg_numbers: Array = []
 var _dmg_dirs: Array = []
+var _gun_alerts: Array = []           # gun_alert: {who, pos, dist, t}
 var _kill_feed: Array = []
+## Lines the kill feed keeps: three in DUO / SQUAD (and a HUD never bound), ONE in the 1 vs 1 (bind:
+## a new line replaces the old, centred, with the gun's silhouette on a soft highlight before it).
+var feed_lines := 3
 var _flash := 0.0
 var _zone_hurt := 0.0
 var _hurt_sound_t := 0.0
 var _center := {"text": "", "sub": "", "t": 0.0, "dur": 1.0, "col": Color.WHITE, "size": 96}
 var _round_banner := {"t": 0.0, "round": 1, "area": ""}
+var _break := {}                   # the break between rounds on screen (show_break), "age" in s
+var _streak := {"round": -1, "n": 0}  # the player's kills this round (kill_banner's DOUBLE / TRIPLE)
+var _result := {}                  # the match's end on the result band (show_result), "age" in s
 var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
 var steps: Array[Dictionary] = []     # enemy footprints for the minimap: {p (x, z), dir, side, t}
 const STEP_SHOW := 2.2                # s a footprint stays on the minimap
+var shots_heard: Array[Dictionary] = []   # an enemy's shots fired out of sight, for the minimap: {p (x, z), t}
+const SHOT_SHOW := 2.0                # s a shot's mark fades over on the minimap
+const STEP_BUZZ_M := 20.0             # an enemy's step this close buzzes (Game.vibrate "footsteps")
 var _vis_t := 0.0
 var _hp_lag := Fighter.MAX_HP
 var _hp_last := Fighter.MAX_HP
@@ -107,7 +136,18 @@ func _ready() -> void:
 	add_child(panels)
 	_lens_tex = _make_lens_texture()
 	resized.connect(func() -> void: _place_minimap(size))
+	_update_safe_area()
 	_place_minimap(size)
+
+
+## Keeps HudLayout.inset at the screen's camera cutout (checked again every second: turning the
+## phone over moves the cutout to the other side without a size change).
+func _update_safe_area() -> void:
+	var m := UI.safe_margins(get_viewport())
+	if m != HudLayout.inset:
+		HudLayout.inset = m
+		if minimap != null:
+			_place_minimap(size)
 
 
 func reload_layout() -> void:
@@ -124,6 +164,12 @@ func bind(p: Player, a: Node) -> void:
 	player.damaged.connect(_on_damaged)
 	_hp_lag = player.hp
 	_hp_last = player.hp
+	# The ping chip in every match; chat and voice in an online one (scripts/hud_net.gd).
+	HudNet.attach(self, bool(a.get("online")))
+	# DUO / SQUAD: teammates, ally tags, knocked markers, REVIVE, spectating (scripts/hud_team.gd).
+	if HudTeam.wanted(a):
+		team = HudTeam.attach(self, a)
+	feed_lines = 3 if team != null else 2
 
 
 # ---------------------------------------------------------------- arena -> HUD API
@@ -141,33 +187,143 @@ func show_round_banner(round_index: int, area: String, sub := "") -> void:
 	_round_banner = {"t": ROUND_BANNER_TIME, "round": round_index, "area": area, "sub": sub}
 
 
-## End of a round that does not end the match: VICTORY / DEFEAT / DRAW over the same band with
-## the score on it (yours on the blue side, theirs on the orange one).
-func show_round_result(title: String, mine: int, theirs: int) -> void:
-	_round_banner = {"t": 2.6, "dur": 2.6, "title": title, "mine": mine, "theirs": theirs}
+## The match is decided (or a round of it decided by the time-out): `title` (VICTORY / DEFEAT /
+## DRAW / TIME UP) and `sub` on the break's result band near the top, from `delay` s on (the beat:
+## the kill feed and the badge first, as in a break) until the results, instead of big words over
+## the middle of the screen.
+func show_result(title: String, sub := "", delay := RoundRules.BREAK_RESULT_AT) -> void:
+	_result = {"age": -maxf(delay, 0.0), "title": title, "sub": sub}
 
 
-func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable) -> void:
-	var r := 1
-	if arena != null:
-		r = int(arena.get("round_index"))
-	panels.open_pick(options, preselect, seconds, on_pick, r)
+## The title on the result band now ("" while none shows; the checks read it).
+func result_title() -> String:
+	return String(_result.title) if not _result.is_empty() and float(_result.age) >= 0.0 else ""
+
+
+## A rejoin into a round already running: its ROUND / AREA band is not shown (the next round's is).
+func skip_round_banner() -> void:
+	_round_banner.t = 0.0
+
+
+## End of a round that does not end the match: the break's timed sequence (RoundRules.break_step,
+## on the HUD's own clock from this call, which the arena makes as its break timer starts):
+## a beat, then `title` (VICTORY / DEFEAT / DRAW) on a band near the top; then the screen dims
+## under the two score plates (yours blue, theirs orange) where the winner's number (`won`: 1
+## yours, -1 theirs, 0 a draw) counts up from the old score, while the top clock counts the break
+## down in red; then round `next_round`'s band (`area`, or `sub`: MATCH POINT! / FINAL ROUND)
+## until the prep. `mine` / `theirs` are the scores after the round. The ELIMINATED BY and
+## SPECTATING cards stay on top.
+func show_break(title: String, mine: int, theirs: int, won: int, next_round: int, area: String, sub := "") -> void:
+	_break = {"age": 0.0, "title": title, "mine": mine, "theirs": theirs, "won": won, "round": next_round,
+		"area": area, "sub": sub}
+	_round_banner.t = 0.0
+
+
+## The step of the break on screen ("" outside one): "beat", "result", "score", "band". The band
+## stays for as long as the arena is in its break: online the guest's break ends with the host's
+## word, which can come a moment after the sequence's own length.
+## Whether the controls and the weapon panel are drawn: through the fight; in the break between
+## rounds (round 8, like the reference) for a player still standing, and for everyone from the next
+## round's band (RoundRules.BREAK_BAND_AT); never at the match's end. Taps stay ignored while the
+## match is frozen (match_over).
+func controls_shown() -> bool:
+	if not match_over:
+		return true
+	if player == null or result_title() != "":
+		return false
+	var step := break_step()
+	if step == "":
+		return false
+	return player.alive or step == "band"
+
+
+func break_step() -> String:
+	if _break.is_empty() or arena == null or int(arena.get("phase")) != 3:
+		return ""
+	var step := RoundRules.break_step(float(_break.age))
+	return "band" if step == "done" else step
+
+
+## A score plate's number now: the old score until the break's tick, then the new one
+## (`mine`: this side's plate).
+func break_score(mine: bool) -> int:
+	var after := int(_break.mine if mine else _break.theirs)
+	var gained := int(_break.won) == (1 if mine else -1)
+	return RoundRules.break_score(float(_break.age), after - 1 if gained else after, after)
+
+
+## The weapon pick panel (HudPanels.open_pick); a 1 vs 1 passes the guns on cooldown and the ROUNDS
+## strip (who picks for each round).
+func open_weapon_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, cooldown := {}, strip := []) -> void:
+	panels.open_pick(options, preselect, seconds, on_pick, _round(), cooldown, strip, "", _last_round())
+
+
+## The side that does not pick: the same panel read-only (HudPanels.open_pick's `watch`) with
+## `picker`'s name in the header; _process closes it once arena.picked_weapon is set or the prep
+## is over.
+func watch_weapon_pick(options: Array, seconds: float, picker: String, cooldown := {}, strip := []) -> void:
+	panels.open_pick(options, "", seconds, Callable(), _round(), cooldown, strip, picker if picker != "" else "THE OTHER PLAYER", _last_round())
+
+
+func _round() -> int:
+	return int(arena.get("round_index")) if arena != null else 1
+
+
+## The match's last round for the pick header's pair of rounds (0 against the target dummy).
+func _last_round() -> int:
+	if arena == null or bool(arena.get("practice")) or not arena.has_method("last_round"):
+		return 0
+	return int(arena.call("last_round"))
 
 
 func close_weapon_pick() -> void:
 	panels.close_pick()
 
 
-func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool) -> void:
+## verb: what the line says instead of ELIMINATED / HEADSHOT ("LEFT": killer is then the one who left).
+func add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
+	var life := FEED_LIFE if feed_lines > 2 else FEED_LIFE_SOLO
 	_kill_feed.push_front({"killer": killer, "victim": victim, "weapon": weapon_name, "icon": weapon_icon,
-		"head": headshot, "mine": mine, "t": FEED_LIFE})
-	if _kill_feed.size() > 3:
+		"head": headshot, "mine": mine, "t": life, "life": life, "verb": verb})
+	while _kill_feed.size() > feed_lines:
 		_kill_feed.pop_back()
 
 
+## DUO / SQUAD (TeamArena): a kill feed line with each side in its colour (the player's team blue,
+## the other orange); verb "KNOCKED", "REVIVED", "LEFT" or "" (ELIMINATED / HEADSHOT). REVIVED reads
+## "<reviver> REVIVED <teammate>"; LEFT "<who> LEFT" (victim "").
+func add_team_feed(killer: String, killer_ally: bool, victim: String, victim_ally: bool, weapon_name: String,
+		weapon_icon: String, headshot: bool, mine: bool, verb := "") -> void:
+	if verb == "REVIVED" or verb == "LEFT":
+		weapon_name = ""              # (no gun to name)
+	add_kill_feed(killer, victim, weapon_name, weapon_icon, headshot, mine, verb)
+	var k: Dictionary = _kill_feed[0]
+	k["kc"] = side_color(killer_ally)
+	k["vc"] = side_color(victim_ally)
+	k["verb_col"] = FEED_VERB_COLORS.get(verb, HudDraw.FEED_HEAD if headshot else HudDraw.FEED_ELIM)
+
+
+## A name's colour in the team kill feed: the player's team blue, the other orange.
+static func side_color(ally: bool) -> Color:
+	return HudTeam.BLUE_TEXT if ally else HudTeam.ORANGE_TEXT
+
+
+## DUO / SQUAD: the player knocked an enemy down: a KNOCKED plate (a red cross, KNOCKED and the name)
+## in the elimination badge's place, calmer than a kill's.
+func knock_banner(victim_name: String) -> void:
+	_kill_banner = {"t": KILL_BANNER_TIME * 0.8, "name": victim_name, "head": false, "cause": "", "knock": true}
+
+
 ## Big elimination feedback when the player takes someone out: a red X on them and the badge.
+## The badge's plate names the player (the one who made the kill, as the reference); in DUO / SQUAD
+## a 2nd and 3rd kill inside one round read DOUBLE and TRIPLE (streak_word). Setting kill_badges
+## off: no badge (the red X stays).
 func kill_banner(victim_name: String, headshot: bool) -> void:
-	_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot}
+	var r := int(arena.get("round_index")) if arena != null and arena.get("round_index") != null else 0
+	_streak = {"round": r, "n": int(_streak.n) + 1 if int(_streak.round) == r else 1}
+	if bool(Game.settings.get("kill_badges", true)):
+		_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot, "cause": "",
+			"by": player.display_name if player != null else "", "word": streak_word(int(_streak.n), team != null, headshot)}
 	if arena != null:
 		for f: Fighter in arena.get("fighters"):
 			if f.display_name == victim_name:
@@ -175,13 +331,91 @@ func kill_banner(victim_name: String, headshot: bool) -> void:
 				_kill_x_t = KILL_X_TIME
 
 
+## The badge's word for the player's `n`th kill this round: DOUBLE / TRIPLE (our words) for a 2nd /
+## 3rd in DUO / SQUAD, else HEADSHOT or ELIMINATED.
+static func streak_word(n: int, teams: bool, headshot: bool) -> String:
+	if teams and n >= 3:
+		return "TRIPLE"
+	if teams and n == 2:
+		return "DOUBLE"
+	return "HEADSHOT" if headshot else "ELIMINATED"
+
+
+## The opponent went down by itself (the zone, a fall, their own frag: a cause in OUT_LINES). It is
+## nobody's kill: no elimination badge and no red X, a plate in the badge's place says what took
+## them out.
+func out_banner(victim_name: String, cause: String) -> void:
+	if OUT_LINES.has(cause):
+		_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": false, "cause": cause}
+
+
+## What the banner in the elimination badge's place shows now: "" none, "kill" (ELIMINATED /
+## HEADSHOT) or the cause of an out_banner (the checks read it).
+func banner_kind() -> String:
+	if float(_kill_banner.t) <= 0.0:
+		return ""
+	if bool(_kill_banner.get("knock", false)):
+		return "knock"
+	var cause := String(_kill_banner.get("cause", ""))
+	return cause if cause != "" else "kill"
+
+
 func reveal(f: Fighter, seconds := 2.5) -> void:
 	_reveal[f] = maxf(float(_reveal.get(f, 0.0)), seconds)
 
 
+## An enemy fired (the arena's on_gunshot): out of sight, a red mark stays on the minimap where the
+## shot was fired and fades over SHOT_SHOW s (never its live position); in sight its arrowhead
+## shows anyway.
+func shot_heard(f: Fighter) -> void:
+	gun_alert(f)
+	if seen.get(f, false):
+		return
+	shots_heard.append({"p": Vector2(f.global_position.x, f.global_position.z), "t": SHOT_SHOW})
+	if shots_heard.size() > 12:
+		shots_heard.pop_front()
+
+
+## GUNSHOT ALERTS (round 8, setting gunshot_alerts): an enemy fired off screen within GUN_ALERT_M:
+## a pale mark round the crosshair toward it for GUN_ALERT_S, fainter the further it is (none for
+## a shooter on screen; the arenas call this only for the other side).
+const GUN_ALERT_M := 60.0
+const GUN_ALERT_S := 1.2
+func gun_alert(f: Fighter) -> void:
+	if player == null or f == null or f == player or not bool(Game.settings.get("gunshot_alerts", true)):
+		return
+	var dist := f.global_position.distance_to(player.global_position)
+	if dist > GUN_ALERT_M or on_screen(f.chest_position()):
+		return
+	for g: Dictionary in _gun_alerts:
+		if g.who == f:
+			g.pos = f.global_position
+			g.dist = dist
+			g.t = GUN_ALERT_S
+			return
+	_gun_alerts.append({"who": f, "pos": f.global_position, "dist": dist, "t": GUN_ALERT_S})
+	if _gun_alerts.size() > 4:
+		_gun_alerts.pop_front()
+
+
+## Whether a world point is in the player's view now (in front of the camera, inside the screen).
+func on_screen(p: Vector3) -> bool:
+	if player == null or player.camera == null or not player.camera.is_inside_tree() or player.camera.is_position_behind(p):
+		return false
+	return Rect2(Vector2.ZERO, size).has_point(player.camera.unproject_position(p))
+
+
+## A gunshot alert's opacity: 1 close by, 0 at GUN_ALERT_M.
+static func gun_alert_alpha(dist: float) -> float:
+	return clampf(1.0 - dist / GUN_ALERT_M, 0.0, 1.0)
+
+
 ## Someone ran: a footprint where the step landed (left and right in turn), shown on the
-## minimap for a moment like the reference mode's footstep marks.
+## minimap for a moment like the reference mode's footstep marks; close by, a light buzz (the
+## vibration row ENEMY FOOTSTEPS).
 func footstep(f: Fighter) -> void:
+	if player and f.global_position.distance_to(player.global_position) < STEP_BUZZ_M:
+		Game.vibrate(15, "footsteps")
 	var v := Vector2(f.velocity.x, f.velocity.z)
 	var side := -1 if steps.is_empty() or int(steps[-1].side) > 0 else 1
 	steps.append({"p": Vector2(f.global_position.x, f.global_position.z), "dir": v.normalized() if v.length() > 0.1 else Vector2.UP,
@@ -209,58 +443,87 @@ func release_all() -> void:
 
 # ---------------------------------------------------------------- hit feedback
 
+## A shot reports its head part and its body part separately (Fighter._after_shot, head first), each
+## the HP it really took: two numbers, one marker and one sound per shot.
 func _on_hit_landed(target: Fighter, amount: float, headshot: bool, pos: Vector3, killed: bool) -> void:
-	_hit_t = 0.22
-	_hit_head = headshot
+	var tick := Engine.get_physics_frames()
+	var same_shot := tick == _hit_tick
+	_hit_tick = tick
+	_hit_t = HIT_T
+	_hit_head = headshot or (same_shot and _hit_head)
 	if headshot:
 		_head_icon_t = 0.7
 	if Game.settings.damage_numbers:
 		_add_damage_number(target, amount, headshot, pos)
-	Audio.play("hit_head" if headshot else "hit_body", -2.0 if headshot else -6.0)
+	if not same_shot:
+		Audio.play("hit_head" if headshot else "hit_body", -2.0 if headshot else -6.0)
 	if killed:
-		_kill_x_pos = pos if target == null else target.chest_position()
-		_kill_x_t = KILL_X_TIME
-		Audio.play("kill_confirm", 0.0)
-		Game.vibrate(60)
+		confirm_kill(pos if target == null else target.chest_position())
 
 
-## Rapid hits on the same target (automatic fire, shotgun pellets) add up into one number that
-## grows and pops at each hit, like the reference; body and head damage keep separate numbers.
-## The merge window is GAME time (physics ticks), so it follows the fire rate at any frame rate.
-## A new number is placed beside the ones still showing (a row like the reference's "22 22 22",
-## then a row above), never on top of them; every number then rises at the same speed, so the
-## row keeps its shape.
+## The player's own kill (a shot or a frag; online the other phone reports it as its death): the
+## red X there, the kill sound and a short buzz.
+func confirm_kill(pos: Vector3) -> void:
+	_kill_x_pos = pos
+	_kill_x_t = KILL_X_TIME
+	Audio.play("kill_confirm", 0.0)
+	Game.vibrate(60, "shooting")
+
+
+## Damage numbers like the reference's: small bold yellow digits up and left of the target's
+## head, one number per burst: a hit on the same target within DMG_MERGE s of the newest number's
+## last hit adds to it (it pops again with the sum) while that number is younger than
+## DMG_MERGE_MAX; else a new number with a small random spread (at most +-DMG_SPREAD u), overlap
+## allowed. A number rises DMG_RISE m/s and goes DMG_LIFE s after its last hit.
+const DMG_MERGE := 0.3
+const DMG_MERGE_MAX := 1.0
+const DMG_RISE := 0.25
+const DMG_SPREAD := 0.04
+const DMG_HEAD_WARM := Color(1.0, 0.6, 0.16)
 func _add_damage_number(target: Fighter, amount: float, headshot: bool, pos: Vector3) -> void:
-	var tick := Engine.get_physics_frames()
-	var merge_ticks := roundi(DMG_MERGE * Engine.physics_ticks_per_second)
-	for i in range(_dmg_numbers.size() - 1, -1, -1):
-		var n: Dictionary = _dmg_numbers[i]
-		if n.target == target and bool(n.head) == headshot and tick - int(n.tick) <= merge_ticks:
-			n.amount = float(n.amount) + amount
-			n.tick = tick
-			n.hits = int(n.hits) + 1
-			n.t = minf(float(n.t), 0.15)
-			n.bump = 0.14
-			return
-	# tick0 / tick: physics frame of the first / latest hit in this number, hits: how many
-	var nn := {"pos": pos + Vector3(0, 0.2, 0), "amount": amount, "head": headshot, "t": 0.0, "tick0": tick, "tick": tick,
-		"hits": 1, "bump": 0.0, "target": target, "off": Vector2.ZERO}
-	nn.off = _dmg_free_offset(nn)
-	_dmg_numbers.append(nn)
+	if target != null:
+		for i in range(_dmg_numbers.size() - 1, -1, -1):
+			var o: Dictionary = _dmg_numbers[i]
+			if o.target != target:
+				continue
+			if float(o.last) < DMG_MERGE and float(o.t) < DMG_MERGE_MAX:
+				o.amount = float(o.amount) + amount
+				o.head = bool(o.head) or headshot
+				o.last = 0.0
+				return
+			break
+	var jit := Vector2.ZERO
+	for o: Dictionary in _dmg_numbers:
+		if o.target == target:
+			jit = Vector2(randf_range(-DMG_SPREAD, DMG_SPREAD), randf_range(-DMG_SPREAD, DMG_SPREAD) * 0.5)
+			break
+	_dmg_numbers.append({"pos": pos, "amount": amount, "head": headshot, "t": 0.0, "last": 0.0, "target": target, "off": jit})
 	if _dmg_numbers.size() > 8:
 		_dmg_numbers.pop_front()
 
 
-## Font size of a damage number: grows a little with the damage, headshots larger.
+## Font size of a damage number: 0.032u .. 0.05u growing a little with the damage, heads x1.15.
 func _dmg_size(amount: float, head: bool, u: float) -> int:
-	return int(clampf(0.044 * u + amount * 0.09, 0.044 * u, 0.085 * u) * (1.25 if head else 1.0))
+	return int(clampf((0.032 + amount * 0.00015) * u, 0.032 * u, 0.05 * u) * (1.15 if head else 1.0))
 
 
-## Screen centre of a damage number now: its hit point (rising) plus its place in the row.
+## The 3D point a damage number hangs from: over the target's head (rising), else the hit point.
+func _dmg_anchor3(n: Dictionary) -> Vector3:
+	var tg: Variant = n.target
+	var p3: Vector3 = n.pos
+	if tg is Fighter and is_instance_valid(tg) and (tg as Fighter).is_inside_tree():
+		p3 = (tg as Fighter).head_position() + Vector3.UP * 0.22
+	return p3 + Vector3.UP * minf(float(n.t), DMG_MERGE_MAX) * DMG_RISE
+
+
+## A number's place on screen relative to its head point, in px: up-left plus its spread.
+static func dmg_offset(n: Dictionary, u: float) -> Vector2:
+	return Vector2(-0.03 * u, 0.0) + (n.off as Vector2) * u
+
+
+## Screen centre of a damage number now.
 func _dmg_point(n: Dictionary, u: float) -> Vector2:
-	var t := float(n.t)
-	var p3: Vector3 = n.pos + Vector3.UP * t * 0.55
-	return player.camera.unproject_position(p3) + (n.off as Vector2) * u + Vector2(0, -t * 0.03 * u)
+	return player.camera.unproject_position(_dmg_anchor3(n)) + dmg_offset(n, u)
 
 
 ## Screen rect of a damage number now; min_digits keeps room for a number that may still grow.
@@ -270,35 +533,6 @@ func _dmg_rect(n: Dictionary, u: float, min_digits := 1) -> Rect2:
 	var w := UI.font("number").get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var c := _dmg_point(n, u)
 	return Rect2(c - Vector2(w * 0.5 + 0.004 * u, fs * 0.42), Vector2(w + 0.008 * u, fs * 0.84))
-
-
-## Row offset (in HUD units) that keeps a new damage number clear of the ones still showing.
-func _dmg_free_offset(n: Dictionary) -> Vector2:
-	var u := HudLayout.unit(size)
-	if player == null or player.camera == null or u <= 0.0 or player.camera.is_position_behind(n.pos):
-		return Vector2.ZERO
-	var taken: Array[Rect2] = []
-	for o: Dictionary in _dmg_numbers:
-		if float(o.t) < DMG_LIFE - 0.15 and not player.camera.is_position_behind(o.pos):
-			taken.append(_dmg_rect(o, u, 3))
-	var base := _dmg_rect(n, u, 3)
-	var off := Vector2.ZERO
-	for attempt in 8:
-		var r := Rect2(base.position + off * u, base.size)
-		var hit := false
-		for other in taken:
-			if other.intersects(r.grow(0.012 * u)):
-				# step to the right of the number in the way, a clear gap and a little higher (two
-				# numbers side by side read as one: 48 and 32 as "4832"); far from the hit, a row above
-				off.x = (other.end.x - base.position.x) / u + 0.03
-				off.y = (other.position.y - base.position.y) / u - 0.02
-				if off.x > 0.2:
-					off = Vector2(0.0, (other.position.y - base.end.y) / u - 0.012)
-				hit = true
-				break
-		if not hit:
-			break
-	return off
 
 
 func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fighter) -> void:
@@ -316,14 +550,16 @@ func _on_damaged(amount: float, from_pos: Vector3, _headshot: bool, attacker: Fi
 	if _hurt_sound_t <= 0.0:
 		_hurt_sound_t = 0.12
 		Audio.play("hurt", -6.0, randf_range(0.95, 1.05))
-	Game.vibrate(35)
+		if randf() < 0.3:             # (a grunt now and then, never on every hit)
+			Audio.play("grunt_%d" % (randi() % 3 + 1), -8.0, randf_range(0.94, 1.06))
+	Game.vibrate(35, "damage")
 
 
 # ---------------------------------------------------------------- touch input
 
 func _input(event: InputEvent) -> void:
-	if editor_mode or player == null:
-		return
+	if editor_mode or player == null or not is_visible_in_tree():
+		return              # (hidden under the in-match menu or the results: online the tree runs on)
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
 		if t.pressed:
@@ -337,6 +573,10 @@ func _input(event: InputEvent) -> void:
 
 func _on_down(index: int, pos: Vector2) -> void:
 	var vs := size
+	if _spec_friend_rect.has_area() and _spec_friend_rect.grow(6).has_point(pos):
+		spectate_add_friend()
+		_touches[index] = {"kind": "ui", "id": "friend"}
+		return
 	if panels.visible and panels.tap(pos):
 		_touches[index] = {"kind": "ui", "id": "panel"}
 		return
@@ -348,6 +588,8 @@ func _on_down(index: int, pos: Vector2) -> void:
 		_touches[index] = {"kind": "ui", "id": "score"}
 		return
 	var id := _widget_at(pos, vs)
+	if team != null and not player.alive and id != "settings":
+		id = ""                 # out of a team round: the controls are hidden
 	if id != "":
 		_press(id, index)
 		if _touches.has(index) and String(_touches[index].kind) == "fire":     # (settings releases all)
@@ -360,40 +602,63 @@ func _on_down(index: int, pos: Vector2) -> void:
 	_touches[index] = {"kind": "look", "id": ""}
 
 
-## Topmost control under the finger ("" = none). Overlapping buttons: the closest centre wins.
+## Topmost control under the finger ("" = none): as drawn, the round buttons over the weapon panel
+## (the gear first, it sits on the panel's corner); overlapping buttons: the closest centre wins.
 func _widget_at(pos: Vector2, vs: Vector2) -> String:
-	# The small settings gear sits right beside the weapon panel: it wins a touch at its edge.
 	var gear: Dictionary = layout.settings
 	if pos.distance_to(HudLayout.center(gear, vs)) <= HudLayout.touch_radius(gear, vs) * 1.15:
 		return "settings"
 	var best := ""
 	var best_d := INF
 	for id: String in HudLayout.ORDER:
-		if id == "joystick" or id == "minimap" or not _button_visible(id):
+		if HudLayout.kind(id) != "button" or not _button_visible(id):
 			continue
 		var w: Dictionary = layout[id]
-		if id == "weapons":
-			if HudLayout.weapon_main(w, vs).grow(4).has_point(pos):
-				return "weapons:main"
-			var slots := HudLayout.weapon_slots(w, vs)
-			for i in [0, 2]:
-				if slots[i].grow(4).has_point(pos):
-					return "weapons:%d" % i
-			continue
 		var r := HudLayout.touch_radius(w, vs)
 		var d := pos.distance_to(HudLayout.center(w, vs)) / maxf(r, 1.0)
 		if d <= 1.15 and d < best_d:
 			best = id
 			best_d = d
-	return best
+	if best != "":
+		return best
+	var panel: Dictionary = layout.weapons
+	if HudLayout.weapon_main(panel, vs).grow(4).has_point(pos):
+		return "weapons:main"
+	var slots := HudLayout.weapon_slots(panel, vs)
+	for i in 3:
+		if slots[i].grow(4).has_point(pos):
+			return "weapons:%d" % i
+	if _can_repick() and HudLayout.weapon_repick(panel, vs).grow(4).has_point(pos):
+		return "weapons:repick"
+	return ""
 
 
 func _button_visible(id: String) -> bool:
 	if editor_mode:
 		return true
+	if not button_enabled(id):
+		return false
 	match id:
 		"sprint":
 			return int(Game.settings.get("run_mode", 2)) != 1
+		"fire_l":
+			# setting Left fire button: always, or only while aiming down a sight
+			return int(Game.settings.get("left_fire", 0)) == 0 or (player != null and player.ads)
+	return true
+
+
+## Whether the settings show a button at all (CONTROLS: the left fire button, RELOAD, SWITCH and free
+## look can be turned off; the editor still shows and places them, marked OFF).
+static func button_enabled(id: String) -> bool:
+	match id:
+		"fire_l":
+			return int(Game.settings.get("left_fire", 0)) != LEFT_FIRE_OFF
+		"reload":
+			return bool(Game.settings.get("reload_button", true))
+		"swap":
+			return bool(Game.settings.get("switch_button", true))
+		"freelook":
+			return bool(Game.settings.get("freelook_button", true))
 	return true
 
 
@@ -401,7 +666,7 @@ func _press(id: String, index: int) -> void:
 	_pressed[id] = 0.16
 	_touches[index] = {"kind": "ui", "id": id}
 	match id:
-		"fire_r":
+		"fire_r", "fire_l":
 			_touches[index] = {"kind": "fire", "id": id}
 			_held[id] = true
 			_cancel_auto_sprint()
@@ -429,18 +694,25 @@ func _press(id: String, index: int) -> void:
 		"freelook":
 			_touches[index] = {"kind": "free", "id": id}
 			player.start_free_look()
+		"reload":
+			if not Weapons.is_melee(player.weapon().def):         # grey with the fists out: nothing to reload
+				player.do_reload()
+		"swap":
+			player.select_weapon(player.next_weapon())      # gun -> sidearm -> fists -> gun
 		"settings":
 			release_all()
 			pause_pressed.emit()
 		"weapons:main":
-			if player.current == 0:
+			if not Weapons.is_melee(player.weapon().def):
 				player.do_reload()
 			else:
-				player.select_weapon(0)
-		"weapons:0":
-			player.select_weapon(0)
-		"weapons:2":
-			player.select_weapon(1)
+				player.select_weapon(Weapons.GUN)
+		"weapons:0", "weapons:1", "weapons:2":
+			# The small slots in SWITCH's order: the gun, the sidearm, the fists.
+			player.select_weapon(Weapons.CYCLE[int(id.substr(8))])
+		"weapons:repick":
+			release_all()
+			arena.call("repick")
 
 
 func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
@@ -460,7 +732,8 @@ func _on_drag(index: int, pos: Vector2, rel: Vector2) -> void:
 			player.add_free_look(rel)
 		"fire":
 			_touches[index]["pos"] = pos
-			player.add_look(rel, true)
+			if String(_touches[index].id) == "fire_r":
+				player.add_look(rel, true)
 
 
 ## A held FIRE button moves with the finger like a joystick knob, as in the reference mode:
@@ -568,6 +841,8 @@ func _board_avoid() -> Array[Rect2]:
 
 func _process(delta: float) -> void:
 	var real := delta / maxf(Engine.time_scale, 0.01)
+	if floorf(_time + real) != floorf(_time):
+		_update_safe_area()
 	_time += real
 	if editor_mode:
 		_place_minimap(size)
@@ -580,10 +855,11 @@ func _process(delta: float) -> void:
 			_lag_hold = 0.35
 		_hp_last = player.hp
 		_lag_hold = maxf(_lag_hold - real, 0.0)
+		_hp_lag = minf(_hp_lag, player.hp_max)
 		if _hp_lag <= player.hp:
 			_hp_lag = player.hp
 		elif _lag_hold <= 0.0:
-			_hp_lag = maxf(player.hp, _hp_lag - Fighter.MAX_HP * 0.6 * real)
+			_hp_lag = maxf(player.hp, _hp_lag - player.hp_max * 0.6 * real)
 	for k in _pressed.keys():
 		_pressed[k] -= real
 		if _pressed[k] <= 0.0:
@@ -596,15 +872,24 @@ func _process(delta: float) -> void:
 	_hurt_sound_t = maxf(_hurt_sound_t - real, 0.0)
 	_center.t = maxf(float(_center.t) - real, 0.0)
 	_round_banner.t = maxf(float(_round_banner.t) - real, 0.0)
+	if not _break.is_empty():
+		_break.age = float(_break.age) + real
+		if arena == null or int(arena.get("phase")) != 3:
+			_break = {}                  # (the prep began: the host's "round" may end it early)
+	if not _result.is_empty():
+		_result.age = float(_result.age) + real
 	_kill_banner.t = maxf(float(_kill_banner.t) - real, 0.0)
 	tips_time = maxf(tips_time - real, 0.0)
 	for n in _dmg_numbers:
 		n.t += real
-		n.bump = maxf(float(n.bump) - real, 0.0)
-	_dmg_numbers = _dmg_numbers.filter(func(n: Dictionary) -> bool: return float(n.t) < DMG_LIFE)
+		n.last += real
+	_dmg_numbers = _dmg_numbers.filter(func(n: Dictionary) -> bool: return float(n.last) < DMG_LIFE)
 	for d in _dmg_dirs:
 		d.t -= real
 	_dmg_dirs = _dmg_dirs.filter(func(d: Dictionary) -> bool: return float(d.t) > 0.0)
+	for g in _gun_alerts:
+		g.t -= real
+	_gun_alerts = _gun_alerts.filter(func(g: Dictionary) -> bool: return float(g.t) > 0.0)
 	for k in _kill_feed:
 		k.t -= real
 	_kill_feed = _kill_feed.filter(func(k: Dictionary) -> bool: return float(k.t) > 0.0)
@@ -615,6 +900,9 @@ func _process(delta: float) -> void:
 	for st in steps:
 		st.t = float(st.t) - delta
 	steps = steps.filter(func(st: Dictionary) -> bool: return float(st.t) > 0.0)
+	for sh in shots_heard:
+		sh.t = float(sh.t) - delta
+	shots_heard = shots_heard.filter(func(sh: Dictionary) -> bool: return float(sh.t) > 0.0)
 	_vis_t -= real
 	if _vis_t <= 0.0:
 		_vis_t = 0.1
@@ -622,6 +910,8 @@ func _process(delta: float) -> void:
 	if real > 0.0:
 		_fps_smooth = lerpf(_fps_smooth, 1.0 / real, 0.05)
 	panels.tick(delta, real)
+	if panels.watching() and arena != null and (String(arena.get("picked_weapon")) != "" or int(arena.get("phase")) != 0):
+		panels.close_pick()              # the pick watched arrived (or the prep is over)
 	if panels.board_open:
 		panels.avoid = _board_avoid()
 	_place_minimap(size)
@@ -709,6 +999,39 @@ func _glyph(id: String) -> Texture2D:
 	return HudDraw.tex(String(GLYPHS.get(id, "")), String(GLYPH_FALLBACK.get(id, "")))
 
 
+## Online: "<NAME> RECONNECTING..." over every fighter whose player is AWAY (RemoteFighter.away:
+## frozen until it is back), at the top of the screen while it is behind the camera; this phone's
+## own "RECONNECTING..." while it rejoins its match (Cloud.rejoining).
+func _draw_away(vs: Vector2, u: float) -> void:
+	if arena == null or not ("fighters" in arena) or player == null or player.camera == null:
+		return
+	var f := UI.font("bold")
+	var fs := int(0.034 * u)
+	var top := vs.y * 0.2
+	var lines: Array[String] = []
+	if bool(arena.get("online")) and Game.session != null and Game.session.rejoining():
+		lines.append("RECONNECTING...")
+	for x: Variant in arena.fighters:
+		var r := x as RemoteFighter
+		if r == null or not r.away or not r.alive:
+			continue
+		var txt := "%s RECONNECTING..." % r.display_name
+		var head := r.global_position + Vector3.UP * 2.3
+		if player.camera.is_position_behind(head):
+			lines.append(txt)
+			continue
+		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var at := player.camera.unproject_position(head) - Vector2(w * 0.5, 0.0)
+		draw_string_outline(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(3, fs / 6), Color(0, 0, 0, 0.8))
+		draw_string(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.85, 0.3))
+	for txt in lines:
+		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var at := Vector2((vs.x - w) * 0.5, top)
+		draw_string_outline(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(3, fs / 6), Color(0, 0, 0, 0.8))
+		draw_string(f, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.85, 0.3))
+		top += fs * 1.3
+
+
 func _draw() -> void:
 	var vs := size
 	var u := HudLayout.unit(vs)
@@ -724,6 +1047,7 @@ func _draw() -> void:
 	if scoped:
 		_draw_scope(c, vs)
 	_draw_damage_dirs(c, u)
+	_draw_away(vs, u)
 	if alive:
 		if player.ready_item != "":
 			_draw_item_aim(c, u)
@@ -732,19 +1056,29 @@ func _draw() -> void:
 		_draw_heal(c, u)
 	_draw_kill_x(u)
 	_draw_damage_numbers(u)
-	if not match_over:
-		_draw_controls(vs)
-		_draw_weapon_panel(vs)
-		_draw_button("settings", vs)          # the gear sits in the corner beside the weapon panel
-	_draw_hp_block(vs, u)
+	if controls_shown():
+		# The panel first: a button the player put over it stays in sight (and takes the taps there,
+		# see _widget_at); the gear sits on the panel's corner. DUO / SQUAD: out of the round (the
+		# camera on a teammate) only the gear stays.
+		if team == null or player.alive or match_over:
+			_draw_weapon_panel(vs)
+			_draw_controls(vs)
+		_draw_button("settings", vs)
+	if hp_subject() != null:
+		_draw_hp_block(vs, u)          # (out of the round: no HP 0/200; spectating: the watched fighter's)
 	_draw_kill_feed(vs, u)
+	_draw_noise_cue(vs, u)
 	_draw_score_bar(vs, u)
-	_draw_zone_strip(vs)
+	if team != null:
+		_draw_zone_strip(vs)       # (DUO / SQUAD only: the 1 vs 1's minimap has no zone strip)
 	_draw_zone_banner(vs, u)
 	_draw_prep(vs, u)
+	_draw_break(vs, u)
+	_draw_match_result(vs, u)
 	_draw_round_banner(vs, u)
 	_draw_kill_banner(vs, u)
 	_draw_spectating(vs, u)
+	_draw_eliminated_by(vs, u)
 	_draw_center_text(vs, u)
 	_draw_tips(vs, u)
 	if Game.settings.show_fps:
@@ -762,6 +1096,12 @@ func _draw_controls(vs: Vector2) -> void:
 			_draw_button(id, vs)
 
 
+## The scope button's small zoom label for a gun's sight: red dot 1X, 2x scope 2X, sniper 8X; none
+## without a sight (iron sights, fists).
+static func zoom_label(def: Dictionary) -> String:
+	return String({"reddot": "1X", "2x": "2X", "sniper": "8X"}.get(Player.sight_of(def), ""))
+
+
 func _draw_button(id: String, vs: Vector2) -> void:
 	var w: Dictionary = layout[id]
 	var c := HudLayout.center(w, vs)
@@ -774,7 +1114,7 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	if player != null and not editor_mode:
 		var ws := player.weapon()
 		match id:
-			"fire_r":
+			"fire_r", "fire_l":
 				en = not player.hold_fire
 			"scope":
 				act = player.ads
@@ -797,6 +1137,10 @@ func _draw_button(id: String, vs: Vector2) -> void:
 				count = player.grenades
 				en = player.grenades > 0
 				act = player.ready_item == "grenade"
+			"reload":
+				var g := _panel_weapon()
+				act = g.reloading
+				en = g == player.weapon() and (g.reloading or g.can_reload())    # grey: full, no reserve, fists out
 	elif editor_mode:
 		match id:
 			"medkit", "wall":
@@ -807,19 +1151,54 @@ func _draw_button(id: String, vs: Vector2) -> void:
 		HudDraw.glyph_button(self, c, r, _glyph(id), o, pressed)
 		return
 	var glyph := _glyph(id)
-	if id == "fire_r" and not editor_mode:
-		c = _fire_center(id, c, r, vs)
+	if (id == "fire_r" or id == "fire_l") and not editor_mode:
+		if id == "fire_r":
+			c = _fire_center(id, c, r, vs)
 		if player != null and player.ready_item != "":
 			glyph = _glyph(player.ready_item)   # a wall or grenade in hand: FIRE uses it
 		elif player != null and Weapons.is_melee(player.weapon().def):
 			glyph = HudDraw.tex("v_fist")       # fists out: the fire buttons punch
+	var gscale := float(GLYPH_SCALE.get(id, 0.6))
+	if id == "swap" and player != null and not editor_mode and player.next_weapon() != Weapons.FISTS:
+		glyph = HudDraw.weapon_tex(player.weapons[player.next_weapon()].def)      # what it draws next (a fist: the fists)
+		gscale = 0.62
 	if id == "fire_r":
 		_draw_fire_halo(c, r, o, pressed)
-	HudDraw.button(self, c, r, glyph, o, pressed, act, en, float(GLYPH_SCALE.get(id, 0.6)))
+	HudDraw.button(self, c, r, glyph, o, pressed, act, en, gscale)
 	if count >= 0:
 		HudDraw.count_badge(self, c, r, count, o)
+	if id == "scope" and player != null and not editor_mode:
+		var zl := zoom_label(player.weapon().def)
+		if zl != "":
+			HudDraw.text(self, zl, c + Vector2(0, r * 0.98), maxi(int(r * 0.42), 10), Color(1, 1, 1, 0.92 * o), 1, 3, "number")
 	if id == "medkit" and act and player != null:
 		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.GOLD, 0.95 * o), 3.0, player.heal_progress())
+	if id == "reload" and act and player != null:
+		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.YELLOW, 0.95 * o), 3.0, _panel_weapon().reload_progress())
+	if id == "swap" or (id == "reload" and not act):
+		# SWITCH: two arrows chasing each other (it trades the hand's slot); RELOAD: one round the
+		# magazine (while it reloads, the gold progress ring takes its place)
+		var mark := Color(1, 1, 1, (0.85 if en else 0.38) * o)
+		if id == "swap":
+			_draw_cycle_arrows(c, r, mark, 2, 80.0)
+		else:
+			_draw_cycle_arrows(c, r, mark, 1, 285.0)
+
+
+## `n` arrows evenly spread round a button's rim, each an arc of `span` degrees, clockwise.
+func _draw_cycle_arrows(c: Vector2, r: float, col: Color, n: int, span: float) -> void:
+	var rr := r * 0.78
+	var lw := maxf(1.5, r * 0.07)
+	var hs := r * 0.17
+	for k in n:
+		var a0 := deg_to_rad(-150.0) + TAU * k / n
+		var a1 := a0 + deg_to_rad(span)
+		draw_arc(c, rr, a0, a1, maxi(8, int(span / 8.0)), col, lw, true)
+		var tip := c + Vector2.from_angle(a1) * rr
+		var along := Vector2.from_angle(a1 + PI * 0.5)
+		var out := Vector2.from_angle(a1)
+		draw_colored_polygon(PackedVector2Array([tip + along * hs, tip - along * hs * 0.3 + out * hs * 0.65,
+			tip - along * hs * 0.3 - out * hs * 0.65]), col)
 
 
 ## The main fire button's outer dotted ring (reference look), warm while firing.
@@ -875,20 +1254,26 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	var reserve := int(def.reserve)
 	var reloading := false
 	var progress := 0.0
-	var gun_sel := true
+	var gun_sel := true                 # a gun (the round's or the sidearm) in hand: the main slot lit
+	var held := Weapons.GUN
 	if player != null and not editor_mode:
-		var g: WeaponState = player.weapons[0]
+		var g := _panel_weapon()
 		def = g.def
 		ammo = g.ammo
 		reserve = g.reserve
 		reloading = g.reloading
 		progress = g.reload_progress()
-		gun_sel = player.current == 0
+		held = player.current
+		gun_sel = g == player.weapon()
 	var dim := 1.0 if gun_sel else 0.55
 	var pressed := _pressed.has("weapons:main")
 	# Near-black slots at ~70 % (the reference), the main one with its top-right corner cut.
 	HudDraw.slot_rect(self, main, s * 0.2, Color(HudDraw.SLOT_BG, (0.86 if pressed else 0.76) * o))
 	HudDraw.vband(self, Rect2(main.position, Vector2(main.size.x - s * 0.2, main.size.y * 0.4)), Color(1, 1, 1, 0.05 * o), Color(1, 1, 1, 0.0))
+	var picking := weapon_picking()
+	if picking != "":
+		_draw_picking_slots(main, slots, s, o, picking)
+		return
 	# Ammo: big magazine number + small "/reserve".
 	var ax := main.position.x + s * 0.16
 	var ay := main.position.y + s * 0.38
@@ -910,23 +1295,84 @@ func _draw_weapon_panel(vs: Vector2) -> void:
 	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
 	draw_rect(Rect2(ul.position, Vector2(ul.size.x * (progress if reloading else 1.0), ul.size.y)),
 		Color(HudDraw.YELLOW, o) if reloading else Color(1, 1, 1, 0.92 * dim * o))
-	# Small slots: the gun, an empty slot, fists.
+	# Small slots in SWITCH's order (Weapons.CYCLE): the gun, the sidearm (each with its rounds
+	# left, magazine and reserve), the fists; the one in hand lit gold.
 	for i in 3:
 		var r := slots[i]
-		var sel := (i == 0 and gun_sel) or (i == 2 and not gun_sel)
+		var wi: int = Weapons.CYCLE[i]
+		var sel := wi == held
 		var sp := _pressed.has("weapons:%d" % i)
 		draw_rect(r, Color(HudDraw.SLOT_BG, (0.86 if sp else 0.76) * o))
 		if sel:
 			HudDraw.vband(self, r, Color(HudDraw.GOLD, 0.7 * o), Color(HudDraw.GOLD.darkened(0.3), 0.62 * o))
 			draw_rect(Rect2(r.position.x, r.end.y - 2.0, r.size.x, 2.0), Color(1, 0.93, 0.6, o))
-		if i == 0:
-			HudDraw.icon(self, HudDraw.weapon_tex(def), r.get_center() + Vector2(0, -s * 0.08), Vector2(r.size.x * 0.8, r.size.y * 0.5),
-				Color(1, 1, 1, (1.0 if sel else 0.75) * o))
-			HudDraw.text(self, str(ammo + reserve), Vector2(r.position.x + s * 0.08, r.end.y - s * 0.17), int(s * 0.25), Color(1, 1, 1, 0.92 * o), 0, 2, "number")
-		elif i == 2:
+		if wi == Weapons.FISTS:
 			HudDraw.icon(self, HudDraw.tex("v_fist"), r.get_center() + Vector2(0, -s * 0.1), Vector2(r.size.y, r.size.y) * 0.5,
 				Color(1, 1, 1, (1.0 if sel else 0.8) * o))
 			_infinity(r.get_center() + Vector2(0, r.size.y * 0.3), s * 0.13, Color(1, 1, 1, 0.9 * o))
+			continue
+		var sd: Dictionary = Weapons.DEFS[Weapons.SIDEARM] if wi == Weapons.SIDE else Weapons.DEFS[Weapons.DEFAULT_PICK]
+		var left := int(sd.mag) + int(sd.reserve)
+		if player != null and not editor_mode and player.weapons.size() > wi:
+			var ws: WeaponState = player.weapons[wi]
+			sd = ws.def
+			left = ws.ammo + ws.reserve
+		HudDraw.icon(self, HudDraw.weapon_tex(sd), r.get_center() + Vector2(0, -s * 0.08), Vector2(r.size.x * (0.8 if wi == Weapons.GUN else 0.62), r.size.y * 0.5),
+			Color(1, 1, 1, (1.0 if sel else 0.75) * o))
+		HudDraw.text(self, str(left), Vector2(r.position.x + s * 0.08, r.end.y - s * 0.17), int(s * 0.25),
+			Color(1, 1, 1, 0.92 * o) if left > 0 else Color(1.0, 0.36, 0.3, o), 0, 2, "number")
+	if _can_repick():
+		# The target dummy: CHANGE GUN beside the small slots opens the weapon pick again.
+		var rp := HudLayout.weapon_repick(w, vs)
+		draw_rect(rp, Color(HudDraw.SLOT_BG, (0.86 if _pressed.has("weapons:repick") else 0.76) * o))
+		draw_rect(Rect2(rp.position.x, rp.end.y - 2.0, rp.size.x, 2.0), Color(HudDraw.YELLOW, 0.9 * o))
+		HudDraw.text(self, "CHANGE GUN", rp.get_center(), int(s * 0.19), Color(1, 1, 1, 0.92 * o), 1, 2, "bold")
+
+
+## The weapon the panel's main slot (and RELOAD) is about: the gun or the sidearm in hand, else
+## (the fists out) the round's gun.
+func _panel_weapon() -> WeaponState:
+	var w := player.weapon()
+	return player.gun() if Weapons.is_melee(w.def) else w
+
+
+## The weapon panel while the round's gun is being picked (Fighter.awaiting_pick): "" when it is
+## not, "picking" while the other side picks (or nothing is chosen yet), else the gun id this
+## player's open pick panel has chosen (drawn dimmed until it is applied).
+func weapon_picking() -> String:
+	if player == null or editor_mode or not player.awaiting_pick:
+		return ""
+	if panels.pick_open and not panels.watching() and Weapons.DEFS.has(panels.pick_choice):
+		return panels.pick_choice
+	return "picking"
+
+
+## The main slot in its picking state: no ammo, "PICKING..." (the chosen gun's silhouette dimmed
+## for the picker), the gun's and the sidearm's small slots empty (the sidearm comes with the
+## gun), the fists held.
+func _draw_picking_slots(main: Rect2, slots: Array[Rect2], s: float, o: float, picking: String) -> void:
+	var ax := main.position.x + s * 0.16
+	HudDraw.text(self, "--", Vector2(ax, main.position.y + s * 0.38), int(s * 0.5), Color(1, 1, 1, 0.4 * o), 0, 2, "number")
+	var dots := ".".repeat(1 + int(_time * 2.0) % 3)
+	HudDraw.text(self, "PICKING" + dots, Vector2(ax, main.position.y + s * 0.76), int(s * 0.23), Color(HudDraw.YELLOW, 0.9 * o), 0, 2, "bold")
+	if picking != "picking":
+		HudDraw.icon(self, HudDraw.weapon_tex(Weapons.DEFS[picking]), Vector2(main.end.x - main.size.x * 0.3, main.position.y + s * 0.44),
+			Vector2(main.size.x * 0.5, s * 0.66), Color(1, 1, 1, 0.32 * o))
+	var ul := Rect2(main.position.x + s * 0.12, main.end.y - s * 0.09, main.size.x - s * 0.24, maxf(2.0, s * 0.035))
+	draw_rect(ul, Color(1, 1, 1, 0.22 * o))
+	for i in 3:
+		var r := slots[i]
+		draw_rect(r, Color(HudDraw.SLOT_BG, 0.76 * o))
+		if Weapons.CYCLE[i] == Weapons.FISTS:
+			HudDraw.vband(self, r, Color(HudDraw.GOLD, 0.7 * o), Color(HudDraw.GOLD.darkened(0.3), 0.62 * o))
+			draw_rect(Rect2(r.position.x, r.end.y - 2.0, r.size.x, 2.0), Color(1, 0.93, 0.6, o))
+			HudDraw.icon(self, HudDraw.tex("v_fist"), r.get_center() + Vector2(0, -s * 0.1), Vector2(r.size.y, r.size.y) * 0.5, Color(1, 1, 1, o))
+			_infinity(r.get_center() + Vector2(0, r.size.y * 0.3), s * 0.13, Color(1, 1, 1, 0.9 * o))
+
+
+## TRAINING GROUND's target dummy lets the gun be changed during the fight (Arena.repick).
+func _can_repick() -> bool:
+	return not editor_mode and arena != null and bool(arena.get("practice")) and arena.has_method("repick")
 
 
 ## "∞" drawn as a lemniscate (the UI fonts are latin subsets).
@@ -977,7 +1423,7 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 	var on := player.crosshair_on_target
 	var hit := _hit_t > 0.0
 	var col := Color(1.0, 0.16, 0.13) if (on or hit) else Game.crosshair_color()
-	var sc := lerpf(0.75, 1.35, float(Game.settings.crosshair_size) / 100.0)
+	var sc := Game.crosshair_scale()
 	var dyn := bool(Game.settings.dynamic_crosshair)
 	var outline := Color(0, 0, 0, 0.45)
 	var shade := Color(0, 0, 0, 0.3)          # soft shadow under the thin lines
@@ -1025,21 +1471,43 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 		HudDraw.ring(self, c, rr, Color(1, 1, 1, 0.95), 2.4, w.reload_progress())
 		var mp := c + Vector2(1, -1).normalized() * (rr + 0.022 * u)
 		HudDraw.icon(self, HudDraw.tex("v_mag"), mp, Vector2(0.026, 0.026) * u, Color(1, 1, 1, 0.95))
-	# Hit marker: short diagonal ticks (headshots in red-orange) + the headshot icon.
+	# Hit marker (round 8): the crosshair blooms into a large orange ring (about 1/16 of the
+	# screen width across) with an orange centre dot, out in HIT_BLOOM s and fading (a headshot
+	# redder and a little larger), faint white ticks inside it; setting hit_ring off: the
+	# short diagonal ticks alone.
 	if hit:
-		var ha := clampf(_hit_t / 0.22, 0.0, 1.0)
-		var hc := Color(1.0, 0.36, 0.2, ha) if _hit_head else Color(1, 1, 1, ha)
+		var age := HIT_T - _hit_t
+		var ha := clampf(_hit_t / HIT_T, 0.0, 1.0)
 		var r0 := maxf(ring_r, 10.0) + 4.0
-		for k in 4:
-			var d := Vector2(1, 1).normalized().rotated(k * PI * 0.5)
-			draw_line(c + d * r0, c + d * (r0 + 0.017 * u), Color(0, 0, 0, 0.5 * ha), 4.0, true)
-			draw_line(c + d * r0, c + d * (r0 + 0.017 * u), hc, 2.2, true)
+		if bool(Game.settings.get("hit_ring", true)):
+			var big := hit_bloom_radius(size, _hit_head)
+			var grow := 1.0 - pow(1.0 - clampf(age / HIT_BLOOM, 0.0, 1.0), 2.0)
+			var rr := lerpf(r0, big, grow)
+			var oc := Color(1.0, 0.22, 0.12) if _hit_head else Color(1.0, 0.52, 0.12)
+			HudDraw.ring(self, c, rr, Color(0, 0, 0, 0.35 * ha), 5.0)
+			HudDraw.ring(self, c, rr, Color(oc, 0.95 * ha), 2.6)
+			HudDraw.disk(self, c, 3.6 * sc, Color(0, 0, 0, 0.4 * ha))
+			HudDraw.disk(self, c, 2.6 * sc, Color(oc, ha))
+			for k in 4:
+				var d := Vector2(1, 1).normalized().rotated(k * PI * 0.5)
+				draw_line(c + d * rr * 0.55, c + d * rr * 0.8, Color(1, 1, 1, 0.35 * ha), 1.6, true)
+		else:
+			var hc := Color(1.0, 0.36, 0.2, ha) if _hit_head else Color(1, 1, 1, ha)
+			for k in 4:
+				var d := Vector2(1, 1).normalized().rotated(k * PI * 0.5)
+				draw_line(c + d * r0, c + d * (r0 + 0.017 * u), Color(0, 0, 0, 0.5 * ha), 4.0, true)
+				draw_line(c + d * r0, c + d * (r0 + 0.017 * u), hc, 2.2, true)
 	if _head_icon_t > 0.0:
 		var ia := clampf(_head_icon_t / 0.25, 0.0, 1.0)
 		var pop := 1.0 + 0.4 * clampf((_head_icon_t - 0.55) / 0.15, 0.0, 1.0)
 		var ip := c + Vector2(0.075 * u, -0.06 * u)
 		HudDraw.disk(self, ip, 0.026 * u * pop, Color(0.6, 0.06, 0.04, 0.75 * ia))
 		HudDraw.icon(self, HudDraw.tex("v_headshot"), ip, Vector2(0.04, 0.04) * u * pop, Color(1.0, 0.85, 0.75, ia))
+
+
+## The hit ring's full radius on `vs`: 1/16 of the width across (a headshot 15 % larger).
+static func hit_bloom_radius(vs: Vector2, head: bool) -> float:
+	return vs.x * 0.0625 * 0.5 * (1.15 if head else 1.0)
 
 
 ## Red-dot sight while aiming: a faint sight frame and a glowing red dot. Returns its radius.
@@ -1115,13 +1583,34 @@ func _draw_heal(c: Vector2, u: float) -> void:
 func _draw_vignette(vs: Vector2) -> void:
 	var low := 0.0
 	if player.alive and not match_over:
-		low = clampf(1.0 - player.hp / (Fighter.MAX_HP * 0.35), 0.0, 1.0)
+		low = clampf(1.0 - player.hp / (player.hp_max * 0.35), 0.0, 1.0)
 	var pulse := low * (0.26 + 0.12 * sin(_time * 6.5))
 	var vig := maxf(_flash, pulse)
 	if vig > 0.01:
 		_edge_glow(vs, Color(0.85, 0.04, 0.04, vig), vs.y * 0.24)
 	if _zone_hurt > 0.0:
-		_edge_glow(vs, Color(0.55, 0.15, 0.85, 0.22 * clampf(_zone_hurt / 0.3, 0.0, 1.0)), vs.y * 0.16)
+		_draw_zone_splats(vs, clampf(_zone_hurt / 0.6, 0.0, 1.0))
+
+
+## Zone damage (round 8, like the reference): red splats round the four screen edges (our own splat
+## sprite, v_splat) over a faint red edge glow; they fade in the 0.6 s after the last zone hit.
+const ZONE_SPLATS := [
+	[0.06, 0.1, 0.2, 0.3], [0.32, 0.02, 0.14, 1.9], [0.7, 0.03, 0.16, 4.0], [0.95, 0.12, 0.19, 2.6],
+	[0.02, 0.5, 0.17, 5.1], [0.98, 0.55, 0.16, 0.9], [0.08, 0.93, 0.19, 3.3], [0.4, 0.99, 0.13, 5.8],
+	[0.63, 0.98, 0.15, 1.2], [0.93, 0.92, 0.2, 2.2],
+]
+func _draw_zone_splats(vs: Vector2, a: float) -> void:
+	_edge_glow(vs, Color(0.8, 0.05, 0.04, 0.16 * a), vs.y * 0.12)
+	var t := HudDraw.tex("v_splat")
+	if t == null:
+		return
+	var u := HudLayout.unit(vs)
+	for sp: Array in ZONE_SPLATS:
+		var c := Vector2(float(sp[0]) * vs.x, float(sp[1]) * vs.y)
+		var sz := float(sp[2]) * u * (1.0 + 0.06 * sin(_time * 3.0 + float(sp[3])))
+		draw_set_transform(c, float(sp[3]))
+		HudDraw.icon(self, t, Vector2.ZERO, Vector2(sz, sz), Color(0.78, 0.04, 0.03, 0.62 * a))
+	draw_set_transform(Vector2.ZERO)
 
 
 func _edge_glow(vs: Vector2, col: Color, t: float) -> void:
@@ -1133,7 +1622,7 @@ func _edge_glow(vs: Vector2, col: Color, t: float) -> void:
 
 
 func _draw_damage_dirs(c: Vector2, u: float) -> void:
-	if player.camera == null or _dmg_dirs.is_empty():
+	if player.camera == null or (_dmg_dirs.is_empty() and _gun_alerts.is_empty()):
 		return
 	var fwd := -player.camera.global_basis.z
 	fwd.y = 0.0
@@ -1152,6 +1641,24 @@ func _draw_damage_dirs(c: Vector2, u: float) -> void:
 		var r := 0.2 * u
 		draw_arc(c, r, ang - 0.36, ang + 0.36, 20, Color(0.9, 0.05, 0.04, 0.35 * a), 0.026 * u, true)
 		draw_arc(c, r, ang - 0.3, ang + 0.3, 20, Color(1.0, 0.18, 0.12, 0.9 * a), 0.012 * u, true)
+	# Gunshot alerts: a paler orange arc further out with a small muzzle-flash glyph on it.
+	for g in _gun_alerts:
+		var to: Vector3 = (g.pos as Vector3) - player.global_position
+		to.y = 0.0
+		if to.length() < 0.1:
+			continue
+		to = to.normalized()
+		var ang := atan2(to.dot(right), to.dot(fwd)) - PI * 0.5
+		var a := clampf(float(g.t) / 0.3, 0.0, 1.0) * gun_alert_alpha(float(g.dist))
+		var r := 0.26 * u
+		var col := Color(1.0, 0.62, 0.35)
+		draw_arc(c, r, ang - 0.22, ang + 0.22, 16, Color(col, 0.75 * a), 0.008 * u, true)
+		var m := c + Vector2.from_angle(ang) * (r + 0.03 * u)
+		var d := Vector2.from_angle(ang)
+		var sd := d.orthogonal()
+		var k := 0.016 * u
+		draw_colored_polygon(PackedVector2Array([m + d * k * 1.3, m + sd * k * 0.55, m - d * k * 0.5, m - sd * k * 0.55]), Color(col, 0.9 * a))
+		draw_circle(m - d * k * 0.2, k * 0.3, Color(1, 0.95, 0.8, a), true, -1.0, true)
 
 
 func _draw_damage_numbers(u: float) -> void:
@@ -1159,36 +1666,35 @@ func _draw_damage_numbers(u: float) -> void:
 		return
 	var f := UI.font("number")
 	for n in _dmg_numbers:
-		var t := float(n.t)
-		if player.camera.is_position_behind(n.pos + Vector3.UP * t * 0.55):
+		var last := float(n.last)
+		if player.camera.is_position_behind(_dmg_anchor3(n)):
 			continue
 		var sp := _dmg_point(n, u)
 		var head := bool(n.head)
 		var amount := float(n.amount)
-		var a := clampf(1.0 - (t - 0.6) / 0.35, 0.0, 1.0)
-		# pop when it appears and again at every hit that adds to it
-		var pop := 1.0 + clampf(0.12 - t, 0.0, 0.12) * 4.0 + float(n.bump) * 1.6
+		var a := clampf(1.0 - (last - (DMG_LIFE - 0.25)) / 0.25, 0.0, 1.0)
+		var pop := 1.0 + clampf(0.1 - last, 0.0, 0.1) * 3.0          # pops when it appears or grows
 		var fs := int(_dmg_size(amount, head, u) * pop)
-		var col := HudDraw.DMG_HEAD if head else HudDraw.DMG_BODY
+		var col := DMG_HEAD_WARM if head else HudDraw.DMG_BODY
 		var txt := str(maxi(roundi(amount), 1))
 		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		# Bold italic: skew the glyphs to the right around their centre.
 		draw_set_transform_matrix(Transform2D(0.0, Vector2.ONE, -0.22, sp))
 		var base := Vector2(-w * 0.5, (f.get_ascent(fs) - f.get_descent(fs)) * 0.5)
-		draw_string_outline(f, base, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(4, fs / 7), Color(0.05, 0.02, 0.0, 0.85 * a))
+		draw_string_outline(f, base, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(3, fs / 7), Color(0.05, 0.02, 0.0, 0.85 * a))
 		draw_string(f, base, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, a))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## The big red X on an eliminated enemy.
+## The red X on an eliminated enemy (a kill marker, short and small).
 func _draw_kill_x(u: float) -> void:
 	if _kill_x_t <= 0.0 or player.camera == null or player.camera.is_position_behind(_kill_x_pos):
 		return
 	var p := player.camera.unproject_position(_kill_x_pos)
 	var age := KILL_X_TIME - _kill_x_t
 	var a := clampf(_kill_x_t / 0.25, 0.0, 1.0)
-	var k := (0.075 * u) * (1.0 + 0.5 * clampf(1.0 - age / 0.12, 0.0, 1.0))
-	var wd := 0.016 * u
+	var k := (0.055 * u) * (1.0 + 0.2 * clampf(1.0 - age / 0.1, 0.0, 1.0))
+	var wd := 0.012 * u
 	for d in [Vector2(1, 1), Vector2(1, -1)]:
 		var v: Vector2 = d.normalized() * k
 		draw_line(p - v, p + v, Color(0, 0, 0, 0.55 * a), wd + 4.0, true)
@@ -1215,56 +1721,92 @@ func _bottom_limits(vs: Vector2, u: float) -> Vector2:
 	return Vector2(lo, hi)
 
 
-func _draw_hp_block(vs: Vector2, u: float) -> void:
-	var hp := Fighter.MAX_HP
-	var healing_rem := 0.0
-	if player != null and not editor_mode:
-		hp = player.hp
-		if player.healing:
-			healing_rem = minf(Fighter.HEAL_RATE * minf(player.heal_left, Fighter.HEAL_AMOUNT / Fighter.HEAL_RATE), Fighter.MAX_HP - hp)
-	var mx := Fighter.MAX_HP
+## Whose health the HP block shows: the player while alive; out of the 1 vs 1 round, the fighter
+## the camera follows (its HP, like the reference); else nobody (no HP 0/200 over the ELIMINATED
+## BY card, also not in the round break).
+func hp_subject() -> Fighter:
+	if player == null or editor_mode:
+		return player
+	if player.alive:
+		return player
+	if team == null:
+		return player.spectating_now()
+	return null
+
+
+## The player's full health: a room's HP rule (Fighter.hp_max), else Fighter.MAX_HP.
+func _hp_full() -> float:
+	var f := hp_subject()
+	if f != null:
+		return f.hp_max
+	return player.hp_max if player != null else Fighter.MAX_HP
+
+
+## The HP block's label, "HP 200/200" (a room's HP 100: "HP 100/100").
+func hp_label() -> String:
+	var f := hp_subject()
+	var hp := f.hp if f != null and not editor_mode else _hp_full()
+	return "HP %d/%d" % [ceili(hp), int(_hp_full())]
+
+
+## The HP block's geometry on `vs`: font size fs, icon size isz, x0 (left edge of the first
+## armour icon), fixed (icons + label width), bar_w, stacked. Inline like the reference:
+## [helmet][vest] HP 200/200 [bar], measured on the widest label so the bar does not shift while
+## the number changes. Short of room (16:9 between the medkit and grenade buttons) the block
+## shifts between the bottom buttons; only a very narrow gap puts the label above the bar.
+func hp_geometry(vs: Vector2, u: float) -> Dictionary:
+	var mx := _hp_full()
 	var lim := _bottom_limits(vs, u)
 	var avail := lim.y - lim.x
-	var by := vs.y * 0.968
-	var bh := maxf(4.0, 0.0105 * u)
-	var label := "HP %d/%d" % [ceili(hp), int(mx)]
-	# Inline like the reference: [helmet][vest] HP 200/200 [bar]. The layout is measured on the
-	# widest label so the bar does not shift while the number changes. Short of room (16:9
-	# between the medkit and grenade buttons) the label and icons get a little smaller first;
-	# only a very narrow gap puts the label above the bar.
-	var fs := int(0.03 * u)
-	var isz := 0.05 * u
-	var lw := HudDraw.text_width("HP %d/%d" % [int(mx), int(mx)], fs, "bold")
+	var fs := int(0.019 * u)
+	var isz := 0.04 * u
+	var lw := HudDraw.text_width("HP %d/%d" % [int(mx), int(mx)], fs, "semi")
 	var icons_w := isz * 2.0 + 0.008 * u
-	var fixed := icons_w + 0.016 * u + lw + 0.014 * u
+	var fixed := icons_w + 0.014 * u + lw + 0.012 * u
 	var bar_w := minf(0.38 * u, avail - fixed)
-	if bar_w < 0.25 * u:
-		fs = int(0.027 * u)
-		isz = 0.045 * u
-		lw = HudDraw.text_width("HP %d/%d" % [int(mx), int(mx)], fs, "bold")
-		icons_w = isz * 2.0 + 0.008 * u
-		fixed = icons_w + 0.012 * u + lw + 0.012 * u
-		bar_w = minf(0.38 * u, avail - fixed)
 	var stacked := bar_w < 0.13 * u
 	if stacked:
 		fixed = icons_w + 0.014 * u
 		bar_w = clampf(avail - fixed, 0.14 * u, 0.38 * u)
 	# The bar sits on the screen centre when there is room, else the block shifts between limits.
 	var x0 := clampf(vs.x * 0.5 - bar_w * 0.5 - fixed, lim.x, maxf(lim.y - fixed - bar_w, lim.x))
-	var bar := Rect2(x0 + fixed, by - bh * 0.5, bar_w, bh)
+	return {"fs": fs, "isz": isz, "x0": x0, "fixed": fixed, "bar_w": bar_w, "stacked": stacked}
+
+
+func _draw_hp_block(vs: Vector2, u: float) -> void:
+	var f := hp_subject()
+	var mx := _hp_full()
+	var hp := mx
+	var healing_rem := 0.0
+	var lag_hp := _hp_lag
+	if f != null and not editor_mode:
+		hp = f.hp
+		if f != player:
+			lag_hp = hp
+		if f.healing:
+			healing_rem = minf(Fighter.HEAL_RATE * minf(f.heal_left, Fighter.HEAL_AMOUNT / Fighter.HEAL_RATE), mx - hp)
+	var g := hp_geometry(vs, u)
+	var by := vs.y * 0.948              # (the reference's height, a little over the bottom edge)
+	var bh := maxf(4.0, 0.0105 * u)
+	var label := hp_label()
+	var fs := int(g.fs)
+	var isz := float(g.isz)
+	var x0 := float(g.x0)
+	var bar_w := float(g.bar_w)
+	var bar := Rect2(x0 + float(g.fixed), by - bh * 0.5, bar_w, bh)
 	draw_rect(bar.grow(1.0), Color(0, 0, 0, 0.5))
 	var frac := clampf(hp / mx, 0.0, 1.0)
-	var lag := clampf(_hp_lag / mx, 0.0, 1.0)
+	var lag := clampf(lag_hp / mx, 0.0, 1.0)
 	if lag > frac:
 		draw_rect(Rect2(bar.position + Vector2(bar_w * frac, 0), Vector2(bar_w * (lag - frac), bh)), Color(0.95, 0.25, 0.2, 0.85))
 	var fill := HudDraw.HP_WHITE if frac > 0.3 else Color(1.0, 0.45, 0.4)
 	draw_rect(Rect2(bar.position, Vector2(bar_w * frac, bh)), fill)
 	if healing_rem > 0.0:
 		draw_rect(Rect2(bar.position + Vector2(bar_w * frac, 0), Vector2(bar_w * healing_rem / mx, bh)), Color(HudDraw.HEAL_GREEN, 0.85 + 0.15 * sin(_time * 8.0)))
-	if stacked:
-		HudDraw.text(self, label, Vector2(bar.position.x, by - bh - 0.02 * u), int(fs * 0.9), Color(1, 1, 1, 0.95), 0, 3, "bold")
+	if bool(g.stacked):
+		HudDraw.text(self, label, Vector2(bar.position.x, by - bh - 0.02 * u), int(fs * 0.9), Color(1, 1, 1, 0.95), 0, 3, "semi")
 	else:
-		HudDraw.text(self, label, Vector2(bar.position.x - 0.012 * u, by), fs, Color(1, 1, 1, 0.95), 2, 3, "bold")
+		HudDraw.text(self, label, Vector2(bar.position.x - 0.012 * u, by), fs, Color(1, 1, 1, 0.95), 2, 3, "semi")
 	# Helmet + vest (level 2) at the left end of the block.
 	for k in 2:
 		_armor_icon(Vector2(x0 + isz * 0.5 + k * (isz + 0.008 * u), by - isz * 0.12), isz, "v_helmet" if k == 0 else "v_vest", 2)
@@ -1283,18 +1825,57 @@ func _draw_kill_feed(vs: Vector2, u: float) -> void:
 	for i in mini(_kill_feed.size(), FEED_Y.size()):
 		var k: Dictionary = _kill_feed[i]
 		var t := float(k.t)
-		var a := clampf(t / 0.5, 0.0, 1.0) * clampf((FEED_LIFE - t) / 0.15, 0.0, 1.0)
+		var a := clampf(t / 0.5, 0.0, 1.0) * clampf((float(k.get("life", FEED_LIFE)) - t) / 0.15, 0.0, 1.0)
 		var head := bool(k.head)
-		var parts := [[String(k.killer) + "  ", Color(1, 1, 1) if not bool(k.mine) else Color(0.75, 0.9, 1.0)],
-			[("HEADSHOT" if head else "ELIMINATED") + "  ", HudDraw.FEED_HEAD if head else HudDraw.FEED_ELIM],
-			[String(k.victim), Color(1, 1, 1)]]
+		var parts := [[String(k.killer) + "  ", k.get("kc", Color(1, 1, 1) if not bool(k.mine) else Color(0.75, 0.9, 1.0))],
+			[(String(k.get("verb", "")) if String(k.get("verb", "")) != "" else ("HEADSHOT" if head else "ELIMINATED")) + "  ",
+				k.get("verb_col", HudDraw.FEED_HEAD if head else HudDraw.FEED_ELIM)],
+			[String(k.victim), k.get("vc", Color(1, 1, 1))]]
 		if String(k.weapon) != "":
 			parts.append(["  (%s)" % String(k.weapon), Color(1, 1, 1, 0.82)])
-		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
 		var tw := HudDraw.parts_width(parts, fs)
-		var y := vs.y * float(FEED_Y[i])
+		var solo := feed_lines <= 2
+		var y := vs.y * (solo_feed_y(i, mini(_kill_feed.size(), feed_lines)) if solo else float(FEED_Y[i]))
+		if solo:
+			_draw_feed_line(parts, tw, String(k.get("icon", "")), y, fs, a)
+			continue
+		# A dark plate keeps the line readable over the white shirt, the yellow pads and the floor.
 		draw_rect(Rect2(vs.x * 0.5 - tw * 0.5 - fs * 0.6, y - fs * 0.72, tw + fs * 1.2, fs * 1.44), Color(0.03, 0.03, 0.04, 0.5 * a))
 		HudDraw.text_parts(self, parts, Vector2(vs.x * 0.5, y), fs, 1, 3, "bold", a)
+
+
+## The 1 vs 1's feed line `i` (0 = newest) of `n` on screen, as a fraction of the height: one line
+## at FEED_Y_SOLO; with two, the older stays there and the newer stacks under it (FEED_Y_SOLO2).
+static func solo_feed_y(i: int, n: int) -> float:
+	if n <= 1:
+		return FEED_Y_SOLO
+	return FEED_Y_SOLO2 if i == 0 else FEED_Y_SOLO
+
+
+## The 1 vs 1's kill feed line, centred: the gun's (or the frag's) silhouette, then the text,
+## on a soft highlight that fades out to both sides (darkest under the line, none at its ends).
+func _draw_feed_line(parts: Array, tw: float, icon_name: String, y: float, fs: int, a: float) -> void:
+	var t := HudDraw.tex(icon_name) if icon_name != "" else null
+	var isz := Vector2(fs * 2.4, fs * 1.05)
+	var iw := isz.x + fs * 0.55 if t != null else 0.0
+	var cx := size.x * 0.5
+	var x0 := cx - (tw + iw) * 0.5
+	var half := (tw + iw) * 0.5 + fs * 3.0
+	var top := y - fs * 0.85
+	var bot := y + fs * 0.85
+	var mid := Color(0.02, 0.02, 0.03, 0.58 * a)
+	var edge := Color(mid, 0.0)
+	for side: float in [-1.0, 1.0]:
+		var outer := cx + side * half
+		var inner := cx + side * (half - fs * 3.0)
+		draw_polygon(PackedVector2Array([Vector2(inner, top), Vector2(outer, top), Vector2(outer, bot), Vector2(inner, bot)]),
+			PackedColorArray([mid, edge, edge, mid]))
+	draw_rect(Rect2(cx - (half - fs * 3.0), top, (half - fs * 3.0) * 2.0, bot - top), mid)
+	draw_line(Vector2(cx - half * 0.8, top), Vector2(cx + half * 0.8, top), Color(1, 1, 1, 0.12 * a), 1.0)
+	if t != null:     # (a dark shadow under the white silhouette: readable over the white shirt too)
+		HudDraw.icon(self, t, Vector2(x0 + isz.x * 0.5 + 1.5, y + 1.5), isz, Color(0, 0, 0, 0.7 * a))
+		HudDraw.icon(self, t, Vector2(x0 + isz.x * 0.5, y), isz, Color(1, 1, 1, 0.92 * a))
+	HudDraw.text_parts(self, parts, Vector2(x0 + iw + tw * 0.5, y), fs, 1, 3, "bold", a)
 
 
 # ---------------------------------------------------------------- top: score bar, zone, prep
@@ -1318,13 +1899,30 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 		theirs = int(sc.get("bot", 0))
 		goal = int(arena.get("rounds_to_win"))
 		var phase := int(arena.get("phase"))
-		t = float(arena.get("prep_left")) if phase == 0 else float(arena.get("time_left"))
+		if break_step() != "":
+			mine = break_score(true)           # (the plates' tick moves these too)
+			theirs = break_score(false)
+		# The fight's clock counts each stage down on its own (RoundRules): 00:20 to 00:00, then
+		# stage 2 from its full length; red in the prep and the last 10 s of a stage.
+		if phase == 0:
+			t = float(arena.get("prep_left"))
+		elif break_step() != "":
+			t = maxf(RoundRules.BREAK_S - float(_break.age), 0.0)      # the break counts down, red
+			phase = 0
+		elif bool(arena.get("practice")):
+			t = float(arena.get("time_left"))
+		else:
+			t = float(arena.call("stage_left"))
 		red = phase == 0 or (t <= 10.0 and not bool(arena.get("practice")))
 		if player != null:
-			hp_me = clampf(player.hp / Fighter.MAX_HP, 0.0, 1.0)
+			hp_me = clampf(player.hp / player.hp_max, 0.0, 1.0)
 		var b: Variant = arena.get("bot")
 		if b is Fighter:
-			hp_bot = clampf((b as Fighter).hp / Fighter.MAX_HP, 0.0, 1.0)
+			hp_bot = clampf((b as Fighter).hp / (b as Fighter).hp_max, 0.0, 1.0)
+		if team != null:
+			# DUO / SQUAD: each bar is the team's HP still standing (knocked and out count 0)
+			hp_me = team.team_hp(team.my_team())
+			hp_bot = team.team_hp(1 - team.my_team())
 	HudDraw.vband(self, Rect2(cx - cw, 0.0, cw * 2.0, ph), Color(0, 0, 0, 0.5), Color(0, 0, 0, 0.32))
 	# Blue plate (your rounds) and bar, orange plate (enemy rounds) and bar, slanted like a V.
 	var bx0 := cx - cw - pw - sl
@@ -1351,6 +1949,9 @@ func _draw_score_bar(vs: Vector2, u: float) -> void:
 	HudDraw.text_parts(self, [["OBJECTIVE: ", Color(1, 1, 1, 0.95)], [str(goal), HudDraw.YELLOW]], Vector2(cx, ph * 0.8), int(0.025 * u), 1, 2, "bold")
 
 
+## The zone strip under the minimap (SAFE ZONE STATIONARY / SHRINKING m:ss / CLOSED): drawn in a
+## DUO / SQUAD and in the HUD editor's preview; the 1 vs 1 shows none (its space stays reserved,
+## the FPS line sits under it).
 func _draw_zone_strip(vs: Vector2) -> void:
 	var w: Dictionary = layout.minimap
 	var o := float(w.o)
@@ -1372,7 +1973,7 @@ func _draw_zone_strip(vs: Vector2) -> void:
 	HudDraw.icon(self, HudDraw.tex("v_zone"), Vector2(r.position.x + h * 0.55, r.get_center().y), Vector2(h, h) * 0.62, Color(1, 1, 1, 0.9 * o))
 	var parts := [["SAFE ZONE  ", Color(0.72, 0.76, 0.82)], [state, Color(1, 0.4, 0.35) if closed else Color.WHITE]]
 	if arena != null and not editor_mode and bool(arena.get("practice")):
-		parts = [["PRACTICE", HudDraw.YELLOW], ["  NO ZONE", Color.WHITE]]
+		parts = [["TRAINING", HudDraw.YELLOW], ["  NO ZONE", Color.WHITE]]
 		closed = true
 	if not closed:
 		var s := ceili(maxf(left, 0.0))
@@ -1427,7 +2028,9 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 	HudDraw.text(self, "PREPARE", Vector2(cx, vs.y * 0.215), int(0.042 * u), Color(1, 1, 1, 0.95), 1, 4, "bold")
 	HudDraw.text(self, str(n), Vector2(cx, vs.y * 0.315), int(0.15 * u * pop), Color(1.0, 0.2, 0.16), 1, 6, "title")
 	var b: Variant = arena.get("bot")
-	if player != null and b is Fighter:
+	if team != null:
+		_draw_team_matchup(vs, u)
+	elif player != null and b is Fighter:
 		# The match-up on a dark plate: readable over the bright, red-tinted alcove.
 		var parts := [[player.display_name, Color(0.62, 0.86, 1.0)], ["   VS   ", Color(1, 1, 1, 0.85)],
 			[(b as Fighter).display_name, Color(1.0, 0.72, 0.52)]]
@@ -1441,21 +2044,178 @@ func _draw_prep(vs: Vector2, u: float) -> void:
 		HudDraw.text(self, note, Vector2(cx, vs.y * 0.49), int(0.03 * u), Color(1.0, 0.86, 0.35), 1, 3, "bold")
 
 
+## DUO / SQUAD prep: "BLUE: A, B  VS  ORANGE: C, D" on a dark plate (two lines when one would not
+## fit the screen).
+func _draw_team_matchup(vs: Vector2, u: float) -> void:
+	var lines := team_matchup_lines()
+	var blue: Array = lines[0]
+	var orange: Array = lines[1]
+	var mfs := int(0.03 * u)
+	var one := blue + [["   VS   ", Color(1, 1, 1, 0.85)]] + orange
+	var room := vs.x * 0.92
+	var cx := vs.x * 0.5
+	var my := vs.y * 0.415
+	if HudDraw.parts_width(one, mfs) <= room:
+		var mw := HudDraw.parts_width(one, mfs)
+		HudDraw.plate(self, Rect2(cx - mw * 0.5 - 0.06 * u, my - 0.03 * u, mw + 0.12 * u, 0.06 * u), 0.62)
+		HudDraw.text_parts(self, one, Vector2(cx, my), mfs, 1, 3, "bold")
+		return
+	var two := [blue, [["VS   ", Color(1, 1, 1, 0.85)]] + orange]
+	var w := maxf(HudDraw.parts_width(two[0], mfs), HudDraw.parts_width(two[1], mfs))
+	if w > room:
+		mfs = maxi(10, int(mfs * room / w))
+		w = room
+	HudDraw.plate(self, Rect2(cx - w * 0.5 - 0.05 * u, my - 0.035 * u, w + 0.1 * u, 0.1 * u), 0.62)
+	HudDraw.text_parts(self, two[0], Vector2(cx, my - 0.005 * u), mfs, 1, 3, "bold")
+	HudDraw.text_parts(self, two[1], Vector2(cx, my + 0.04 * u), mfs, 1, 3, "bold")
+
+
+## The prep line's two halves as text parts: [["BLUE: ", col], ["A, B", col]] and the same for ORANGE.
+func team_matchup_lines() -> Array:
+	var out := []
+	for side in 2:
+		var t: int = team.my_team() if side == 0 else 1 - team.my_team()
+		var names := PackedStringArray()
+		for f: Fighter in team.members(t):
+			names.append(f.display_name.to_upper())
+		out.append([["BLUE: " if side == 0 else "ORANGE: ", HudDraw.BLUE if side == 0 else HudDraw.ORANGE],
+			[", ".join(names), HudTeam.BLUE_TEXT if side == 0 else HudTeam.ORANGE_TEXT]])
+	return out
+
+
 ## "ROUND n / AREA: name" on a band fading from blue (left) to orange (right).
 ## Eliminated and following the killer's view: SPECTATING and their name at the bottom right
-## (the controls are hidden then; the kill feed keeps the bottom centre).
+## (the controls are hidden then; the kill feed keeps the bottom centre), with a small row of what
+## this player still carried when eliminated (walls, frags, medkits: Player.kit_at_death) and,
+## in an internet match against the player watched (Arena.watched_player_id), ADD FRIEND: the same
+## friend request as the results', greyed as REQUEST SENT once sent and FRIENDS when they already
+## are (spectate_friend_state). DUO / SQUAD: HudTeam draws it, with NEXT.
 func _draw_spectating(vs: Vector2, u: float) -> void:
+	_spec_friend_rect = Rect2()
+	if team != null:
+		return
 	var who := player.spectating_now() if player != null else null
 	if who == null:
 		return
 	var nm := who.display_name.to_upper()
 	var fs := int(0.03 * u)
 	var lfs := int(0.022 * u)
-	var w := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("SPECTATING", lfs, "bold")) + 0.12 * u
+	var kit: Dictionary = player.kit_at_death
+	var friend := spectate_friend_state(who)
+	var w := maxf(maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("SPECTATING", lfs, "bold")) + 0.12 * u,
+		0.36 * u if not kit.is_empty() or friend != "" else 0.0)
+	var h := 0.085 * u + (0.05 * u if not kit.is_empty() else 0.0) + (0.075 * u if friend != "" else 0.0)
 	var c := Vector2(vs.x - w * 0.5 - 0.06 * u, vs.y * 0.8)
-	HudDraw.plate(self, Rect2(c.x - w * 0.5, c.y - 0.04 * u, w, 0.085 * u), 0.7)
-	HudDraw.text(self, "SPECTATING", Vector2(c.x, c.y - 0.015 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
-	HudDraw.text(self, nm, Vector2(c.x, c.y + 0.022 * u), fs, Color.WHITE, 1, 2, "bold")
+	var top := minf(c.y - 0.04 * u, vs.y - 0.02 * u - h)
+	HudDraw.plate(self, Rect2(c.x - w * 0.5, top, w, h), 0.7)
+	HudDraw.text(self, "SPECTATING", Vector2(c.x, top + 0.025 * u), lfs, HudDraw.YELLOW, 1, 2, "bold")
+	HudDraw.text(self, nm, Vector2(c.x, top + 0.062 * u), fs, Color.WHITE, 1, 2, "bold")
+	var y := top + 0.085 * u
+	if not kit.is_empty():
+		# [wall] n   [frag] n   [medkit] n, centred under the name
+		var items := [["v_wall", int(kit.get("walls", 0))], ["item_grenade", int(kit.get("frags", 0))], ["v_medkit", int(kit.get("medkits", 0))]]
+		var step := 0.1 * u
+		var x0 := c.x - step * (items.size() - 1) * 0.5
+		var iy := y + 0.024 * u
+		for i in items.size():
+			var ix := x0 + step * i
+			var n := int(items[i][1])
+			var col := Color(1, 1, 1, 0.92) if n > 0 else Color(1, 1, 1, 0.35)
+			HudDraw.icon(self, HudDraw.tex(String(items[i][0])), Vector2(ix - 0.018 * u, iy), Vector2(0.034, 0.034) * u, col)
+			HudDraw.text(self, "x%d" % n, Vector2(ix + 0.004 * u, iy), int(0.02 * u), col, 0, 2, "bold")
+		y += 0.05 * u
+	if friend != "":
+		var br := Rect2(c.x - w * 0.5 + 0.03 * u, y + 0.008 * u, w - 0.06 * u, 0.06 * u)
+		var on := friend == "add"
+		draw_rect(br, Color(UI.ACCENT, 0.95) if on else Color(0.3, 0.3, 0.32, 0.75))
+		var caption := String({"add": "ADD FRIEND", "sent": "REQUEST SENT", "friends": "FRIENDS"}.get(friend, ""))
+		HudDraw.text(self, caption, br.get_center(), int(0.024 * u), UI.INK if on else Color(1, 1, 1, 0.6), 1, 0, "bold")
+		if on:
+			_spec_friend_rect = br
+
+
+## ADD FRIEND on the SPECTATING card for the player watched (`who`): "add" (can be sent), "sent"
+## (a request is waiting), "friends" (they already are), or "" (no button: a bot, a match without
+## internet, a blocked player).
+func spectate_friend_state(who: Fighter) -> String:
+	if arena == null or not arena.has_method("watched_player_id") or who == null:
+		return ""
+	var id := String(arena.call("watched_player_id", who))
+	if id == "" or Game.is_blocked(id):
+		return ""
+	if Game.is_friend(id):
+		return "friends"
+	return "sent" if Game.cloud_service().friend_asked(id) else "add"
+
+
+## A tap on the SPECTATING card's ADD FRIEND: the friend request goes to the player watched.
+func spectate_add_friend() -> bool:
+	var who := player.spectating_now() if player != null else null
+	if spectate_friend_state(who) != "add":
+		return false
+	var ok := Game.cloud_service().request_friend(String(arena.call("watched_player_id", who)))
+	queue_redraw()
+	return ok
+
+
+## The 1 vs 1 player is out of the round: a small card at the bottom left while it spectates (the
+## controls are hidden then): "ELIMINATED BY <NAME>" over a row with the killer's name, the gun
+## (its silhouette and name) and the damage that player dealt this one this round; the zone, a fall
+## or the player's own frag read "ELIMINATED BY THE ZONE" / "... A FALL" / "... YOUR OWN FRAG".
+func _draw_eliminated_by(vs: Vector2, u: float) -> void:
+	if team != null or arena == null or player == null or player.alive or int(arena.get("phase")) < 2:
+		return
+	var e: Dictionary = arena.get("eliminated_by")
+	if e.is_empty():
+		return
+	var cause := String(e.get("cause", ""))
+	var by_name := String(e.get("name", "")).to_upper()
+	var what := String({"zone": "THE ZONE", "fall": "A FALL", "self": "YOUR OWN FRAG", "left": "LEAVING"}.get(cause, by_name))
+	var line := String({"zone": "OUTSIDE THE SAFE ZONE TOO LONG", "fall": "A DROP FROM THE HIGH GROUND",
+		"self": "STAY CLEAR OF YOUR OWN FRAG", "left": ""}.get(cause, ""))
+	# The card ends 0.01u before the HP block's first armour icon on every screen shape (16:9: the
+	# block sits right of the medkit), its contents scaled down to that width.
+	var r := death_card_rect(vs, u)
+	var k := clampf(r.size.x / (0.56 * u), 0.6, 1.0)
+	var fs := int(0.026 * u * k)
+	var h := r.size.y
+	HudDraw.plate(self, r, 0.78)
+	draw_rect(Rect2(r.position, Vector2(0.008 * u, r.size.y)), HudDraw.RED)
+	var tx := r.position.x + 0.03 * u * k
+	var ty := r.position.y + 0.035 * u
+	HudDraw.text_parts(self, [["ELIMINATED BY ", Color(0.78, 0.8, 0.84)], [what, Color(1.0, 0.5, 0.45)]],
+		Vector2(tx, ty), fs, 0, 2, "bold")
+	draw_line(Vector2(tx, ty + 0.025 * u), Vector2(r.end.x - 0.03 * u * k, ty + 0.025 * u), Color(1, 1, 1, 0.14), 1.0)
+	var ry := r.position.y + h * 0.68
+	if cause in ["gun", "frag"]:
+		var nfs := int(0.028 * u * k)
+		var nm := by_name
+		var nw := minf(HudDraw.text_width(nm, nfs, "bold"), 0.17 * u * k)
+		HudDraw.text(self, nm, Vector2(tx, ry), _fit_fs(nm, nfs, 0.17 * u * k), Color.WHITE, 0, 2, "bold")
+		var gx := tx + nw + 0.03 * u * k
+		var gid := String(e.get("gun_id", ""))
+		var t: Texture2D = HudDraw.tex("item_grenade") if cause == "frag" else HudDraw.weapon_tex(Weapons.DEFS.get(gid, Weapons.DEFS[Weapons.DEFAULT_PICK]))
+		HudDraw.icon(self, t, Vector2(gx + 0.04 * u * k, ry), Vector2(0.08, 0.04) * u * k, Color(1, 1, 1, 0.92))
+		HudDraw.text(self, String(e.get("gun", "")), Vector2(gx + 0.09 * u * k, ry), int(0.022 * u * k), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+		HudDraw.text_parts(self, [["DMG ", Color(0.78, 0.8, 0.84)], [str(int(e.get("damage", 0))), HudDraw.YELLOW]],
+			Vector2(r.end.x - 0.03 * u * k, ry), nfs, 2, 2, "bold")
+	elif line != "":
+		HudDraw.text(self, line, Vector2(tx, ry), _fit_fs(line, int(0.022 * u * k), r.size.x - 0.05 * u * k), Color(0.78, 0.8, 0.84), 0, 2, "semi")
+
+
+## The ELIMINATED BY card's rectangle: bottom left, at most 0.56u wide and ending at least 0.01u
+## before the HP block's first armour icon (the block may show the watched fighter's HP).
+func death_card_rect(vs: Vector2, u: float) -> Rect2:
+	var x := 0.03 * u
+	var right := minf(x + 0.56 * u, float(hp_geometry(vs, u).x0) - 0.01 * u)
+	var h := 0.13 * u
+	return Rect2(x, vs.y - h - 0.035 * u, maxf(right - x, 0.2 * u), h)
+
+
+## Font size for `t`: `px`, smaller when the text would be wider than `room`.
+func _fit_fs(t: String, px: int, room: float) -> int:
+	var w := HudDraw.text_width(t, px, "bold")
+	return maxi(9, int(px * minf(1.0, room / maxf(w, 1.0))))
 
 
 func _draw_round_banner(vs: Vector2, u: float) -> void:
@@ -1463,10 +2223,17 @@ func _draw_round_banner(vs: Vector2, u: float) -> void:
 	if t <= 0.0:
 		return
 	var age := float(_round_banner.get("dur", ROUND_BANNER_TIME)) - t
-	var a := clampf(age / 0.18, 0.0, 1.0) * clampf(t / 0.4, 0.0, 1.0)
+	_draw_round_band(vs, u, int(_round_banner.round), String(_round_banner.area), String(_round_banner.get("sub", "")), age, t)
+
+
+## "ROUND n / AREA: name" (or the sub-line: MATCH POINT! / FINAL ROUND) on a band fading from blue
+## (left) to orange (right), `age` s after it came and `left` s before it goes (it slides in and
+## fades out).
+func _draw_round_band(vs: Vector2, u: float, round_n: int, area: String, sub: String, age: float, left: float) -> void:
+	var a := clampf(age / 0.18, 0.0, 1.0) * clampf(left / 0.4, 0.0, 1.0)
 	var slide := (1.0 - ease(clampf(age / 0.28, 0.0, 1.0), 0.35)) * vs.x * 0.12
 	var h := 0.13 * u
-	var y0 := vs.y * (0.5 if _round_banner.has("mine") else 0.3)      # a result sits under the kill badge
+	var y0 := vs.y * 0.3
 	var w := minf(vs.x * 0.66, 1.3 * u)
 	var x0 := (vs.x - w) * 0.5 - slide
 	var xm := x0 + w * 0.5
@@ -1482,55 +2249,279 @@ func _draw_round_banner(vs: Vector2, u: float) -> void:
 		PackedColorArray([orange, Color(orange, 0.0), Color(orange, 0.0), orange]))
 	draw_line(Vector2(x0 + fade, y0), Vector2(x0 + w - fade, y0), Color(1, 1, 1, 0.25 * a), 1.5)
 	draw_line(Vector2(x0 + fade, y0 + h), Vector2(x0 + w - fade, y0 + h), Color(1, 1, 1, 0.25 * a), 1.5)
-	if _round_banner.has("mine"):
-		var title := String(_round_banner.title)
-		var tcol := HudDraw.YELLOW if title == "VICTORY" else Color(0.86, 0.86, 0.86)
-		HudDraw.text(self, title, Vector2(xm, y0 - 0.05 * u), int(0.05 * u), Color(tcol, a), 1, 3, "bold")
-		HudDraw.text_parts(self, [[str(int(_round_banner.mine)), Color.WHITE], ["   VS   ", Color(1, 1, 1, 0.9)],
-			[str(int(_round_banner.theirs)), Color.WHITE]], Vector2(xm, y0 + h * 0.52), int(0.085 * u), 1, 3, "title", a)
-		return
 	var tc := Vector2(xm, y0 + h * 0.4)
-	HudDraw.text_parts(self, [["ROUND ", Color.WHITE], [str(int(_round_banner.round)), HudDraw.YELLOW]], tc, int(0.078 * u), 1, 3, "bold", a)
-	if String(_round_banner.get("sub", "")) != "":
-		HudDraw.text(self, String(_round_banner.sub), Vector2(xm, y0 + h * 0.8), int(0.032 * u), Color(HudDraw.YELLOW, a), 1, 2, "bold")
+	HudDraw.text_parts(self, [["ROUND ", Color.WHITE], [str(round_n), HudDraw.YELLOW]], tc, int(0.078 * u), 1, 3, "bold", a)
+	if sub != "":
+		HudDraw.text(self, sub, Vector2(xm, y0 + h * 0.8), int(0.032 * u), Color(HudDraw.YELLOW, a), 1, 2, "bold")
 	else:
-		HudDraw.text_parts(self, [["AREA: ", Color(1, 1, 1, 0.95)], [String(_round_banner.area), HudDraw.YELLOW]],
+		HudDraw.text_parts(self, [["AREA: ", Color(1, 1, 1, 0.95)], [area, HudDraw.YELLOW]],
 			Vector2(xm, y0 + h * 0.8), int(0.03 * u), 1, 2, "bold", a)
+
+
+## The break between rounds, step by step (show_break): the result band near the top, the dimmed
+## screen with the score plates, the next round's band.
+func _draw_break(vs: Vector2, u: float) -> void:
+	var step := break_step()
+	var age := float(_break.age) if step != "" else 0.0
+	match step:
+		"result":
+			_draw_result_band(vs, u, String(_break.title), "ROUND %d" % (int(_break.round) - 1), age - RoundRules.BREAK_RESULT_AT,
+				RoundRules.BREAK_SCORE_AT - age)
+		"score":
+			_draw_break_score(vs, u, age - RoundRules.BREAK_SCORE_AT, RoundRules.BREAK_BAND_AT - age)
+		"band":
+			_draw_round_band(vs, u, int(_break.round), String(_break.area), String(_break.sub),
+				age - RoundRules.BREAK_BAND_AT, RoundRules.BREAK_S - age + 0.3)
+
+
+## Whether the match's end shows a win (VICTORY!: its longer sequence, RoundRules.match_end_step).
+func result_won() -> bool:
+	return not _result.is_empty() and String(_result.title).begins_with("VICTORY")
+
+
+## The match's end (round 8): the result band (show_result); a win then turns into a big glowing
+## gold VICTORY! across the middle with sparks, and the band moves to the top with the split score
+## band under it until the results cover it (RoundRules.match_end_step).
+func _draw_match_result(vs: Vector2, u: float) -> void:
+	if result_title() == "":
+		return
+	var age := float(_result.age)
+	var title := String(_result.title)
+	var sub := String(_result.sub).to_upper()
+	var t := age + RoundRules.MATCH_BAND_AT
+	match RoundRules.match_end_step(t, result_won()):
+		"band", "results":
+			if not result_won():
+				_draw_result_band(vs, u, title, sub, age, 99.0)
+			else:
+				_draw_result_band(vs, u, title, sub, age, RoundRules.VICTORY_WORD_AT - t)
+		"word":
+			_draw_victory_word(vs, u, t - RoundRules.VICTORY_WORD_AT)
+		"top":
+			_draw_victory_top(vs, u, t - RoundRules.VICTORY_TOP_AT)
+
+
+## The big gold VICTORY! across the middle, `t` s into its RoundRules.VICTORY_WORD_S: it pops in,
+## glows and throws sparks, then fades as the band takes the top.
+func _draw_victory_word(vs: Vector2, u: float, t: float) -> void:
+	var a := clampf(t / 0.15, 0.0, 1.0) * clampf((RoundRules.VICTORY_WORD_S - t) / 0.25, 0.0, 1.0)
+	var c := Vector2(vs.x * 0.5, vs.y * 0.5)
+	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.35 * a))
+	var pop := 1.0 + 0.25 * (1.0 - clampf(t / 0.25, 0.0, 1.0))
+	var fs := int(0.2 * u * pop)
+	var gold := Color(1.0, 0.8, 0.22)
+	for i in 3:
+		var g := 1.0 - i * 0.3
+		HudDraw.text(self, "VICTORY!", c, fs, Color(1.0, 0.65, 0.1, 0.12 * a * g), 1, int(0.03 * u * (i + 1)), "heavy", Color(1.0, 0.6, 0.1, 1.0))
+	HudDraw.text(self, "VICTORY!", c, fs, Color(gold, a), 1, 5, "heavy", Color(0.35, 0.18, 0.0, 0.9 * a))
+	var shine := clampf((t - 0.2) / 0.6, 0.0, 1.0)
+	if shine > 0.0 and shine < 1.0:
+		var w := HudDraw.text_width("VICTORY!", fs, "heavy")
+		var x := c.x - w * 0.5 + w * shine
+		draw_line(Vector2(x - fs * 0.25, c.y + fs * 0.4), Vector2(x + fs * 0.25, c.y - fs * 0.4), Color(1, 1, 0.9, 0.55 * a), fs * 0.08, true)
+	_draw_sparks(c + Vector2(-0.3 * u, 0), t, 0.3 * u, gold, a)
+	_draw_sparks(c + Vector2(0.3 * u, 0), t - 0.15, 0.3 * u, gold, a)
+	_draw_sparks(c, t - 0.4, 0.45 * u, Color(1, 0.95, 0.7), a)
+
+
+## After the big word: the VICTORY! band slid up to the top with the split score band under it.
+func _draw_victory_top(vs: Vector2, u: float, t: float) -> void:
+	var k := clampf(t / 0.35, 0.0, 1.0)
+	var a := clampf(t / 0.2, 0.0, 1.0)
+	# (under the score bar, clear of the minimap and the weapon panel in the corners)
+	var cy := lerpf(vs.y * 0.5, vs.y * 0.2, 1.0 - pow(1.0 - k, 3.0))
+	HudDraw.text(self, "VICTORY!", Vector2(vs.x * 0.5, cy), int(0.09 * u), Color(1.0, 0.8, 0.22, a), 1, 4, "heavy", Color(0.35, 0.18, 0.0, 0.9 * a))
+	var sc: Dictionary = arena.get("score") if arena != null else {}
+	_draw_split_score(vs, u, cy + 0.17 * u, a, int(sc.get("player", 0)), int(sc.get("bot", 0)), 0, -1.0)
+
+
+## VICTORY (yellow) / DEFEAT (grey) / DRAW, TIME UP (white) on a dark band at y 0.15 that fades at
+## both ends, `sub` ("ROUND n", or the match's end line) under the word; it fades in, no pop.
+func _draw_result_band(vs: Vector2, u: float, title: String, sub: String, age: float, left: float) -> void:
+	var a := clampf(age / 0.25, 0.0, 1.0) * clampf(left / 0.35, 0.0, 1.0)
+	var col: Color = HudDraw.YELLOW if title.begins_with("VICTORY") else (Color(0.8, 0.82, 0.85) if title == "DEFEAT" else Color.WHITE)
+	var cy := vs.y * 0.15
+	var h := 0.12 * u
+	var w := minf(vs.x * 0.7, 1.4 * u)
+	var x0 := (vs.x - w) * 0.5
+	var fade := w * 0.3
+	var bg := Color(0.03, 0.04, 0.06, 0.72 * a)
+	var y0 := cy - h * 0.5
+	draw_polygon(PackedVector2Array([Vector2(x0, y0), Vector2(x0 + fade, y0), Vector2(x0 + fade, y0 + h), Vector2(x0, y0 + h)]),
+		PackedColorArray([Color(bg, 0.0), bg, bg, Color(bg, 0.0)]))
+	draw_rect(Rect2(x0 + fade, y0, w - fade * 2.0, h), bg)
+	draw_polygon(PackedVector2Array([Vector2(x0 + w - fade, y0), Vector2(x0 + w, y0), Vector2(x0 + w, y0 + h), Vector2(x0 + w - fade, y0 + h)]),
+		PackedColorArray([bg, Color(bg, 0.0), Color(bg, 0.0), bg]))
+	var line := Color(col, 0.55 * a)
+	draw_line(Vector2(x0 + fade * 0.5, y0), Vector2(x0 + w - fade * 0.5, y0), line, 1.5)
+	draw_line(Vector2(x0 + fade * 0.5, y0 + h), Vector2(x0 + w - fade * 0.5, y0 + h), line, 1.5)
+	HudDraw.text(self, title, Vector2(vs.x * 0.5, cy - h * 0.1), int(0.075 * u), Color(col, a), 1, 4, "title")
+	if sub != "":
+		HudDraw.text(self, sub, Vector2(vs.x * 0.5, cy + h * 0.34), _fit_fs(sub, int(0.024 * u), w * 0.6),
+			Color(1, 1, 1, 0.8 * a), 1, 2, "bold")
+
+
+## The break's score step (round 8, like the reference): the screen dimmed near black, one wide
+## split band (x 0.12-0.93 of the width: yours blue on the left, theirs orange on the right) with
+## both numbers by our centre glyph, the names at its ends and the round's result over it; the
+## number that changed flashes with a burst of sparks at the tick (RoundRules.BREAK_TICK_AT).
+func _draw_break_score(vs: Vector2, u: float, age: float, left: float) -> void:
+	var a := clampf(age / 0.3, 0.0, 1.0) * clampf(left / 0.3, 0.0, 1.0)
+	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.92 * a))
+	var tick := float(_break.age) - RoundRules.BREAK_TICK_AT
+	var flash := 0 if tick < 0.0 else int(_break.won)
+	_draw_split_score(vs, u, vs.y * 0.5, a, break_score(true), break_score(false), flash, tick)
+	var title := String(_break.title)
+	HudDraw.text(self, title, Vector2(vs.x * 0.5, vs.y * 0.5 - 0.15 * u), int(0.05 * u),
+		Color(HudDraw.YELLOW if title.begins_with("VICTORY") else Color(0.86, 0.88, 0.9), a), 1, 3, "heavy")
+
+
+## The split score band centred at height `cy`: blue (yours) | orange (theirs), the numbers by the
+## centre glyph, the names at the ends. `flash` 1: your number flashes and sparks (-1 theirs, 0
+## none), `tick` s after the change.
+func split_band_rect(vs: Vector2, u: float, cy: float) -> Rect2:
+	var h := 0.14 * u
+	return Rect2(vs.x * 0.12, cy - h * 0.5, vs.x * 0.81, h)
+
+
+func _draw_split_score(vs: Vector2, u: float, cy: float, a: float, mine: int, theirs: int, flash: int, tick: float) -> void:
+	var r := split_band_rect(vs, u, cy)
+	var cx := vs.x * 0.5
+	var fade := r.size.x * 0.12
+	var blue := Color(HudDraw.BLUE, 0.92 * a)
+	var orange := Color(HudDraw.ORANGE, 0.92 * a)
+	draw_polygon(PackedVector2Array([r.position, Vector2(r.position.x + fade, r.position.y), Vector2(r.position.x + fade, r.end.y), Vector2(r.position.x, r.end.y)]),
+		PackedColorArray([Color(blue, 0.0), blue, blue, Color(blue, 0.0)]))
+	draw_rect(Rect2(r.position.x + fade, r.position.y, cx - r.position.x - fade, r.size.y), blue)
+	draw_rect(Rect2(cx, r.position.y, r.end.x - fade - cx, r.size.y), orange)
+	draw_polygon(PackedVector2Array([Vector2(r.end.x - fade, r.position.y), Vector2(r.end.x, r.position.y), Vector2(r.end.x, r.end.y), Vector2(r.end.x - fade, r.end.y)]),
+		PackedColorArray([orange, Color(orange, 0.0), Color(orange, 0.0), orange]))
+	draw_rect(Rect2(r.position.x + fade, r.position.y, r.size.x - fade * 2.0, r.size.y * 0.4), Color(1, 1, 1, 0.1 * a))
+	# Our centre glyph: a dark diamond with a white rim and three claw marks.
+	var g := r.size.y * 0.62
+	var dia := PackedVector2Array([Vector2(cx, cy - g), Vector2(cx + g * 0.8, cy), Vector2(cx, cy + g), Vector2(cx - g * 0.8, cy)])
+	draw_colored_polygon(dia, Color(0.06, 0.07, 0.09, 0.95 * a))
+	dia.append(dia[0])
+	draw_polyline(dia, Color(1, 1, 1, 0.85 * a), maxf(2.0, 0.004 * u), true)
+	for k in 3:
+		var dx := (k - 1) * g * 0.22
+		draw_line(Vector2(cx + dx + g * 0.1, cy - g * 0.38), Vector2(cx + dx - g * 0.1, cy + g * 0.38), Color(1, 1, 1, 0.9 * a), maxf(2.0, 0.005 * u), true)
+	var names := ["YOUR TEAM", "THE OTHER TEAM"] if team != null else [player.display_name if player != null else "YOU", _their_name()]
+	for side in 2:
+		var mine_side := side == 0
+		var sgn := -1.0 if mine_side else 1.0
+		var nc := Vector2(cx + sgn * (g * 0.8 + 0.07 * u), cy)
+		var lit := flash == (1 if mine_side else -1) and tick >= 0.0
+		var pop := 1.0 + (0.35 * (1.0 - clampf(tick / 0.35, 0.0, 1.0)) if lit else 0.0)
+		var col := Color.WHITE
+		if lit and tick < 0.6:
+			col = Color.WHITE.lerp(HudDraw.YELLOW, 0.5 + 0.5 * sin(tick * 30.0))
+		HudDraw.text(self, str(mine if mine_side else theirs), nc, int(0.11 * u * pop), Color(col, a), 1, 4, "number")
+		if lit:
+			_draw_sparks(nc, tick, 0.12 * u, HudDraw.YELLOW, a)
+		var nm := String(names[side]).to_upper()
+		var nx := r.position.x + fade + 0.02 * u if mine_side else r.end.x - fade - 0.02 * u
+		HudDraw.text(self, nm, Vector2(nx, cy), _fit_fs(nm, int(0.028 * u), r.size.x * 0.22), Color(1, 1, 1, 0.95 * a),
+			0 if mine_side else 2, 3, "bold")
+
+
+## A burst of sparks from `c`, `t` s after it began (0.7 s): streaks flying out and fading.
+func _draw_sparks(c: Vector2, t: float, reach: float, col: Color, a: float) -> void:
+	if t < 0.0 or t > 0.7:
+		return
+	var k := t / 0.7
+	for i in 16:
+		var ang := TAU * i / 16.0 + 0.37 * float(i % 3)
+		var d := Vector2.from_angle(ang)
+		var far := reach * (0.4 + 0.6 * (float((i * 7) % 5) / 4.0))
+		var p0 := c + d * far * pow(k, 0.6)
+		var p1 := p0 + d * reach * 0.18 * (1.0 - k)
+		draw_line(p0, p1, Color(col, (1.0 - k) * a), maxf(2.0, reach * 0.03), true)
+
+
+## The 1 vs 1 opponent's name (the score plates).
+func _their_name() -> String:
+	var b: Variant = arena.get("bot") if arena != null else null
+	return (b as Fighter).display_name if b is Fighter else "OPPONENT"
 
 
 ## Elimination badge (our own emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
 func _draw_kill_banner(vs: Vector2, u: float) -> void:
 	var t := float(_kill_banner.t)
-	if t <= 0.0:
-		return
+	if t <= 0.0 or break_step() not in ["", "beat"] or result_title() != "":
+		return                           # (the result band takes over from the badge)
 	var age := KILL_BANNER_TIME - t
-	var a := clampf(age / 0.1, 0.0, 1.0) * clampf(t / 0.45, 0.0, 1.0)
-	var pop := 1.0 + 0.45 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
-	var c := Vector2(vs.x * 0.5, vs.y * 0.19)
-	var bs := 0.19 * u * pop
+	var a := clampf(age / 0.12, 0.0, 1.0) * clampf(t / 0.35, 0.0, 1.0)
+	var pop := 1.0
+	var c := Vector2(vs.x * 0.5, vs.y * 0.17)
+	var cause := String(_kill_banner.get("cause", ""))
+	if bool(_kill_banner.get("knock", false)):
+		_draw_knock_banner(c, u, a, pop)
+		return
+	if cause != "":
+		_draw_out_banner(c, u, a, cause)
+		return
+	# Small and still (no glow, no pulse, no pop): a headshot kill only tints the badge red and puts
+	# the head target on it.
+	var bs := 0.12 * u
 	var head := bool(_kill_banner.head)
-	HudDraw.disk(self, c, bs * 0.42, Color(0.9, 0.2, 0.15, (0.32 if head else 0.18) * a * (1.0 - clampf(age / 0.6, 0.0, 1.0))))
-	# A headshot kill gets its own look: a red badge with the head target on it and a red pulse.
-	if head:
-		HudDraw.ring(self, c, bs * (0.45 + 0.35 * clampf(age / 0.5, 0.0, 1.0)), Color(1.0, 0.25, 0.18, 0.7 * a * (1.0 - clampf(age / 0.5, 0.0, 1.0))), maxf(2.0, 0.008 * u))
 	HudDraw.icon(self, HudDraw.tex("badge_elim"), c, Vector2(bs, bs), Color(1.0, 0.62, 0.55, a) if head else Color(1, 1, 1, a))
 	if head:
 		HudDraw.disk(self, c, bs * 0.17, Color(0.55, 0.05, 0.03, 0.9 * a))
 		HudDraw.icon(self, HudDraw.tex("v_headshot"), c, Vector2(bs, bs) * 0.27, Color(1.0, 0.86, 0.8, a))
 	# One dark plate under the badge holds both lines (HEADSHOT / ELIMINATED, then the name),
 	# so they stay readable over a bright hall or the character's raised arms.
-	var label := "HEADSHOT" if head else "ELIMINATED"
-	var lfs := int(0.036 * u)
-	var nm := String(_kill_banner.name).to_upper()
-	var fs := int(0.03 * u)
-	var ty := c.y + 0.19 * u * 0.5 + 0.024 * u
+	var label := String(_kill_banner.get("word", "HEADSHOT" if head else "ELIMINATED"))
+	var lfs := int(0.03 * u)
+	var nm := String(_kill_banner.get("by", _kill_banner.name)).to_upper()
+	var fs := int(0.026 * u)
+	var ty := c.y + bs * 0.5 + 0.022 * u
 	var pw := maxf(HudDraw.text_width(label, lfs, "bold"), HudDraw.text_width(nm, fs, "bold")) + 0.2 * u
-	var plate := Rect2(c.x - pw * 0.5, ty - 0.026 * u, pw, 0.1 * u)
+	var plate := Rect2(c.x - pw * 0.5, ty - 0.024 * u, pw, 0.09 * u)
 	HudDraw.plate(self, plate, 0.72 * a)
 	HudDraw.text(self, label, Vector2(c.x, ty), lfs, Color(HudDraw.FEED_HEAD if head else Color.WHITE, a), 1, 3, "bold")
 	var line_y := ty + 0.026 * u
 	draw_rect(Rect2(c.x - pw * 0.3, line_y, pw * 0.6, maxf(1.5, 0.003 * u)), Color(HudDraw.KILL_RED, a))
 	HudDraw.text(self, nm, Vector2(c.x, line_y + 0.025 * u), fs, Color(1, 1, 1, a), 1, 2, "bold")
+
+
+## knock_banner's plate: a red cross in a ring over KNOCKED and the name (calmer than a kill's badge).
+func _draw_knock_banner(c: Vector2, u: float, a: float, pop: float) -> void:
+	var r := 0.04 * u * lerpf(1.0, pop, 0.5)
+	var red := Color(1.0, 0.5, 0.3)
+	HudDraw.disk(self, c, r, Color(0.1, 0.03, 0.02, 0.75 * a))
+	HudDraw.ring(self, c, r, Color(red, 0.95 * a), maxf(2.0, 0.005 * u))
+	var s := r * 1.1
+	var t := s * 0.32
+	draw_rect(Rect2(c - Vector2(t * 0.5, s * 0.5), Vector2(t, s)), Color(red, a))
+	draw_rect(Rect2(c - Vector2(s * 0.5, t * 0.5), Vector2(s, t)), Color(red, a))
+	var nm := String(_kill_banner.name).to_upper()
+	var fs := int(0.03 * u)
+	var lfs := int(0.032 * u)
+	var ty := c.y + r + 0.03 * u
+	var pw := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width("KNOCKED", lfs, "bold")) + 0.14 * u
+	HudDraw.plate(self, Rect2(c.x - pw * 0.5, ty - 0.026 * u, pw, 0.088 * u), 0.66 * a)
+	HudDraw.text(self, "KNOCKED", Vector2(c.x, ty), lfs, Color(red, a), 1, 3, "bold")
+	HudDraw.text(self, nm, Vector2(c.x, ty + 0.037 * u), fs, Color(1, 1, 1, a), 1, 2, "bold")
+
+
+## out_banner's plate: a small disk with what took them out (the zone's blue for the zone) and one
+## line, "<NAME>" over "CAUGHT IN THE ZONE" (OUT_LINES), smaller and calmer than a kill's badge.
+func _draw_out_banner(c: Vector2, u: float, a: float, cause: String) -> void:
+	var tint := Color(0.45, 0.72, 1.0) if cause == "zone" else Color(0.86, 0.86, 0.88)
+	var r := 0.042 * u
+	HudDraw.disk(self, c, r, Color(0.04, 0.06, 0.1, 0.72 * a))
+	HudDraw.ring(self, c, r, Color(tint, 0.9 * a), maxf(2.0, 0.005 * u))
+	HudDraw.icon(self, HudDraw.tex(String(OUT_ICONS.get(cause, "v_zone"))), c, Vector2(r, r) * 1.15, Color(tint, a))
+	var line := String(OUT_LINES.get(cause, ""))
+	var nm := String(_kill_banner.name).to_upper()
+	var fs := int(0.03 * u)
+	var lfs := int(0.026 * u)
+	var ty := c.y + r + 0.03 * u
+	var pw := maxf(HudDraw.text_width(nm, fs, "bold"), HudDraw.text_width(line, lfs, "bold")) + 0.14 * u
+	HudDraw.plate(self, Rect2(c.x - pw * 0.5, ty - 0.024 * u, pw, 0.082 * u), 0.66 * a)
+	HudDraw.text(self, nm, Vector2(c.x, ty), fs, Color(1, 1, 1, a), 1, 2, "bold")
+	HudDraw.text(self, line, Vector2(c.x, ty + 0.035 * u), lfs, Color(tint, a), 1, 2, "bold")
 
 
 func _draw_center_text(vs: Vector2, u: float) -> void:
@@ -1555,18 +2546,39 @@ func _draw_center_text(vs: Vector2, u: float) -> void:
 		HudDraw.text(self, sub, Vector2(vs.x * 0.5, y + fsize * 0.62), int(0.04 * u), Color(1, 1, 1, a), 1, 4, "bold")
 
 
+## The firing noise cue (round 8): a small yellow warning triangle at the bottom centre for
+## NOISE_CUE_S after each of the player's shots (others can hear where you are).
+const NOISE_CUE_S := 0.6
+func _draw_noise_cue(vs: Vector2, u: float) -> void:
+	if player == null or not player.alive or editor_mode:
+		return
+	var since := Time.get_ticks_msec() / 1000.0 - player.last_shot_time
+	if since < 0.0 or since > NOISE_CUE_S or Weapons.is_melee(player.weapon().def):
+		return
+	var a := clampf((NOISE_CUE_S - since) / 0.2, 0.0, 1.0)
+	var c := Vector2(vs.x * 0.5, vs.y * 0.965)
+	var h := 0.022 * u
+	var tri := PackedVector2Array([c + Vector2(0, -h * 0.6), c + Vector2(h * 0.6, h * 0.45), c + Vector2(-h * 0.6, h * 0.45)])
+	draw_colored_polygon(tri, Color(HudDraw.YELLOW, 0.9 * a))
+	draw_line(c + Vector2(0, -h * 0.25), c + Vector2(0, h * 0.12), Color(0.1, 0.08, 0.02, a), maxf(1.5, h * 0.12))
+	HudDraw.disk(self, c + Vector2(0, h * 0.28), maxf(1.0, h * 0.06), Color(0.1, 0.08, 0.02, a))
+
+
 func _draw_tips(vs: Vector2, u: float) -> void:
 	if tips_time <= 0.0 or panels.pick_open or match_over:
 		return
 	var a := clampf(tips_time, 0.0, 1.0)
-	var fs := int(0.027 * u)
-	var l1 := "LEFT SIDE: MOVE  ·  RIGHT SIDE: DRAG TO AIM"
-	var l2 := "HOLD FIRE AND DRAG IT TO AIM WHILE SHOOTING"
-	var w := maxf(HudDraw.text_width(l1, fs), HudDraw.text_width(l2, fs)) + 0.08 * u
-	var r := Rect2(vs.x * 0.5 - w * 0.5, vs.y * 0.6, w, 0.1 * u)
-	draw_rect(r, Color(0, 0, 0, 0.5 * a))
-	HudDraw.text(self, l1, Vector2(vs.x * 0.5, r.position.y + r.size.y * 0.3), fs, Color(1, 1, 1, a), 1, 0, "bold")
-	HudDraw.text(self, l2, Vector2(vs.x * 0.5, r.position.y + r.size.y * 0.72), fs, Color(HudDraw.YELLOW, a), 1, 0, "bold")
+	for tip: Array in TIPS:
+		var id := String(tip[0])
+		if not layout.has(id):
+			continue
+		var w: Dictionary = layout[id]
+		var c := HudLayout.center(w, vs)
+		var r := HudLayout.radius(w, vs)
+		var at := c + Vector2(0, r + 0.022 * u)
+		if at.y > vs.y - 0.02 * u:
+			at = c - Vector2(0, r + 0.022 * u)
+		HudDraw.text(self, String(tip[1]), at, int(0.02 * u), Color(HudDraw.YELLOW, a), 1, 3, "bold")
 
 
 # ---------------------------------------------------------------- editor preview
@@ -1581,10 +2593,11 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 	_draw_zone_strip(vs)
 	var fs := int(0.03 * u)
 	var feed := [["PLAYER  ", Color.WHITE], ["ELIMINATED  ", HudDraw.FEED_ELIM], ["BOT", Color.WHITE], ["  (VIPER AR)", Color(1, 1, 1, 0.82)]]
-	var feed_c := Vector2(vs.x * 0.5, vs.y * float(FEED_Y[0]))
+	var feed_c := Vector2(vs.x * 0.5, vs.y * FEED_Y_SOLO)
 	var feed_w := HudDraw.text_parts(self, feed, feed_c, fs, 1, 3, "bold", 0.8)
+	_draw_weapon_panel(vs)                    # as in a match: the panel, the buttons, the gear
 	_draw_controls(vs)
-	_draw_weapon_panel(vs)
+	_draw_button("settings", vs)
 	# Labels under (or above) each widget, nudged so they never sit on top of each other or on
 	# another widget (the small corner gear's label goes beside it, not onto the weapon panel).
 	var taken: Array[Rect2] = [Rect2(feed_c - Vector2(feed_w * 0.5, fs * 0.6), Vector2(feed_w, fs * 1.2))]
@@ -1602,6 +2615,8 @@ func _draw_editor(vs: Vector2, u: float) -> void:
 		var r := HudLayout.hit_rect(id, w, vs)
 		var sel := id == selected_id
 		var label := String(SHORT_LABELS.get(id, HudLayout.LABELS.get(id, id)))
+		if not button_enabled(id):
+			label += " (OFF)"              # turned off in SETTINGS > CONTROLS: placed, not shown in a match
 		# Labels keep clear of the selection ring (r + 5) and of the fire button's dotted halo.
 		var lr0 := r
 		if HudLayout.kind(id) in ["button", "joy"]:

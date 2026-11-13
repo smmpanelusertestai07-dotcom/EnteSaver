@@ -10,15 +10,51 @@
 #                          signer list parsing, settings clamping, results honours
 #   --autotest=sim         a full headless match (scripted player vs bot) ends with results
 #   --autotest=aim         aim assist: pull, head stop, tracking with vs without, red crosshair
+#   tests/login_check.gd   guest login, first profile setup, the Privacy Notice true to cloud.gd
+#   tests/shots_profile.gd PROFILE and other players' cards with real taps and swipes: CAREER,
+#                          HISTORY (a row opens the opponent's card), BLOCKED (UNBLOCK, BLOCK asked
+#                          first, kept by name, follows changes), lists that scroll from any row,
+#                          56 px touch targets, a challenge that waits behind an open question
+#                          and is declined by back (headless: every check, no pictures)
 #   tests/anim_check.gd    every clip merged, toe fix, swap timing, flinch limit, grenade release
 #   tests/bot_check.gd     grenade arc accuracy, the bot survives the closing zone
 #   tests/flow_soak.gd     several matches in one process: no leaks, corpses stay on the floor
-#   tests/rounds_check.gd  a match over rounds: resets, alternating gun pick, the final result
+#   tests/rounds_check.gd  a match over rounds: resets, alternating gun pick, the final result,
+#                          HISTORY and CAREER after it; a match left with QUIT MATCH is LEFT
 #   tests/guard_check.gd   a detection made before a match voids it
-#   tests/lan_check.gd     Wi-Fi 1 vs 1 with two copies of the game: find, challenge, accept,
-#                          play, a lethal hit and the result on both
-#   tests/cloud_check.gd   the same online over two rounds (end-to-end encrypted), through tests/mqtt_mock.gd
+#   tests/lan_check.gd     PLAY WITHOUT INTERNET with two copies of the game (LW_NET_ROLE host /
+#                          guest) through the lobby's tab: HOST shows a code, JOIN finds the host,
+#                          a wrong code is refused, the right one pairs; two rounds (end-to-end
+#                          encrypted on the local network), the local ping, lethal hits, the
+#                          result on both and HISTORY marked local
+#   tests/cloud_check.gd   online 1 vs 1 with two copies of the game (LW_NET_ROLE host / guest)
+#                          through tests/mqtt_mock.gd: find, challenge, accept, two rounds
+#                          (end-to-end encrypted), a flood of walls and frags held to one round's
+#                          items, back closing the online pause menu, the opponent's footprints,
+#                          lethal hits and the result on both, which each one's HISTORY keeps
+#                          with the other's id; the direct UDP path (LW_DIRECT=local: loopback,
+#                          no STUN) comes up, carries the state, and falls back to the relay when
+#                          the guest's UDP is blocked mid-match
 #   tests/room_check.gd    friends (request, accept) and a custom room (password, rules, host START) online
+#   tests/quick_check.gd   QUICK MATCH: a lone search never pairs with itself and CANCEL stops it; two
+#                          searching copies find each other and play the match (lower id hosts)
+#   tests/drop_check.gd    online matches that end early or nearly: a slow load is waited for, a quit
+#                          before the first fight counts nowhere, a load that freezes 8 s is no
+#                          disconnect; a short absence keeps the match (the frozen fighter is
+#                          damaged and eliminated on the other copy, both end alike); an absence past
+#                          the grace (LW_AWAY_GRACE_MS shortens it) is LEFT for it, a win for the other
+#   tests/resume_check.gd  an online 1 vs 1 whose guest app is killed in a fight: started again in time it
+#                          rejoins the same match with no tap and both end alike; started after the
+#                          grace it opens in the lobby with the match LEFT, counted once
+#   tests/team_resume_check.gd  an all-human DUO with four copies: the host away (its fighter decided by the
+#                          stand-in, adopted when it is back), a member and then the host killed and
+#                          started again into the same match; all four end alike
+#   tests/team_direct_check.gd  an all-human DUO with four copies over direct UDP pairs (LW_DIRECT=local): 3 pairs up
+#                          per copy carrying the states, TEAM chat to the own team only, m3's pairs cut fall back
+#                          to the relay, all four end alike
+#   tests/sync_check.gd    online rounds decided once, by the host, under a 600 ms round trip: both
+#                          dying in the zone together, no kill credit for the zone, the match
+#                          clock running under the online pause menu; both copies end alike
 # Screenshots and the APK have their own tools: tools/qa/capture.sh, tools/build_apk.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -50,24 +86,124 @@ step unit godot --headless --path . res://tests/run_tests.tscn
 if [ "${1:-}" != "quick" ]; then
   step sim godot --headless --path . -- --autotest=sim
   step aim godot --headless --path . -- --autotest=aim
+  step login godot --headless --path . -- --autotest=script:res://tests/login_check.gd
+  step profile godot --headless --path . -- --autotest=script:res://tests/shots_profile.gd
   step anim godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
   step bot godot --headless --path . -- --autotest=script:res://tests/bot_check.gd
   step soak env LW_ROUNDS=4 godot --headless --path . -- --autotest=script:res://tests/flow_soak.gd
   step rounds env LW_ROUNDS_TO_WIN=2 godot --headless --path . -- --autotest=script:res://tests/rounds_check.gd
   step guard godot --headless --path . -- --autotest=script:res://tests/guard_check.gd
-  step lan bash -c 'LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd > "$0" 2>&1 &
-    h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd; g=$?
+  step lan bash -c 'export LW_ROUNDS_TO_WIN=2
+    LW_NET_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/lan_check.gd; g=$?
     wait $h; r=$?; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/lan_host.txt"
   step cloud bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47810 > /dev/null 2>&1 & m=$!
-    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810 LW_ROUNDS_TO_WIN=2
-    LW_LAN_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &
-    h=$!; LW_LAN_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd; g=$?
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47810 LW_ROUNDS_TO_WIN=2 LW_DIRECT=local
+    LW_NET_ROLE=host timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 150 godot --headless --path . -- --autotest=script:res://tests/cloud_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/cloud_host.txt"
   step room bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47811 > /dev/null 2>&1 & m=$!
     sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47811
-    LW_LAN_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd > "$0" 2>&1 &
-    h=$!; LW_LAN_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd; g=$?
+    LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/room_host.txt"
+  # tests/voice_check.gd: voice between two copies (a generated tone for the microphone, LW_VOICE_TONE=1): the
+  # 1 vs 1, a custom room's group (DUO, waiting) and its DUO match; GROUP never reaches an enemy; with LW_DIRECT=local
+  # the 1 vs 1's voice goes over the direct path while it is up (none through the relay), the relay once it is cut. Mock port 47834.
+  step voice bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47834 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47834 LW_VOICE_TONE=1 LW_ROUNDS_TO_WIN=1 LW_DIRECT=local
+    LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/voice_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/voice_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/voice_host.txt"
+  step quick bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47818 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47818
+    LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/quick_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/quick_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/quick_host.txt"
+  step drop bash -c 'timeout 270 godot --headless -s res://tests/mqtt_mock.gd -- 47812 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47812 LW_AWAY_GRACE_MS=10000
+    LW_NET_ROLE=host timeout 240 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest timeout 240 godot --headless --path . -- --autotest=script:res://tests/drop_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/drop_host.txt"
+  step sync bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47816 300 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47816 LW_ROUNDS_TO_WIN=2
+    LW_NET_ROLE=host LW_SYNC_OUT="$0.host" timeout 170 godot --headless --path . -- --autotest=script:res://tests/sync_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest LW_SYNC_OUT="$0.guest" timeout 170 godot --headless --path . -- --autotest=script:res://tests/sync_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- as each saw it:"; cat "$0.host" "$0.guest"
+    [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest"' "$LOGS/sync_host.txt"
+  # tests/resume_check.gd: an online 1 vs 1 whose guest process is killed in a fight and started again (run 1 at
+  # once: it rejoins the same match, which both end alike; run 2 after the grace: the normal lobby, nothing counted
+  # twice). Mock port 47824; host and guest keep their own data folders (the guest's survives its restart).
+  step resume bash -c 'timeout 420 godot --headless -s res://tests/mqtt_mock.gd -- 47824 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47824 LW_ROUNDS_TO_WIN=2 LW_AWAY_GRACE_MS=20000; ok=0; d="$XDG_DATA_HOME"
+    for n in 1 2; do
+      XDG_DATA_HOME="$d/rh$n" LW_RESUME_RUN=$n LW_NET_ROLE=host timeout 180 godot --headless --path . -- --autotest=script:res://tests/resume_check.gd > "$0.h$n" 2>&1 &
+      h=$!
+      XDG_DATA_HOME="$d/rg$n" LW_RESUME_RUN=$n LW_RESUME_PART=1 LW_NET_ROLE=guest timeout 120 godot --headless --path . -- --autotest=script:res://tests/resume_check.gd > "$0.g$n" 2>&1
+      grep -q "RESUME PART 1 DONE bad=0" "$0.g$n" || ok=1
+      if [ $n = 2 ]; then sleep 24; else sleep 4; fi      # (the player opens the app again: in time, or after the grace)
+      XDG_DATA_HOME="$d/rg$n" LW_RESUME_RUN=$n LW_RESUME_PART=2 LW_NET_ROLE=guest timeout 120 godot --headless --path . -- --autotest=script:res://tests/resume_check.gd; g=$?
+      wait $h; r=$?
+      echo "--- run $n, the host:"; cat "$0.h$n"; echo "--- run $n, the guest before its restart:"; cat "$0.g$n"
+      if [ $g -ne 0 ] || [ $r -ne 0 ]; then ok=1; fi
+    done; kill $m 2>/dev/null; [ $ok -eq 0 ]' "$LOGS/resume.txt"
+  # --- DUO / SQUAD: WP-B1's steps (team_lobby) go right below this line ---
+  step team_lobby env LW_FILL_S=3 LW_MQTT_URL=ws://127.0.0.1:9 godot --headless --path . -- --autotest=script:res://tests/team_lobby_check.gd
+  # GROUPS and the CUSTOM ROOM with slots in the lobby: one copy, a group put in Cloud by the check, nothing leaves the machine
+  step group_lobby env LW_MQTT_URL=ws://127.0.0.1:9 godot --headless --path . -- --autotest=script:res://tests/group_lobby_check.gd
+
+  # --- DUO / SQUAD: WP-B2's steps (none planned) go right below this line ---
+
+  # --- DUO / SQUAD: WP-C's steps (team_offline) go right below this line ---
+  # TRAINING SQUAD scripted through knocks, a revive, spectating and a team wipe; a DUO played by the bots to its end
+  step team_offline timeout 170 godot --headless --path . -- --autotest=script:res://tests/team_offline_check.gd
+
+  # --- DUO / SQUAD: WP-N's steps (team_online: two copies, mock port 47820) go right below this line ---
+  # tests/team_online_check.gd: a TEAM INVITE (coop DUO vs bots), PLAY AGAIN TOGETHER from its results,
+  # and a random DUO between two copies; both copies' first result tables must match, and every
+  # state one sent through the relay the other took.
+  step team_online bash -c 'timeout 260 godot --headless -s res://tests/mqtt_mock.gd -- 47820 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47820 LW_FILL_S=3
+    LW_NET_ROLE=host LW_TEAM_OUT="$0.host" timeout 230 godot --headless --path . -- --autotest=script:res://tests/team_online_check.gd > "$0" 2>&1 &
+    h=$!; LW_NET_ROLE=guest LW_TEAM_OUT="$0.guest" timeout 230 godot --headless --path . -- --autotest=script:res://tests/team_online_check.gd; g=$?
+    wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; echo "--- tables:"; cat "$0.host" "$0.guest"
+    read -r ho hi < "$0.host.st"; read -r go gi < "$0.guest.st"
+    echo "relay states: host sent $ho, guest took $gi; guest sent $go, host took $hi"
+    [ $g -eq 0 ] && [ $r -eq 0 ] && [ -s "$0.host" ] && cmp -s "$0.host" "$0.guest" && [ -n "$ho" ] && [ "$ho" = "$gi" ] && [ "$go" = "$hi" ]' "$LOGS/team_online_host.txt"
+
+  # --- DUO / SQUAD: the integration's steps (team_invite_e2e, mock port 47822) go right below this line ---
+
+  # tests/team_resume_check.gd: an all-human DUO with four copies (host, m1, m2, m3) joined by a custom room's code.
+  # The host goes away (a stand-in decides its fighter, the host adopts it); then the member with the highest id,
+  # and after it the host, is killed and started again into the same match; all four end alike. Mock port 47826; each copy keeps its own
+  # data folder, and the one whose part 1 ends with the kill is started again with LW_RESUME_PART=2.
+  step team_resume bash -c 'timeout 330 godot --headless -s res://tests/mqtt_mock.gd -- 47826 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47826 LW_ROUNDS_TO_WIN=1 LW_AWAY_GRACE_MS=40000; d="$XDG_DATA_HOME"; o="$0"
+    copy() {
+      XDG_DATA_HOME="$d/$1" LW_NET_ROLE=$1 LW_RESUME_PART=1 timeout 240 godot --headless --path . -- --autotest=script:res://tests/team_resume_check.gd > "$o.$1" 2>&1
+      local c=$?
+      if grep -q "TEAM RESUME PART 1 DONE bad=0" "$o.$1"; then
+        sleep 3                      # (the player opens the app again)
+        XDG_DATA_HOME="$d/$1" LW_NET_ROLE=$1 LW_RESUME_PART=2 timeout 150 godot --headless --path . -- --autotest=script:res://tests/team_resume_check.gd > "$o.$1.again" 2>&1
+        c=$?
+      fi
+      return $c
+    }
+    copy host & a=$!; sleep 1; copy m1 & b=$!; copy m2 & c=$!; copy m3; e=$?
+    wait $a; ra=$?; wait $b; rb=$?; wait $c; rc=$?; kill $m 2>/dev/null
+    for r in host m1 m2 m3; do echo "--- $r:"; cat "$o.$r"; if [ -f "$o.$r.again" ]; then echo "--- $r after its restart:"; cat "$o.$r.again"; fi; done
+    [ $ra -eq 0 ] && [ $rb -eq 0 ] && [ $rc -eq 0 ] && [ $e -eq 0 ] && [ "$(ls "$o".*.again 2>/dev/null | wc -l)" -eq 2 ]' "$LOGS/team_resume.txt"
+  # tests/team_direct_check.gd: an all-human DUO with four copies (host, m1, m2, m3) and LW_DIRECT=local: each copy's
+  # 3 direct pairs come up and carry the states, TEAM chat reaches only the sender's teammate and ALL everyone, m3's
+  # pairs cut fall back to the relay at once, and all four end alike (the same RESULT line). Mock port 47836.
+  step team_direct bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47836 > /dev/null 2>&1 & m=$!
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47836 LW_ROUNDS_TO_WIN=1 LW_DIRECT=local; d="$XDG_DATA_HOME"; o="$0"
+    copy() { XDG_DATA_HOME="$d/$1" LW_NET_ROLE=$1 timeout 170 godot --headless --path . -- --autotest=script:res://tests/team_direct_check.gd > "$o.$1" 2>&1; }
+    copy host & a=$!; sleep 1; copy m1 & b=$!; copy m2 & c=$!; copy m3; e=$?
+    wait $a; ra=$?; wait $b; rb=$?; wait $c; rc=$?; kill $m 2>/dev/null
+    for r in host m1 m2 m3; do echo "--- $r:"; cat "$o.$r"; done
+    n=$(cat "$o".host "$o".m1 "$o".m2 "$o".m3 | grep -o "RESULT .*" | sort -u | wc -l)
+    [ $ra -eq 0 ] && [ $rb -eq 0 ] && [ $rc -eq 0 ] && [ $e -eq 0 ] && [ "$n" -eq 1 ]' "$LOGS/team_direct.txt"
 fi
 # A script error anywhere fails the run even when the check itself exited 0.
 if grep -l "SCRIPT ERROR" "$LOGS"/*.log >/dev/null 2>&1; then

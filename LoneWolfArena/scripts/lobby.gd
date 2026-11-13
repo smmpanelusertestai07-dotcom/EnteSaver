@@ -1,15 +1,44 @@
+class_name Lobby
 extends Node3D
 ## Lobby: our character large on a lit hexagonal podium in a container yard at sunset (cheap
-## 3D: a few boxes and props, fog, one shadowed light); drag on the character to turn it.
-## UI in the battle-royale lobby layout (original art): player card (avatar, name + EDIT, level,
-## XP line) and an offline coin strip top-left, logo + glyph buttons top-right, a text menu on
-## the left (PRACTICE, PLAY WITH FRIENDS, BUNDLES, CUSTOM HUD, SETTINGS, HOW TO PLAY), the mode card
-## "LONE WOLF / CARGO CAGE" with difficulty chips, match stats and the big START bottom-right.
-## BUNDLES opens the wardrobe (vault-like: rarity tabs, item cards with rarity glow and bar,
-## preview on the podium, EQUIP / BACK). START shows the match loading overlay
-## (Loading.start_match) and then enters the arena.
-## Node names used by the screenshot walkthrough: StartButton, SettingsButton, BundlesButton,
-## Bundle_<id>, EquipButton.
+## 3D: a few boxes and props, fog, one shadowed light), in the middle; drag on it to turn it.
+## UI in the reference lobby's layout (original art, nothing to buy: no currency, no store):
+## the player card (profile picture, name + EDIT, level, XP line: a tap opens PROFILE) top-left;
+## the logo, the ping chip, FRIENDS and the settings gear top-right; the bar of main buttons
+## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
+## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
+## the opponent and the team size SOLO / DUO / SQUAD are picked too; the figure at its right end
+## opens the TEAM panel above it: the group code, JOIN BY CODE, FILL EMPTY PLACES and the size
+## tiles, LobbyDialogs.open_size_box) and the big START. START plays
+## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
+## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
+## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
+## scripts/net_match.gd; DUO / SQUAD: Cloud.group_start, real players only, design/GROUPS.txt; in a
+## group of two, SOLO is a DUEL between the two: start_duel). A search has no popup: the search tab
+## (SearchTab, scripts/lobby_search.gd) drops from the top centre with the time searched and a
+## cancel X, START turns into the greyed MATCHING... plate, and the lobby stays usable (a tap on the
+## mode card says CANCEL THE SEARCH FIRST; the match found closes whatever window is open). In
+## LONE WOLF the right-hand social panel (LobbySocial) invites online friends into a group of up to
+## 4; in a group the TEAM bar under the player card (LobbyTeam, scripts/lobby_team.gd) opens the
+## TEAM panel; the hero steps left and the other members stand to its right, smaller, with name
+## plates and a LEADER mark (show_group_members); only the leader's START works (a member
+## sees GroupWaitLeader "WAITING FOR <LEADER> TO START" in its place). WARDROBE opens the outfit picker
+## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
+## are in SETTINGS (the gear).
+## This file has the 3D stage, the top bar, the bottom bar, the mode card, START, the settings
+## panel and input. Four parts have their own files: helpers the lobby makes, which build under
+## `ui` and reach back through their `lobby`: LobbyDialogs (`dialogs`: the popup frame, SELECT
+## MODE with the opponent chips, the name editor, the quit dialog), LobbyFriends (`friends`:
+## ONLINE 1 VS 1, FRIENDS, custom rooms, the net signals), LobbyWardrobe (`wardrobe_ui`: WARDROBE),
+## LobbyProfile (`profile_ui`: PROFILE and another player's card) and LobbyTeam (`team`: the TEAM
+## bar and its invites).
+## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard (with
+## SizeBoxButton), BottomBar,
+## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
+## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader, MatchingPlate, SearchLayer
+## with SearchTab (SearchLine, SearchTimer, SearchPlayers, SearchCancel); 3D: GroupMembers with
+## GroupModel_<1..3> (CharacterModel), each with NamePlate and, on the leader, LeaderMark (data: the
+## 2D plates HeroPlate and MemberPlate_<1..3>, scripts/lobby_plate.gd, show them under the feet).
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -21,59 +50,105 @@ const CAM_WARD_DIST := 3.75
 const CAM_WARD_Y := 1.0
 const CAM_WARD_LOOK_Y := 1.13
 const CAM_FOV := 38.0
-const HERO_X := 0.41
+const HERO_X := 0.5
 const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
-const RARITY_ORDER := ["legendary", "epic", "rare", "common"]
-const CARD_SIZE := Vector2(168, 222)
+## The group's other members (GROUPS.txt 1, the reference's team lobby): with members in the group
+## the hero stands further left on the screen (HERO_X_GROUP, the camera moves) and the members stand
+## to its right, a little smaller: the first on the podium's right edge, the next two behind on the
+## floor, further right (clear of the mode card); each turned a little toward the middle. Nothing
+## stands under the hero (the voice's pill goes there) and there is no "+" plate on the podium.
+const MEMBER_SCALE := 0.86
+const MEMBER_SPOTS := [Vector3(0.76, PODIUM_TOP, -0.38), Vector3(1.5, 0.0, -1.45), Vector3(2.2, 0.0, -2.1)]
+const MEMBER_YAWS := [PI - 0.42, PI - 0.55, PI - 0.66]
+const HERO_X_GROUP := 0.40
 const SKYLINE := "res://assets/ui/lobby_skyline.png"
+## The art each mode shows (mode card, SELECT MODE): [texture, the part of it to show]. LONE
+## WOLF is the two fighters facing off, TRAINING GROUND our hero aiming at a far-off target.
+const MODE_ART := {
+	"training": ["keyart_clean.jpg", Rect2(380, 150, 1320, 660)],
+	"lonewolf": ["mode_lonewolf.jpg", Rect2(0, 30, 640, 320)],
+}
 
 var model: CharacterModel
 var camera: Camera3D
 var ui: CanvasLayer
 var start_btn: Button
-var _net_kind := "online"
-var _net_list: VBoxContainer
-var _net_status: Label
-var _net_sig := ""
-var _net_note := ""
-var _net_refresh_t := 0.0
-var _friend_query := ""                # FRIENDS tab search (an ID or a name)
-var _room_rules := Cloud.ROOM_RULES.duplicate()     # the next custom room's rules
-var _room_pin_draft := ""              # the password typed before a rule button rebuilt the tab
-var _room_join_code := ""              # the room this phone asked to join (for its status line)
-var wardrobe: Control
+## The mode card above START (node ModeCard: opens SELECT MODE) and what follows the mode.
+var mode_card: Button
+var _mode_label: Label
+var _mode_sub: Label
+## The lobby's parts in their own files (see above).
+var dialogs := LobbyDialogs.new(self)
+var friends := LobbyFriends.new(self)
+var wardrobe_ui := LobbyWardrobe.new(self)
+var profile_ui := LobbyProfile.new(self)
+var team := LobbyTeam.new(self)
+var social := LobbySocial.new(self)       # the right-hand social panel and its arrow tab (scripts/lobby_social.gd)
+## The open popup, the wardrobe layer while it is open and the outfit it previews: the parts keep
+## them, the screenshot tours read them here.
+var _modal: Control:
+	get:
+		return dialogs.modal
+var wardrobe: Control:
+	get:
+		return wardrobe_ui.layer
+@warning_ignore("unused_private_class_variable")
+var _preview_bundle: String:
+	get:
+		return wardrobe_ui.preview_bundle
 var _main_ui: Control
-var _preview_bundle := ""
 var _drag_index := -1
 var _idle_t := 0.0
+## The hero's turn by a drag, kept while the game runs (the reference keeps the view's angle when
+## you come back from a match); it does not swing back by itself.
+static var hero_yaw := MODEL_YAW
 var _name_label: Label
-var _bundle_label: Label
-var _name_plate: Control
-var _plate_label: Label
+var _avatar_view: Control
 var _time := 0.0
 var _cam_t := 1.0
 var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_from_look := Vector3(0, CAM_LOOK_Y, 0)
 var _cam_to_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_to_look := Vector3(0, CAM_LOOK_Y, 0)
-## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME.
-const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X],
+## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME. MEDIUM (what AUTO picks on most phones) keeps
+## 2x MSAA: the stage is static and light (~150 draw calls) and without it the hero's outline
+## shows jagged steps on a phone; LOW has no MSAA but gets FXAA (_apply_quality).
+const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X], [1.0, Viewport.MSAA_2X],
 	[1.0, Viewport.MSAA_4X]]
 
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
-var _modal: Control
-var _ward_grid: GridContainer
-var _ward_filter := "all"
-var _ward_info_name: Label
-var _ward_info_rarity: Label
-var _ward_info_desc: Label
-var _ward_equip: Button
-var _ward_tabs := {}
+var _vp_ssaa := Viewport.SCREEN_SPACE_AA_DISABLED
+## The group's other members on the podium: the node GroupMembers, id -> CharacterModel, id -> spot.
+var group_view: Node3D
+var _member_models := {}
+var _member_slot := {}
+## The 2D name plates (scripts/lobby_plate.gd): the hero's and, by member id, the members'.
+var _hero_plate: LobbyPlate
+var _member_plates := {}
+## ADD (AddFriendButton): hidden while the team-size box covers its place.
+var _add_btn: Button
+var _group_gid := ""
+## In START's place for a member: WAITING FOR <LEADER> TO START (or the group's search).
+var _wait_leader: PanelContainer
+var _wait_label: Label
+var _gate_t := 0.0
+var _gate_member := false
+var _gate_leader_name := ""
+## The search tab (SearchTab, scripts/lobby_search.gd) on its own layer over the lobby's windows,
+## and the plate that stands in START's place while a search runs.
+var search_tab: SearchTab
+var _search_layer: CanvasLayer
+var _matching: Button
+var _search_was := ""
+## The member the leader's DUEL challenge went to (start_duel), "" when none waits: MATCHING...
+## stands in START's place until the match loads, or a notice says why not.
+var _duel_with := ""
 
 
 func _ready() -> void:
+	Game.team_match = {}             # a team match is set up by START or a team invite, never left over
 	_build_stage()
 	_build_ui()
 	if not bool(Game.profile.get("name_set", false)):
@@ -85,18 +160,33 @@ func _ready() -> void:
 	get_tree().process_frame.connect(_mark_start, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	Game.settings_changed.connect(_apply_quality)
-	_connect_net(Game.lan_service())
-	_connect_net(Game.cloud_service())
-	Game.lan.start_discovery()
+	# The net services' signals; online presence starts with the lobby.
+	friends.on_lobby_ready()
 
 
-## 3D resolution and anti-aliasing by the graphics setting. The stage (about 150-170 draw calls)
-## is a little lighter than the arena, so each level gets a bit more than in a match.
+## The graphics setting on the stage, at build and again on every change (settings_changed): 3D
+## resolution and anti-aliasing (the stage, about 150-170 draw calls, is a little lighter than the
+## arena, so each level gets a bit more than in a match), and from MEDIUM up the glow, the key
+## light's shadow and the dust motes (CPU-simulated: LOW and VISUAL EFFECTS off drop them). The
+## stage's PerfGovernor only measures the phone for AUTO graphics (no dynamic resolution here).
 func _apply_quality() -> void:
-	var q: Array = STAGE_QUALITY[clampi(int(Game.settings.graphics), 0, STAGE_QUALITY.size() - 1)]
+	var g := clampi(int(Game.settings.graphics), 0, STAGE_QUALITY.size() - 1)
+	var q: Array = STAGE_QUALITY[g]
 	var vp := get_viewport()
 	vp.scaling_3d_scale = float(q[0])
 	vp.msaa_3d = int(q[1]) as Viewport.MSAA
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if g == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
+	var stage_env := get_node_or_null(^"StageEnv") as WorldEnvironment
+	if stage_env:
+		stage_env.environment.glow_enabled = g >= 1
+	var key_light := get_node_or_null(^"KeyLight") as Light3D
+	if key_light:
+		key_light.shadow_enabled = g >= 1
+	var motes := get_node_or_null(^"Motes") as CPUParticles3D
+	if motes:
+		motes.visible = g >= 1 and bool(Game.settings.visual_effects)
+		motes.emitting = motes.visible
+	PerfGovernor.attach(self, float(q[0]), false)
 
 
 func _mark_start() -> void:
@@ -104,22 +194,14 @@ func _mark_start() -> void:
 
 
 func _exit_tree() -> void:
-	for svc: Node in [Game.lan, Game.cloud]:
-		if svc:
-			_disconnect_net(svc)
-			svc.cancel_invite()
-	if Game.lan:
-		Game.lan.stop_discovery()
-	if Game.cloud:
-		if not Game.cloud.in_session:
-			Game.cloud.close_room()
-			Game.cloud.leave_join()
-		Game.cloud.stop_lobby()
+	friends.on_lobby_exit()
+	profile_ui.on_lobby_exit()
 	# the arena sets its own anti-aliasing and 3D scale; hand the viewport back as it was
 	var vp := get_viewport()
 	if vp:
 		vp.msaa_3d = _vp_msaa
 		vp.scaling_3d_scale = _vp_scale
+		vp.screen_space_aa = _vp_ssaa
 
 
 ## Camera x that puts the character (at x = 0) at `frac` of the screen width on this aspect
@@ -130,8 +212,13 @@ func _cam_x(frac: float, dist: float) -> float:
 	return -(frac - 0.5) * 2.0 * tan(deg_to_rad(CAM_FOV * 0.5)) * aspect * dist
 
 
+## Where the hero stands on the screen: HERO_X alone, HERO_X_GROUP with group members beside it.
+func hero_x() -> float:
+	return HERO_X_GROUP if not _member_models.is_empty() else HERO_X
+
+
 func _main_view() -> Array:
-	var x := _cam_x(HERO_X, CAM_DIST)
+	var x := _cam_x(hero_x(), CAM_DIST)
 	return [Vector3(x, CAM_Y, CAM_DIST), Vector3(x, CAM_LOOK_Y, 0.0)]
 
 
@@ -154,12 +241,12 @@ func _on_viewport_resized() -> void:
 # ---------------------------------------------------------------- 3D stage
 
 func _build_stage() -> void:
-	var hi := int(Game.settings.graphics) >= 1
 	var vp := get_viewport()
 	_vp_msaa = vp.msaa_3d
+	_vp_ssaa = vp.screen_space_aa
 	_vp_scale = vp.scaling_3d_scale
-	_apply_quality()
 	var env := WorldEnvironment.new()
+	env.name = "StageEnv"
 	var e := Environment.new()
 	e.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
@@ -180,8 +267,7 @@ func _build_stage() -> void:
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.tonemap_exposure = 0.95
 	e.tonemap_white = 4.0                 # roll off highlights (white outfits) instead of clipping
-	e.glow_enabled = hi
-	e.glow_intensity = 0.55
+	e.glow_intensity = 0.55               # glow on from MEDIUM (_apply_quality)
 	e.glow_bloom = 0.06
 	e.glow_hdr_threshold = 1.0
 	e.fog_enabled = true
@@ -227,19 +313,23 @@ func _build_stage() -> void:
 	model = CharacterModel.new()
 	add_child(model)
 	model.position = Vector3(0, PODIUM_TOP, 0)
-	model.rotation.y = MODEL_YAW
+	model.rotation.y = hero_yaw
 	model.setup(String(Game.profile.bundle), false)
-	model.play_lobby()
+	model.pose_choice = String(Game.profile.lobby_pose)    # WARDROBE > LOBBY POSE ("" = random)
+	model.play_lobby(true)          # the hero also cheers now and then
+	group_view = Node3D.new()
+	group_view.name = "GroupMembers"
+	add_child(group_view)
 	# Lights: warm key from the side with the only shadow (a gradient across the body), cool +
 	# warm rims, soft fill.
 	var key := SpotLight3D.new()
+	key.name = "KeyLight"                 # its shadow from MEDIUM (_apply_quality)
 	key.position = Vector3(3.1, 4.0, 2.7)
 	key.light_energy = 2.5
 	key.spot_range = 12.0
 	key.spot_angle = 28.0
 	key.spot_attenuation = 0.8
 	key.light_color = Color(1.0, 0.9, 0.8)
-	key.shadow_enabled = hi
 	add_child(key)
 	key.look_at(Vector3(0, 1.0, 0))
 	var rim := SpotLight3D.new()
@@ -275,6 +365,7 @@ func _build_stage() -> void:
 	camera.position = view[0]
 	camera.look_at(view[1])
 	camera.current = true
+	_apply_quality()
 
 
 func _unshaded(c: Color, additive := false, tex: Texture2D = null) -> StandardMaterial3D:
@@ -519,25 +610,42 @@ func _build_ui() -> void:
 	UI.full_rect(_main_ui)
 	_main_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_main_ui)
+	UI.keep_clear_of_cutout(_main_ui)          # the menus, cards and START stay out of a camera cutout
 	var root := _main_ui
 	# soft vignette so text reads over the 3D
 	var top := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.5)], [0.16, Color(0, 0, 0, 0.0)], [0.8, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.55)]])
 	UI.full_rect(top)
 	root.add_child(top)
-	var left := UI.gradient_rect([[0.0, Color(0, 0, 0, 0.45)], [0.25, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
-	UI.full_rect(left)
-	root.add_child(left)
 	_build_top_bar(root)
-	_build_feature_card(root)
-	_build_left_menu(root)
 	_build_right_column(root)
-	_build_bottom_left(root)
-	_build_name_plate(root)
+	_build_bottom_bar(root)
+	_build_chat_strip(root)
+	_build_add_button(root)
+	team.build(root)
+	social.build(root)
+	_hero_plate = LobbyPlate.make(self, null, true)    # the anchor: the hero, set with the stage
+	_hero_plate.name = "HeroPlate"
+	root.add_child(_hero_plate)
+	VoiceButtons.lobby_pill(self, root)        # [mic | speaker] under the character (scripts/voice_buttons.gd)
+	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
+	# so the search stays in sight and its X in reach while the player looks around.
+	_search_layer = CanvasLayer.new()
+	_search_layer.name = "SearchLayer"
+	_search_layer.layer = ui.layer + 1
+	add_child(_search_layer)
+	var holder := Control.new()
+	UI.full_rect(holder)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_search_layer.add_child(holder)
+	UI.keep_clear_of_cutout(holder)
+	search_tab = SearchTab.new()
+	holder.add_child(search_tab)
 
 
 func _build_top_bar(root: Control) -> void:
-	# Player card: avatar with level badge, name + EDIT, level and a thin XP line. The whole card
-	# is a button that opens the name editor (a big touch target); the pencil does the same.
+	# Player card: profile picture with level badge, name + EDIT, level and a thin XP line. The
+	# whole card is a button that opens PROFILE (a big touch target); the pencil opens the name
+	# editor.
 	var card := Button.new()
 	card.name = "PlayerCard"
 	card.position = Vector2(0, 0)
@@ -555,7 +663,7 @@ func _build_top_bar(root: Control) -> void:
 	card.button_up.connect(card.queue_redraw)
 	card.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
-		_edit_name())
+		_open_profile())
 	root.add_child(card)
 	var av := Panel.new()
 	av.position = Vector2(8, 5)
@@ -563,17 +671,16 @@ func _build_top_bar(root: Control) -> void:
 	av.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	av.add_theme_stylebox_override("panel", UI.box(Color(0.1, 0.1, 0.12), 0, 2, UI.ACCENT, 0.0))
 	card.add_child(av)
-	var em := UI.texture("emblem.png")
-	if em:
-		var t := TextureRect.new()
-		t.texture = em
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		t.position = Vector2(3, 3)
-		t.size = Vector2(46, 46)
-		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		av.add_child(t)
+	# the profile picture PROFILE's NAME CARD picks (the emblem by default)
+	_avatar_view = Control.new()
+	_avatar_view.name = "PlayerAvatar"
+	_avatar_view.position = Vector2(3, 3)
+	_avatar_view.size = Vector2(46, 46)
+	_avatar_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_avatar_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_avatar_view.draw.connect(func() -> void:
+		LobbyProfile.draw_avatar(_avatar_view, String(Game.profile.avatar), Rect2(Vector2.ZERO, _avatar_view.size)))
+	av.add_child(_avatar_view)
 	var lvb := PanelContainer.new()
 	lvb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lvb.add_theme_stylebox_override("panel", UI.box(UI.ACCENT, 0, 0, Color.TRANSPARENT, 3.0))
@@ -589,9 +696,11 @@ func _build_top_bar(root: Control) -> void:
 	_name_label.position = Vector2(72, 4)
 	_name_label.size = Vector2(166, 30)
 	card.add_child(_name_label)
-	var edit := _pencil_button()
+	# The pencil: a 56 px touch target (a near miss would open PROFILE instead) around a plate that
+	# fits next to the name.
+	var edit := _pencil_button(Vector2(44, 38))
 	edit.name = "EditName"
-	edit.position = Vector2(244, 4)
+	edit.position = Vector2(238, 0)
 	edit.pressed.connect(_edit_name)
 	card.add_child(edit)
 	var lv_txt := UI.label("LV %d" % Game.level(), 14, UI.ACCENT, "bold")
@@ -607,41 +716,6 @@ func _build_top_bar(root: Control) -> void:
 		xp.draw_rect(Rect2(Vector2.ZERO, xp.size), Color(1, 1, 1, 0.15))
 		xp.draw_rect(Rect2(Vector2.ZERO, Vector2(xp.size.x * Game.level_progress(), xp.size.y)), UI.ACCENT))
 	card.add_child(xp)
-	# Coin strip with a slanted end (offline, cosmetic).
-	var strip := Control.new()
-	strip.position = Vector2(292, 0)
-	strip.size = Vector2(330, 46)
-	strip.draw.connect(func() -> void:
-		var s := strip.size
-		strip.draw_colored_polygon(PackedVector2Array([Vector2(14, 0), Vector2(s.x, 0), Vector2(s.x - 22, s.y), Vector2(0, s.y)]), Color(0.16, 0.18, 0.22, 0.72))
-		strip.draw_line(Vector2(s.x, 0), Vector2(s.x - 22, s.y), Color(1, 1, 1, 0.25), 1.5, true))
-	root.add_child(strip)
-	var sh := HBoxContainer.new()
-	sh.position = Vector2(26, 5)
-	sh.add_theme_constant_override("separation", 8)
-	strip.add_child(sh)
-	sh.add_child(UI.icon("v_coin", 30, Color(1.0, 0.82, 0.25)))
-	var coins := UI.label(_fmt_thousands(_coins()), 26, UI.TEXT, "number")
-	coins.name = "Coins"
-	sh.add_child(coins)
-	sh.add_child(UI.spacer(0))
-	var div := ColorRect.new()
-	div.color = Color(1, 1, 1, 0.18)
-	div.custom_minimum_size = Vector2(1, 28)
-	div.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	sh.add_child(div)
-	sh.add_child(UI.icon("v_trophy", 26, UI.TEXT))
-	var wins := UI.label("%d WINS" % int(Game.profile.wins), 20, UI.TEXT, "bold")
-	wins.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	wins.custom_minimum_size = Vector2(0, 34)
-	sh.add_child(wins)
-	var off := PanelContainer.new()
-	off.add_theme_stylebox_override("panel", UI.chamfer(Color(UI.ACCENT, 0.18), 4, 1, Color(UI.ACCENT, 0.6), 6.0, ["br"]))
-	off.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	off.add_child(UI.label("OFFLINE", 13, UI.ACCENT, "bold"))
-	sh.add_child(off)
-	# A long-time player's numbers widen the row: the slanted strip grows with it.
-	strip.size.x = maxf(330.0, sh.position.x + sh.get_combined_minimum_size().x + 34.0)
 	# Logo wordmark centred at about 0.75 W (the reference's place), glyph buttons top-right.
 	var lg := UI.texture("logo.png")
 	if lg:
@@ -662,33 +736,48 @@ func _build_top_bar(root: Control) -> void:
 		root.add_child(lr)
 	var top_right := HBoxContainer.new()
 	top_right.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	top_right.offset_left = -200
-	top_right.offset_right = -10
+	top_right.offset_left = -220
+	top_right.offset_right = -6
 	top_right.offset_top = 6
-	top_right.offset_bottom = 56
+	top_right.offset_bottom = 6 + UI.TOUCH_MIN
 	top_right.alignment = BoxContainer.ALIGNMENT_END
 	top_right.add_theme_constant_override("separation", 8)
 	root.add_child(top_right)
-	var info := UI.glyph_button("v_info", 46, "?")
-	info.name = "HelpButton"
-	info.pressed.connect(_how_to_play)
-	top_right.add_child(info)
-	var gear := UI.glyph_button("v_settings", 46, "SET")
+	# FRIENDS (the FRIENDS tab of the ONLINE window; the unread badge sits on it) and the gear.
+	var pals := UI.glyph_button("v_friends", UI.TOUCH_MIN, "FR")
+	pals.name = "FriendsButton"
+	pals.pressed.connect(_open_friends.bind("friends"))
+	top_right.add_child(pals)
+	var gear := UI.glyph_button("v_settings", UI.TOUCH_MIN, "SET")
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
 	top_right.add_child(gear)
+	top_right.add_child(NetPing.lobby_chip())   # the round trip to the relay, rightmost (scripts/net_ping.gd)
 
 
-func _pencil_button() -> Button:
+## The pencil (EDIT) button: a 56 px touch target (the 720 px canvas) with its plate drawn in the
+## middle, `plate` px (all of it by default; smaller where there is no room for a 56 px plate).
+func _pencil_button(plate := Vector2(56, 56)) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(44, 38)
-	b.size = Vector2(44, 38)
+	b.custom_minimum_size = Vector2(56, 56)
+	b.size = Vector2(56, 56)
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_stylebox_override("normal", UI.chamfer(Color(1, 1, 1, 0.08), 4, 1, Color(1, 1, 1, 0.25), 0.0, ["br"]))
-	b.add_theme_stylebox_override("hover", UI.chamfer(Color(1, 1, 1, 0.16), 4, 1, Color(1, 1, 1, 0.4), 0.0, ["br"]))
-	b.add_theme_stylebox_override("pressed", UI.chamfer(Color(UI.ACCENT, 0.4), 4, 1, UI.ACCENT, 0.0, ["br"]))
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var looks := {
+		"normal": UI.chamfer(Color(1, 1, 1, 0.08), 4, 1, Color(1, 1, 1, 0.25), 0.0, ["br"]),
+		"hover": UI.chamfer(Color(1, 1, 1, 0.16), 4, 1, Color(1, 1, 1, 0.4), 0.0, ["br"]),
+		"pressed": UI.chamfer(Color(UI.ACCENT, 0.4), 4, 1, UI.ACCENT, 0.0, ["br"]),
+	}
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	b.draw.connect(func() -> void:
+		var mode := b.get_draw_mode()
+		var look: StyleBox = looks.normal
+		if mode == BaseButton.DRAW_PRESSED or mode == BaseButton.DRAW_HOVER_PRESSED:
+			look = looks.pressed
+		elif mode == BaseButton.DRAW_HOVER:
+			look = looks.hover
+		var ps := plate.min(b.size)
+		look.draw(b.get_canvas_item(), Rect2(((b.size - ps) * 0.5).round(), ps))
 		var c := b.size * 0.5
 		var d := Vector2(1, -1).normalized()
 		var n := Vector2(1, 1).normalized()
@@ -701,115 +790,230 @@ func _pencil_button() -> Button:
 	return b
 
 
-func _coins() -> int:
-	return 500 + int(Game.profile.wins) * 120 + int(Game.profile.kills) * 15 + int(Game.profile.matches) * 25
+## The bar of main buttons bottom-left, as the reference lobby's: WARDROBE and ONLINE 1 VS 1, a
+## glyph and a caption each with a thin divider between, on a dark translucent strip.
+func _build_bottom_bar(root: Control) -> void:
+	var bar := PanelContainer.new()
+	bar.name = "BottomBar"
+	var st := UI.chamfer(Color(0.02, 0.02, 0.025, 0.62), 12, 1, Color(1, 1, 1, 0.14), 0.0, ["tr"])
+	st.content_margin_left = 6
+	st.content_margin_right = 16
+	bar.add_theme_stylebox_override("panel", st)
+	bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE)
+	bar.offset_left = 12
+	bar.offset_bottom = -12
+	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	root.add_child(bar)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	bar.add_child(row)
+	var items := [
+		["WARDROBE", "v_wardrobe", "BundlesButton", _open_wardrobe],
+		["PROFILE", "v_profile", "ProfileButton", _open_profile],
+		["ONLINE 1 VS 1", "v_online", "OnlineButton", _open_friends.bind("online")],
+	]
+	for i in items.size():
+		if i > 0:
+			var line := ColorRect.new()
+			line.color = Color(1, 1, 1, 0.22)
+			line.custom_minimum_size = Vector2(1, 26)
+			line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(line)
+		var it: Array = items[i]
+		row.add_child(_bar_button(String(it[0]), String(it[1]), String(it[2]), it[3]))
 
 
-func _fmt_thousands(n: int) -> String:
-	var s := str(n)
-	var out := ""
-	while s.length() > 3:
-		out = "," + s.substr(s.length() - 3) + out
-		s = s.substr(0, s.length() - 3)
-	return s + out
+## The chat strip's full width, and the room it leaves for the voice's mic / speaker pill, which
+## is centred under the hero's feet (half the pill's width and a gap, VOICE_PLACE_LEFT).
+const CHAT_W := 470.0
+const VOICE_PLACE_LEFT := 66.0
 
 
-## Featured card above the menu: the duel art with the mode pitch (opens HOW TO PLAY).
-func _build_feature_card(root: Control) -> void:
-	var tex := UI.texture("mode_lonewolf.jpg")
+## The chat strip above the bottom bar (the reference's chat icons and one-line ticker): a speech
+## bubble button (ChatButton) and the newest friend message as "[FRIEND] NAME: text" (ChatTicker,
+## "[FRIENDS] TAP TO CHAT WITH A FRIEND" when there is none); a tap opens the chat panel with that
+## friend, or FRIENDS when there is nobody to chat with yet. Its width: chat_strip_width().
+func _build_chat_strip(root: Control) -> void:
+	var strip := Button.new()
+	strip.name = "ChatStrip"
+	strip.focus_mode = Control.FOCUS_NONE
+	strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	strip.offset_left = 12
+	strip.offset_right = 12 + CHAT_W
+	strip.offset_top = -12 - UI.TOUCH_MIN - 8 - UI.TOUCH_MIN      # a full 56 px touch target
+	strip.offset_bottom = -12 - UI.TOUCH_MIN - 8
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		strip.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var ticker := UI.ellipsis(UI.label("", 17, UI.TEXT, "semi"))
+	ticker.name = "ChatTicker"
+	UI.outlined(ticker, 3, Color(0, 0, 0, 0.6))
+	ticker.position = Vector2(62, 0)
+	ticker.size = Vector2(CHAT_W - 66.0, UI.TOUCH_MIN)
+	ticker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	strip.add_child(ticker)
+	strip.draw.connect(func() -> void:
+		var hot := strip.is_pressed()
+		var r := Rect2(0, (strip.size.y - 44.0) * 0.5, 52, 44)     # the icon square, centred
+		strip.draw_rect(r, Color(0, 0, 0, 0.62) if not hot else Color(UI.ACCENT, 0.35))
+		strip.draw_rect(r, Color(1, 1, 1, 0.22), false, 1.0)
+		# our speech bubble: a rounded box with a tail and three dots
+		var b := Rect2(r.position + Vector2(11, 9), Vector2(30, 21))
+		strip.draw_rect(b, UI.TEXT)
+		strip.draw_colored_polygon(PackedVector2Array([b.position + Vector2(6, b.size.y), b.position + Vector2(15, b.size.y),
+			b.position + Vector2(5, b.size.y + 8)]), UI.TEXT)
+		for i in 3:
+			strip.draw_circle(b.position + Vector2(8 + i * 7, b.size.y * 0.5), 2.2, UI.INK)
+		strip.draw_rect(Rect2(58, strip.size.y * 0.5 - 12, 2, 24), Color(1, 1, 1, 0.5))
+		var n := NetChat.unread_total() + _group_unread()
+		if n > 0:
+			strip.draw_circle(r.position + Vector2(48, 4), 9.0, UI.BAD)
+			strip.draw_string(UI.font("bold"), r.position + Vector2(39, 9), str(mini(n, 9)), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE))
+	strip.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		var who := chat_ticker_friend()
+		if Game.cloud and Game.cloud.in_group():
+			LobbyNet.open_group(self)          # in a team (or a room): its chat first, as the reference's
+		elif who == "":
+			_open_friends("friends")
+		else:
+			LobbyNet.open(self, who, String(Game.profile.friends[who].name), ""))
+	root.add_child(strip)
+	_refresh_chat_strip()
+
+
+## The friend the chat strip opens: the newest message's (unread first), else the first friend
+## online, else the first friend; "" with no friends (not blocked).
+func chat_ticker_friend() -> String:
+	var best := ""
+	var best_ts := -1
+	for f: String in Game.profile.friends:
+		if Game.is_blocked(f):
+			continue
+		var msgs := NetChat.messages(f)
+		var ts := int((msgs.back() as Array)[0]) if not msgs.is_empty() else -1
+		if NetChat.unread(f) > 0:
+			ts += 1 << 40
+		if ts > best_ts or best == "":
+			best = f
+			best_ts = ts
+	return best
+
+
+var _chat_shown := ""
+var _chat_t := 0.0
+
+
+## The chat strip's width: CHAT_W, but with group members beside it the hero stands further left
+## (HERO_X_GROUP), so the strip ends short of the voice pill's place under the hero's feet (the
+## hero is 3D: a left camera cutout moves the strip right, not the hero).
+func chat_strip_width() -> float:
+	if _member_models.is_empty():
+		return CHAT_W
+	var vp := get_viewport()
+	var free := hero_x() * vp.get_visible_rect().size.x - VOICE_PLACE_LEFT - UI.safe_margins(vp).x - 12.0
+	return clampf(floorf(free), 180.0, CHAT_W)
+
+
+## The ticker follows the newest friend message (checked twice a second from _process), the
+## strip's width follows chat_strip_width().
+func _refresh_chat_strip() -> void:
+	var strip := _main_ui.get_node_or_null("ChatStrip") as Button if _main_ui else null
+	if strip == null:
+		return
+	var w := chat_strip_width()
+	if not is_equal_approx(strip.size.x, w):
+		strip.offset_right = 12 + w
+		(strip.get_node("ChatTicker") as Label).size.x = w - 66.0
+	var who := chat_ticker_friend()
+	var text := "[FRIENDS] TAP TO CHAT WITH A FRIEND"
+	if who != "":
+		var msgs := NetChat.messages(who)
+		if not msgs.is_empty():
+			var m: Array = msgs.back()
+			text = "[FRIEND] %s: %s" % [String(Game.profile.name) if bool(m[1]) else String(Game.profile.friends[who].name),
+				NetChat.first_words(String(m[2]), 40)]
+	if Game.cloud and Game.cloud.in_group():
+		# In a team (or a custom room): its newest line, or how to start one.
+		var gm := NetChat.group_messages(String(Game.cloud.group.get("gid", "")))
+		var tag := LobbyNet.group_title()
+		text = "[%s] TAP TO CHAT WITH YOUR %s" % [tag, tag]
+		if not gm.is_empty():
+			var g: Array = gm.back()
+			text = "[%s] %s: %s" % [tag, String(g[2]), NetChat.first_words(String(g[3]), 40)]
+	var key := text + "|" + str(NetChat.unread_total() + _group_unread())
+	if key == _chat_shown:
+		return
+	_chat_shown = key
+	(strip.get_node("ChatTicker") as Label).text = text
+	strip.queue_redraw()
+
+
+## The TEAM / ROOM chat's unread lines (0 out of a group).
+func _group_unread() -> int:
+	if Game.cloud == null or not Game.cloud.in_group():
+		return 0
+	return NetChat.group_unread(String(Game.cloud.group.get("gid", "")))
+
+
+## ADD (right side, as the reference's add-friend button): a person with a plus over its caption;
+## opens FRIENDS on PLAYERS, where every player can be added.
+func _build_add_button(root: Control) -> void:
 	var b := Button.new()
-	b.name = "FeatureCard"
-	b.position = Vector2(10, 76)
-	b.size = Vector2(300, 132)
+	b.name = "AddFriendButton"
 	b.focus_mode = Control.FOCUS_NONE
-	for st in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
+	b.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	b.offset_left = -84
+	b.offset_right = -14
+	b.offset_top = -10
+	b.offset_bottom = 60
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	b.draw.connect(func() -> void:
-		var r := Rect2(Vector2.ZERO, b.size)
-		if tex:
-			b.draw_texture_rect_region(tex, r, Rect2(40, 40, 560, 246))
-		b.draw_rect(Rect2(0, r.size.y - 50, r.size.x, 50), Color(0, 0, 0, 0.55))
-		b.draw_rect(r, Color(1, 1, 1, 0.25) if not b.is_hovered() else UI.ACCENT, false, 2.0))
-	b.pressed.connect(_how_to_play)
-	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
+		var col := UI.ACCENT if b.is_pressed() else UI.TEXT
+		HudDraw.icon(b, HudDraw.tex("v_friend_add"), Vector2(b.size.x * 0.5, 22), Vector2(36, 36), col)
+		var f := UI.font("heavy")
+		b.draw_string_outline(f, Vector2(0, 60), "ADD", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 18, 4, Color(0, 0, 0, 0.6))
+		b.draw_string(f, Vector2(0, 60), "ADD", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 18, col))
+	b.button_down.connect(b.queue_redraw)
+	b.button_up.connect(b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		_open_friends("online"))
 	root.add_child(b)
-	var t1 := UI.shadowed(UI.label("1V1 DUEL", 26, UI.TEXT, "italic"))
-	t1.position = Vector2(12, 80)
-	b.add_child(t1)
-	var t2 := UI.label("BEAT THE BOT IN CARGO CAGE", 14, UI.ACCENT, "bold")
-	t2.position = Vector2(14, 108)
-	b.add_child(t2)
-	var tag := PanelContainer.new()
-	tag.add_theme_stylebox_override("panel", UI.chamfer(UI.ACCENT, 5, 0, Color.TRANSPARENT, 6.0, ["br"]))
-	tag.add_child(UI.label("NEW MAP", 13, UI.INK, "heavy"))
-	tag.position = Vector2(8, 8)
-	b.add_child(tag)
+	_add_btn = b
 
 
-func _build_left_menu(root: Control) -> void:
-	var menu := VBoxContainer.new()
-	menu.name = "Menu"
-	menu.position = Vector2(0, 236)
-	menu.add_theme_constant_override("separation", 6)
-	root.add_child(menu)
-	var items := [
-		["PRACTICE", "v_crosshair", "PracticeButton", _start_practice],
-		["PLAY WITH FRIENDS", "v_player", "FriendsButton", _open_friends],
-		["BUNDLES", "v_wardrobe", "BundlesButton", _open_wardrobe],
-		["CUSTOM HUD", "v_hud", "CustomHudButton", Game.goto_hud_editor],
-		["SETTINGS", "v_settings", "SettingsMenuButton", _open_settings],
-		["HOW TO PLAY", "v_info", "HowToPlayButton", _how_to_play],
-	]
-	for it in items:
-		menu.add_child(_menu_row(String(it[0]), String(it[1]), String(it[2]), it[3]))
-
-
-func _menu_row(text: String, icon_name: String, node_name: String, action: Callable) -> Button:
+## One button of the bottom bar: the glyph and the caption, white, accent while pressed.
+func _bar_button(text: String, icon_name: String, node_name: String, action: Callable) -> Button:
 	var b := Button.new()
 	b.name = node_name
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(262, 50)
+	b.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
 	b.text = text
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.icon = UI.icon_texture(icon_name)
-	b.expand_icon = true
-	b.add_theme_constant_override("icon_max_width", 30)
-	b.add_theme_constant_override("h_separation", 12)
+	b.add_theme_constant_override("icon_max_width", 28)      # (not expanded: its width counts in the button's)
+	b.add_theme_constant_override("h_separation", 10)
 	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 25)
-	var empty := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
-	empty.content_margin_left = 22
-	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
-		b.add_theme_stylebox_override(st, empty)
+	b.add_theme_font_size_override("font_size", 22)
+	var flat := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
+	flat.content_margin_left = 16
+	flat.content_margin_right = 16
+	var lit := flat.duplicate() as StyleBoxFlat
+	lit.bg_color = Color(1, 1, 1, 0.08)
+	for state in ["normal", "focus"]:
+		b.add_theme_stylebox_override(state, flat)
+	for state in ["hover", "pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(state, lit)
 	b.add_theme_color_override("font_color", UI.TEXT)
-	b.add_theme_color_override("font_hover_color", UI.ACCENT)
+	b.add_theme_color_override("font_hover_color", UI.TEXT)
 	b.add_theme_color_override("font_pressed_color", UI.ACCENT)
-	b.add_theme_constant_override("outline_size", 4)
-	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.55))
+	b.add_theme_color_override("font_hover_pressed_color", UI.ACCENT)
+	b.add_theme_constant_override("outline_size", 3)
+	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
 	b.add_theme_color_override("icon_normal_color", UI.TEXT)
-	b.add_theme_color_override("icon_hover_color", UI.ACCENT)
+	b.add_theme_color_override("icon_hover_color", UI.TEXT)
 	b.add_theme_color_override("icon_pressed_color", UI.ACCENT)
-	# The dark plate fading to the right is a child drawn BEHIND the button: a Button's own
-	# `draw` signal fires after it has drawn its text and icon, so a plate drawn there would
-	# cover (and grey out) the caption.
-	var plate := Control.new()
-	plate.name = "Plate"
-	plate.show_behind_parent = true
-	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UI.full_rect(plate)
-	plate.draw.connect(func() -> void:
-		var s := plate.size
-		var a := 0.86 if b.is_pressed() else 0.74
-		var pts := PackedVector2Array([Vector2(0, 2), Vector2(s.x, 2), Vector2(s.x - 14, s.y - 2), Vector2(0, s.y - 2)])
-		plate.draw_polygon(pts, PackedColorArray([Color(0, 0, 0, a), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.0), Color(0, 0, 0, a)])))
-	b.add_child(plate)
-	# only the accent tick is drawn over the button (left of the icon, never over the text)
-	b.draw.connect(func() -> void:
-		b.draw_rect(Rect2(0, 2, 4, b.size.y - 4), UI.ACCENT if b.is_hovered() or b.is_pressed() else Color(1, 1, 1, 0.3)))
-	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
-		b.connect(sig, func() -> void:
-			b.queue_redraw()
-			plate.queue_redraw())
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
 		action.call())
@@ -827,630 +1031,579 @@ func _build_right_column(root: Control) -> void:
 	start_btn.offset_bottom = -12
 	start_btn.pressed.connect(_start)
 	root.add_child(start_btn)
-	# Mode card above it.
-	var card := Control.new()
-	card.name = "ModeCard"
-	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	card.offset_left = -430
-	card.offset_right = -12
-	card.offset_top = -170
-	card.offset_bottom = -98
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var thumb := UI.texture("mode_lonewolf.jpg")
-	card.draw.connect(func() -> void:
-		var s := card.size
-		var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
-		card.draw_polygon(pts, PackedColorArray([Color(0.16, 0.12, 0.07, 0.92), Color(0.16, 0.12, 0.07, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.07, 0.06, 0.05, 0.92), Color(0.12, 0.09, 0.06, 0.92)]))
-		if thumb:
-			# the two fighters of the mode art, at the slot's aspect (120 x 60)
-			card.draw_texture_rect_region(thumb, Rect2(s.x - 128, 6, 120, s.y - 12), Rect2(110, 96, 420, 210))
-			card.draw_rect(Rect2(s.x - 128, 6, 120, s.y - 12), Color(1, 1, 1, 0.35), false, 1.5)
-		card.draw_rect(Rect2(0, s.y - 2, s.x, 2), Color(UI.AMBER, 0.8)))
-	root.add_child(card)
-	var mode_l := UI.shadowed(UI.label("LONE WOLF", 32, UI.AMBER, "heavy"))
-	mode_l.position = Vector2(20, 2)
-	card.add_child(mode_l)
-	var map_l := UI.label("CARGO CAGE", 22, UI.TEXT, "heavy")
-	map_l.position = Vector2(22, 38)
-	card.add_child(map_l)
-	var sub := UI.label("1 VS 1  ·  1 ROUND", 14, UI.TEXT_DIM, "bold")
-	sub.position = Vector2(138, 44)
-	card.add_child(sub)
-	# Difficulty chips above the card.
-	var diff := HBoxContainer.new()
-	diff.name = "Difficulty"
-	diff.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	diff.offset_left = -430
-	diff.offset_right = -12
-	diff.offset_top = -214
-	diff.offset_bottom = -178
-	diff.add_theme_constant_override("separation", 6)
-	diff.alignment = BoxContainer.ALIGNMENT_END
-	root.add_child(diff)
-	var cap := UI.label("BOT", 15, UI.TEXT_DIM, "bold")
-	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	cap.custom_minimum_size = Vector2(0, 36)
-	diff.add_child(cap)
-	var group := ButtonGroup.new()
-	for i in Game.DIFFICULTY_NAMES.size():
-		diff.add_child(_diff_chip(String(Game.DIFFICULTY_NAMES[i]), i, group))
-	# Match stats chips.
-	var stats := HBoxContainer.new()
-	stats.name = "Stats"
-	stats.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	stats.offset_left = -430
-	stats.offset_right = -12
-	stats.offset_top = -258
-	stats.offset_bottom = -222
-	stats.add_theme_constant_override("separation", 6)
-	stats.alignment = BoxContainer.ALIGNMENT_END
-	root.add_child(stats)
-	for s in [["v_player", "MATCHES", Game.profile.matches], ["v_trophy", "WINS", Game.profile.wins], ["v_skull", "KILLS", Game.profile.kills]]:
-		var p := PanelContainer.new()
-		p.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.55), 6, 1, Color(1, 1, 1, 0.12), 10.0, ["br"]))
-		var h := HBoxContainer.new()
-		h.add_theme_constant_override("separation", 6)
-		h.add_child(UI.icon(String(s[0]), 20, UI.TEXT_DIM))
-		var v := UI.label(str(int(s[2])), 22, UI.TEXT, "number")
-		v.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		h.add_child(v)
-		var c := UI.label(String(s[1]), 13, UI.TEXT_DIM, "bold")
-		c.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		h.add_child(c)
-		p.add_child(h)
-		stats.add_child(p)
+	# A member's phone shows who starts in START's place (GROUPS.txt 1).
+	_wait_leader = PanelContainer.new()
+	_wait_leader.name = "GroupWaitLeader"
+	_wait_leader.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_wait_leader.offset_left = -342
+	_wait_leader.offset_top = -90
+	_wait_leader.offset_right = -12
+	_wait_leader.offset_bottom = -12
+	_wait_leader.add_theme_stylebox_override("panel", UI.chamfer(Color(0.02, 0.02, 0.025, 0.8), 12, 2, Color(UI.ACCENT, 0.7), 10.0, ["tl", "br"]))
+	_wait_leader.mouse_filter = Control.MOUSE_FILTER_STOP
+	_wait_leader.visible = false
+	_wait_label = UI.label("", 21, UI.ACCENT, "heavy")
+	_wait_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_wait_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_wait_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_wait_leader.add_child(_wait_label)
+	root.add_child(_wait_leader)
+	# While a search runs, START is a greyed plate (the search tab at the top cancels it).
+	_matching = UI.hero_button("MATCHING...", 40, Vector2(330, 78))
+	_matching.name = "MatchingPlate"
+	_matching.disabled = true
+	_matching.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_matching.offset_left = -342
+	_matching.offset_top = -90
+	_matching.offset_right = -12
+	_matching.offset_bottom = -12
+	_matching.visible = false
+	root.add_child(_matching)
+	# Mode card above it: the mode START plays (name, map, format, the mode's art); a tap opens
+	# SELECT MODE.
+	mode_card = Button.new()
+	mode_card.name = "ModeCard"
+	mode_card.focus_mode = Control.FOCUS_NONE
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		mode_card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	mode_card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	mode_card.offset_left = -430
+	mode_card.offset_right = -12
+	mode_card.offset_top = -170
+	mode_card.offset_bottom = -98
+	mode_card.draw.connect(_draw_mode_card)
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		mode_card.connect(sig, mode_card.queue_redraw)
+	mode_card.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		if search_kind() != "":
+			dialogs.notice("SELECT MODE", "CANCEL THE SEARCH FIRST")
+			return
+		_select_mode())
+	root.add_child(mode_card)
+	var text := VBoxContainer.new()
+	text.position = Vector2(20, 2)
+	text.add_theme_constant_override("separation", -4)
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mode_card.add_child(text)
+	_mode_label = UI.shadowed(UI.label("", 32, UI.TEXT, "heavy"))
+	_mode_label.name = "ModeName"
+	text.add_child(_mode_label)
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 12)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.add_child(line)
+	line.add_child(UI.label("CARGO CAGE", 22, UI.TEXT, "heavy"))
+	_mode_sub = UI.label("", 14, UI.TEXT_DIM, "bold")
+	_mode_sub.name = "ModeFormat"
+	_mode_sub.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(_mode_sub)
+	mode_card.add_child(_build_size_box_button())
+	_refresh_mode()
 
 
-func _diff_chip(text: String, idx: int, group: ButtonGroup) -> Button:
+## The figure at the mode card's right end (SizeBoxButton, over the art's right part): a tap opens
+## the team-size box just above the card (LobbyDialogs.open_size_box) instead of SELECT MODE.
+## Hidden for a group member and during a search (update_start_gate).
+func _build_size_box_button() -> Button:
 	var b := Button.new()
-	b.name = "Diff_" + text
-	b.toggle_mode = true
-	b.button_group = group
-	b.button_pressed = idx == int(Game.settings.difficulty)
+	b.name = "SizeBoxButton"
 	b.focus_mode = Control.FOCUS_NONE
-	b.text = text
-	b.custom_minimum_size = Vector2(104, 36)
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 17)
-	var off := UI.chamfer(Color(0, 0, 0, 0.55), 8, 1, Color(1, 1, 1, 0.2), 8.0, ["tl", "br"], 0.0)
-	var hov := UI.chamfer(Color(1, 1, 1, 0.1), 8, 1, Color(1, 1, 1, 0.35), 8.0, ["tl", "br"], 0.0)
-	var on := UI.chamfer(UI.ACCENT, 8, 0, Color.TRANSPARENT, 8.0, ["tl", "br"], 0.0)
-	b.add_theme_stylebox_override("normal", off)
-	b.add_theme_stylebox_override("hover", hov)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT)
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
+	b.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
+	b.offset_left = -UI.TOUCH_MIN - 2.0
+	b.offset_right = -2.0
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var c := b.size * 0.5
+		var hot := b.is_hovered() or b.is_pressed() or dialogs.size_box != null
+		b.draw_circle(c, 21.0, Color(0, 0, 0, 0.72), true, -1.0, true)
+		b.draw_circle(c, 21.0, UI.ACCENT if hot else Color(1, 1, 1, 0.5), false, 2.0, true)
+		HudDraw.icon(b, HudDraw.tex("v_player"), c, Vector2(26, 26), UI.ACCENT if hot else Color.WHITE))
+	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
+		b.connect(sig, b.queue_redraw)
 	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		Game.settings.difficulty = idx
-		Game.save_settings())
+		Audio.play("ui_click", -4.0)
+		if dialogs.size_box:
+			dialogs.close_size_box()
+		else:
+			dialogs.open_size_box()
+		b.queue_redraw())
 	return b
 
 
-func _build_bottom_left(root: Control) -> void:
-	var info := CharacterModel.bundle_info(String(Game.profile.bundle))
-	var box := VBoxContainer.new()
-	box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	box.offset_left = 22
-	box.offset_right = 420
-	box.offset_top = -78
-	box.offset_bottom = -12
-	box.add_theme_constant_override("separation", 2)
-	root.add_child(box)
-	var cap := UI.label("OUTFIT", 13, UI.TEXT_DIM, "bold")
-	box.add_child(cap)
-	_bundle_label = UI.shadowed(UI.label("", 22, UI.RARITY_COLORS[info.rarity], "bold"))
-	box.add_child(_bundle_label)
-	_update_bundle_label(String(Game.profile.bundle))
-	var ver := UI.label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 13, Color(1, 1, 1, 0.45), "semi")
-	box.add_child(ver)
-
-
-## Name plate under the character's feet (follows the projected position).
-func _build_name_plate(root: Control) -> void:
-	_name_plate = PanelContainer.new()
-	_name_plate.add_theme_stylebox_override("panel", UI.chamfer(Color(0, 0, 0, 0.6), 6, 1, Color(1, 1, 1, 0.14), 14.0, ["tl", "br"]))
-	_name_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	h.add_child(UI.icon("v_player", 18, UI.ACCENT))
-	_plate_label = UI.label(String(Game.profile.name), 18, UI.TEXT, "bold")
-	h.add_child(_plate_label)
-	_name_plate.add_child(h)
-	root.add_child(_name_plate)
-
-
-func _update_bundle_label(id: String) -> void:
-	var info := CharacterModel.bundle_info(id)
-	_bundle_label.text = "%s  ·  %s" % [info.name, String(info.rarity).to_upper()]
-	_bundle_label.add_theme_color_override("font_color", UI.RARITY_COLORS[info.rarity])
-
-
-func _start() -> void:
-	if start_btn.disabled:
+## Draws a mode's art into `dest` of `ci`, cut from its MODE_ART part to dest's shape (centred).
+static func draw_mode_art(ci: CanvasItem, m: String, dest: Rect2) -> void:
+	var art: Array = MODE_ART.get(m, MODE_ART[Game.DEFAULT_MODE])
+	var tex := UI.texture(String(art[0]))
+	if tex == null:
+		ci.draw_rect(dest, Color(0.12, 0.11, 0.1))
 		return
-	Game.practice = false
-	Game.online = false
-	start_btn.disabled = true
-	UI.set_caption(start_btn, "MATCHING")
-	Loading.start_match(self)
-
-
-# ---------------------------------------------------------------- play with friends (Lan / Cloud)
-
-## Two ways to find a friend: ONLINE (internet, no account: a free public relay carries
-## end-to-end encrypted messages, see Cloud) and SAME WI-FI (no server at all, see Lan). Players
-## show up by name; CHALLENGE sends a request, the other phone accepts or declines. The ONLINE
-## list connects only once this tab is opened.
-func _open_friends(kind := "online") -> void:
-	_net_kind = kind
-	var svc: Node = _net_service()
-	if kind != "wifi":
-		Game.cloud_service().start_lobby()
-	var v := _open_modal("PLAY WITH FRIENDS", 980.0)
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 10)
-	for t: Array in [["online", "ONLINE"], ["friends", "FRIENDS"], ["room", "CUSTOM ROOM"], ["wifi", "SAME WI-FI"]]:
-		var b := UI.button(String(t[1]), 19, "primary" if t[0] == kind else "dark", Vector2(205, 48))
-		b.name = "Tab_" + String(t[0])
-		var tk := String(t[0])
-		b.pressed.connect(func() -> void:
-			if tk != _net_kind:
-				_open_friends(tk))
-		tabs.add_child(b)
-	v.add_child(tabs)
-	var notes := {
-		"online": "Play anyone online from anywhere. No sign-up: players who have this screen open show up by name.",
-		"friends": "Add players as friends with their ID. Friends who are online can be challenged to a 1 vs 1 duel.",
-		"room": "A private room: share its ID and password. The host sets the rules and starts the match.",
-		"wifi": "Same Wi-Fi or one phone's hotspot: nearby players show up by name.",
-	}
-	var info := UI.label(String(notes[kind]), 17, UI.TEXT_DIM, "semi")
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(info)
-	_net_status = UI.label("", 20, UI.ACCENT, "bold")
-	v.add_child(_net_status)
-	if kind == "friends":
-		_build_friends_tab(v)
-	elif kind == "room":
-		_build_room_tab(v)
-	_net_list = VBoxContainer.new()
-	_net_list.name = "NetList"
-	_net_list.add_theme_constant_override("separation", 8)
-	_net_list.custom_minimum_size = Vector2(0, 170 if kind in ["online", "wifi"] else 0)
-	v.add_child(_net_list)
-	_net_sig = "-"
-	_net_note = ""
-	if svc:
-		_refresh_friends()
-
-
-## FRIENDS tab head: this phone's ID and a search box (an ID or a name among the players online).
-func _build_friends_tab(v: VBoxContainer) -> void:
-	var cloud := Game.cloud_service()
-	var me := HBoxContainer.new()
-	me.add_theme_constant_override("separation", 12)
-	var code := Cloud.friend_code(cloud.my_id) if cloud.my_id != "" else "--------"
-	var my_id := UI.label("YOUR ID:  %s" % code, 24, UI.TEXT, "heavy")
-	my_id.name = "MyId"
-	my_id.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	me.add_child(my_id)
-	var copy := UI.button("COPY", 18, "light", Vector2(120, 46))
-	copy.pressed.connect(func() -> void:
-		DisplayServer.clipboard_set(Cloud.friend_code(Game.cloud_service().my_id))
-		_net_note = "ID COPIED"
-		_net_sig = "-")
-	me.add_child(copy)
-	v.add_child(me)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	var le := _text_field("FRIEND'S ID OR NAME", 14, false)
-	le.name = "FriendSearch"
-	le.text = _friend_query
-	row.add_child(le)
-	var go := UI.button("SEARCH", 19, "primary", Vector2(160, 54))
-	var search := func() -> void:
-		_friend_query = Game.clean_name(le.text)
-		_net_sig = "-"
-		_refresh_friends()
-	go.pressed.connect(search)
-	le.text_submitted.connect(func(_t: String) -> void: search.call())
-	row.add_child(go)
-	v.add_child(row)
-
-
-## CUSTOM ROOM tab: create one (password, rules) or join one (ID + password); once in a room it
-## shows the room's ID, password and players, and the host's START.
-func _build_room_tab(v: VBoxContainer) -> void:
-	var cloud := Game.cloud_service()
-	if cloud.room_code != "":
-		var head := UI.label("ROOM ID  %s     PASSWORD  %s" % [cloud.room_code, cloud.room_pin], 30, UI.TEXT, "heavy")
-		head.name = "RoomHead"
-		v.add_child(head)
-		v.add_child(UI.label(_rules_text(cloud.room_rules), 18, UI.TEXT_DIM, "semi"))
-		var slots := HBoxContainer.new()
-		slots.add_theme_constant_override("separation", 14)
-		var guest := String(cloud.room_guest.get("name", ""))
-		for t: Array in [[String(Game.profile.name) + "  (HOST)", UI.ACCENT], [guest if guest != "" else "WAITING FOR A PLAYER...", UI.TEXT if guest != "" else UI.TEXT_DIM]]:
-			var slot := UI.label(String(t[0]), 22, t[1], "bold")
-			slot.custom_minimum_size = Vector2(420, 54)
-			slot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			slot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			slot.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.45), 8, 1, Color(1, 1, 1, 0.2), 12.0, ["br"]))
-			slots.add_child(slot)
-		v.add_child(slots)
-		var row := HBoxContainer.new()
-		row.alignment = BoxContainer.ALIGNMENT_END
-		row.add_theme_constant_override("separation", 12)
-		var close := UI.button("CLOSE ROOM", 19, "light", Vector2(200, 52))
-		close.pressed.connect(func() -> void:
-			Game.cloud_service().close_room()
-			_open_friends("room"))
-		var start := UI.button("START", 22, "primary", Vector2(200, 52))
-		start.name = "RoomStart"
-		start.disabled = guest == ""
-		start.pressed.connect(func() -> void:
-			start.disabled = true
-			UI.set_caption(start, "STARTING")
-			if not Game.cloud_service().start_room_match():
-				_net_note = "COULD NOT START, TRY AGAIN"
-				start.disabled = false)
-		row.add_child(close)
-		row.add_child(start)
-		v.add_child(row)
-		return
-	if cloud.join_state != "":
-		var msg := {"asking": "JOINING ROOM %s...", "in": "IN ROOM %s: WAITING FOR THE HOST TO START",
-			"wrong": "WRONG PASSWORD FOR ROOM %s", "none": "NO ROOM %s FOUND (OR ITS HOST LEFT)"}
-		var st := UI.label(String(msg.get(cloud.join_state, "%s")) % String(_room_join_code), 24, UI.TEXT, "heavy")
-		st.name = "JoinState"
-		v.add_child(st)
-		var back := UI.button("LEAVE" if cloud.join_state in ["asking", "in"] else "BACK", 19, "light", Vector2(200, 52))
-		back.pressed.connect(func() -> void:
-			Game.cloud_service().leave_join()
-			_open_friends("room"))
-		v.add_child(back)
-		return
-	# Create: password (digits), rules.
-	var create := HBoxContainer.new()
-	create.add_theme_constant_override("separation", 10)
-	create.add_child(UI.label("NEW ROOM  ·  PASSWORD", 20, UI.TEXT, "bold"))
-	var pin := _text_field("4-6 DIGITS", 6, true)
-	pin.name = "RoomPin"
-	pin.text = "%04d" % randi_range(0, 9999)
-	pin.custom_minimum_size = Vector2(170, 54)
-	pin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	create.add_child(pin)
-	var mode := UI.label("1 VS 1", 20, UI.ACCENT, "heavy")
-	create.add_child(mode)
-	v.add_child(create)
-	var rules := HBoxContainer.new()
-	rules.add_theme_constant_override("separation", 8)
-	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-		var key := String(k[0])
-		var tb := UI.button(String(k[1]), 16, "primary" if bool(_room_rules[key]) else "dark", Vector2(190, 46))
-		tb.name = "Rule_" + key
-		tb.pressed.connect(func() -> void:
-			_room_rules[key] = not bool(_room_rules[key])
-			_room_pin_draft = pin.text
-			_open_friends("room"))
-		rules.add_child(tb)
-	var rounds := UI.button("FIRST TO %d" % int(_room_rules.rounds), 16, "light", Vector2(150, 46))
-	rounds.name = "Rule_rounds"
-	rounds.pressed.connect(func() -> void:
-		var steps := [1, 3, 5, 7]
-		_room_rules.rounds = steps[(steps.find(int(_room_rules.rounds)) + 1) % steps.size()]
-		_room_pin_draft = pin.text
-		_open_friends("room"))
-	rules.add_child(rounds)
-	v.add_child(rules)
-	if _room_pin_draft != "":
-		pin.text = _room_pin_draft
-	var make := UI.button("CREATE ROOM", 20, "primary", Vector2(230, 52))
-	make.name = "RoomCreate"
-	make.pressed.connect(func() -> void:
-		var p := pin.text
-		if p.length() < 4:
-			_net_note = "THE PASSWORD NEEDS 4 TO 6 DIGITS"
-			_net_sig = "-"
-			return
-		_room_pin_draft = ""
-		Game.cloud_service().open_room(p, _room_rules)
-		_open_friends("room"))
-	v.add_child(make)
-	v.add_child(UI.label("2 VS 2 and 4 VS 4 rooms (8 slots) need team matches, which are not in this version yet.", 15, UI.TEXT_DIM, "semi"))
-	# Join: room ID + password.
-	var join := HBoxContainer.new()
-	join.add_theme_constant_override("separation", 10)
-	join.add_child(UI.label("JOIN A ROOM", 20, UI.TEXT, "bold"))
-	var code := _text_field("ROOM ID", 6, true)
-	code.name = "JoinCode"
-	join.add_child(code)
-	var jpin := _text_field("PASSWORD", 6, true)
-	jpin.name = "JoinPin"
-	join.add_child(jpin)
-	var go := UI.button("JOIN", 20, "primary", Vector2(150, 54))
-	go.name = "RoomJoin"
-	go.pressed.connect(func() -> void:
-		if code.text.length() != 6 or jpin.text.length() < 4:
-			_net_note = "ENTER THE 6-DIGIT ROOM ID AND ITS PASSWORD"
-			_net_sig = "-"
-			return
-		_room_join_code = code.text
-		Game.cloud_service().join_room(code.text, jpin.text)
-		_open_friends("room"))
-	join.add_child(go)
-	v.add_child(join)
-
-
-func _rules_text(r: Dictionary) -> String:
-	var parts := ["1 VS 1", "FIRST TO %d" % int(r.get("rounds", 5))]
-	for k: Array in [["ammo", "UNLIMITED AMMO"], ["walls", "UNLIMITED WALLS"], ["frags", "UNLIMITED FRAGS"]]:
-		if bool(r.get(String(k[0]), false)):
-			parts.append(String(k[1]))
-	return "   ·   ".join(PackedStringArray(parts))
-
-
-## A text box in the lobby's style; digits_only keeps only 0-9 and opens the number keyboard.
-func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEdit:
-	var le := LineEdit.new()
-	le.placeholder_text = placeholder
-	le.max_length = max_len
-	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	le.custom_minimum_size = Vector2(150, 54)
-	le.virtual_keyboard_enabled = true
-	le.virtual_keyboard_show_on_focus = true
-	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER if digits_only else LineEdit.KEYBOARD_TYPE_DEFAULT
-	le.add_theme_font_override("font", UI.font("bold"))
-	le.add_theme_font_size_override("font_size", 24)
-	le.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.25), 14.0, ["br"]))
-	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
-	le.add_theme_color_override("font_color", UI.TEXT)
-	le.add_theme_color_override("caret_color", UI.ACCENT)
-	if digits_only:
-		le.text_changed.connect(func(t: String) -> void:
-			var d := ""
-			for ch in t:
-				if ch >= "0" and ch <= "9":
-					d += ch
-			if d != t:
-				le.text = d
-				le.caret_column = d.length())
-	return le
-
-
-func _net_service() -> Node:
-	return (Game.lan_service() as Node) if _net_kind == "wifi" else (Game.cloud_service() as Node)
-
-
-func _refresh_friends() -> void:
-	if _net_list == null or not is_instance_valid(_net_list):
-		return
-	var svc: Node = _net_service()
-	var waiting := String(svc.waiting_for())
-	var peers: Dictionary = svc.peers
-	var cloud := svc as Cloud
-	if _net_kind != "wifi" and String(svc.status) != "online":
-		match String(svc.status):
-			"preparing":
-				_net_status.text = "GETTING READY..."
-			"connecting":
-				_net_status.text = "CONNECTING..."
-			_:
-				_net_status.text = "NO INTERNET: RETRYING..."
-	elif _net_kind == "wifi" and String(svc.local_address()) == "":
-		_net_status.text = "NOT ON WI-FI: JOIN A WI-FI NETWORK OR A HOTSPOT"
-	elif waiting != "":
-		_net_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
-	elif _net_note != "":
-		_net_status.text = _net_note
-	elif _net_kind == "friends":
-		_net_status.text = "%d FRIEND REQUEST%s" % [cloud.friend_requests.size(), "" if cloud.friend_requests.size() == 1 else "S"] \
-			if not cloud.friend_requests.is_empty() else "FRIENDS"
-	elif _net_kind == "room":
-		_net_status.text = "ROOM OPEN: SHARE ITS ID AND PASSWORD" if cloud.room_code != "" else ""
-	elif peers.is_empty():
-		_net_status.text = "LOOKING FOR PLAYERS ONLINE..." if _net_kind == "online" else "LOOKING FOR PLAYERS ON THIS WI-FI..."
+	var src: Rect2 = art[1]
+	var want := dest.size.x / maxf(dest.size.y, 1.0)
+	if src.size.x / src.size.y > want:
+		var w := src.size.y * want
+		src = Rect2(src.position.x + (src.size.x - w) * 0.5, src.position.y, w, src.size.y)
 	else:
-		_net_status.text = "PLAYERS ONLINE" if _net_kind == "online" else "PLAYERS NEARBY"
-	if _net_kind == "room":
+		var h := src.size.x / want
+		src = Rect2(src.position.x, src.position.y + (src.size.y - h) * 0.5, src.size.x, h)
+	ci.draw_texture_rect_region(tex, dest, src)
+
+
+func _draw_mode_card() -> void:
+	var c := mode_card
+	var s := c.size
+	var a := 0.98 if c.is_pressed() else 0.92
+	var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
+	var purple := Color(0.37, 0.21, 0.58, a)        # (#5E3595)
+	var blue := Color(0.23, 0.33, 0.77, a)          # (#3B55C4)
+	c.draw_polygon(pts, PackedColorArray([purple, purple.lerp(blue, 0.6), blue, blue.lerp(purple, 0.3), purple]))
+	c.draw_rect(Rect2(0, 0, s.x * 0.55, s.y), Color(0, 0, 0, 0.18))
+	var thumb := Rect2(s.x - 128, 6, 120, s.y - 12)
+	draw_mode_art(c, Game.mode, thumb)
+	c.draw_rect(thumb, Color(1, 1, 1, 0.35), false, 1.5)
+	# a dropdown chevron beside the mode name: tap to choose the other mode
+	var hot := c.is_hovered() or c.is_pressed()
+	var cx := s.x - 150.0
+	c.draw_polyline(PackedVector2Array([Vector2(cx - 9, 18), Vector2(cx, 27), Vector2(cx + 9, 18)]),
+		UI.ACCENT if hot else Color(1, 1, 1, 0.8), 3.0, true)
+	var frame := pts.duplicate()
+	frame.append(pts[0])
+	c.draw_polyline(frame, UI.ACCENT if not hot else UI.ACCENT.lightened(0.3), 2.0, true)
+
+
+## The mode card follows Game.mode and the opponent chosen in SELECT MODE (the bot's level, or
+## Game.practice: the target dummy).
+func _refresh_mode() -> void:
+	_mode_label.text = Game.mode_name()
+	_mode_sub.text = mode_format()
+	mode_card.queue_redraw()
+	team.refresh()
+
+
+## The mode card's format line (short: the card's art is beside it): LONE WOLF "1 VS 1 ONLINE"
+## (DUO / SQUAD: "DUO  ·  2 VS 2 ONLINE", or "DUO: NEXT UPDATE" while Game.TEAMS_ONLINE is off);
+## TRAINING GROUND "BOT: <level>  ·  FIRST TO n" (DUO / SQUAD: "SQUAD  ·  BOT: <level>"), or
+## "TARGET DUMMY".
+static func mode_format(teams_online := Game.TEAMS_ONLINE) -> String:
+	var size := Game.team_size
+	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "SOLO"))
+	if Game.mode != "training":
+		if size == 1:
+			return "1 VS 1 ONLINE"
+		return "%s  ·  %d VS %d ONLINE" % [word, size, size] if teams_online else "%s: NEXT UPDATE" % word
+	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	if size > 1:
+		return "%s  ·  BOT: %s" % [word, level]
+	if Game.practice:
+		return "TARGET DUMMY"
+	return "BOT: %s  ·  FIRST TO %d" % [level, Game.rounds_to_win()]
+
+
+## The player card top-left follows the profile (PROFILE picks the picture, the editor the name).
+func refresh_player_card() -> void:
+	_name_label.text = String(Game.profile.name)
+	if _avatar_view:
+		_avatar_view.queue_redraw()
+
+
+## START plays the mode on the card at its team size (start_route): TRAINING GROUND loads the
+## match at once (SOLO: against the bot or the target dummy; DUO / SQUAD: the player and bot
+## teammates against bots); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH, NetMatch;
+## DUO / SQUAD: TeamMatch, which plays against bots when nobody is found). The match loads once
+## another searching player is found. Friends' duels and custom rooms are in the ONLINE window
+## (FRIENDS top-right); a friend joins a DUO / SQUAD through the TEAM bar.
+func _start() -> void:
+	if start_btn.disabled or LobbyTeam.is_member():
+		return                          # (a member's START is the leader's: GroupWaitLeader shows instead)
+	var size := Game.team_size
+	match start_route(Game.mode, size, Game.TEAMS_ONLINE, LobbyTeam.members().size()):
+		"quick":
+			if LobbyTeam.in_group():
+				dialogs.notice("LONE WOLF 1 VS 1", "EXIT GROUP to play 1 VS 1, or pick DUO or SQUAD in SELECT MODE to play with your group.")
+				return
+			Game.team_match = {}
+			NetMatch.open(self)
+		"duel":
+			start_duel()
+		"team_search":
+			start_group(size)
+		"team_later":
+			dialogs.notice("ONLINE DUO / SQUAD", "Online DUO and SQUAD come in the next update. Play them now in TRAINING GROUND, you and bot teammates against bots.")
+		"training_team":
+			Game.team_match = TeamArena.offline_match(size, "training", int(Game.settings.difficulty))
+			load_match()
+		_:
+			Game.team_match = {}
+			load_match()
+
+
+## LONE WOLF DUO / SQUAD (GROUPS.txt 1): the leader (or a solo, who leads itself) starts the group's
+## match or its search for real players (Cloud.group_start); a text back is a notice (a group of 3 in
+## DUO...). Searching: the search tab with PLAYERS n/N (search_kind "group").
+func start_group(size: int) -> void:
+	Game.team_match = {}
+	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
+	var n := LobbyTeam.members().size() if LobbyTeam.in_group() else 1
+	if not bool(Game.settings.get("team_fill", true)) and fill_needed(size, n) and not Game.cloud_service().in_room():
+		dialogs.notice("LONE WOLF %s" % word, "FILL EMPTY PLACES is off: no other players join your team, so only a whole team starts (%d players in %s). Invite more players, or tick FILL EMPTY PLACES in the TEAM panel (the figure on the mode card)." % [NetGroup.per_team(size), word])
 		return
-	if _net_kind == "friends" and _modal and cloud.my_id != "":
-		var my := _modal.find_child("MyId", true, false) as Label
-		if my:
-			my.text = "YOUR ID:  %s" % Cloud.friend_code(cloud.my_id)     # the key may be made after the tab opened
-	var sig := waiting + "|" + _net_kind + "|" + _friend_query
-	for id in peers:
-		sig += "|%s:%s" % [id, peers[id].name]
-	if cloud:
-		sig += "|f%d|r%s" % [(Game.profile.friends as Dictionary).size(), ",".join(PackedStringArray(cloud.friend_requests.keys()))]
-		for id in peers:
-			sig += ",a" if cloud.friend_asked(String(id)) else ""
-	if sig == _net_sig:
+	var why := Game.cloud_service().group_start(size)
+	if why != "":
+		dialogs.notice("LONE WOLF %s" % word, why)
+
+
+## Whether START in DUO / SQUAD (`size` a team) with a group of `group_n` players needs players
+## from outside the group IN ITS OWN TEAM: when the group is smaller than one team (a solo, a SQUAD
+## group of 2 or 3). A whole team (a DUO pair, a SQUAD of 4) only searches for opponents, a DUO
+## group of 4 plays 2 VS 2 among itself, and a group too big for its team gets Cloud.group_start's
+## own refusal (GROUPS.txt 1). With the TEAM panel's FILL EMPTY PLACES off (setting team_fill) a
+## START that needs places filled does not search and says why.
+static func fill_needed(size: int, group_n: int) -> bool:
+	return not (size == 2 and group_n == 4) and group_n < NetGroup.per_team(size)
+
+
+## A group of exactly two with SOLO: the leader's START plays the plain 1 vs 1 between the two
+## (Cloud.group_duel: a duel challenge the member's phone takes at once from its leader); the match
+## and its results are the usual 1 vs 1's, and both come back to the lobby still in the group.
+## Meanwhile the greyed MATCHING... plate stands in START's place (duel_waiting) until the match
+## loads; a duel the member's phone never takes (declined, not reached, timed out) gives the plate
+## back to START with a notice.
+func start_duel() -> void:
+	Game.team_match = {}
+	var cloud := Game.cloud_service()
+	var why := cloud.group_duel()
+	if why != "":
+		dialogs.notice("DUEL", why)
 		return
-	_net_sig = sig
-	for c in _net_list.get_children():
-		c.queue_free()
-	if _net_kind == "friends":
-		_fill_friends(cloud, waiting)
+	_duel_with = cloud.waiting_for()
+	update_start_gate()
+
+
+## True while the leader's DUEL challenge waits for the member's phone or its match is starting;
+## once it ended otherwise, false and a notice (unless another one, such as COULD NOT BE REACHED,
+## is already up).
+func duel_waiting() -> bool:
+	if _duel_with == "":
+		return false
+	var c := Game.cloud_service()
+	if c.in_session or c.waiting_for_id() != "":
+		return true
+	var who := _duel_with
+	_duel_with = ""
+	if not start_btn.disabled and dialogs.modal == null:
+		dialogs.notice("DUEL", "%s did not take the duel: it did not start." % who)
+	return false
+
+
+## What the lobby is searching for now: "quick" (the 1 vs 1 QUICK MATCH, NetMatch), "group" (a DUO
+## / SQUAD search: Cloud.search_needed > 0, on the leader's phone and every member's), "" nothing.
+func search_kind() -> String:
+	var nm := get_node_or_null(^"NetMatch") as NetMatch
+	if nm and nm.searching:
+		return "quick"
+	if Game.cloud and Game.cloud.search_needed > 0 and not Game.cloud.in_session and not Game.cloud.session_multi:
+		return "group"
+	return ""
+
+
+## The search tab's X and Android back: the search stops (a member's search is the leader's).
+func cancel_search() -> void:
+	match search_kind():
+		"quick":
+			(get_node(^"NetMatch") as NetMatch).cancel()
+		"group":
+			if not LobbyTeam.is_member():
+				friends.cancel_search()
+
+
+## Every frame: the search tab follows what searches (shown, its X, the time, PLAYERS n/N).
+func _follow_search(delta: float) -> void:
+	if search_tab == null:
 		return
-	for id: String in peers:
-		_net_list.add_child(_player_row(svc, id, String(peers[id].name), waiting))
-
-
-## One player in a list: name and code, ADD (online, not yet a friend) and CHALLENGE.
-func _player_row(svc: Node, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
-	var label := "%s  #%s" % [who, Cloud.friend_code(id) if svc is Cloud else id.left(4).to_upper()]
-	var name_l := UI.label(label + online_tag, 24, UI.TEXT, "heavy")
-	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(name_l)
-	var cloud := svc as Cloud
-	if cloud and not Game.is_friend(id) and cloud.peers.has(id):
-		var asked := cloud.friend_asked(id)
-		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 52))
-		add.disabled = asked
-		add.pressed.connect(func() -> void:
-			if not Game.cloud_service().request_friend(id):
-				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
-			_net_sig = "-"
-			_refresh_friends())
-		row.add_child(add)
-	if svc.peers.has(id):
-		var b := UI.button("CANCEL" if waiting != "" else "DUEL 1 VS 1", 19, "light" if waiting != "" else "primary", Vector2(210, 52))
-		b.pressed.connect(func() -> void:
-			var sv: Node = _net_service()
-			_net_note = ""
-			if String(sv.waiting_for()) != "":
-				sv.cancel_invite()
-			elif not bool(sv.invite(id)):
-				_net_note = "COULD NOT SEND THE REQUEST, TRY AGAIN"
-			_net_sig = "-"
-			_refresh_friends())
-		row.add_child(b)
-	return row
-
-
-## FRIENDS tab body: requests to answer, the search's matches among players online, the friends.
-func _fill_friends(cloud: Cloud, waiting: String) -> void:
-	for id: String in cloud.friend_requests:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
-		var t := UI.label("%s  #%s  wants to be friends" % [String(cloud.friend_requests[id].name), Cloud.friend_code(id)], 22, UI.ACCENT, "bold")
-		t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(t)
-		for a: Array in [["DECLINE", false, "light"], ["ACCEPT", true, "primary"]]:
-			var yes := bool(a[1])
-			var b := UI.button(String(a[0]), 18, String(a[2]), Vector2(150, 50))
-			b.name = "Friend" + String(a[0]).capitalize()
-			b.pressed.connect(func() -> void:
-				Game.cloud_service().answer_friend(id, yes)
-				_net_sig = "-"
-				_refresh_friends())
-			row.add_child(b)
-		_net_list.add_child(row)
-	if _friend_query != "":
-		var found := 0
-		for id: String in cloud.peers:
-			var who := String(cloud.peers[id].name)
-			if Cloud.friend_code(id).begins_with(_friend_query) or who.contains(_friend_query):
-				_net_list.add_child(_player_row(cloud, id, who, waiting, "  ·  ONLINE"))
-				found += 1
-		if found == 0:
-			_net_list.add_child(UI.label("NOBODY ONLINE MATCHES \"%s\" (THEY NEED THIS SCREEN OPEN)" % _friend_query, 18, UI.TEXT_DIM, "semi"))
-	var friends: Dictionary = Game.profile.friends
-	if friends.is_empty():
-		_net_list.add_child(UI.label("NO FRIENDS YET: SEARCH A PLAYER'S ID OR NAME, OR TAP ADD FRIEND IN THE ONLINE TAB.", 18, UI.TEXT_DIM, "semi"))
-	for id: String in friends:
-		var on := cloud.peers.has(id)
-		var who := String(friends[id].name) if String(friends[id].name) != "" else "PLAYER"
-		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else "  ·  OFFLINE")
-		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 52))
-		rm.pressed.connect(func() -> void:
-			Game.remove_friend(id)
-			_net_sig = "-"
-			_refresh_friends())
-		row.add_child(rm)
-		_net_list.add_child(row)
-
-
-func _on_net_invited(who: String, svc: Node) -> void:
-	_net_list = null
-	var v := _open_modal("CHALLENGE", 640.0)
-	var t := UI.label("%s wants a 1 vs 1 (%s)" % [who, "online" if svc is Cloud else "Wi-Fi"], 26, UI.TEXT, "heavy")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(t)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 12)
-	var no := UI.button("DECLINE", 20, "light", Vector2(190, 52))
-	no.pressed.connect(func() -> void:
-		svc.answer(false)
-		_close_modal())
-	var yes := UI.button("ACCEPT", 22, "primary", Vector2(190, 52))
-	yes.name = "AcceptButton"
-	yes.pressed.connect(func() -> void:
-		yes.disabled = true
-		UI.set_caption(yes, "CONNECTING")
-		svc.answer(true))
-	row.add_child(no)
-	row.add_child(yes)
-	v.add_child(row)
-
-
-func _on_net_invite_cancelled(_svc: Node) -> void:
-	if _modal and is_instance_valid(_modal) and _modal.find_child("AcceptButton", true, false):
-		_close_modal()
-
-
-func _on_net_answered(accepted: bool, who: String, _svc: Node) -> void:
-	if not accepted:
-		_net_note = "%s DECLINED (OR DID NOT ANSWER)" % who
-		_net_sig = "-"
-
-
-## The custom room changed (a player joined, a join attempt ended): redraw the room tab.
-func _on_room_changed() -> void:
-	if _net_kind == "room" and _modal and is_instance_valid(_modal) and _net_list and is_instance_valid(_net_list):
-		_open_friends("room")
-
-
-func _on_net_session(_host: bool, svc: Node) -> void:
-	if start_btn.disabled:
+	var kind := search_kind()
+	if kind == "":
+		search_tab.end()
+		_search_was = ""
 		return
-	Game.practice = false
-	Game.online = true
-	Game.session = svc
-	var rules: Variant = svc.get("session_rules")
-	Game.room_rules = (rules as Dictionary).duplicate() if rules is Dictionary else {}
-	if svc is Cloud:
-		(svc as Cloud).close_room()
-		(svc as Cloud).leave_join()
-	_close_modal()
-	start_btn.disabled = true
-	UI.set_caption(start_btn, "MATCHING")
-	Loading.start_match(self)
+	if kind != _search_was:
+		search_tab.end()             # (a new kind of search counts from 0:00)
+		_search_was = kind
+	var member := kind == "group" and LobbyTeam.is_member()
+	search_tab.begin(Callable() if member else cancel_search)
+	var c := Game.cloud_service()
+	if kind == "quick":
+		var nm := get_node(^"NetMatch") as NetMatch
+		search_tab.elapsed = nm.elapsed
+		search_tab.set_status(nm.status_line())
+		search_tab.set_players(0, 0)
+	else:
+		search_tab.elapsed += delta
+		search_tab.set_status("CONNECTING..." if c.status != "online" else "")
+		search_tab.set_players(c.search_found, c.search_needed)
+	search_tab.refresh()
 
 
-func _on_net_ended(reason: String, _svc: Node) -> void:
-	Game.online = false
-	_net_note = "CONNECTION LOST" if reason == "left" else reason.to_upper()
-	_net_sig = "-"
+## A match was found: every window on the lobby goes (a popup, SETTINGS, PROFILE, WARDROBE), so
+## the match loads in their place. SETTINGS closes as its own X closes it (SettingsPanel.close_panel:
+## saved, its `closed` emitted; nothing in the lobby waits on that signal, the ping chip and the
+## lobby's back handling read the tree), except while it runs DELETE MY DATA (busy), which keeps
+## its waiting screen until the scene changes.
+func close_layers() -> void:
+	dialogs.close_size_box()
+	dialogs.close_modal()
+	var sp := _find_settings()
+	if sp:
+		sp.close_panel()
+	if profile_ui.layer:
+		profile_ui.close()
+	if wardrobe:
+		_close_wardrobe()            # (what was not equipped goes back: LobbyWardrobe.close)
 
 
-func _connect_net(svc: Node) -> void:
-	if svc is Cloud:
-		(svc as Cloud).room_changed.connect(_on_room_changed)
-		(svc as Cloud).friends_changed.connect(func() -> void: _net_sig = "-")
-	svc.invited.connect(_on_net_invited.bind(svc))
-	svc.invite_cancelled.connect(_on_net_invite_cancelled.bind(svc))
-	svc.invite_answered.connect(_on_net_answered.bind(svc))
-	svc.session_started.connect(_on_net_session.bind(svc))
-	svc.session_ended.connect(_on_net_ended.bind(svc))
+## The group changed (Cloud.group_changed): a member's mode card follows the leader's choice, the
+## leader's choice goes to a new group, then the GROUP bar, the podium and START's place follow.
+func on_group_changed() -> void:
+	var g := LobbyTeam.group()
+	var gid := String(g.get("gid", ""))
+	if LobbyTeam.is_member():
+		var m := String(g.get("mode", Game.mode))
+		var n := int(g.get("size", Game.team_size))
+		if Game.MODE_NAMES.has(m) and n in Game.TEAM_SIZES and (m != Game.mode or n != Game.team_size):
+			Game.mode = m
+			Game.team_size = n
+			_refresh_mode()
+	elif gid != "" and gid != _group_gid:
+		# (set first: set_group_mode emits group_changed at once, which comes back here; with the
+		# gid not yet remembered that recursed without end, the crash on the first INVITE)
+		_group_gid = gid
+		Game.cloud_service().set_group_mode(Game.mode, Game.team_size)
+	_group_gid = gid
+	var list := LobbyTeam.members()
+	_gate_member = LobbyTeam.is_member()
+	_gate_leader_name = LobbyTeam.leader_name(list)
+	team.on_group_changed()
+	show_group_members(list)
+	update_start_gate()
 
 
-func _disconnect_net(svc: Node) -> void:
-	for sig in ["invited", "invite_cancelled", "invite_answered", "session_started", "session_ended", "room_changed", "friends_changed"]:
-		if not svc.has_signal(sig):
+## START or, for a member, who starts in its place; while a search runs (search_kind) the greyed
+## MATCHING... plate (MatchingPlate) for everyone, the leader's and a member's phone alike (the
+## search tab at the top shows the rest), and on the leader's phone while its DUEL waits
+## (duel_waiting). Polled 4 times a second.
+func update_start_gate() -> void:
+	if _wait_leader == null:
+		return
+	var searching := search_kind() != ""
+	var text := ""
+	if _gate_member and not searching:
+		text = LobbyTeam.start_gate_text(true, false, _gate_leader_name)
+	if _wait_label.text != text:
+		_wait_label.text = text
+	_wait_leader.visible = text != ""
+	_matching.visible = (searching or duel_waiting()) and not start_btn.disabled
+	start_btn.visible = text == "" and not _matching.visible
+	var box_ok := LobbyDialogs.size_box_allowed(_gate_member, searching)
+	var fig := mode_card.get_node_or_null(^"SizeBoxButton") as Control if mode_card else null
+	if fig:
+		fig.visible = box_ok
+	if not box_ok:
+		dialogs.close_size_box()
+
+
+## Which of the 3 spots each other member takes: a member keeps theirs while in the group, a new one
+## takes the first free spot; at most MEMBER_SPOTS.size(). `ids`: the other members, join order.
+static func member_slots(old: Dictionary, ids: Array) -> Dictionary:
+	var out := {}
+	for id: String in ids:
+		if old.has(id) and int(old[id]) < MEMBER_SPOTS.size():
+			out[id] = int(old[id])
+	for id: String in ids:
+		if out.has(id):
 			continue
-		for c: Dictionary in svc.get_signal_connection_list(sig):
-			if (c.callable as Callable).get_object() == self:
-				svc.disconnect(sig, c.callable)
+		for i in MEMBER_SPOTS.size():
+			if not out.values().has(i):
+				out[id] = i
+				break
+	return out
 
 
-## Practice against a training dummy that never goes down (no zone, no clock, nothing recorded).
-func _start_practice() -> void:
-	if start_btn.disabled:
+## The other members on the podium (group_members, without this player): added with a short
+## scale-in, dropped with a scale-out, their outfit changed in place; the name plate and the
+## LEADER mark follow. They share the hero's materials and cast no shadow (the phone's budget).
+func show_group_members(list: Array) -> void:
+	if group_view == null:
 		return
-	Game.practice = true
+	var others: Array = []
+	var info := {}
+	for m: Dictionary in list:
+		var id := String(m.get("id", ""))
+		if bool(m.get("me", false)) or id == "" or others.size() >= MEMBER_SPOTS.size():
+			continue
+		others.append(id)
+		info[id] = m
+	_member_slot = member_slots(_member_slot, others)
+	for id: String in _member_models.keys():
+		if not info.has(id):
+			_drop_member(id)
+	for id: String in others:
+		var m: Dictionary = info[id]
+		var bundle := String(m.get("bundle", "default"))
+		var cm := _member_models.get(id) as CharacterModel
+		if cm == null or not is_instance_valid(cm):
+			cm = _add_member(id, int(_member_slot[id]), bundle)
+		elif cm.bundle != bundle:
+			cm.apply_bundle(bundle)
+		var plate := cm.get_node_or_null(^"NamePlate") as Label3D
+		if plate:
+			plate.text = String(m.get("name", "PLAYER"))
+		var mark := cm.get_node_or_null(^"LeaderMark") as Label3D
+		if mark:
+			mark.visible = bool(m.get("leader", false))
+		var p2 := _member_plates.get(id) as LobbyPlate
+		if p2 and is_instance_valid(p2):
+			p2.name = "MemberPlate_%d" % (int(_member_slot[id]) + 1)
+			p2.show_member(String(m.get("name", "PLAYER")), LobbyTeam.member_level(m), bool(m.get("leader", false)), false)
+	_refresh_hero_plate()
+	# the hero steps left while members stand beside it (back to the middle when alone again)
+	var view := _main_view()
+	if camera != null and wardrobe == null and not (view[0] as Vector3).is_equal_approx(_cam_to_pos):
+		_move_camera(view[0], view[1])
+	_refresh_chat_strip()            # (its width: the voice pill's place under the hero stays free)
+
+
+func _add_member(id: String, slot: int, bundle: String) -> CharacterModel:
+	var cm := CharacterModel.new()
+	cm.name = "GroupModel_%d" % (slot + 1)
+	group_view.add_child(cm)
+	cm.position = MEMBER_SPOTS[slot]
+	cm.rotation.y = MEMBER_YAWS[slot]
+	cm.setup(bundle, false)
+	cm.play_lobby()
+	_share_looks(cm)
+	# the member's name and leader mark as data on the model (NamePlate, LeaderMark: never drawn,
+	# render layers 0); the 2D LobbyPlate under the feet shows them
+	var plate := _plate("PLAYER")
+	plate.name = "NamePlate"
+	cm.add_child(plate)
+	var mark := _plate("LEADER")
+	mark.name = "LeaderMark"
+	cm.add_child(mark)
+	var p2 := LobbyPlate.make(self, cm, false)
+	p2.name = "MemberPlate_%d" % (slot + 1)
+	_main_ui.add_child(p2)
+	_main_ui.move_child(p2, _hero_plate.get_index())
+	_member_plates[id] = p2
+	cm.scale = Vector3.ONE * 0.01
+	cm.create_tween().tween_property(cm, "scale", Vector3.ONE * MEMBER_SCALE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_member_models[id] = cm
+	return cm
+
+
+func _drop_member(id: String) -> void:
+	var cm := _member_models.get(id) as CharacterModel
+	_member_models.erase(id)
+	var p2 := _member_plates.get(id) as LobbyPlate
+	_member_plates.erase(id)
+	if p2 and is_instance_valid(p2):
+		p2.queue_free()
+	if cm == null or not is_instance_valid(cm):
+		return
+	cm.name = "GroupModelGone"
+	var tw := cm.create_tween()
+	tw.tween_property(cm, "scale", Vector3.ONE * 0.01, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.tween_callback(cm.queue_free)
+
+
+## A member's meshes take the hero's materials (the same GLB meshes: one set of materials for every
+## model on the podium) and cast no shadow.
+func _share_looks(cm: CharacterModel) -> void:
+	for n: String in cm.meshes:
+		var mine := cm.meshes[n] as MeshInstance3D
+		mine.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var hero := model.meshes.get(n) as MeshInstance3D if model else null
+		if hero == null or hero.mesh != mine.mesh:
+			continue
+		for s in mine.mesh.get_surface_count():
+			var mat := hero.get_surface_override_material(s)
+			if mat:
+				mine.set_surface_override_material(s, mat)
+
+
+## A member's name or leader mark kept on its model as data (a Label3D on render layer 0: never
+## drawn; the 2D LobbyPlate shows them).
+static func _plate(text: String) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.layers = 0
+	return l
+
+
+## The name plates' places this frame: each under its character's feet (LobbyPlate.place), then,
+## nearest the camera first (lowest on screen), a plate that would overlap one already placed or
+## the mode card moves up just clear of it.
+func _place_plates() -> void:
+	var shown: Array = []
+	for p2: Variant in [_hero_plate] + _member_plates.values():
+		if p2 is LobbyPlate and is_instance_valid(p2) and (p2 as LobbyPlate).place():
+			shown.append(p2)
+	shown.sort_custom(func(a: LobbyPlate, b: LobbyPlate) -> bool: return a.global_position.y > b.global_position.y)
+	var taken: Array = []
+	if mode_card and mode_card.is_visible_in_tree():
+		taken.append(mode_card.get_global_rect().grow(4.0))
+	var pill := _main_ui.get_node_or_null(^"VoicePill") as Control
+	if pill and pill.visible:
+		taken.append(pill.get_global_rect())
+	for p2: LobbyPlate in shown:
+		var r := Rect2(p2.global_position, p2.size)
+		for _i in 4:
+			var hit := false
+			for t: Rect2 in taken:
+				if t.intersects(r):
+					r.position.y = t.position.y - r.size.y - 4.0
+					hit = true
+			if not hit:
+				break
+		p2.global_position = r.position
+		taken.append(r)
+
+
+## This player's own plate: the name, the level, the flag when leading a group, the leave glyph in
+## a group (polled with START's gate and on every group change). A CUSTOM ROOM is a group too,
+## but it is left on its own page (LEAVE / CLOSE ROOM): no leave glyph there.
+func _refresh_hero_plate() -> void:
+	if _hero_plate == null:
+		return
+	if _hero_plate.anchor == null and model != null:
+		_hero_plate.anchor = model
+	var grouped := LobbyTeam.in_group()
+	_hero_plate.show_member(String(Game.profile.name), Game.level(), grouped and LobbyTeam.is_leader(),
+		grouped and not Game.cloud_service().in_room())
+
+
+## What START does for a mode and a team size: "training" (the 1 vs 1 against the bot or the
+## dummy), "training_team" (DUO / SQUAD against bots on this phone), "quick" (the 1 vs 1 QUICK
+## MATCH), "team_search" (the group's DUO / SQUAD: Cloud.group_start) or "team_later" (online teams
+## switched off); "duel" for SOLO in a group of exactly two (`group_n`: the group's players, 0 or 1
+## for a solo): the 1 vs 1 between the two (start_duel).
+static func start_route(m: String, size: int, teams_online := Game.TEAMS_ONLINE, group_n := 0) -> String:
+	if m == "lonewolf":
+		if size <= 1:
+			return "duel" if group_n == 2 else "quick"
+		return "team_search" if teams_online else "team_later"
+	return "training_team" if size > 1 else "training"
+
+
+## The match on this phone loads now (Game.team_match set by the caller: {} for the 1 vs 1).
+func load_match() -> void:
+	Game.online = false
 	start_btn.disabled = true
+	UI.set_caption(start_btn, "LOADING")
 	Loading.start_match(self)
+
+
+func _select_mode() -> void:
+	dialogs.select_mode()
 
 
 func _open_settings() -> void:
@@ -1467,459 +1620,29 @@ func _find_settings() -> SettingsPanel:
 	return null
 
 
-# ---------------------------------------------------------------- modals (how to play, name)
+# ---------------------------------------------------------------- the parts in their own files
 
-## A popup in the reference look: the light header strip (dark caps title, hazard line, X on a
-## dark tile), then the near-black body with a yellow corner mark. Returns the body column.
-## top: the frame sits at the top of the screen, clear of the on-screen keyboard (text entry).
-func _open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
-	_close_modal()
-	_modal = Control.new()
-	_modal.name = "Modal"
-	UI.full_rect(_modal)
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	ui.add_child(_modal)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.72)
-	UI.full_rect(shade)
-	_modal.add_child(shade)
-	var frame := VBoxContainer.new()
-	frame.add_theme_constant_override("separation", 0)
-	frame.anchor_left = 0.5
-	frame.anchor_right = 0.5
-	frame.anchor_top = 0.0 if top else 0.5
-	frame.anchor_bottom = 0.0 if top else 0.5
-	frame.offset_left = -width * 0.5
-	frame.offset_right = width * 0.5
-	frame.offset_top = 18.0 if top else 0.0
-	frame.grow_vertical = Control.GROW_DIRECTION_END if top else Control.GROW_DIRECTION_BOTH
-	_modal.add_child(frame)
-	var head := UI.popup_header(title, 26, 54.0)
-	(head.get_node("Close") as Button).pressed.connect(_close_modal)
-	frame.add_child(head)
-	var panel := UI.popup_body()
-	frame.add_child(panel)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 12)
-	panel.add_child(v)
-	_modal.modulate.a = 0.0
-	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.15)
-	return v
-
-
-func _close_modal() -> void:
-	if _modal:
-		_modal.queue_free()
-		_modal = null
-		DisplayServer.virtual_keyboard_hide()     # a text field in it may have opened the keyboard
-
-
-const HOW_TO := [
-	["MOVE & LOOK", [
-		["stance_sprint", "MOVE", "Left thumb on the joystick. Push it past the ring to sprint."],
-		["v_eye", "LOOK  ·  FREE LOOK", "Drag on the right side to turn the camera. Hold the eye and drag to look all around, even at your own face."],
-		["v_fire", "FIRE", "Hold the big button to shoot; keep holding and drag to aim while firing."],
-		["v_scope", "SCOPE", "Aim down the red dot, or the sniper scope with a sniper rifle."],
-		["stance_crouch", "CROUCH · PRONE · JUMP", "Crouch and prone make you a smaller target; jump onto crates."],
-		["v_reload", "RELOAD", "Tap the weapon panel (or it reloads by itself when the magazine is empty)."],
-	]],
-	["ITEMS", [
-		["v_medkit", "MEDKIT  x2", "+75 HP over 4 seconds. You walk slower; firing cancels it."],
-		["v_wall", "SHIELD WALL  x2", "Tap it, then FIRE: frozen-foam cover that soaks 600 damage for 45 seconds."],
-		["item_grenade", "FRAG GRENADE  x1", "Tap it, then FIRE to throw along the arc. Up to 150 damage (a vest stops a third), 3 s fuse."],
-	]],
-	["THE MATCH", [
-		["v_player", "FIRST TO 5 ROUNDS", "1 vs 1, 200 HP each, Lv2 helmet and vest. Win 5 rounds to win the match."],
-		["v_timer", "PICK THE GUN", "Every 2 rounds one side picks the gun you both use (12 guns, fixed attachments); the pick takes turns."],
-		["v_zone", "SAFE ZONE", "Holds 25 s, then shrinks. Outside it you lose HP; at time-out more HP wins."],
-	]],
-]
-
-
-func _how_to_play() -> void:
-	var v := _open_modal("HOW TO PLAY", 1040.0)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 470)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	v.add_child(scroll)
-	var cols := HBoxContainer.new()
-	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cols.add_theme_constant_override("separation", 24)
-	scroll.add_child(cols)
-	var left := VBoxContainer.new()
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 6)
-	var right := VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 6)
-	cols.add_child(left)
-	cols.add_child(right)
-	for gi in HOW_TO.size():
-		var g: Array = HOW_TO[gi]
-		var col := left if gi == 0 else right
-		if gi > 1:
-			col.add_child(UI.spacer(6))
-		col.add_child(UI.section(String(g[0]), 18))
-		for it in g[1]:
-			col.add_child(_howto_item(String(it[0]), String(it[1]), String(it[2])))
-
-
-func _howto_item(icon_name: String, title: String, text: String) -> Control:
-	var p := PanelContainer.new()
-	var st := UI.chamfer(Color(1, 1, 1, 0.045), 6, 0, Color.TRANSPARENT, 10.0, ["br"])
-	st.content_margin_top = 5
-	st.content_margin_bottom = 5
-	p.add_theme_stylebox_override("panel", st)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 12)
-	var ic := PanelContainer.new()
-	var ics := UI.box(Color(0, 0, 0, 0.45), 21, 1, Color(1, 1, 1, 0.18), 0.0)
-	ics.set_content_margin_all(7)
-	ic.add_theme_stylebox_override("panel", ics)
-	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ic.add_child(UI.icon(icon_name, 28, UI.TEXT))
-	h.add_child(ic)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", -3)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(UI.label(title, 17, UI.ACCENT, "bold"))
-	var t := UI.label(text, 15, UI.TEXT, "semi")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	t.custom_minimum_size = Vector2(380, 0)
-	v.add_child(t)
-	h.add_child(v)
-	p.add_child(h)
-	return p
-
-
-## The name editor. first: asked once at start (new installs and ones from before this prompt):
-## type a name or roll a random one; closing it keeps the current name.
 func _edit_name(first := false) -> void:
-	var v := _open_modal("CHOOSE YOUR NAME" if first else "PLAYER NAME", 640.0, true)
-	v.add_child(UI.label("Type a name or tap RANDOM. Up to 14 letters or digits; shown in matches.", 16, UI.TEXT_DIM, "semi"))
-	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 10)
-	var le := LineEdit.new()
-	le.name = "NameEdit"
-	le.text = String(Game.profile.name)
-	le.max_length = 14
-	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	le.custom_minimum_size = Vector2(0, 54)
-	le.virtual_keyboard_enabled = true
-	le.virtual_keyboard_show_on_focus = true
-	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_DEFAULT
-	le.select_all_on_focus = first
-	le.add_theme_font_override("font", UI.font("bold"))
-	le.add_theme_font_size_override("font_size", 26)
-	le.add_theme_stylebox_override("normal", UI.chamfer(Color(0, 0, 0, 0.5), 8, 1, Color(1, 1, 1, 0.25), 14.0, ["br"]))
-	le.add_theme_stylebox_override("focus", UI.chamfer(Color(0, 0, 0, 0.5), 8, 2, UI.ACCENT, 14.0, ["br"]))
-	le.add_theme_color_override("font_color", UI.TEXT)
-	le.add_theme_color_override("caret_color", UI.ACCENT)
-	line.add_child(le)
-	var dice := UI.button("RANDOM", 20, "light", Vector2(150, 54))
-	dice.name = "NameRandom"
-	dice.pressed.connect(func() -> void:
-		le.text = Game.random_name()
-		le.caret_column = le.text.length()
-		Audio.play("ui_click", -4.0))
-	line.add_child(dice)
-	v.add_child(line)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 12)
-	var cancel := UI.button("KEEP" if first else "CANCEL", 20, "light", Vector2(170, 52))
-	var keep := func() -> void:
-		if first:
-			Game.profile.name_set = true
-			Game.save_profile()
-		_close_modal()
-	cancel.pressed.connect(keep)
-	var ok := UI.button("OK", 22, "primary", Vector2(170, 52))
-	ok.name = "NameOk"
-	var apply := func() -> void:
-		var n := Game.clean_name(le.text)
-		if n != "":
-			Game.profile.name = n
-			_name_label.text = n
-			_plate_label.text = n
-		Game.profile.name_set = true
-		Game.save_profile()
-		_close_modal()
-	ok.pressed.connect(apply)
-	le.text_submitted.connect(func(_t: String) -> void: apply.call())
-	row.add_child(cancel)
-	row.add_child(ok)
-	v.add_child(row)
-	if first:
-		var x := _modal.find_child("Close", true, false) as Button
-		if x:
-			x.pressed.connect(keep)
-		get_tree().process_frame.connect(func() -> void:
-			if is_instance_valid(ok) and ok.is_inside_tree():
-				Game.mark("name prompt")
-				Game.mark_ui("name_ok", ok, ok.size / 2.0), CONNECT_ONE_SHOT | CONNECT_DEFERRED)
-	# Focus once the dialog is up: the keyboard then opens under it, with the field in view.
-	get_tree().create_timer(0.2).timeout.connect(func() -> void:
-		if is_instance_valid(le) and le.is_inside_tree():
-			le.grab_focus()
-			le.caret_column = le.text.length())
+	dialogs.edit_name(first)
 
 
-# ---------------------------------------------------------------- wardrobe
+func _open_friends(kind := "online") -> void:
+	friends.open(kind)
+
 
 func _open_wardrobe() -> void:
-	if wardrobe:
-		return
-	_close_modal()
-	_preview_bundle = String(Game.profile.bundle)
-	wardrobe = Control.new()
-	wardrobe.name = "Wardrobe"
-	UI.full_rect(wardrobe)
-	wardrobe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(wardrobe)
-	_main_ui.visible = false
-	var view := _ward_view()
-	_move_camera(view[0], view[1])
-	var shade := UI.gradient_rect([[0.0, Color(0.03, 0.03, 0.04, 0.94)], [0.5, Color(0.03, 0.03, 0.04, 0.88)], [0.66, Color(0, 0, 0, 0.0)], [1.0, Color(0, 0, 0, 0.0)]], true)
-	UI.full_rect(shade)
-	wardrobe.add_child(shade)
-	# Header.
-	var head := HBoxContainer.new()
-	head.position = Vector2(26, 16)
-	head.add_theme_constant_override("separation", 16)
-	wardrobe.add_child(head)
-	head.add_child(UI.section("BUNDLES", 30))
-	var note := UI.label("ALL OUTFITS UNLOCKED  ·  OFFLINE", 15, UI.TEXT_DIM, "bold")
-	note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	note.custom_minimum_size = Vector2(0, 36)
-	head.add_child(note)
-	# Rarity tabs (left).
-	var tabs := VBoxContainer.new()
-	tabs.position = Vector2(0, 76)
-	tabs.add_theme_constant_override("separation", 4)
-	wardrobe.add_child(tabs)
-	_ward_tabs.clear()
-	for f in ["all", "legendary", "epic", "rare", "common"]:
-		var tb := _ward_tab(f)
-		tabs.add_child(tb)
-		_ward_tabs[f] = tb
-	# Item grid with the item info strip under it.
-	var col := VBoxContainer.new()
-	col.anchor_bottom = 1.0
-	col.offset_left = 196
-	col.offset_right = 196 + 3 * CARD_SIZE.x + 2 * 10
-	col.offset_top = 74
-	col.offset_bottom = -16
-	col.add_theme_constant_override("separation", 10)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wardrobe.add_child(col)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	col.add_child(scroll)
-	_ward_grid = GridContainer.new()
-	_ward_grid.columns = 3
-	_ward_grid.add_theme_constant_override("h_separation", 10)
-	_ward_grid.add_theme_constant_override("v_separation", 10)
-	scroll.add_child(_ward_grid)
-	var info := VBoxContainer.new()
-	info.add_theme_constant_override("separation", 0)
-	col.add_child(info)
-	var ih := PanelContainer.new()
-	ih.add_theme_stylebox_override("panel", UI.chamfer(Color(0.05, 0.42, 0.48, 0.95), 8, 0, Color.TRANSPARENT, 14.0, ["tl"]))
-	var ihh := HBoxContainer.new()
-	ihh.add_theme_constant_override("separation", 12)
-	ihh.add_child(UI.icon("v_wardrobe", 24, UI.TEXT))
-	_ward_info_name = UI.label("", 24, UI.TEXT, "bold")
-	_ward_info_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ihh.add_child(_ward_info_name)
-	_ward_info_rarity = UI.label("", 16, UI.TEXT, "heavy")
-	_ward_info_rarity.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	ihh.add_child(_ward_info_rarity)
-	ih.add_child(ihh)
-	info.add_child(ih)
-	var ib := PanelContainer.new()
-	ib.add_theme_stylebox_override("panel", UI.chamfer(Color(0.06, 0.06, 0.07, 0.9), 8, 0, Color.TRANSPARENT, 14.0, ["br"]))
-	_ward_info_desc = UI.label("", 17, UI.TEXT, "semi")
-	_ward_info_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ib.add_child(_ward_info_desc)
-	info.add_child(ib)
-	# EQUIP / BACK under the preview.
-	var row := HBoxContainer.new()
-	row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	row.offset_left = -460
-	row.offset_right = -20
-	row.offset_top = -80
-	row.offset_bottom = -14
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 14)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wardrobe.add_child(row)
-	var back := UI.button("BACK", 26, "light", Vector2(170, 64))
-	back.name = "BackButton"
-	back.pressed.connect(func() -> void:
-		model.apply_bundle(String(Game.profile.bundle))
-		_update_bundle_label(String(Game.profile.bundle))
-		_close_wardrobe())
-	row.add_child(back)
-	_ward_equip = UI.hero_button("EQUIP", 38, Vector2(240, 64))
-	_ward_equip.name = "EquipButton"
-	_ward_equip.pressed.connect(func() -> void:
-		Game.profile.bundle = _preview_bundle
-		Game.save_profile()
-		_update_bundle_label(_preview_bundle)
-		_close_wardrobe())
-	row.add_child(_ward_equip)
-	_fill_wardrobe()
-	wardrobe.modulate.a = 0.0
-	wardrobe.create_tween().tween_property(wardrobe, "modulate:a", 1.0, 0.2)
+	wardrobe_ui.open()
 
 
-func _ward_tab(f: String) -> Button:
-	var b := Button.new()
-	b.name = "Tab_" + f
-	b.toggle_mode = true
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(190, 52)
-	b.text = f.to_upper()
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.button_pressed = f == _ward_filter
-	b.add_theme_font_override("font", UI.font("bold"))
-	b.add_theme_font_size_override("font_size", 22)
-	var normal := UI.box(Color(0, 0, 0, 0), 0, 0, Color.TRANSPARENT, 0.0)
-	var hover := UI.box(Color(1, 1, 1, 0.06), 0, 0, Color.TRANSPARENT, 0.0)
-	var on := UI.chamfer(UI.ACCENT, 12, 0, Color.TRANSPARENT, 0.0, ["br"])
-	for st in [normal, hover, on]:
-		st.content_margin_left = 30
-	b.add_theme_stylebox_override("normal", normal)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", on)
-	b.add_theme_stylebox_override("hover_pressed", on)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", UI.TEXT if f == "all" else UI.RARITY_COLORS.get(f, UI.TEXT))
-	b.add_theme_color_override("font_hover_color", UI.TEXT)
-	b.add_theme_color_override("font_pressed_color", UI.INK)
-	b.add_theme_color_override("font_hover_pressed_color", UI.INK)
-	b.draw.connect(func() -> void:
-		if b.button_pressed:
-			UI.draw_tab_selected(b, b.size))
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		_ward_filter = f
-		for k in _ward_tabs:
-			(_ward_tabs[k] as Button).set_pressed_no_signal(k == f)
-			(_ward_tabs[k] as Button).queue_redraw()
-		_fill_wardrobe())
-	return b
-
-
-func _fill_wardrobe() -> void:
-	for c in _ward_grid.get_children():
-		_ward_grid.remove_child(c)
-		c.queue_free()
-	var group := ButtonGroup.new()
-	var list := []
-	for r in RARITY_ORDER:
-		for b in CharacterModel.BUNDLE_INFO:
-			if b.rarity == r and (_ward_filter == "all" or _ward_filter == r):
-				list.append(b)
-	# The info box and the podium follow the first card when the previewed one is filtered out.
-	if not list.is_empty() and not list.any(func(b: Dictionary) -> bool: return String(b.id) == _preview_bundle):
-		_preview_bundle = String(list[0].id)
-		model.apply_bundle(_preview_bundle)
-		_update_bundle_label(_preview_bundle)
-	for b in list:
-		_ward_grid.add_child(_bundle_card(b, group))
-	_update_ward_info()
-
-
-func _bundle_card(b: Dictionary, group: ButtonGroup) -> Button:
-	var id := String(b.id)
-	var rc: Color = UI.RARITY_COLORS[b.rarity]
-	var card := Button.new()
-	card.name = "Bundle_" + id
-	card.toggle_mode = true
-	card.button_group = group
-	card.button_pressed = id == _preview_bundle
-	card.focus_mode = Control.FOCUS_NONE
-	card.custom_minimum_size = CARD_SIZE
-	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
-		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-	var portrait := UI.texture("bundle_%s.png" % id)
-	var glow := UI.radial_glow(Color(rc, 0.62))
-	var floor_glow := UI.radial_glow(Color(rc.lightened(0.15), 0.5))
-	card.draw.connect(func() -> void:
-		var s := card.size
-		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.075, 0.072, 0.07, 0.97))
-		# rarity glow: a smooth radial gradient behind the outfit, inside the card, plus a
-		# brighter pool at the feet
-		card.draw_texture_rect(glow, Rect2(0, 0, s.x, s.y - 46), false)
-		card.draw_texture_rect(floor_glow, Rect2(s.x * 0.12, s.y * 0.62, s.x * 0.76, s.y * 0.2), false)
-		card.draw_rect(Rect2(0, 0, s.x, s.y * 0.5), Color(1, 1, 1, 0.02))
-		if portrait:
-			var ph := s.y - 58
-			var pw := ph * 0.75
-			card.draw_texture_rect(portrait, Rect2((s.x - pw) * 0.5, 8, pw, ph), false)
-		# name strip + rarity bar
-		card.draw_rect(Rect2(0, s.y - 52, s.x, 48), Color(0, 0, 0, 0.6))
-		card.draw_rect(Rect2(0, s.y - 5, s.x, 5), rc)
-		# equipped: yellow outline + tick; previewed: white outline
-		var equipped := id == String(Game.profile.bundle)
-		if equipped:
-			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), UI.ACCENT, false, 3.0)
-			UI.draw_tick_corner(card, Vector2(s.x, s.y - 5), 34.0)
-		if card.button_pressed and not equipped:
-			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), Color(1, 1, 1, 0.95), false, 3.0)
-		elif card.is_hovered() and not equipped:
-			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.5), false, 2.0)
-		elif not equipped:
-			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.1), false, 1.0))
-	var nm := UI.ellipsis(UI.label(String(b.name), 18, UI.TEXT, "bold"))
-	nm.position = Vector2(9, CARD_SIZE.y - 50)
-	nm.size = Vector2(CARD_SIZE.x - 18, 24)
-	card.add_child(nm)
-	var rl := UI.label(String(b.rarity).to_upper(), 14, rc, "bold")
-	rl.position = Vector2(9, CARD_SIZE.y - 28)
-	card.add_child(rl)
-	card.mouse_entered.connect(card.queue_redraw)
-	card.mouse_exited.connect(card.queue_redraw)
-	card.toggled.connect(func(_on: bool) -> void: card.queue_redraw())
-	card.pressed.connect(func() -> void:
-		Audio.play("ui_select", -6.0)
-		_preview_bundle = id
-		model.apply_bundle(id)
-		_update_bundle_label(id)
-		_update_ward_info()
-		for other in _ward_grid.get_children():
-			(other as Control).queue_redraw())
-	return card
-
-
-func _update_ward_info() -> void:
-	if _ward_info_name == null:
-		return
-	var info := CharacterModel.bundle_info(_preview_bundle)
-	_ward_info_name.text = String(info.name)
-	_ward_info_rarity.text = String(info.rarity).to_upper()
-	_ward_info_rarity.add_theme_color_override("font_color", UI.RARITY_COLORS[info.rarity].lightened(0.25))
-	var equipped := _preview_bundle == String(Game.profile.bundle)
-	_ward_info_desc.text = String(info.desc) + ("   EQUIPPED" if equipped else "")
-	if _ward_equip:
-		UI.set_caption(_ward_equip, "EQUIPPED" if equipped else "EQUIP")
+func _open_profile() -> void:
+	profile_ui.open()
 
 
 func _close_wardrobe() -> void:
-	if wardrobe:
-		wardrobe.queue_free()
-		wardrobe = null
-		_ward_grid = null
-		_ward_info_name = null
-		_ward_equip = null
-	_main_ui.visible = true
-	var view := _main_view()
-	_move_camera(view[0], view[1])
+	wardrobe_ui.close()
 
 
+## Moves the camera to a view (the wardrobe's or the main one) over the next 0.45 s.
 func _move_camera(pos: Vector3, look: Vector3) -> void:
 	# start from where the camera looks now (also mid-transition)
 	_cam_from_pos = camera.position
@@ -1932,7 +1655,7 @@ func _move_camera(pos: Vector3, look: Vector3) -> void:
 # ---------------------------------------------------------------- input / anim
 
 func _modal_open() -> bool:
-	return _modal != null or _find_settings() != null
+	return _modal != null or dialogs.size_box != null or _find_settings() != null or profile_ui.layer != null
 
 
 func _input(event: InputEvent) -> void:
@@ -1946,140 +1669,78 @@ func _input(event: InputEvent) -> void:
 		var d := event as InputEventScreenDrag
 		if d.index == _drag_index:
 			var vs := get_viewport().get_visible_rect().size
-			model.rotation.y += d.relative.x / maxf(vs.x, 1.0) * 6.0
+			# a full turn in about one screen width of drag, any way round (360 degrees)
+			model.rotation.y = wrapf(model.rotation.y + d.relative.x / maxf(vs.x, 1.0) * 6.0, -PI, PI)
+			hero_yaw = model.rotation.y
 			_idle_t = 0.0
 
 
-## Where a drag turns the character: around it, between the menus.
+## Where a drag turns the character: around it, clear of the bars and the mode card.
 func _in_drag_zone(p: Vector2) -> bool:
 	var vs := get_viewport().get_visible_rect().size
 	var x := p.x / vs.x
 	var y := p.y / vs.y
 	if wardrobe:
 		return x > 0.62 and y > 0.1 and y < 0.68
-	return x > 0.24 and x < 0.66 and y > 0.1 and y < 0.86
+	return x > hero_x() - 0.22 and x < hero_x() + 0.16 and y > 0.1 and y < 0.86
 
 
 func _process(delta: float) -> void:
 	_time += delta
 	_idle_t += delta
-	if _net_list and is_instance_valid(_net_list):
-		_net_refresh_t -= delta
-		if _net_refresh_t <= 0.0:
-			_net_refresh_t = 0.4
-			_refresh_friends()
+	friends.process(delta)
+	_chat_t -= delta
+	if _chat_t <= 0.0:
+		_chat_t = 0.5
+		_refresh_chat_strip()
 	if _cam_t < 1.0:
 		_cam_t = minf(1.0, _cam_t + delta / 0.45)
 		var k := 1.0 - pow(1.0 - _cam_t, 3.0)
 		camera.position = _cam_from_pos.lerp(_cam_to_pos, k)
 		camera.look_at(_cam_from_look.lerp(_cam_to_look, k))
-	# back to the hero angle a while after a drag
-	if _drag_index == -1 and _idle_t > 4.0:
-		model.rotation.y = lerp_angle(model.rotation.y, MODEL_YAW, minf(1.0, delta * 2.0))
 	if start_btn and not start_btn.disabled:
 		var s := 1.0 + sin(_time * 3.2) * 0.012
 		start_btn.pivot_offset = start_btn.size * 0.5
 		start_btn.scale = Vector2(s, s)
 	if start_btn:
 		start_btn.queue_redraw()
-	if _ward_equip:
-		_ward_equip.queue_redraw()
-	if _name_plate and _main_ui.visible and camera:
-		var feet := Vector3(model.global_position.x, PODIUM_TOP, 0.55)
-		if not camera.is_position_behind(feet):
-			var p := camera.unproject_position(feet)
-			_name_plate.position = (p - Vector2(_name_plate.size.x * 0.5, 0)).round()
+	wardrobe_ui.process()
+	profile_ui.process(delta)
+	team.process(delta)
+	social.process()
+	_follow_search(delta)
+	if group_view:
+		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
+	_place_plates()
+	if _add_btn:
+		_add_btn.visible = dialogs.size_box == null
+	_gate_t -= delta
+	if _gate_t <= 0.0:
+		_gate_t = 0.25
+		update_start_gate()
+		_refresh_hero_plate()
 
 
-## Android back: closes the top-most layer (settings, credits, a popup, the wardrobe); with
-## nothing open it asks before quitting; while START's match loading runs it does nothing.
+## Android back: closes the top-most layer (settings, the team-size box, a popup: its own way
+## back, PROFILE, the wardrobe); with nothing open it cancels a running search (the search tab's X), else asks before
+## quitting; while START's match loading runs it does nothing.
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_GO_BACK_REQUEST:
 		return
 	if start_btn and start_btn.disabled:
 		return                      # the match is loading
-	if _find_settings():
+	var sp := _find_settings()
+	if sp and not sp.covered():
 		return                      # the panel closes itself
-	if _modal:
-		_close_modal()
+	if _modal:                      # (also a popup that came in over the settings panel or the size box)
+		dialogs.back()
+	elif dialogs.size_box:
+		dialogs.close_size_box()
+	elif profile_ui.layer:
+		profile_ui.close()
 	elif wardrobe:
-		model.apply_bundle(String(Game.profile.bundle))
-		_update_bundle_label(String(Game.profile.bundle))
 		_close_wardrobe()
+	elif search_kind() != "" and search_tab.on_cancel.is_valid():
+		cancel_search()             # with no window open, back cancels the search (not a member's)
 	else:
-		_confirm_quit()
-
-
-## "Quit the game?" as a system dialog: a full-width dark band with the emblem, the question,
-## CANCEL (grey) and QUIT (yellow). Back or CANCEL closes it.
-func _confirm_quit() -> void:
-	_close_modal()
-	_modal = Control.new()
-	_modal.name = "QuitDialog"
-	UI.full_rect(_modal)
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	ui.add_child(_modal)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.62)
-	UI.full_rect(shade)
-	_modal.add_child(shade)
-	var band := Control.new()
-	band.anchor_right = 1.0
-	band.anchor_top = 0.30
-	band.anchor_bottom = 0.70
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	band.draw.connect(func() -> void: UI.draw_dialog_band(band, band.size))
-	_modal.add_child(band)
-	var em := UI.texture("emblem.png")
-	if em:
-		var t := TextureRect.new()
-		t.texture = em
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		t.anchor_left = 0.16
-		t.anchor_right = 0.16
-		t.anchor_top = 0.5
-		t.anchor_bottom = 0.5
-		t.offset_left = -84
-		t.offset_right = 84
-		t.offset_top = -84
-		t.offset_bottom = 84
-		t.modulate = Color(1, 1, 1, 0.9)
-		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		band.add_child(t)
-	var v := VBoxContainer.new()
-	v.anchor_left = 0.3
-	v.anchor_right = 0.95
-	v.anchor_top = 0.0
-	v.anchor_bottom = 1.0
-	v.offset_top = 34
-	v.offset_bottom = -26
-	v.add_theme_constant_override("separation", 8)
-	band.add_child(v)
-	v.add_child(UI.label("QUIT THE GAME?", 38, UI.TEXT, "bold"))
-	var bar := ColorRect.new()
-	bar.color = UI.ACCENT
-	bar.custom_minimum_size = Vector2(64, 4)
-	bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(bar)
-	v.add_child(UI.spacer(2))
-	v.add_child(UI.label("Your name, outfits, settings and progress stay saved on this phone.", 19, Color(1, 1, 1, 0.86), "semi"))
-	var fill := UI.spacer(0)
-	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(fill)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 14)
-	v.add_child(row)
-	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 52))
-	cancel.name = "QuitCancel"
-	cancel.pressed.connect(_close_modal)
-	row.add_child(cancel)
-	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 52))
-	quit.name = "QuitConfirm"
-	quit.pressed.connect(func() -> void: get_tree().quit())
-	row.add_child(quit)
-	_modal.modulate.a = 0.0
-	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.12)
+		dialogs.confirm_quit()

@@ -9,14 +9,15 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 ## 1. Mode and round flow (reference: 1v1 "Lone Wolf" duels)
 | Item | Target |
 |---|---|
-| Format | 1 vs 1 bot, ONE round per START (owner's choice; the reference mode is first-to-5) |
-| Flow | Lobby START -> loading -> PREP 10 s (spawn alcove behind a glowing red floor barrier, red countdown, weapon pick panel) -> "ROUND 1 / AREA: CARGO CAGE" banner -> FIGHT 90 s -> result |
-| Weapon pick | Grid of weapons, the chosen gun is used by BOTH players; 10 s; default pick if the timer ends |
-| Loadout | Chosen gun + fists, 2 medkits, 2 shield walls, 1 frag grenade, Lv2 helmet + Lv2 vest |
+| Modes | Two, both 1 vs 1 on the one map CARGO CAGE: TRAINING GROUND (against a bot, EASY / NORMAL / HARD, or the TARGET DUMMY: endless HP, no zone, the clock counts up, nothing counted) and LONE WOLF (online against another player; START opens the ONLINE list). TRAINING GROUND is the default |
+| Format | First to 5 rounds (best of 9), as in the reference mode; a custom room plays first to 1-7 |
+| Flow | Lobby START -> loading -> PREP 15 s (spawn alcove behind a glowing red floor barrier, red countdown, weapon pick panel; the second round of a pick 5 s) -> "ROUND 1 / AREA: CARGO CAGE" banner -> FIGHT in two stages on the one clock, stage 1 20 s then stage 2 90 s (DUO the same, SQUAD 120 s), fighting in both -> the BREAK (10.5 s, one timer on both phones: the kill at normal speed (no slow motion: the one kill feed line, a small elimination badge, a small ELIMINATED tag over the body with one white burst), at 2.5 s the result band near the top (VICTORY yellow / DEFEAT grey / DRAW) with the top clock red counting the break down, at 5 s a dimmed screen with the two score plates (blue yours, orange theirs) where the winner's number counts up from the old score at 6 s, at 8 s the "ROUND n / AREA" band with MATCH POINT! / FINAL ROUND, then the prep: a round without a pick starts about 15.5 s after the kill; the ELIMINATED BY card stays on top; DUO / SQUAD the same with the team score; round 1's band shows when its fight starts, later rounds' bands only in the break) -> next round (gun picked every 2 rounds, the pick alternates) ... -> the match's end on the same result band (VICTORY! / DEFEAT / DRAW / TIME UP with the rounds, from 2.5 s after the kill; the camera stays, no orbit) -> result |
+| Weapon pick | 1 vs 1: grid of weapons, the chosen gun is used by BOTH players; 15 s (the panel 14 s); a gun picked for a pair of rounds rests for the next 4 rounds, whoever picks (its card greyed with our clock glyph and "n ROUNDS"); a ROUNDS strip of numbered discs under the title (blue: this player picks, orange: the other, the current pair ringed yellow); the preselected free gun if the timer ends; the header names the pair of rounds ("PICK FOR ROUNDS 1-2"); the side that does not pick sees the same panel read-only (its own strip, the cooldowns, the ring, SELECT dimmed, "WAITING FOR <NAME> TO PICK FOR ROUNDS 3-4") until the pick lands, then "<NAME> PICKED: <GUN>" under PREPARE. Until a pick round's pick lands both fighters hold the fists only (no gun in hand or on the back) and the weapon panel's main slot reads "--" / PICKING... (the picker's chosen gun dimmed in it). DUO / SQUAD: every fighter picks its own gun in a 10 s prep, no cooldown |
+| Loadout | The kit, the same in every mode: the chosen gun + the sidearm WREN 9 (our own light pistol, not in the pick grid, the same whatever the gun: 32 a body shot, 12 rounds + 2 spare magazines, 0.2 s between shots, 0.15 s draw, the pistol model with a blue-grey tint and a compact silhouette of its own) + fists (weapon indexes: gun 0, fists 1, sidearm 2); the sidearm comes with the gun (fists only until a pick lands); 2 medkits, 3 shield walls, 1 frag grenade, Lv2 helmet + Lv2 vest |
 | HP | 200, resets each round; no knock-down in 1v1 (0 HP = eliminated) |
-| Zone | Holds 25 s, then shrinks over 40 s to r = 4 m; damage 5 HP/s (first 10 s outside), then 10, then 20 |
+| Zone | Stage 1: covers the whole hall and stays put; the change to stage 2 is quiet in the 1 vs 1 (no band, no centre line, no beep, no zone strip: only the clock starts stage 2), while DUO / SQUAD keep the strip's countdown to the closing, the warning band in stage 1's last 10 s and ZONE SHRINKING; stage 2: starts at r = 47 m, well outside the hall (about 1.12 x its 42 m long side, so the spawn ends stay safe until roughly the last 35-45 s; a tuning from an estimate of the reference, fitted from its minimap) and closes continuously and evenly to r = 0.5 m exactly when the clock ends, its centre sliding to a new spot every round (the same on both phones); damage 5 HP/s (first 10 s outside), then 10, then 20 |
 | Time-out | Higher HP wins; equal HP -> draw |
-| Score HUD | Top centre: [your bar][blue box: your rounds][timer + "OBJECTIVE 1"][orange box: enemy rounds][enemy bar]; timer red in the last 10 s and during prep |
+| Score HUD | Top centre: [your bar][blue box: your rounds][timer + "OBJECTIVE: 5" (the rounds to win)][orange box: enemy rounds][enemy bar]; the timer counts each stage down (00:20 -> 00:00, then 01:30 -> 00:00), red in the last 10 s of a stage and during prep |
 
 ## 2. Map "Cargo Cage" (original, warehouse duel arena)
 - Enclosed industrial hall, 42 x 30 m inside, 9 m walls, 180-degree rotational symmetry, spawn
@@ -28,43 +29,73 @@ QA agents (`tools/agents/agents/visual-qa.txt`, `gameplay-tester.txt`) check aga
 - Shipping containers in light blue, deep blue, rust red, orange and cream (20 ft and 40 ft, some
   stacked 2-high, an open walk-through container), steel ramps and crate steps up to the
   high ground: a 40 ft container on each side of an open 8.5 m centre bay (bare floor where the
-  safe zone's final 4 m circle closes), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
+  safe zone's last circle can close), X-braced wooden crates as steps/cover, barrels, pallets, a forklift, a tank,
   bollards, roll-up doors, fire cabinets, area signs (A / B).
 - Lighting: neutral bright daylight + fluorescent ambience, soft shadows, vivid colours.
 - Performance budget (phone): <= 220 draw calls and <= 250k primitives per frame in the arena.
 
-## 3. In-match HUD (default layout, 16:9 .. 20:9)
-Positions of the movable widgets are those of the reference's default layout, measured on a 20:9
-recording (no left fire, reload, scoreboard or free-look buttons), and live in code:
-`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor, so the
-layout keeps its look on 16:9; y and sizes in screen heights). The table quotes them on 20:9.
+## 3. In-match HUD (default layout, 16:9 .. 22:9)
+Positions of the movable widgets follow the reference's default layout as measured on its 16:9
+screen (2026-11 observation, a training squad layout and a ranked match), and live in code:
+`HudLayout.DEFAULTS` in scripts/hud_layout.gd (x in 20:9 widths with an edge anchor l / c / r: on
+16:9 a left-anchored x is the frame's x * 0.8, a right-anchored one 1 - (1 - frame x) * 0.8; y and
+sizes in screen heights). The table quotes the layout's own numbers; the unit tests check that no
+two default touch areas overlap from 16:10 to 22:9. A layout the player saved (HUD editor) stays as
+they made it, every widget of it, sizes included. Our own decisions where it departs from the
+reference:
+- the column right of the minimap holds the gear on top (the reference's place); its next two
+  places (frame (0.185, 0.11) and (0.185, 0.182)) are for the voice buttons (SPEAKER, MIC), the
+  ping (signal bars and the number) sits right of the gear (frame about (0.278, 0.031)); we have no
+  pet, emote, camera, backpack, skill, map marker or quick chat bubble, so those places stay empty;
+- SPRINT sits a little lower than the reference's (frame (0.17, 0.49)), clear of the DUO / SQUAD
+  team list under the minimap;
+- a LEFT FIRE button (hold to fire with the left thumb) shows always and the reference's quick
+  RELOAD and quick weapon SWITCH buttons start on (the owner's wish; the reference ships them off
+  and the left fire button only while scoped); each can be turned off in SETTINGS > CONTROLS. They
+  sit out of the middle of the screen: LEFT FIRE on the left edge under the team list's place,
+  RELOAD and SWITCH up and left of SCOPE, under the weapon panel;
+- a FREE LOOK eye can be turned on (off by default, as the reference's free camera button);
+- free look needs no button (as the reference): standing still, a drag on the free area takes the
+  camera round the character, 360 degrees, its face too, and the body keeps its facing (the head
+  turns a little toward the look); FIRE turns the body to the crosshair at once, the stick or the
+  sprint lock turns it back and it runs away from the camera; a drag while running turns the run;
+- a camera cutout on a short side moves the edge-anchored widgets in by its width.
 | Element | Position (x, y) | Size | Style |
 |---|---|---|---|
-| Minimap (square) | top-left 0.075, 0.15 | 0.27 h | dark translucent square, floor plan from above, player arrow, enemy red dot when revealed; safe-zone strip under it |
+| Minimap (square) | top-left corner 0.0625, 0.137, anchor l | 0.27 h | dark translucent square, floor plan from above that turns with the view by default (the player in the middle, its arrow up, everything on the map turning with it, a small N on the edge where north is; SETTINGS > DISPLAY > MINIMAP: TURNS WITH VIEW / NORTH UP), player arrow, each enemy in sight a red arrowhead pointing where it faces, out of sight its shots leave small red marks that fade over 2 s (no live position), red footprints of its running steps; teammates as dots numbered and coloured as the team list's boxes; safe-zone strip under it in DUO / SQUAD only |
+| Team list (DUO / SQUAD) | under the minimap (and its zone strip), lined up with its left edge | 0.88 x the minimap wide; header 0.042 h, rows 0.036 h | dark header with a small flag and TEAM, a yellow rule under it; a row per member in slot order: a square number box in the member's colour (1 cyan, 2 orange, 3 pink, 4 purple; grey once out), the name (the player's yellow), the leader's yellow flag at the right end, a thin HP bar; KNOCKED with a red cross and the bleed-out bar (green while revived), OUT / LEFT grey. No "+" rows: nobody can join a running match |
+| Teammate tag | over each standing teammate's head | number box 0.03 h, name 0.019 h | the member's number box in its colour and the name; enemies have no name tag |
 | Score bar | top centre 0.50 | 0.66 h wide, 0.09 h tall | see section 1 |
-| Zone warning | under the score bar | text 0.03 h | "SAFE ZONE SHRINKS IN 7s" / "OUTSIDE THE SAFE ZONE" |
-| Kill feed | bottom centre, y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange |
-| Weapon panel | top-right 0.887, 0.158 (right edge on the screen edge; main slot y 0 .. 0.155, three slots under it) | slot 0.152 h | main slot (big mag + small /reserve, RELOAD / RELOADING, gun silhouette, underline bar, top-right corner cut; tap = reload) over three square slots (gun, empty, fists) |
-| HP block | bottom centre, y 0.968 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
-| Joystick | 0.18, 0.66 | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |
-| Sprint | 0.181, 0.438 | 0.131 | running-figure glyph |
-| Medkit | left edge 0.0375, 0.678 | 0.104 | kit glyph + count badge |
-| Fire | 0.798, 0.68 | 0.26 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
-| Shield wall | over the fire button 0.754, 0.384 | 0.11 | wall glyph + count badge |
-| Scope / ADS | 0.835, 0.40 | 0.104 | reticle glyph |
-| Jump | right of the fire button 0.906, 0.519 | 0.166 | leaping-figure silhouette |
-| Crouch | right, below 0.922, 0.834 | 0.166 | crouching-figure silhouette |
-| Prone | top, right of the score bar 0.673, 0.073 | 0.104 | lying-figure silhouette |
-| Grenade | bottom 0.678, 0.912 | 0.13 | grenade silhouette + count |
-| Settings / pause | top-right corner 0.963, 0.027, in the weapon panel's main slot corner | 0.046 (touch radius >= 0.036 h) | small gear on a soft dark disk, drawn over the panel and winning a touch there; the gun silhouette sits under it |
+| Zone warning | under the score bar | text 0.03 h | "OUTSIDE THE SAFE ZONE - MOVE IN!" (red, every mode); "SAFE ZONE SHRINKS IN 7s" in DUO / SQUAD only |
+| Eliminated by | bottom left, 0.56 u wide | 0.13 u high | 1 vs 1, while the eliminated player spectates: dark plate with a red left edge, "ELIMINATED BY <NAME>" (the name red; THE ZONE / A FALL / YOUR OWN FRAG), a thin rule, then the killer's name, the gun's silhouette and name, and "DMG n" (what that player dealt this round) in yellow at the right |
+| Kill feed | bottom centre: 1 vs 1 y 0.77 (one line, a new one replaces it; the reference's place); DUO / SQUAD y 0.77 .. 0.85 (3 lines) | text 0.03 h | "<killer> HEADSHOT / ELIMINATED <victim> (weapon)", HEADSHOT in orange; the 1 vs 1 line has the gun's silhouette before the text, on a soft highlight fading to both sides |
+| Elimination badge | top centre, y 0.17 | 0.12 h | the player's own kill: our emblem (red-tinted with the head target for a headshot) over ELIMINATED / HEADSHOT and the name on one dark plate; still (no pop, glow or pulse), gone after 2.3 s or when a result band shows |
+| Weapon panel | top-right corner 0.9184, 0.1535, anchor r (the frame's x 0.80 .. 1.0, y 0.04 .. 0.27) | slot 0.108 h | main slot (the gun or the sidearm in hand, the gun dimmed with TAP TO SWITCH while the fists are out: big mag + small /reserve, RELOAD / RELOADING, silhouette, underline bar, top-right corner cut; tap = reload) over three square slots in SWITCH's order: gun | sidearm | fists, the one in hand lit gold, the gun's and the sidearm's rounds left (red at 0) under their silhouettes; a tap on a slot draws it; against the target dummy a CHANGE GUN plate sits left of the small slots |
+| HP block | bottom centre, y 0.948 | bar up to 0.38 h | helmet + vest Lv2 icons, "HP 200/200", white fill (#EBF0F2), green only for the heal preview (label above the bar when space is short) |
+| Joystick | 0.135, 0.75, anchor l | 0.23 | translucent ring + knob, floating in the left part; push past the ring to sprint |
+| Sprint | 0.136, 0.49, anchor l | 0.115 | running-figure glyph |
+| Medkit | bottom left 0.1832, 0.897, anchor l | 0.104 | kit glyph + count badge |
+| Shield wall | up and left of FIRE 0.7904, 0.757, anchor r (the reference's wall place) | 0.098 | wall glyph + count badge |
+| Left fire | left edge 0.044, 0.64, anchor l | 0.13 | bullet glyph; hold to fire (it does not aim); setting: off, always or only while aiming |
+| Fire | 0.8624, 0.687, anchor r | 0.17 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
+| Scope / ADS | right edge 0.964, 0.53, anchor r | 0.104 | reticle glyph |
+| Free look | right edge 0.964, 0.40, anchor r | 0.09 | eye glyph (off by default: a drag standing still already turns the camera round); hold and drag to look round while running, the run keeps its direction |
+| Jump | right edge, right of FIRE 0.964, 0.70, anchor r | 0.115 | leaping-figure silhouette |
+| Crouch | bottom-right corner 0.964, 0.90, anchor r | 0.115 | crouching-figure silhouette |
+| Prone | left of CROUCH 0.8952, 0.90, anchor r | 0.115 | lying-figure silhouette |
+| Reload | up and left of SCOPE 0.90, 0.47, anchor r | 0.09 | magazine glyph with a turning arrow; reloads the gun or the sidearm in hand; grey on a full magazine, without reserve or with the fists out; gold progress ring while reloading |
+| Switch | beside RELOAD on its left 0.848, 0.47, anchor r | 0.09 | the next weapon's glyph (the sidearm with the gun out, the fist with the sidearm out, the gun with the fists out) between two chasing arrows; gun -> sidearm -> fists -> gun (only the fists before a pick lands) |
+| Grenade | bottom, left of PRONE 0.7408, 0.90, anchor r (the reference's throwable place) | 0.10 | grenade silhouette + count |
+| Settings / pause | top, right of the minimap 0.148, 0.04, anchor l (the reference's column) | 0.06 (touch radius >= 0.036 h, a tap counts to 1.15 x it) | small gear on a soft dark disk; the ping (signal bars and the number, DIRECT / RELAY under it) right of it |
 | Scoreboard | (no button) | - | a tap on the score bar opens it |
 - Buttons: dark translucent circles (~35-45 % black), white glyphs, opacity per button editable.
 - Crosshair: WHITE by default, a thin circle + small centre dot (fixed with four short outer ticks
   for shotguns, a dot for the sniper, a small circle for the fists); the rifles' circle widens with
   movement/firing; turns RED only when a shot would hit (the crosshair's ray meets the enemy before
   cover); red-dot reticle when aiming (ADS), full scope for the sniper.
-- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; hits on the
-  same target within 0.32 s add up into one number, separate numbers line up side by side.
+- Damage numbers: yellow, bold, outlined, float up; headshots orange-red and larger; every shot its
+  own number, the HP it really took (a shotgun shell's pellets add up, its head part a number of
+  its own); numbers still showing line up side by side.
 - Hit marker: white X; headshot: orange X + head icon; kill: big red X on the enemy and the
   elimination badge (our emblem) with HEADSHOT / ELIMINATED and the victim's name plate.
 - Damage direction: red arc segments around the centre; low HP: red vignette pulse.
@@ -73,39 +104,222 @@ layout keeps its look on 16:9; y and sizes in screen heights). The table quotes 
 ## 4. Game feel (numbers)
 | Item | Target |
 |---|---|
-| Run / sprint / walk | 5.0 / 6.0 / 2.0 m/s (sprint = joystick pushed past the ring for 0.3 s) |
-| Crouch / prone | 1.75 / 0.75 m/s; stance change 0.2 s / 0.45 s |
-| ADS / firing speed | x0.70 / x0.85 (SMG x0.95) |
+| Run / sprint / walk | 4.6 / 5.5 / 1.85 m/s with a rifle, times the class in hand: fists 1.15, SMG 1.06, rifle and pistol 1.0, shotgun 0.97, marksman 0.95, sniper 0.92 (Weapons.CLASS_MOVE; sprint = joystick pushed past the ring for 0.12 s, or the sprint button, as the run mode allows; never while aiming, healing or firing) |
+| Crouch / prone | 1.6 / 0.7 m/s (times the same class factor); stance change 0.2 s / 0.45 s |
+| ADS / firing speed | x0.70 / firing x0.80-0.85 for ARs and shotguns (SMGs x0.93-0.95, pistols x0.90-0.92, DMR x0.75, snipers x0.60) |
 | Jump | apex ~1.3 m (can climb 1.2 m crates), gravity 22 m/s2 |
 | Fall damage | none up to 4 m, then 12 HP per extra metre |
-| Head multiplier | pistols/snipers 5.5, ARs 4.0, SMGs 3.5, shotgun pellets 3.0 (decays to 80 % at range for SMG/SG) |
-| Armour | helmet Lv2 45 %, vest Lv2 50 % |
+| Head multiplier | pistols 4.0 (BRUTE .50) / 3.4 (M1917), snipers 3.0-3.2, ARs and the DMR 2.5-2.6, SMGs 2.2, shotgun pellets 2.0-2.2, fists 1.5 (decays to 80 % at range for SMGs and shotguns); legs x0.75-0.8 (values: weapons.gd) |
+| Armour | helmet Lv2 35 %, vest Lv2 35 % (Weapons.HELMET_REDUCTION / VEST_REDUCTION) |
 | Medkit | +75 HP over 4 s (1 s wind-up then 25 HP/s), walk at 60 %, firing cancels |
 | Shield wall | 600 HP, 3.5 x 2.0 m, lasts 45 s |
-| Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest halves it |
-| Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; strength 0.9 x the weapon's assist factor (SMG 1.15, shotguns 1.2, sniper 0.5); on target the look slows to 0.4 and follows 100 % of the target's motion; an upward drag from the chest takes fixed shares of the screen at any distance: 4 % to the head band (+-0.2 m), the head band 26 % (the stop), a 0.25 m lip 8 %, then free (x strength); a mostly upward drag keeps 35 % of its sideways part; firing pulls sideways onto the body and, once a drag stops (net drag over 3 ticks < 0.4 % of the screen, so jitter does not count), holds what the drag chose (head, from the lip too; body; or nothing over the head) against the recoil; bloom counts a quarter on target; the first shot waits up to 0.15 s for a drag that starts with the press (0.15 s more while a slight overshoot is pulled back), first bullet after a pause at half spread (values: player.gd ASSIST) |
+| Frag | 150 at centre -> 60 at 5 m, 3 s fuse; body damage, so the Lv2 vest takes a third off it; a frag kill reads FRAG in the kill feed |
+| Aim assist | hip cone 9 deg at 10 m (x 10/d, clamped 0.6..3) out to 30 m; scoped 2.5 deg to 80 m; strength 0.9 x the weapon's assist factor (SMGs 1.15, shotguns 1.2, DMR 0.8, snipers 0.5); on target the look slows to 0.4 and follows 100 % of the target's motion; an upward drag from the chest takes fixed shares of the screen at any distance: 4 % to the head band (+-0.15 m, the head's hit zone), the head band 26 % (the stop), a 0.25 m lip 8 %, then free (x strength); a mostly upward drag keeps 35 % of its sideways part; firing pulls sideways onto the body and, once a drag stops (net drag over 3 ticks < 0.4 % of the screen, so jitter does not count), holds what the drag chose (head, from the lip too; body; or nothing over the head) against the recoil; bloom counts a quarter on target; the first shot waits up to 0.15 s for a drag that starts with the press (0.15 s more while a slight overshoot is pulled back), first bullet after a pause at half spread (values: player.gd ASSIST) |
 | Aim checks (`--autotest=aim`) | pull onto body < 0.6 s; drag sweep from the chest: body, then >= 15 % of the screen on the head, then over the head; while firing: a jittering thumb and a 2 % flick stay on the body, 15 %, 30 % and slanted (22 % up, 12 % sideways) flicks end on the head, 50 % goes over; first bullet: a 12 % flick with the press = head (its line passing < 0.07 m beside the head's middle), no drag = body; on-target % with assist > without; red crosshair only on the body |
 
 ## 5. Screens
 - Loading (boot, the main scene): full-bleed key art of our own character in a container yard
   at sunset (slow push-in), logo top-left, a thin gold progress bar near the bottom with the
   percentage, status text and rotating tips, the version.
-- Match loading (START / PLAY AGAIN): key-art backdrop, LONE WOLF / CARGO CAGE mode card with
-  chips (ROUNDS 1, 1 VS BOT, bot difficulty), big map wordmark, the bar.
-- Lobby: character large on a lit podium in a 3D container yard; top bar (emblem avatar, level,
-  name with EDIT, XP line, offline coins and wins); left text menu (BUNDLES, CUSTOM HUD,
-  SETTINGS, HOW TO PLAY); featured duel card top-left; right: stats chips, bot
-  difficulty, mode card "LONE WOLF / CARGO CAGE" and the big yellow START bottom-right.
-- Wardrobe (BUNDLES): rarity tabs, 3-column item cards with the rendered outfit portrait and a
-  rarity bar, live preview on the podium, EQUIP and BACK.
-- Result: mode/map text top-left, our medal with gold "VICTORY" / grey "DEFEAT" / white "DRAW" /
-  red "INVALID", round score plates, stats table (ELIMINATIONS, DAMAGE, HEADSHOTS, ACCURACY,
-  TIME, HP LEFT), honour tag, XP bar, PLAY AGAIN / LOBBY.
+- Match loading (START / an online challenge / PLAY AGAIN): key-art backdrop, the mode + map
+  card (TRAINING GROUND or LONE WOLF / CARGO CAGE) with chips: FIRST TO 5, 1 VS BOT, BOT: <level>
+  (or TARGET DUMMY); online FIRST TO n, 1 VS 1 ONLINE and the opponent's name, never a bot; big
+  map wordmark, the bar.
+- Lobby hero: a drag turns it 360 degrees (a full turn in about one screen width), no swing back,
+  the angle kept for the session (after a match too); idle: lobby_idle with a look round every
+  5-9 s and now and then a cheer.
+- Lobby (the reference lobby's layout): character large on a lit podium in the middle of a 3D
+  container yard; player card top-left (emblem avatar, level, name with EDIT, XP line) and nothing
+  store-like (no currency, no featured or "new" cards); top-right the logo, FRIENDS
+  (two busts; the unread badge), the gear and, rightmost, the ping (a wifi mark and a plain number,
+  white when good, yellow, red; the match HUD shows the same at 0.278, 0.031); bottom-left a dark translucent bar of main buttons
+  (WARDROBE | PROFILE | ONLINE 1 VS 1, glyph and caption each) with the chat strip above it (a
+  speech-bubble square with the unread count and a one-line ticker of the newest friend message,
+  "[FRIEND] NAME: text"; a tap opens the chat panel; shorter while group members stand beside the
+  hero, so the place under the hero's feet stays free for the voice pill); ADD (person with a plus over its caption) on
+  the right edge at mid height opens FRIENDS on PLAYERS; bottom-right the mode card (purple to blue
+  ramp, 2 px yellow frame, the mode name white) (TRAINING GROUND /
+  CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
+  ONLINE"; a tap opens SELECT MODE, a full page laid out like the reference's mode page: the X box
+  top right, a tab bar at the top centre with its one tab MODES (yellow caps over a 3 px yellow
+  underline on a thin line), the two modes as big picture cards side by side filling the page (the
+  mode's art filling the card, darkened towards the foot; a small yellow tag VS BOT / ONLINE top
+  left; the name in big white caps at the lower left, the yellow line "CARGO CAGE · START: <what
+  START plays>" under it, two grey lines, the size chips, TRAINING GROUND's opponent chips EASY,
+  NORMAL, HARD, DUMMY, the player's numbers at the foot; the picked card framed 2 px yellow), each
+  card with a small "?" at its top right opening a 4-page picture help with page dots, arrows and
+  swipe; a bottom row at the right of dark rectangular buttons with an icon and a caps label:
+  CUSTOM ROOM, PLAY WITHOUT INTERNET (FRIENDS on those tabs) and HOW TO PLAY (a page whose X comes
+  back to the mode page); a figure in a dark disc at the card's right end
+  opens the TEAM panel just above the card: in LONE WOLF the GROUP CODE row (a flag, the code,
+  COPY), yellow tick boxes JOIN BY CODE and FILL EMPTY PLACES, then the picture tiles SOLO / DUO /
+  SQUAD (one, two, four figures; DUEL in a group of two), the current one framed yellow with the
+  tick corner; a member's panel is the same, greyed, showing the leader's choice) and the big yellow START (LONE WOLF: searches for a match). Searching
+  has no popup: a dark search tab with a yellow edge hangs from the top centre (about x 0.37-0.63,
+  y 0-0.12): a small line "ESTIMATED 0:10" for the first 10 s, then "STILL SEARCHING...", a big m:ss
+  count-up, "PLAYERS n/N" for DUO / SQUAD, a cancel X at its right end (none for a group member);
+  START becomes a greyed "MATCHING..." plate and the rest of the lobby stays usable. In a group an
+  amber TEAM bar ("TEAM n/4" and a flag) sits under the player card; it opens the TEAM panel from
+  the left (x 0-0.36, full height, near-black purple): the 10-digit GROUP CODE ("12 3456 7890") with
+  COPY (JOIN BY CODE OFF at start, COPY turns it on; a member sees it only while the leader's switch
+  is on, else the small line THE LEADER SHARES THE GROUP CODE), the member rows (level square, name,
+  the leader's yellow flag disc, REMOVE), + INVITE (the right-hand social panel), TEAMS and EXIT /
+  DISBAND. No "+" plates beside the hero: with members the hero stands at about 0.40 of the width and
+  the members to its right, a little smaller, the far ones on the floor clear of the mode card;
+  nothing under the hero (the voice pill's place). No text
+  menu, stats chips, name plate, outfit or version text (CUSTOM HUD and HOW TO PLAY are in
+  SETTINGS).
+- FRIENDS (FRIENDS top-right, ONLINE 1 VS 1, ADD): a full page over the lobby on the page ramp,
+  "FRIENDS" in caps top-right beside the X box in the corner; boxed tabs down the left (0.16 of the
+  width): FRIENDS, REQUESTS (with the count), PLAYERS (online now, then ALL PLAYERS), CUSTOM ROOM,
+  PLAY WITHOUT INTERNET; BLOCKED as a light button at the foot of the column (PROFILE's BLOCKED).
+  FRIENDS' head: the yellow-barred title, YOUR ID with COPY, the search box with a white square
+  magnifier button; a yellow "n FRIEND REQUESTS WAITING >>" link when some wait. Rows: a dark
+  translucent plate with a cut corner, the player's picture in a white-edged square, NAME #CODE (a
+  tap opens their card), a status column (LV n over ONLINE / IN A MATCH in yellow-orange, or LAST
+  SEEN ... in grey), then ADD FRIEND / DUEL 1 VS 1 / CHAT / REMOVE. Empty lists: a grey hatched block,
+  a grey caps line and a yellow link ("YOU HAVE NO FRIENDS YET" / "FIND PLAYERS >>").
+- Chat (the chat strip, a friend's CHAT): a panel from the left over the live lobby (0.53 of the
+  width, full height, #160E19); the FRIENDS tab top-left as a light tile with a hazard stripe, the X
+  box top-right of the panel; a column of friends (picture with a green dot when online, name, red
+  unread count; the open one lit with a yellow edge); the conversation: NAME #CODE and ONLINE NOW /
+  OFFLINE, message rows (picture, name (yours yellow), "TODAY 17:16", a dark bubble with a thin grey
+  border, everyone's on the left), the encryption line, our quick phrases as dark chips (a tap
+  sends one), the field and the yellow SEND; a tap on the lobby beside the panel goes back (the
+  dim behind it covers the whole lobby). Typing keeps the panel and its header in place: only the
+  input row and the quick phrases rise above the keyboard, the conversation shrinks.
+- Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);
+  3-column item cards with the rendered outfit portrait and the outfit's own colour bar, live
+  preview on the podium, EQUIP and BACK.
+- Result: mode/map text top-left (TRAINING GROUND or LONE WOLF), our medal with gold "VICTORY" /
+  grey "DEFEAT" / white "DRAW" / red "INVALID", round score plates, stats table (ELIMINATIONS,
+  DAMAGE, HEADSHOTS, ACCURACY, TIME, HP LEFT; the opponent's row says BOT · <level>, or ONLINE
+  for a player, LEFT after they quit, with "<NAME> LEFT THE MATCH" under the table), honour tag,
+  XP bar, PLAY AGAIN / LOBBY; an internet match: ADD FRIEND / REMATCH / LOBBY with a status line
+  above them ("<NAME> WANTS A REMATCH").
 - Crosshair sizes (radius, the reference's M1887 circle is ~0.07 h across): rifle ring 0.028 h (grows
   with the spread up to 0.06 h), shotgun ring 0.035 h fixed, fists a dot in a 0.0175 h ring; lines
   ~1.4 px with a soft shadow.
-- Settings (only what the reference mode offers): BASIC (graphics LOW .. EXTREME, 30/60/90 FPS),
-  CONTROLS (dynamic joystick, custom HUD), SENSITIVITY (general, red dot, sniper scope,
-  fire-button drag), SOUND; per-tab RESET. Everything else is fixed at its best value.
-- Pause: full-width dark band, PAUSED, score / time left / HP chips, RESUME, SETTINGS, QUIT MATCH
-  (asks again).
+- Settings (the reference's layout, groups and defaults, our own words and pictures; only what it
+  offers plus what the owner asked for). Frame: the full pages' backdrop (UI.draw_page_bg, as
+  FRIENDS and PROFILE), tab column UI.TAB_DARK #0F0810 (SettingsPanel.COLUMN_BG, MENU_W 210) with
+  the kit's side tabs (UI.side_tab, as FRIENDS' left tabs: dark boxes with a light lower edge;
+  active: yellow tile, hazard stripes, notch) IN-MATCH, DISPLAY, SOUND, ONLINE, ACCOUNT, HOW TO PLAY and the
+  player's name at its foot; SETTINGS title top-right left of the X box; IN-MATCH has a sub-tab
+  bar (#312F32, a yellow line under it; active sub-tab light grey #E7E7E7 with dark text, cut
+  top-left corner, hazard stripes along its right and bottom edges): HUD, CONTROLS, SENSITIVITY,
+  VIBRATION. Rows: the kit's row plates UI.ROW (#21181D translucent; ROW_BG), 6 px apart, 54 px
+  tall, title left (a dim help line under it on pages without a picture, as wide as the row's free
+  room), the control at the right end; section titles
+  with the 4 px yellow bar. Segments: chosen light grey #D9D8D6 with dark text, the others
+  near-black #0D0B0E (SEG_OFF) with a thin light border. Sliders: number, [-], yellow bar with a
+  white grip, [+]. Square RESET (circular arrow) bottom-left of the content on pages with
+  settings; no save button (changes apply at once).
+  HUD: a large picture of the player's own HUD (their saved layout drawn by the HUD's own drawing
+  over our arena without a HUD, assets/ui/settings/arena.png: a moved FIRE shows where they put
+  it, buttons turned off in CONTROLS are left out) under a yellow trapezoid tab "MY HUD" in a 2 px
+  yellow frame, a yellow CUSTOM button on it (the editor).
+  CONTROLS and SENSITIVITY: a picture pane on the left (40 % of the content, 340-520 px): our HUD
+  screenshot cropped around the row's button, the button ringed in dashed yellow, a yellow callout
+  with a shadow (a white drag trail and two yellow turn arrows for camera rows), and under it the
+  row's current value in yellow plus what it does; the rows on the right, the selected one in a
+  2 px yellow outline. CONTROLS: SHOOTING (aim precision ASSISTED / MANUAL IN SCOPE / FULL
+  MANUAL, left fire button OFF / ALWAYS / WHEN AIMING, hold fire to scope), QUICK BUTTONS (weapon
+  switch, reload, the reload ring, free look (off)), MOVEMENT (joystick DYNAMIC (default) /
+  FIXED, run mode TAP / DRAG / MIXED). SENSITIVITY on the reference's 0-100 scale (our 1-200
+  mapped so our defaults read General 65, Red Dot 85, 2x 65, Sniper 75, Free Look 65) with the
+  DEFAULT / HIGH presets. VIBRATION: ENEMIES NEARBY (footsteps on), YOU (taking damage off,
+  shooting off).
+  DISPLAY: graphics AUTO / LOW .. EXTREME (AUTO's pick marked, a heat warning before EXTREME) with
+  an indented row of picture tiles of our arena at each level (144x81, the level in use framed
+  yellow, a tap picks it), 30/60 FPS plus 90/120 where the screen refreshes that fast, visual
+  effects; MINIMAP as two picture tiles (118 px) TURNS WITH VIEW / NORTH UP. SOUND: GAME AUDIO
+  (music, sound effects), VOICE CHAT (push to talk, voice, MIC TEST with a level meter). ONLINE
+  (chat, friends, career, who can reach you, vibration out of a match, direct connection), ACCOUNT (the player ID with COPY, CLEAR
+  CACHE; along the bottom DELETE MY DATA, Terms of Use, Privacy Notice as underlined links).
+  Questions (RESET, EXTREME, ...) ask first. No FPS counter, crosshair colour or size,
+  fire-button drag or master volume: everything else is fixed at its best value. The pictures are
+  remade by tests/shots_settings_pics.gd (<= 256 px high, lossless).
+- In-match menu (the gear, Android back): the settings at once, as the reference's gear opens
+  them in a match, with QUIT MATCH (red text on a dark plate, asks again) at the foot of the tab
+  column above HOW TO PLAY, and the HUD page's CUSTOM opening the editor over the match; X resumes. TRAINING
+  GROUND pauses under it, online the match runs on.
+
+## 6. Theme tokens (scripts/ui.gd)
+| Token | Value | Use |
+|---|---|---|
+| ACCENT | #F9BF06 | main buttons, open tabs, selection frames, links, slider fill |
+| ACCENT_EDGE | #BC8200 | the lower edge of yellow buttons |
+| LIGHT | #D8D8D8 | secondary buttons (dark caps text) |
+| PANEL | #110F12 at 90 % | panels and popups |
+| ROW | #21181D at 62 % | list and setting rows |
+| TAB_DARK | #0F0810 | closed side tabs, page columns |
+| PAGE_TOP / PAGE_BOTTOM | #1F1820 / #33264A | full pages' backdrop ramp (with a soft warm glow up right) |
+| CHAT_BG / BUBBLE | #160E19 / #141215 | the chat panel / a message bubble (1 px grey border) |
+| STATUS_ON | #FFB521 | ONLINE / IN A MATCH in player lists |
+| TEXT / TEXT_DIM / BAD | #F7F7F5 / #A3A3A8 / #F24D3D | text, secondary text, risk and unread |
+- Buttons (`UI.button`): square, a 45-degree cut at the bottom-right; primary yellow with a 3 px
+  darker lower edge and black heavy caps; light grey the same; dark near-black with a thin border.
+  The big CTA (`UI.hero_button`: START, PLAY AGAIN): slanted left edge, yellow ramp, gloss, chevrons,
+  a light sweep every 3.2 s.
+- Side tabs (`UI.side_tab`): dark boxes with a light lower edge; the open one yellow with black
+  hazard stripes down its left edge and a cut corner. Top tabs (`UI.top_tab`): the open one a light
+  tile with a hazard stripe down its right edge.
+- Close (`UI.close_button`): a dark square with a thin white X and a yellow triangle across its
+  top-right corner. Popups: light header ramp (#F1F1F1 -> #D1D1D1) with dark caps title, a hazard
+  line under it, the X on a dark tile; a dark body with a yellow corner mark.
+- Links (`UI.link_button`): yellow, underlined, ending in ">>". Empty states (`UI.empty_state`).
+
+VOICE (the reference's places and defaults, our icons)
+- Lobby: a small dark pill [mic | speaker] (112x44, radius 22, near-black 66 %) under the player's
+  character, also when alone. Mic: outline mic, a red slash when OFF, a small people mark for
+  GROUP, yellow while this phone's voice goes out. Speaker: speaker with waves, slash when OFF.
+  With PUSH TO TALK and the mic on in a group or custom room: a TALK button (84x44, dark, yellow
+  while held) right of the pill; the mic sends only while it is held.
+- Popups: a dark translucent box with no border; MIC MODE title for the mic; items icon over word
+  (OFF / ALL / GROUP), the chosen one yellow; PUSH TO TALK tick box (unticked by default); then
+  PLAYERS: a sound mark (yellow while speaking), the name and MUTE / MUTED. A tap outside closes.
+- Match: round dark buttons at HudLayout "speaker" (0.16, 0.105) and "mic" (0.16, 0.19), left
+  anchored, beside the minimap; SPEAKER toggles at once (slash = OFF), MIC opens MIC MODE to its
+  right (GROUP only with teammates). TALK under MIC only with PUSH TO TALK. Who speaks: small rows
+  (sound mark + name) under the buttons.
+
+ROUND 8 - OUT OF THE MATCH (checklist)
+- [ ] Lobby hero edges smooth at MEDIUM graphics (2x MSAA on the stage; FXAA at LOW).
+- [ ] Group lobby: no floating names; small dark plates (level square, yellow flag for the leader,
+      18 px name) under each character's feet, the hero's above its voice pill with a leave glyph;
+      plates never overlap each other or the mode card and hide under popups and pages.
+- [ ] Every page has the X box top-right with its caps title right-aligned beside it (FRIENDS,
+      CUSTOM ROOM, PLAY WITHOUT INTERNET, PROFILE, WARDROBE).
+- [ ] FRIENDS rows: avatar, the player's banner behind the name with LV in its corner, the status in
+      yellow (online / in a match) or grey (last seen); no REMOVE in the rows.
+- [ ] No guide paragraphs on the pages: a 36 px "?" square beside the section title opens a dark
+      tooltip with a thin yellow border.
+- [ ] Popups blur the lobby behind them (about half brightness); plain dark shade at LOW graphics.
+- [ ] The quit question is a normal popup (light header, X, CANCEL / QUIT), not a band.
+- [ ] CUSTOM ROOM list rows: map picture, room name, ID and host, rules, LONE WOLF + team size, n / max,
+      a password mark, the yellow join disc; under it the ID field, QUICK JOIN and the yellow CREATE.
+- [ ] WARDROBE: OUTFIT / LOBBY POSE / VICTORY POSE tabs on the left; a tap shows the item at once with a
+      name tag by the character; EQUIP yellow, EQUIPPED grey and inert.
+- [ ] Match loading: a teaching card (yellow-bar title, grey line, a diagram with dashed yellow
+      callouts), the logo top right, a 4 px full-width line at y 0.92 with the % at its right end,
+      "LOADING <MODE> (CARGO CAGE)..." above its left end, a caps tip under it.
+- [ ] Lobby ping chip: the wifi mark alone (coloured by quality); the number on a tap.
+- [ ] HISTORY: a forfeit win reads VICTORY over a grey OPPONENT LEFT.
+
+ROUND 8 - THE MATCH (checklist)
+- [ ] 16:9: the ELIMINATED BY card ends left of the HP block's first icon; no HP 0/200 after a death.
+- [ ] Damage numbers: small bold yellow (heads warm orange), up-left of the head, one per burst.
+- [ ] A hit blooms the crosshair into an orange ring (~1/16 of the width) with a red splash on the target.
+- [ ] One tap on WALL places the shield wall (QUICK WALL on by default).
+- [ ] The minimap shows the whole arena with a white wall outline on dark slate.
+- [ ] The controls stay through the round break for a living player.
+- [ ] LEFT FIRE only while aiming by default.
+- [ ] Enemies carry a thin red outline; teammates never.
+- [ ] The 1 vs 1 kill feed: two lines (0.767, 0.80), about 3.5 s; zone deaths name no killer.
+- [ ] Zone damage: red splats at the screen edges.
+- [ ] The break: near-black screen, one blue / orange split band, the changed number sparks.
+- [ ] A won match: VICTORY! band, the big gold VICTORY! with sparks, then the band at the top over the score.
+- [ ] Results page 1: the hero in the centre on a bright stage, the plate over the chest, the title above.
+- [ ] Gunshot alerts: pale orange marks toward unseen shooters within 60 m.
+- [ ] Our own sounds for weapon draw, punches, the empty click, near misses, impacts and grunts.

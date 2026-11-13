@@ -1,14 +1,25 @@
 class_name HudPanels
 extends Control
 ## Overlay panels of the in-match HUD, drawn above everything else:
-##  - the pre-round weapon pick: near-black panel with corner brackets, "SELECT WEAPON FOR
-##    ROUND n", a "| WEAPON" label, a 6-column grid of gun cards (silhouette, name, class; the
+##  - the pre-round weapon pick: near-black panel with corner brackets, a header that names the
+##    rounds the pick holds for ("PICK FOR ROUNDS 1-2"; DUO / SQUAD "PICK YOUR WEAPON FOR ROUND n",
+##    the target dummy "PICK YOUR WEAPON", see pick_header), a "| WEAPON" label, a 6-column grid of gun cards (silhouette, name, class; the
 ##    choice gets a yellow outline and a tick), the choice's bars, magazine and attachments, a
 ##    countdown and a yellow SELECT button. It calls on_pick exactly once: SELECT or the close X
-##    confirm the current choice, so does the timer;
+##    confirm the current choice, so does the timer. A 1 vs 1 adds the ROUNDS strip under the title
+##    (a numbered disc per round of the match: blue the rounds this player picks for, orange the
+##    other's, the pair being picked ringed in yellow) and greys the guns on cooldown (our clock
+##    glyph and "n ROUNDS" on the card; a tap on one does nothing). The side that does not pick
+##    sees the same panel read-only (open_pick with `watch` = the picker's name): the cards, the
+##    strip from its own view and the countdown ring, no choice marked, nothing to tap, SELECT
+##    dimmed, the header "WAITING FOR <NAME> TO PICK FOR ROUNDS 3-4"; it never calls on_pick and
+##    the HUD closes it once the pick arrives (its X closes it sooner);
 ##  - the scoreboard (rows from arena.scoreboard_rows()), usable while the match runs. It stays
 ##    between the widgets listed in `avoid` (the HUD passes the minimap and the weapon panel),
 ##    so on 16:9 it gets narrower and its header and columns shrink to fit instead of covering them.
+##    DUO / SQUAD (a team arena): grouped by team, BLUE (the player's, the player first) then
+##    ORANGE, each under its band with the rounds won; columns STATUS (UP / KNOCKED / OUT / LEFT),
+##    KILLS, KNOCKS, REVIVES, DAMAGE, HP; shorter rows so a SQUAD board fits a 720 px screen.
 ## The HUD sends taps here first (tap() returns true when a panel used the tap).
 
 const CLASS_NAMES := {"AR": "ASSAULT RIFLE", "SMG": "SUBMACHINE GUN", "SG": "SHOTGUN", "PISTOL": "PISTOL",
@@ -23,6 +34,10 @@ var pick_choice := ""
 var pick_left := 0.0
 var pick_total := 1.0
 var pick_round := 1
+var pick_cooldown := {}           # gun -> rounds it still waits (RoundRules.cooldowns): greyed, not pickable
+var pick_strip: Array = []        # per round of the match: true when this player picks its gun (ROUNDS strip)
+var pick_watch := ""              # the picker's name while this side only watches the pick (read-only)
+var pick_last := 0                # the match's last round (0: no pairs, the target dummy)
 var board_open := false
 var avoid: Array[Rect2] = []      # screen rects the scoreboard keeps clear of (set by the HUD)
 var _pick_cb := Callable()
@@ -41,28 +56,65 @@ func _ready() -> void:
 
 # ---------------------------------------------------------------- weapon pick
 
-func open_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, round_index := 1) -> void:
+## `watch`: the picker's name when this side only watches (read-only: no choice, no callback);
+## `last`: the match's last round, for the header's pair of rounds (0: just "PICK YOUR WEAPON").
+func open_pick(options: Array, preselect: String, seconds: float, on_pick: Callable, round_index := 1,
+		cooldown := {}, strip := [], watch := "", last := 0) -> void:
 	pick_options = options.duplicate()
 	if pick_options.is_empty():
 		pick_options = [Weapons.DEFAULT_PICK]
-	pick_choice = preselect if pick_options.has(preselect) else String(pick_options[0])
+	pick_cooldown = cooldown.duplicate()
+	pick_strip = strip.duplicate()
+	pick_watch = watch
+	pick_last = last
+	pick_choice = preselect if pick_options.has(preselect) and not pick_cooldown.has(preselect) else String(pick_options[0])
+	if pick_cooldown.has(pick_choice):
+		for o: String in pick_options:
+			if not pick_cooldown.has(o):
+				pick_choice = o
+				break
+	if watch != "":
+		pick_choice = ""                 # (the other side chooses: nothing is marked here)
 	pick_total = maxf(seconds, 0.1)
 	pick_left = pick_total
 	pick_round = round_index
-	_pick_cb = on_pick
-	_pick_done = false
+	_pick_cb = Callable() if watch != "" else on_pick
+	_pick_done = watch != ""
 	pick_open = true
 	board_open = false
 	_anim = 0.0
 	visible = true
 
 
-## Closes the panel without a callback (the arena picked for the player).
+## Closes the panel without a callback (the arena picked for the player, or the pick watched
+## arrived).
 func close_pick() -> void:
 	_pick_done = true
 	_pick_cb = Callable()
 	pick_open = false
+	pick_watch = ""
 	visible = board_open
+
+
+## The panel is open read-only: the other side picks (see open_pick's `watch`).
+func watching() -> bool:
+	return pick_open and pick_watch != ""
+
+
+## The header as text parts [[text, colour], ...]: the picker "PICK FOR ROUNDS 1-2" (a pair cut
+## short by the match's last round "PICK FOR ROUND 9"), the side that waits "WAITING FOR <NAME> TO
+## PICK FOR ROUNDS 3-4", DUO / SQUAD (`own`: every fighter picks for its round) "PICK YOUR WEAPON
+## FOR ROUND n", the target dummy (`last` 0) "PICK YOUR WEAPON".
+static func pick_header(r: int, last: int, watch := "", own := false) -> Array:
+	var white := Color(1, 1, 1)
+	if own:
+		return [["PICK YOUR WEAPON FOR ", white], ["ROUND %d" % r, HudDraw.YELLOW]]
+	if last <= 0:
+		return [["PICK YOUR WEAPON", white]]
+	var span := RoundRules.pick_span(r, last)
+	if watch != "":
+		return [["WAITING FOR ", white], [watch.to_upper(), Color(1.0, 0.72, 0.52)], [" TO PICK FOR ", white], [span, HudDraw.YELLOW]]
+	return [["PICK FOR ", white], [span, HudDraw.YELLOW]]
 
 
 ## Confirms the current choice: calls on_pick once and closes.
@@ -80,7 +132,7 @@ func finish_pick() -> void:
 
 
 func select(id: String) -> void:
-	if pick_options.has(id):
+	if pick_options.has(id) and not pick_cooldown.has(id):
 		pick_choice = id
 
 
@@ -101,6 +153,16 @@ func close_board() -> void:
 	visible = pick_open
 
 
+## The seconds the pick's ring shows: the prep clock's (arena.prep_left, what the top clock reads,
+## rounded the same way) while the arena is in its prep, else the panel's own pick_left.
+func ring_seconds() -> float:
+	if arena != null and int(arena.get("phase")) == 0:
+		var pl: Variant = arena.get("prep_left")
+		if pl is float or pl is int:
+			return minf(float(pl), pick_total)
+	return pick_left
+
+
 ## delta: game time (the pick timer follows the prep clock); real: unscaled time for animation.
 func tick(delta: float, real: float) -> void:
 	_anim += real
@@ -110,6 +172,8 @@ func tick(delta: float, real: float) -> void:
 		if pick_left <= 0.0:
 			pick_left = 0.0
 			finish_pick()
+	elif watching():
+		pick_left = maxf(pick_left - delta, 0.0)      # (the ring runs; the picker's phone picks)
 	if board_open and arena != null:
 		_rows_t -= real
 		if _rows_t <= 0.0:
@@ -130,9 +194,21 @@ func pick_rect() -> Rect2:
 	var x0 := 0.025 * u
 	var w := minf(1.42 * u, size.x - x0 - 0.56 * u)
 	var rows := maxi(1, ceili(pick_options.size() / float(COLS)))
-	var h := u * (0.08 + 0.06 + rows * 0.205 + (rows - 1) * 0.018 + 0.03 + 0.1)
+	var h := u * (0.08 + 0.06 + rows * 0.205 + (rows - 1) * 0.018 + 0.03 + 0.1) + strip_h()
 	var y0 := clampf((size.y - h) * 0.5 - 0.03 * size.y, 0.105 * size.y, maxf(size.y - h - 4.0, 0.105 * size.y))
 	return Rect2(x0, y0, w, h)
+
+
+## Height of the ROUNDS strip (0 without one: DUO / SQUAD, the target dummy).
+func strip_h() -> float:
+	return 0.07 * _u() if not pick_strip.is_empty() else 0.0
+
+
+## Centre of the ROUNDS strip's disc for round `r` (1-based).
+func strip_disc(r: int) -> Vector2:
+	var u := _u()
+	var pr := pick_rect()
+	return Vector2(pr.position.x + 0.2 * u + (r - 1) * 0.06 * u, pr.position.y + 0.08 * u + strip_h() * 0.5)
 
 
 func _card_size() -> Vector2:
@@ -147,7 +223,7 @@ func card_rect(i: int) -> Rect2:
 	var r := pick_rect()
 	var cs := _card_size()
 	var gap := 0.018 * u
-	var top := r.position.y + 0.14 * u
+	var top := r.position.y + 0.14 * u + strip_h()
 	return Rect2(Vector2(r.position.x + 0.025 * u + (i % COLS) * (cs.x + gap), top + (i / COLS) * (cs.y + gap)), cs)
 
 
@@ -165,9 +241,21 @@ func pick_close_rect() -> Rect2:
 	return Rect2(c - Vector2(0.032, 0.032) * u, Vector2(0.064, 0.064) * u)
 
 
+## A team arena's board (grouped by team).
+func team_board() -> bool:
+	return HudTeam.wanted(arena)
+
+
+## Row height of the board, in HUD units.
+func board_row_h() -> float:
+	if not team_board():
+		return 0.085
+	return 0.056 if _rows.size() > 4 else 0.07
+
+
 func board_rect() -> Rect2:
 	var u := _u()
-	var h := (0.155 + maxi(_rows.size(), 2) * 0.085 + 0.075) * u
+	var h := (0.155 + maxi(_rows.size(), 2) * board_row_h() + (0.09 if team_board() else 0.0) + 0.085) * u
 	var y0 := 0.17 * size.y
 	var lo := 0.05 * u
 	var hi := size.x - 0.05 * u
@@ -193,6 +281,12 @@ func board_close_rect() -> Rect2:
 # ---------------------------------------------------------------- input
 
 func tap(pos: Vector2) -> bool:
+	if watching():
+		if pick_close_rect().grow(6).has_point(pos):
+			close_pick()                     # (the prep line under PREPARE still says who picks)
+			Audio.play("ui_back", -6.0)
+			return true
+		return pick_rect().has_point(pos)    # read-only: no card, no SELECT
 	if pick_open:
 		if pick_rect().has_point(pos):
 			if select_rect().grow(4).has_point(pos) or pick_close_rect().grow(6).has_point(pos):
@@ -202,6 +296,8 @@ func tap(pos: Vector2) -> bool:
 				return true
 			for i in pick_options.size():
 				if card_rect(i).has_point(pos):
+					if pick_cooldown.has(String(pick_options[i])):
+						return true                  # resting: not pickable this time
 					if pick_choice != String(pick_options[i]):
 						Audio.play("ui_select", -6.0)
 					pick_choice = String(pick_options[i])
@@ -238,16 +334,27 @@ func _draw_pick() -> void:
 	HudDraw.vband(self, Rect2(r.position, Vector2(r.size.x, 0.08 * u)), Color(1, 1, 1, 0.07 * a), Color(1, 1, 1, 0.02 * a))
 	draw_line(Vector2(r.position.x, r.position.y + 0.08 * u), Vector2(r.end.x, r.position.y + 0.08 * u), Color(1, 1, 1, 0.1 * a), 1.0)
 	HudDraw.corner_brackets(self, r.grow(-4), 0.035 * u, Color(1, 1, 1, 0.4 * a), 2.0)
-	# Header: "SELECT WEAPON FOR ROUND 1" with the key part in yellow.
-	HudDraw.text_parts(self, [["SELECT WEAPON FOR ", Color(1, 1, 1)], ["ROUND %d" % pick_round, HudDraw.YELLOW]],
-		Vector2(r.get_center().x, r.position.y + 0.042 * u), int(0.038 * u), 1, 0, "bold", a)
+	# Header: "PICK FOR ROUNDS 1-2" (waiting: "WAITING FOR <NAME> TO PICK FOR ...") with the
+	# rounds in yellow, smaller when a long name would reach the X.
 	var xr := pick_close_rect()
+	var head := pick_header(pick_round, pick_last, pick_watch, arena is TeamArena)
+	var hfs := int(0.038 * u)
+	var room := (xr.position.x - r.get_center().x) * 2.0 - 0.04 * u
+	var hw := HudDraw.parts_width(head, hfs)
+	if hw > room:
+		hfs = maxi(10, int(hfs * room / hw))
+	HudDraw.text_parts(self, head, Vector2(r.get_center().x, r.position.y + 0.042 * u), hfs, 1, 0, "bold", a)
 	HudDraw.close_button(self, xr.get_center(), xr.size.x * 0.5, a)
+	if not pick_strip.is_empty():
+		_draw_strip(a, u)
 	# "| WEAPON" label.
-	var ly := r.position.y + 0.11 * u
+	var ly := r.position.y + 0.11 * u + strip_h()
 	draw_rect(Rect2(Vector2(r.position.x + 0.025 * u, ly - 0.014 * u), Vector2(0.007 * u, 0.028 * u)), Color(HudDraw.YELLOW, a))
 	var lw := HudDraw.text(self, "WEAPON", Vector2(r.position.x + 0.045 * u, ly), int(0.03 * u), Color(1, 1, 1, a), 0, 0, "bold")
-	HudDraw.text_parts(self, [["BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)], ["SELECTED WEAPON", HudDraw.YELLOW]],
+	# (DUO / SQUAD: every fighter picks its own gun, TeamArena; a 1 vs 1: both use the one picked)
+	var own := arena is TeamArena
+	HudDraw.text_parts(self, [["EVERY FIGHTER PICKS " if own else "BOTH FIGHTERS USE THE ", Color(0.72, 0.76, 0.82)],
+		["THEIR OWN WEAPON" if own else "SELECTED WEAPON", HudDraw.YELLOW]],
 		Vector2(r.position.x + 0.07 * u + lw, ly), int(0.021 * u), 0, 0, "semi", a)
 	for i in pick_options.size():
 		_draw_card(i, a, u)
@@ -255,19 +362,28 @@ func _draw_pick() -> void:
 	var sr := select_rect()
 	var fy := sr.get_center().y
 	var fx := r.position.x + 0.03 * u
-	_draw_details(Vector2(fx, fy), sr.position.x - 0.11 * u - fx, a, u)
+	var watch := pick_watch != ""
+	if watch:
+		var wl := "%s PICKS THE GUN FOR BOTH FIGHTERS" % pick_watch.to_upper()
+		HudDraw.text(self, wl, Vector2(fx, fy), _fit(wl, 0.024 * u, sr.position.x - 0.11 * u - fx, "semi"),
+			Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
+	else:
+		_draw_details(Vector2(fx, fy), sr.position.x - 0.11 * u - fx, a, u)
 	var cc := Vector2(sr.position.x - 0.06 * u, fy)
 	var cr := 0.03 * u
 	HudDraw.disk(self, cc, cr, Color(0, 0, 0, 0.5 * a))
 	HudDraw.ring(self, cc, cr, Color(1, 1, 1, 0.18 * a), 3.0)
-	var urgent := pick_left <= 3.0
-	HudDraw.ring(self, cc, cr, Color(HudDraw.RED if urgent else HudDraw.YELLOW, a), 3.0, pick_left / pick_total)
-	HudDraw.text(self, str(ceili(pick_left)), cc, int(0.034 * u), Color(HudDraw.RED if urgent else Color.WHITE, a), 1, 0, "number")
+	var shown := ring_seconds()
+	var urgent := shown <= 3.0
+	HudDraw.ring(self, cc, cr, Color(HudDraw.RED if urgent else HudDraw.YELLOW, a), 3.0, clampf(shown / pick_total, 0.0, 1.0))
+	HudDraw.text(self, str(maxi(ceili(shown - 0.001), 0)), cc, int(0.034 * u), Color(HudDraw.RED if urgent else Color.WHITE, a), 1, 0, "number")
 	var pressed := _flash == "select" and _flash_t > 0.0
 	var bc := HudDraw.YELLOW.darkened(0.15) if pressed else HudDraw.YELLOW
+	if watch:
+		bc = Color(0.36, 0.37, 0.4)          # dimmed: the other side selects
 	draw_rect(sr, Color(bc, a))
-	HudDraw.vband(self, Rect2(sr.position, Vector2(sr.size.x, sr.size.y * 0.5)), Color(1, 1, 1, 0.25 * a), Color(1, 1, 1, 0.0))
-	HudDraw.text(self, "SELECT", sr.get_center(), int(0.036 * u), Color(0.1, 0.07, 0.02, a), 1, 0, "bold")
+	HudDraw.vband(self, Rect2(sr.position, Vector2(sr.size.x, sr.size.y * 0.5)), Color(1, 1, 1, (0.08 if watch else 0.25) * a), Color(1, 1, 1, 0.0))
+	HudDraw.text(self, "SELECT", sr.get_center(), int(0.036 * u), Color(0.62, 0.63, 0.66, a) if watch else Color(0.1, 0.07, 0.02, a), 1, 0, "bold")
 	draw_set_transform(Vector2.ZERO)
 
 
@@ -292,11 +408,51 @@ func _draw_card(i: int, a: float, u: float) -> void:
 	var gun_box := Vector2(r.size.x * 0.8, r.size.y * 0.46)
 	HudDraw.icon(self, HudDraw.weapon_tex(def), Vector2(r.get_center().x, r.position.y + r.size.y * 0.66), gun_box,
 		Color(1, 1, 1, (0.97 if sel else 0.62) * a))
+	if pick_cooldown.has(id):
+		_draw_resting(r, int(pick_cooldown[id]), a, u)
 	if sel:
 		draw_rect(r, Color(HudDraw.YELLOW, a), false, maxf(2.0, 0.004 * u))
 		var tcen := Vector2(r.end.x - 0.024 * u, r.position.y + 0.024 * u)
 		HudDraw.disk(self, tcen, 0.017 * u, Color(HudDraw.YELLOW, a))
 		HudDraw.icon(self, HudDraw.tex("v_tick"), tcen, Vector2(0.022, 0.022) * u, Color(0.1, 0.07, 0.02, a))
+
+
+## A gun on cooldown: the card dimmed, our clock glyph (a ring with two hands) and "n ROUNDS".
+func _draw_resting(r: Rect2, n: int, a: float, u: float) -> void:
+	draw_rect(r, Color(0.02, 0.03, 0.04, 0.62 * a))
+	var c := r.get_center() + Vector2(0, -0.01 * u)
+	var cr := 0.026 * u
+	HudDraw.disk(self, c, cr, Color(0, 0, 0, 0.55 * a))
+	HudDraw.ring(self, c, cr, Color(0.86, 0.88, 0.92, a), maxf(2.0, 0.005 * u))
+	var w := maxf(2.0, 0.004 * u)
+	draw_line(c, c + Vector2(0, -cr * 0.62), Color(0.86, 0.88, 0.92, a), w)
+	draw_line(c, c + Vector2(cr * 0.5, cr * 0.18), Color(0.86, 0.88, 0.92, a), w)
+	HudDraw.text(self, "%d ROUND%s" % [n, "" if n == 1 else "S"], Vector2(c.x, c.y + cr + 0.026 * u), int(0.024 * u),
+		Color(0.86, 0.88, 0.92, a), 1, 2, "bold")
+
+
+## The ROUNDS strip: "ROUNDS", a numbered disc per round of the match (blue: this player picks its
+## gun, orange: the other one does; the pair being picked ringed in yellow), and what a pick means.
+func _draw_strip(a: float, u: float) -> void:
+	var pr := pick_rect()
+	var cy := pr.position.y + 0.08 * u + strip_h() * 0.5
+	HudDraw.text(self, "ROUNDS", Vector2(pr.position.x + 0.03 * u, cy), int(0.024 * u), Color(0.72, 0.76, 0.82, a), 0, 0, "bold")
+	var dr := 0.022 * u
+	var first := pick_round - (pick_round - 1) % RoundRules.PICK_ROUNDS
+	for i in pick_strip.size():
+		var rr := i + 1
+		var c := strip_disc(rr)
+		var col: Color = HudDraw.BLUE if bool(pick_strip[i]) else HudDraw.ORANGE
+		if rr < first:
+			col = col.darkened(0.45)
+		HudDraw.disk(self, c, dr, Color(col, a))
+		if rr == first or rr == first + 1:
+			HudDraw.ring(self, c, dr + 0.006 * u, Color(HudDraw.YELLOW, a), maxf(2.0, 0.004 * u))
+		HudDraw.text(self, str(rr), c, int(0.024 * u), Color(1, 1, 1, a), 1, 0, "number")
+	var nx := strip_disc(pick_strip.size()).x + 0.05 * u
+	var note := "THE GUN %s RESTS FOR THE %d ROUNDS AFTER" % ["PICKED" if pick_watch != "" else "YOU PICK", RoundRules.COOLDOWN_ROUNDS]
+	HudDraw.text(self, note, Vector2(nx, cy), _fit(note, 0.02 * u, pr.end.x - nx - 0.03 * u, "semi"),
+		Color(0.72, 0.76, 0.82, a), 0, 0, "semi")
 
 
 ## Font size for `t`: `px` px, smaller when the text would be wider than `room`.
@@ -337,11 +493,13 @@ func _draw_board() -> void:
 	draw_rect(r, Color(HudDraw.PANEL_BG, HudDraw.PANEL_BG.a * a))
 	HudDraw.vband(self, Rect2(r.position, Vector2(r.size.x, 0.09 * u)), Color(1, 1, 1, 0.08 * a), Color(1, 1, 1, 0.02 * a))
 	HudDraw.corner_brackets(self, r.grow(-4), 0.035 * u, Color(1, 1, 1, 0.4 * a), 2.0)
-	var mode := "LONE WOLF"
+	var mode := Game.mode_name()
 	var map_name := "CARGO CAGE"
 	var round_i := 1
 	var goal := 1
 	if arena != null:
+		if arena.get("mode_name") != null:
+			mode = String(arena.get("mode_name"))
 		map_name = String(arena.get("map_name"))
 		round_i = int(arena.get("round_index"))
 		goal = int(arena.get("rounds_to_win"))
@@ -366,6 +524,9 @@ func _draw_board() -> void:
 	HudDraw.text_parts(self, right_parts, Vector2(right_x, hy), rfs, 2, 0, "semi", a)
 	var xr := board_close_rect()
 	HudDraw.close_button(self, xr.get_center(), xr.size.x * 0.5, a)
+	if team_board():
+		_draw_team_rows(r, u, a)
+		return
 	# Columns (header and value fonts fit the column width).
 	var cols := ["ROUNDS", "KILLS", "DAMAGE", "HEADSHOTS", "ACCURACY", "HP"]
 	var name_w := r.size.x * 0.33
@@ -415,11 +576,70 @@ func _draw_board() -> void:
 				vc = Color(team.lightened(0.35), a)
 			HudDraw.text(self, String(vals[c]), Vector2(x0 + name_w + col_w * (c + 0.5), cy - (0.008 * u if c == 5 else 0.0)), vfs, vc, 1, 0, "number")
 		# HP mini bar under the number.
-		var hpf := clampf(float(row.get("hp", 0)) / Fighter.MAX_HP, 0.0, 1.0)
+		var hpf := clampf(float(row.get("hp", 0)) / float(row.get("hp_max", Fighter.MAX_HP)), 0.0, 1.0)
 		var bw := col_w * 0.6
 		var bx := x0 + name_w + col_w * 5.5 - bw * 0.5
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw, 0.006 * u), Color(0, 0, 0, 0.5 * a))
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw * hpf, 0.006 * u), Color(HudDraw.HP_WHITE, a))
 		y += row_h
-	HudDraw.text(self, "TAP THE SCORE BAR OR THE LIST BUTTON TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
+	HudDraw.text(self, "TAP THE SCORE BAR TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.03 * u),
+		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")
+
+
+## The team rows (scoreboard_rows with "team", "ally", "status", "knocks", "revives", "bot"): my team
+## first under a blue band, then the other under an orange one.
+func _draw_team_rows(r: Rect2, u: float, a: float) -> void:
+	var cols := ["STATUS", "KILLS", "KNOCKS", "REVIVES", "DAMAGE", "HP"]
+	var name_w := r.size.x * 0.3
+	var x0 := r.position.x + 0.03 * u
+	var col_w := (r.size.x - name_w - 0.06 * u) / cols.size()
+	var hfs := int(0.02 * u)
+	var widest := 0.0
+	for c in cols:
+		widest = maxf(widest, HudDraw.text_width(String(c), hfs, "semi"))
+	if widest > col_w * 0.92:
+		hfs = maxi(8, int(hfs * col_w * 0.92 / widest))
+	var hy2 := r.position.y + 0.115 * u
+	HudDraw.text(self, "PLAYER", Vector2(x0 + 0.03 * u, hy2), hfs, Color(0.7, 0.74, 0.8, a), 0, 0, "semi")
+	for c in cols.size():
+		HudDraw.text(self, String(cols[c]), Vector2(x0 + name_w + col_w * (c + 0.5), hy2), hfs, Color(0.7, 0.74, 0.8, a), 1, 0, "semi")
+	var rh := board_row_h() * u
+	var y := r.position.y + 0.145 * u
+	var score: Dictionary = arena.get("score") if arena != null and arena.get("score") is Dictionary else {}
+	var vfs := mini(int(0.028 * u), int(col_w * 0.9 / maxf(HudDraw.text_width("100", 100, "number") / 100.0, 0.01)))
+	for side in 2:
+		var mine := side == 0
+		var col := HudDraw.BLUE if mine else HudDraw.ORANGE
+		var band := Rect2(Vector2(x0, y), Vector2(r.size.x - 0.06 * u, 0.04 * u))
+		HudDraw.band(self, band, Color(col, 0.75 * a), Color(col, 0.1 * a))
+		HudDraw.text(self, "BLUE TEAM" if mine else "ORANGE TEAM", Vector2(x0 + 0.02 * u, band.get_center().y), int(0.024 * u), Color(1, 1, 1, a), 0, 0, "bold")
+		var won := int(score.get("player" if mine else "bot", 0))
+		HudDraw.text(self, "ROUNDS %d" % won, Vector2(band.end.x - 0.02 * u, band.get_center().y), int(0.022 * u), Color(1, 1, 1, 0.9 * a), 2, 0, "bold")
+		y += 0.045 * u
+		for row: Dictionary in _rows:
+			if bool(row.get("ally", bool(row.get("me", false)))) != mine:
+				continue
+			var rr := Rect2(Vector2(x0, y), Vector2(r.size.x - 0.06 * u, rh - 0.008 * u))
+			var st := String(row.get("status", "up" if bool(row.get("alive", true)) else "out"))
+			var gone := st == "out" or st == "left"
+			HudDraw.band(self, rr, Color(col, (0.12 if gone else 0.26) * a), Color(col, 0.04 * a))
+			draw_rect(Rect2(rr.position, Vector2(0.006 * u, rr.size.y)), Color(col, a))
+			var cy := rr.get_center().y
+			var nm := String(row.get("name", "?")).to_upper()
+			var nfs := int(0.028 * u)
+			var nw := HudDraw.text_width(nm, nfs, "bold")
+			if nw > name_w - 0.05 * u:
+				nfs = maxi(9, int(nfs * (name_w - 0.05 * u) / nw))
+			var name_col := HudDraw.YELLOW if bool(row.get("me", false)) else Color.WHITE
+			HudDraw.text(self, nm, Vector2(x0 + 0.025 * u, cy), nfs, Color(name_col, (0.55 if gone else 1.0) * a), 0, 0, "bold")
+			var st_col: Color = {"up": HudDraw.HEAL_GREEN, "knocked": HudTeam.KNOCK_RED, "left": HudTeam.OUT_GREY}.get(st, Color(1, 0.4, 0.35))
+			var vals := [st.to_upper(), str(row.get("kills", 0)), str(row.get("knocks", 0)), str(row.get("revives", 0)),
+				str(row.get("damage", 0)), str(row.get("hp", 0)) if st == "up" else "-"]
+			for c in vals.size():
+				var vc := Color(st_col, a) if c == 0 else Color(1, 1, 1, (0.6 if gone else 1.0) * a)
+				HudDraw.text(self, String(vals[c]), Vector2(x0 + name_w + col_w * (c + 0.5), cy), int(0.02 * u) if c == 0 else vfs, vc, 1, 0,
+					"bold" if c == 0 else "number")
+			y += rh
+		y += 0.005 * u
+	HudDraw.text(self, "TAP THE SCORE BAR TO OPEN / CLOSE", Vector2(r.get_center().x, r.end.y - 0.025 * u),
 		int(0.019 * u), Color(1, 1, 1, 0.45 * a), 1, 0, "semi")
