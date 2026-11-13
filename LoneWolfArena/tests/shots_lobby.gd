@@ -13,9 +13,11 @@ const PEOPLE := [["tour-l-fox", "NIGHTFOX21", "shadow", 23, true, false], ["tour
 const STRANGERS := [["tour-l-rook", "ROOKIE99", 3, true], ["tour-l-vex", "VEXA", 15, false]]
 
 var _fails := 0
+var _at_ref: Node
 
 
 func run(at: Node) -> int:
+	_at_ref = at
 	OS.set_environment("LW_MQTT_URL", "ws://127.0.0.1:9")
 	if DisplayServer.get_name() == "headless":
 		get_tree().root.size = Vector2i(1280, 720)
@@ -108,11 +110,12 @@ func run(at: Node) -> int:
 	var tab_req := lobby.dialogs.modal.find_child("Tab_requests", true, false) as Button
 	var asker2 := "tour-l-asker2".sha256_text().left(32)
 	cloud.friend_requests[asker2] = {"name": "ORBIT", "pk": "", "ts": now}
-	await at.wait(0.6)
+	# (the page polls every 0.4 s; a loaded machine's slow frames get up to 2 s)
+	await _until(func() -> bool: return tab_req != null and tab_req.text == "REQUESTS  2", 2.0)
 	_check(tab_req != null and tab_req.text == "REQUESTS  2", "a new request counts on the REQUESTS tab (%s)" % (tab_req.text if tab_req else "none"))
 	cloud.friend_requests.erase(asker2)
 	cloud.friend_requests.erase(asker)
-	await at.wait(0.6)
+	await _until(func() -> bool: return tab_req != null and tab_req.text == "REQUESTS", 2.0)
 	_check(tab_req != null and tab_req.text == "REQUESTS", "answered requests leave the REQUESTS tab's count (%s)" % (tab_req.text if tab_req else "none"))
 	cloud.friend_requests[asker] = {"name": "SABRE", "pk": "", "ts": now}
 	lobby.friends.open("online")
@@ -448,3 +451,11 @@ func _check_mode_page(lobby: Lobby) -> void:
 	var ta := a.find_child("ModeTitle", true, false) as Control
 	var tb := b.find_child("ModeTitle", true, false) as Control
 	_check(ta != null and tb != null and absf(ta.global_position.y - tb.global_position.y) < 1.0, "both cards' names line up")
+
+
+## Waits (game time, 0.1 s steps) until cond() is true or `seconds` pass.
+func _until(cond: Callable, seconds: float) -> void:
+	var t := 0.0
+	while not cond.call() and t < seconds:
+		await _at_ref.wait(0.1)
+		t += 0.1
