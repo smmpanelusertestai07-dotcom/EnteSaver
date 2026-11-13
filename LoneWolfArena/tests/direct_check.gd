@@ -25,6 +25,7 @@ static func run(runner: Node) -> void:
 	me._stun()
 	me._sealing()
 	me._candidates()
+	me._paths()
 	me._loopback()
 	me._cloud_part()
 
@@ -179,6 +180,31 @@ func _candidates() -> void:
 		Game.autotest = saved
 	_check(Game.DEFAULT_SETTINGS.direct_connect == true and "direct_connect" in Game.BOOL_SETTINGS,
 		"DIRECT CONNECTION is on by default, an on/off setting")
+
+
+## The address the state goes to when the other phone answers from several (path_rank, best_path).
+func _paths() -> void:
+	_check(NetDirect.path_rank("192.168.1.20") == 3 and NetDirect.path_rank("10.20.30.40") == 3 and NetDirect.path_rank("172.20.0.5") == 3
+		and NetDirect.path_rank("fd12::7") == 3, "same-network addresses rank first")
+	_check(NetDirect.path_rank("2409:4040:1::9") == 2 and NetDirect.path_rank("100.70.1.2") == 1 and NetDirect.path_rank("::ffff:100.70.1.2") == 1
+		and NetDirect.path_rank("203.0.113.7") == 0 and NetDirect.path_rank("172.32.0.1") == 0, "then IPv6, then carrier NAT, then public IPv4")
+	var now := 50000
+	var v4 := ["203.0.113.7", 40000, now - 10]
+	var v6 := ["2409:4040:1::9", 40001, now - 300]
+	_check(NetDirect.best_path([v4, v6], now, NetDirect.PATH_FRESH_MS) == v6, "a working IPv6 path wins over a later IPv4 packet")
+	_check(NetDirect.best_path([v4, ["2409:4040:1::9", 40001, now - NetDirect.PATH_FRESH_MS]], now, NetDirect.PATH_FRESH_MS) == v4,
+		"an IPv6 path not heard lately gives way to the IPv4 one")
+	var v4b := ["198.51.100.2", 40000, now - 5]
+	_check(NetDirect.best_path([v4, v4b], now, NetDirect.PATH_FRESH_MS) == v4b, "on a tie the address heard last")
+	_check(NetDirect.best_path([], now, NetDirect.PATH_FRESH_MS).is_empty() and NetDirect.best_path([["203.0.113.7", 1, 0]], now, 1000).is_empty(),
+		"no fresh path: none")
+	var d := NetDirect.new(true, Crypto.new().generate_random_bytes(32))
+	d._heard_from("203.0.113.7", 40000, now)
+	d._heard_from("2409:4040:1::9", 40001, now + 20)
+	d._heard_from("203.0.113.7", 40000, now + 40)
+	_check(d._peer_ip == "2409:4040:1::9" and d._peer_port == 40001, "the sends stay on the IPv6 path while both answer")
+	d._heard_from("203.0.113.7", 40000, now + 20 + NetDirect.PATH_FRESH_MS)
+	_check(d._peer_ip == "203.0.113.7", "and move to IPv4 once IPv6 went quiet")
 
 
 ## Two sockets on this machine, driven with a made-up clock: the packets are real.
