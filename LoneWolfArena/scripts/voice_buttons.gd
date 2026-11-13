@@ -32,11 +32,14 @@ static func lobby_pill(l: Node, root: Control) -> VoiceButtons:
 	root.add_child(v)
 	var hub := NetVoice.hub()
 	hub.changed.connect(v.queue_redraw)
-	hub.mic_refused.connect(func() -> void:
-		v.note = NetVoice.REFUSED_NOTE
-		v._note_t = 6.0
-		v.queue_redraw())
+	hub.mic_refused.connect(v._on_mic_refused)
 	return v
+
+
+func _on_mic_refused() -> void:
+	note = NetVoice.REFUSED_NOTE
+	_note_t = 6.0
+	queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -77,13 +80,11 @@ func _draw() -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
-	var at := Vector2.ZERO
-	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-		at = (event as InputEventMouseButton).position
-	elif event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
-		at = (event as InputEventScreenTouch).position
-	else:
+	# (a touch reaches the GUI as its emulated mouse press, as for a Button: one popup per tap)
+	if not (event is InputEventMouseButton and (event as InputEventMouseButton).pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT) \
+			or popup != null:
 		return
+	var at := (event as InputEventMouseButton).position
 	accept_event()
 	Audio.play("ui_click", -6.0)
 	var kind := "mic" if at.x < PILL.x * 0.5 else "speaker"
