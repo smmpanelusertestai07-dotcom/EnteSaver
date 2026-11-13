@@ -2669,12 +2669,13 @@ func _on_room(msg: PackedByteArray) -> void:
 			var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 			if tokens >= 1.0 and line != "":
 				chat_received.emit(line)
-		"vo":
-			# Voice (NetVoice, "vo": to everyone; a "vg" is for teammates, and a 1 vs 1 has none):
-			# with the SPEAKER on here, never from a blocked player, at most NetVoice.MAX_FRAMES_S
-			# frames a second, each a frame NetVoice can play.
+		"vo", "vg":
+			# Voice (NetVoice, "vo": to everyone; "vg" to teammates only: a co-op DUO's other phone,
+			# never a 1 vs 1's opponent): with the SPEAKER on here, never from a blocked player, at
+			# most NetVoice.MAX_FRAMES_S frames a second, each a frame NetVoice can play.
 			var a: Variant = (d as Dictionary).get("a")
-			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 \
+			var mate := voice_mate(String(opponent.get("id", "")))
+			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or (kind == "vg" and not mate) \
 					or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
 				return
 			var now := Time.get_ticks_msec()
@@ -2683,7 +2684,7 @@ func _on_room(msg: PackedByteArray) -> void:
 			var frame := Marshalls.base64_to_raw(String(a))
 			if tokens >= 1.0 and NetVoice.frame_ok(frame):
 				voice_received.emit(frame)
-				voice_from.emit(frame, String(opponent.get("id", "")), false)
+				voice_from.emit(frame, String(opponent.get("id", "")), mate)
 		"ev":
 			var ev: Variant = (d as Dictionary).get("e", "")
 			var data: Variant = (d as Dictionary).get("d", [])
@@ -2927,7 +2928,8 @@ func voice_mate(id: String) -> bool:
 		return false
 	if in_session:
 		if not session_multi:
-			return false
+			# (a two-phone DUO / SQUAD over the 1 vs 1 session: in co-op the other phone is a teammate)
+			return id == String(opponent.get("id", "")) and bool(session_team.get("coop", false))
 		var sides := {}
 		for e: Dictionary in session_roster:
 			sides[String(e.get("id", ""))] = int(e.get("team", -1))
@@ -2945,7 +2947,9 @@ func voice_mate(id: String) -> bool:
 ## How many players count as GROUP for voice (voice_mate) in the match, or else the group.
 func voice_mates() -> int:
 	var n := 0
-	if in_session:
+	if in_session and not session_multi:
+		n = 1 if voice_mate(String(opponent.get("id", ""))) else 0
+	elif in_session:
 		for e: Dictionary in session_roster:
 			if voice_mate(String(e.get("id", ""))) and not (_multi.get("left", {}) as Dictionary).has(String(e.get("id", ""))):
 				n += 1
