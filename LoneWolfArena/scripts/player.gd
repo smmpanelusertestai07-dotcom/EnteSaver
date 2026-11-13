@@ -299,7 +299,7 @@ func _update_body_turn(delta: float) -> void:
 	var d := wrapf(aim_yaw - _turn_aim, -PI, PI)
 	_turn_aim = aim_yaw
 	if not alive:
-		body_turn = 0.0
+		pass                         # (the fall plays where the body faced: no turn at the end)
 	elif body_holds():
 		body_turn = wrapf(body_turn - d, -PI, PI)
 	else:
@@ -311,7 +311,7 @@ func _update_body_turn(delta: float) -> void:
 		if model.aim_mod:
 			# The held body looks where the camera looks (the head and a little of the chest),
 			# up to HEAD_FOLLOW; with the camera round at its face it looks ahead again.
-			var want := clampf(-body_turn, -HEAD_FOLLOW, HEAD_FOLLOW) if absf(body_turn) < 1.9 else 0.0
+			var want := clampf(-body_turn, -HEAD_FOLLOW, HEAD_FOLLOW) if alive and absf(body_turn) < 1.9 else 0.0
 			model.aim_mod.twist = lerpf(model.aim_mod.twist, want, 1.0 - exp(-6.0 * delta))
 
 
