@@ -218,6 +218,8 @@ func _zone_start() -> void:
 			break
 	_check(enter >= 5.0 and enter <= 40.0, "the circle reaches the minimap's sides %.0f s into stage 2" % enter)
 	_check(RoundRules.zone_start_for(Rect2(), 47.0) == 47.0, "a map without a rect keeps its own start")
+	_check(RoundRules.zone_start_for(mr, MapBuilder.ZONE_START_R, true) == MapBuilder.ZONE_START_R,
+		"online the zone starts at the map's own radius (what a 1.9.x phone uses: both phones draw the same circle)")
 
 
 ## Round 8: the match's end in steps; a win's VICTORY! sequence before the results, a loss's

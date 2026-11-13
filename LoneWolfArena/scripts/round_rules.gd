@@ -52,12 +52,15 @@ static func zone_t(elapsed: float, stage2: float) -> float:
 	return clampf((elapsed - STAGE1_S) / maxf(stage2, 0.01), 0.0, 1.0)
 
 
-## The zone's starting radius on a map (round 8, like the reference): outside the walls, 0.58 x
-## the diagonal of map_rect, so the circle comes onto the whole-arena minimap some way into stage 2;
-## `fallback` (the map's own) for a map without a rect.
+## The zone's starting radius on a map (round 8): outside the walls, 0.58 x the diagonal of
+## map_rect, so the circle comes onto the whole-arena minimap some way into stage 2; `fallback`
+## (the map's own, MapBuilder.ZONE_START_R) for a map without a rect, and ONLINE (cloud or local):
+## each phone works the zone out itself and the session carries no app version, so a 1.9.x phone
+## (fallback) and this build must agree; the new start goes online only once both phones can say
+## they have it (a protocol field), until then training alone uses it.
 const ZONE_START_DIAG := 0.58
-static func zone_start_for(map_rect: Rect2, fallback: float) -> float:
-	if not map_rect.has_area():
+static func zone_start_for(map_rect: Rect2, fallback: float, online := false) -> float:
+	if online or not map_rect.has_area():
 		return fallback
 	return ZONE_START_DIAG * map_rect.size.length()
 

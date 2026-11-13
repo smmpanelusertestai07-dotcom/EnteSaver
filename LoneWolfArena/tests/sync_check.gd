@@ -40,6 +40,10 @@ func run(autotest: Node) -> int:
 	var arena: Node = get_tree().current_scene
 	var p: Fighter = arena.get("player")
 	var b: Fighter = arena.get("bot")
+	# Round 8: each phone works the zone out itself and the session carries no app version, so an
+	# online match keeps the 1.9.x start (the map's own radius), not training's 0.58 x diagonal.
+	if not is_equal_approx(float(arena.get("zone_start_radius")), MapBuilder.ZONE_START_R):
+		_fail("online the zone starts at %.1f m, not the map's own %.1f m (a 1.9.x phone's)" % [float(arena.get("zone_start_radius")), MapBuilder.ZONE_START_R])
 	if not host:
 		# The guest believes the match lasts longer than the host does: the host still decides when
 		# it ends (its "fin"), and both phones end it alike.

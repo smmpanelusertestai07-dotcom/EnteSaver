@@ -1095,7 +1095,8 @@ ROUND 8 - THE MATCH
 - Settings (Game.DEFAULT_SETTINGS, SETTINGS_VERSION 8; on / off in Game.BOOL_SETTINGS_R8): wall_quick
   (QUICK WALL, CONTROLS > ITEMS: one tap on WALL places the wall at once, Player.quick_wall; off:
   the old take-in-hand, FIRE places it; online the same "wall" event), hit_ring (HIT MARKER RING /
-  TICKS), enemy_outline (CharacterModel.set_outline, Arena.apply_outlines / is_enemy; TeamArena:
+  TICKS), enemy_outline (CharacterModel.set_outline: Body_* / Outfit_* meshes only, outline_mesh_ok;
+  Arena.apply_outlines / is_enemy; TeamArena:
   the other team only; SettingsPanel.SCENE_KEYS emits settings_changed for it), gunshot_alerts
   (HUD.gun_alert, GUN_ALERT_M 60 m, GUN_ALERT_S 1.2 s), kill_badges; damage_numbers and
   dynamic_crosshair are settings now (no longer FIXED_SETTINGS). left_fire defaults to 1 (WHEN
@@ -1122,7 +1123,9 @@ ROUND 8 - THE MATCH
 - Minimap: HudMinimap.view_m(map_rect) = the long side x 1.05 (VIEW_M 28 m only past WHOLE_MAP_MAX
   80 m), view_center keeps at most ~10 % of the view outside the map, a white wall outline always,
   a dark slate (0.16, 0.17, 0.19) outside.
-- RoundRules: zone_start_for(map_rect, fallback) = 0.58 x the diagonal (Arena.zone_start_radius);
+- RoundRules: zone_start_for(map_rect, fallback, online) = 0.58 x the diagonal in training
+  (Arena.zone_start_radius); online (cloud or local) the map's own MapBuilder.ZONE_START_R, as on
+  1.9.x (each phone works out the zone itself and no app version travels; tests/sync_check.gd);
   the match's end: MATCH_BAND_AT 2.5, VICTORY_WORD_AT 3.3, VICTORY_WORD_S 1.5, VICTORY_TOP_AT,
   RESULTS_WIN_AT 6.0, RESULTS_LOSS_AFTER 1.6; results_at(won), match_end_step(t, won): beat, band,
   (a win:) word, top, results. Arena.results_delay() = results_at(hud.result_won()). The break's

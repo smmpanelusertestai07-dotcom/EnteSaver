@@ -165,8 +165,8 @@ func _ready() -> void:
 	map_rect = map.map_rect
 	map_name = map.map_name
 	zone_center = map.zone_center
-	zone_start_radius = RoundRules.zone_start_for(map_rect, map.zone_start_radius)
 	online = Game.online and Game.session != null and Game.session.in_session
+	zone_start_radius = RoundRules.zone_start_for(map_rect, map.zone_start_radius, online)   # (online: the 1.9.x start, alike on both phones)
 	practice = Game.practice and not online
 	mode = "lonewolf" if online else "training"
 	mode_name = Game.mode_name(mode) + (" · LOCAL" if online and Game.local_match() else "")   # PLAY WITHOUT INTERNET
