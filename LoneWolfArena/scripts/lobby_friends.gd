@@ -214,12 +214,12 @@ func open(kind := "online", back := false) -> void:
 				open(tk))
 		tabs.add_child(b)
 	# BLOCKED (bottom left, as the reference's list of blocked players): PROFILE's BLOCKED tab.
-	var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 56))
-	blk.name = "FriendsBlocked"
-	blk.icon = UI.icon_texture("v_guest")
-	blk.add_theme_constant_override("icon_max_width", 24)
-	blk.pressed.connect(func() -> void: lobby.profile_ui.open("blocked"))
 	if not own:
+		var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 56))
+		blk.name = "FriendsBlocked"
+		blk.icon = UI.icon_texture("v_guest")
+		blk.add_theme_constant_override("icon_max_width", 24)
+		blk.pressed.connect(func() -> void: lobby.profile_ui.open("blocked"))
 		(page.foot as VBoxContainer).add_child(blk)
 	var v: VBoxContainer = page.body
 	if kind == "friends":
