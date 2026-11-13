@@ -4,11 +4,15 @@ extends Node
 ## accepts; each phone lists the other's signed player card (v2: picture, banner, level and
 ## signature, kept by the broker) and sees a new banner arrive once the other phone changes it;
 ## the host opens room 424242 with password 4821 and rules (first to 1, unlimited walls
-## and ammo); the guest tries a wrong password (refused), then the right one; the host sees it in
+## and ammo, and this build's RoomRules off their defaults: HP 100, speed 125%, jump 150%, one gun
+## the whole match (the sniper), no aim assist, a room name); the guest tries a wrong password (refused), then the right one; the host sees it in
 ## the room and starts; both play the match with the room's rules (the host's walls never run out)
-## and the host wins. Prints "ROOM CHECK DONE bad=N".
+## (the room's rules reach the guest with the room before START; both phones' arenas play HP 100,
+## the speed, the jump, the sniper without a pick panel, no aim assist) and the host wins. Prints "ROOM CHECK DONE bad=N".
 
 const CODE := "424242"
+const RULES := {"rounds": 1, "walls": true, "ammo": true, "frags": false, "hp": 100, "speed": 125, "jump": 150,
+	"gun": "fixed", "gun_id": "sniper", "aim": false, "name": "CHECK ROOM"}
 const PIN := "4821"
 ## Each phone's name card (its banner changes to "then" once it has seen the other's card).
 const CARDS := {
@@ -84,7 +88,7 @@ func run(autotest: Node) -> int:
 		at.log_line("friends chat: \"%s\", unread %d" % [want, NetChat.unread(other)])
 	# Custom room.
 	if host:
-		cloud.open_room(PIN, {"rounds": 1, "walls": true, "ammo": true, "frags": false}, CODE)
+		cloud.open_room(PIN, RULES, CODE)
 		if not await _until(func() -> bool: return not cloud.room_guest.is_empty(), 40.0):
 			return _done("nobody joined the room")
 		if String(cloud.room_guest.id) != other:
@@ -100,6 +104,11 @@ func run(autotest: Node) -> int:
 		cloud.join_room(CODE, PIN)
 		if not await _until(func() -> bool: return cloud.join_state == "in", 20.0):
 			return _done("the right password did not get in (state %s)" % cloud.join_state)
+		# The room's rules reach the joiner with the room (the host's roster), before START.
+		if not await _until(func() -> bool: return int(cloud.room_rules_now().get("hp", 0)) == 100, 15.0):
+			_fail("the room's rules never reached the joiner before the start (%s)" % str(cloud.room_rules_now()))
+		elif String(cloud.room_rules_now().name) != "CHECK ROOM":
+			_fail("the room's name did not come with its rules")
 	if not await _until(func() -> bool: return started[0], 30.0):
 		return _done("no session")
 	if not await _until(func() -> bool: return get_tree().current_scene != null and get_tree().current_scene.name == "Arena", 30.0):
@@ -115,6 +124,15 @@ func run(autotest: Node) -> int:
 	await at.wait(1.5)
 	var p: Fighter = arena.get("player")
 	var b: Fighter = arena.get("bot")
+	# Both phones play by this build's room rules (RoomRules on the arena).
+	var rr: RoomRules = arena.get("rules")
+	at.log_line("room rules object: custom %s, HP %d, speed x%.2f, jump x%.2f, gun %s, assist %s, player HP %d" % [rr.custom, int(p.hp_max),
+		p.rule_speed, p.rule_jump, p.gun().id, (p as Player).room_assist, int(p.hp)])
+	if not rr.custom or p.hp_max != 100.0 or p.hp > 100.0 or b.hp_max != 100.0 or not is_equal_approx(p.rule_speed, 1.25) \
+			or not is_equal_approx(p.rule_jump * p.rule_jump, 1.5) or (p as Player).room_assist:
+		_fail("this phone's match does not play the room's HP / speed / jump / aim rules")
+	if p.gun().id != "sniper" or b.gun().id != "sniper" or bool((arena.get("hud") as Node).get("panels").pick_open):
+		_fail("ONE GUN: both fighters should hold the sniper without a pick panel (%s / %s)" % [p.gun().id, b.gun().id])
 	# The online HUD layer: the round trip to the other phone is measured, and the host's chat line
 	# (the room's encryption) shows in the guest's feed.
 	var hud_net: HudNet = (arena.get("hud") as Node).get_node_or_null("HudNet")
