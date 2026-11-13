@@ -522,7 +522,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 			var f := _theirs(data, 0)
 			if data.size() == 3 and f != null and typeof(data[1]) == TYPE_STRING and Weapons.PICKABLE.has(String(data[1])) \
 					and _num_ok(data[2]) and int(data[2]) == round_index and (phase == Phase.PREP or phase == Phase.FIGHT) \
-					and _net_rate_ok("pick%d" % f.slot, 2.0, 4.0):
+					and not rules.gun_forced() and _net_rate_ok("pick%d" % f.slot, 2.0, 4.0):
 				_apply_decision("pick", [f.slot, String(data[1]), round_index])
 		"shot":
 			var f := _theirs(data, 0) as RemoteFighter

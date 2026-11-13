@@ -983,3 +983,41 @@ listed here. If a part needs something new from the core, add it in its own file
   member's phone takes at once from its leader only. The usual 1 vs 1 match and results; the group
   stays. A group of 3 or 4 with SOLO keeps the notice. Tests: tests/group_lobby_unit.gd (_group_code,
   _duel), tests/group_lobby_check.gd (the member's search tab, plate and TEAMS never overlap).
+
+## Custom rooms: rules, create page, room chat (1.9, scripts/room_rules.gd, room_create.gd)
+- `RoomRules` (scripts/room_rules.gd): the one object the arenas play a room's rules by. Keys and
+  choices in its header; DEFAULTS are today's rules. `RoomRules.active()` = Game.room_rules online
+  (set from Cloud.session_rules when a room's session starts), else DEFAULTS (`custom` false).
+  `sanitize`, `text` / `parse` (what the room's messages carry), `needs_new` (an older build would
+  play a SOLO room's rules differently; a team room lets it in only when `is_classic(r, true)`), `is_classic` / `classic(size, name)`, `summary(rules, team)`.
+- Arena (both arenas): `rules` (RoomRules, from _ready); `spawn_cap(kind)` = rules.throw_cap;
+  `_rules_to_fighters()` sets Fighter.hp_max (start and heal cap; every HP bar, label and the
+  low-health edge measure against it: Hud.hp_label() "HP 100/100"), rule_speed, rule_jump and
+  Player.room_assist; `forced_pick()` = ONE GUN / RANDOM's gun for a pick round (Cloud.match_seed
+  "gun<pick round>", alike on every phone; the pick panel stays closed and the other side's "pick"
+  is ignored); `_update_zone` does nothing without the zone. TeamArena: rounds_to_win = the room's,
+  `_apply_room_rules()` each frame and at the prep, the forced gun for every fighter.
+- Fighter: `hp_max` (MAX_HP unless a room says less), `rule_speed`, `rule_jump`; Player:
+  `room_assist`. The HUD's HP bar still reads Fighter.MAX_HP (a room's HP 100 shows a half bar).
+- Cloud: `room_rules` (hosted), `joined_rules` (the joined room's, from the host's roster "rr"),
+  `room_rules_now()`, `rules_from(v)` = RoomRules.sanitize; GROUPS.txt 6 has the wire.
+- Create page (FRIENDS > CUSTOM ROOM, RoomCreate.build): left tabs RoomPage_room / RoomPage_game;
+  ROOM: RoomName, RoomPin, RoomGameMode (LONE WOLF), RoomMode_<1|2|4>, RoomPlayers; GAME:
+  RoomPreset_<classic|custom>, fields Rule_<rounds|hp|speed|jump> (a tap steps the choice),
+  Rule_gun_<pick|fixed|random> (+ Rule_gun_id), rows Rule_<key> with Rule_<key>_<yes|no> and
+  RoomHelp_<key> (its help on the status line); RoomCreate. The draft: LobbyFriends.room_draft.
+  The room tab's content scrolls in NetList. The open room shows SlotPanel.rules_strip (RoomRules,
+  RoomName, RuleTag_<n>) for the host and, once the roster brought them, for a player.
+- TEAM / ROOM chat (NetChat.group_*, Cloud.send_group_chat, signal group_chat_changed): the chat
+  panel (LobbyNet) shows ChatTab_team (ChatTab_room in a custom room) first while in a group, then
+  ChatTab_friends; `LobbyNet.open_group(lobby)`; its column lists the members (ChatMember_<n>),
+  the empty state is ChatEmpty; the lobby's chat strip shows "[TEAM] NAME: text" and opens it; the
+  unread lines count on the strip's badge. A match's chat stays the match room's (HudNet).
+- Social panel (LobbySocial, Lobby.social): SocialArrow at the right edge opens SocialPanel
+  (SocialTab_<friends|recent>, SocialStatus, SocialRefresh, SocialSearch, SocialGroupCode,
+  SocialRow_<code> with SocialInvite_<code>, SocialEmpty / SocialAddFriends); GROUP CODE's keypad
+  CodePad (CodePadShown, CodeKey_<0-9>, CodeKeyBack, CodeKeyPaste, CodeKeyGo, CodePadState).
+  Setting team_status (0 JOIN ME ANYTIME: a GROUP INVITE is taken at once; 1 ONLINE; 2 BUSY:
+  declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
+- FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,
+  DUEL DUEL_W; on MY FRIENDS CHAT CHAT_W and REMOVE REMOVE_W), empty places held by ColumnGap.

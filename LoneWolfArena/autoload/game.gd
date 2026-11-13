@@ -74,6 +74,7 @@ const DEFAULT_SETTINGS := {
 	"show_career": true,          # SHOW MY CAREER: the player card carries a career summary (Cloud card v3)
 	"voice_chat": false,          # push-to-talk in an online match (NetVoice; asks for the microphone)
 	"challenges_from": 0,         # DUEL CHALLENGES FROM: CHALLENGES_EVERYONE, _FRIENDS, _NOBODY (Cloud.challenge_allowed)
+	"team_status": 1,             # the social panel's status (LobbySocial): 0 JOIN ME ANYTIME, 1 ONLINE, 2 BUSY
 	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
 	"direct_connect": true,       # DIRECT CONNECTION: the match state straight to the other phone (NetDirect)
 }
@@ -103,7 +104,7 @@ const SETTING_RANGES := {
 	"graphics": [0, 3], "sens_general": [1, 200], "sens_reddot": [1, 200], "sens_2x": [1, 200],
 	"sens_sniper": [1, 200], "sens_freelook": [1, 200], "vol_sfx": [0, 100], "vol_music": [0, 100],
 	"difficulty": [0, 2], "aim_precision": [0, 2], "left_fire": [0, 2], "run_mode": [0, 2],
-	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY], "team_size": [1, 4],
+	"vol_voice": [0, 100], "challenges_from": [CHALLENGES_EVERYONE, CHALLENGES_NOBODY], "team_status": [0, 2], "team_size": [1, 4],
 }
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "dynamic_joystick", "vibrate_footsteps", "vibrate_damage",

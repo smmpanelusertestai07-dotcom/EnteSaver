@@ -245,6 +245,26 @@ func _room_cloud() -> void:
 	_check(host.group_members().size() == 1 and not (host._grp.invited as Dictionary).has(guest.my_id), "a KICKed player is not let in again")
 	host.close_room()
 	_check(not host.in_room() and host.group.is_empty(), "CLOSE ROOM ends the room's group")
+	# An older build (an "ask" without "rv") plays a DUO room by today's rules: a room set to
+	# FIRST TO 7 keeps it out; with "rv" (this build) it gets in.
+	host.open_room("4821", RoomRules.classic(2), "424242", 2)
+	_check(RoomRules.is_classic(host.room_rules, true), "a CLASSIC DUO room")
+	host._inbox_budget = 8.0
+	host._on_room_ask(ask)
+	_check((host._grp.invited as Dictionary).has(guest.my_id), "a CLASSIC DUO room lets an older build in")
+	var seven := RoomRules.classic(2)
+	seven.rounds = 7
+	host.open_room("4821", seven, "424242", 2)
+	host._inbox_budget = 8.0
+	host._on_room_ask(ask)
+	_check(not (host._grp.invited as Dictionary).has(guest.my_id), "a DUO room FIRST TO 7 keeps an older build (no \"rv\") out")
+	var ask_new := ask.duplicate()
+	ask_new.rv = 1
+	host._on_room_ask(ask_new)
+	_check((host._grp.invited as Dictionary).has(guest.my_id), "a DUO room FIRST TO 7 lets this build (\"rv\") in")
+	host.open_room("4821", {}, "424242", 2)
+	_check(RoomRules.is_classic(host.room_rules, true), "a DUO room opened with {} is CLASSIC (first to 4)")
+	host.close_room()
 	host.free()
 	guest.free()
 
@@ -286,6 +306,30 @@ func _group_code() -> void:
 		and String(guest.group.code) == "4213579086", "the right \"gin\": the joiner holds the group's keys, no invite needed")
 	host._on_gjoin(guest.my_id, {"name": "GUEST", "bundle": "default"})
 	_check(host.group_members().size() == 2, "the joiner's \"gjoin\" seats it")
+	# TEAM chat over the group room ("gchat"): the member's line reaches the leader with its name,
+	# counts as unread, a replay or a flood is dropped; the sender keeps its own line.
+	NetChat.reset_for_test()
+	var gid := String(host._grp.gid)
+	_check(guest.send_group_chat("too soon") == "NO GROUP", "TEAM chat: not before the leader's roster has the member")
+	guest._on_groster(host._roster_msg())          # (the leader's roster, as it would arrive)
+	_check(guest.send_group_chat("meet at 9!") == "" and NetChat.group_messages(gid).size() == 1 and bool(NetChat.group_messages(gid)[0][1]),
+		"TEAM chat: a member's SEND keeps its own line")
+	_check(guest.send_group_chat("again") == "WAIT" and guest.send_group_chat("   ") == "EMPTY", "TEAM chat: one message a second, never an empty one")
+	NetChat.reset_for_test()
+	var pkt := guest._seal({"k": "gchat", "x": "meet at 9!", "ts": 0}, guest.my_id, 900, guest._grp.aes, guest._grp.mac)
+	host._on_group(pkt)
+	var gm := NetChat.group_messages(gid)
+	_check(gm.size() == 1 and String(gm[0][2]) == "GUEST" and String(gm[0][3]) == "MEET AT 9!" and not bool(gm[0][1]) and NetChat.group_unread(gid) == 1,
+		"TEAM chat: the leader gets the member's line with its name, unread (%s)" % str(gm))
+	host._on_group(pkt)
+	for n in 6:
+		host._on_group(guest._seal({"k": "gchat", "x": "spam %d" % n, "ts": 0}, guest.my_id, 901 + n, guest._grp.aes, guest._grp.mac))
+	_check(NetChat.group_messages(gid).size() < 5, "TEAM chat: a replayed line and a flood are dropped (%d kept)" % NetChat.group_messages(gid).size())
+	host._on_group(guest._seal({"k": "gchat", "x": 42, "ts": 0}, guest.my_id, 950, guest._grp.aes, guest._grp.mac))
+	_check(NetChat.group_messages(gid).size() < 5, "TEAM chat: a line that is not text is dropped")
+	NetChat.group_mark_read(gid)
+	_check(NetChat.group_unread(gid) == 0 and NetChat.group_messages("another").is_empty(), "TEAM chat: read marks; another group starts empty")
+	NetChat.reset_for_test()
 	_check(guest.join_group_code("1124680211") == "EXIT YOUR GROUP FIRST", "a member cannot join another group by code")
 	# A wrong code: nobody answers, and the search gives up with NO GROUP WITH THIS CODE.
 	var lost := _peer(Cloud.new())

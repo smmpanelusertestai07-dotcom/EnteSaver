@@ -137,7 +137,7 @@ func team_rows() -> Array:
 		i += 1
 		var st := status(f)
 		rows.append({"n": i, "name": f.display_name, "me": f == p, "leader": f == lead, "status": st,
-			"hp": clampf(f.hp / Fighter.MAX_HP, 0.0, 1.0) if st == "up" else 0.0,
+			"hp": clampf(f.hp / f.hp_max, 0.0, 1.0) if st == "up" else 0.0,
 			"bleed": clampf(f.knock_hp / Fighter.KNOCK_HP, 0.0, 1.0) if st == "knocked" else 0.0,
 			"revive": revive_progress(f) if st == "knocked" else -1.0})
 	return rows
@@ -191,10 +191,12 @@ func team_hp(t: int) -> float:
 	if list.is_empty():
 		return 0.0
 	var sum := 0.0
+	var full := 0.0
 	for f: Fighter in list:
+		full += f.hp_max
 		if status(f) == "up":
 			sum += f.hp
-	return clampf(sum / (Fighter.MAX_HP * list.size()), 0.0, 1.0)
+	return clampf(sum / full, 0.0, 1.0)
 
 
 # ---------------------------------------------------------------- geometry (static: unit tests)

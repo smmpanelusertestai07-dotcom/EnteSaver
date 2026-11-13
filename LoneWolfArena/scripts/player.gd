@@ -79,6 +79,7 @@ var recoil_yaw := 0.0
 var shake := 0.0
 var assist_target: Fighter
 var assist_on := true                 # tests compare the aim with and without the assist
+var room_assist := true               # a custom room's AIM ASSIST rule (RoomRules.aim_assist, set by the arena)
 var aim_zone := ""                    # crosshair on the assist target: "head", "body" or ""
 var _shot_wait := -1.0                # s since the press while the first shot waits (-1: not waiting)
 var _v_drag := 0.0                    # vertical look drag since the last physics tick (screen heights)
@@ -251,7 +252,7 @@ func forget_aim_hold() -> void:
 
 
 func _assist_active() -> bool:
-	return assist_on and not is_free_looking() and assist_allowed(int(Game.settings.get("aim_precision", 0)), ads)
+	return assist_on and room_assist and not is_free_looking() and assist_allowed(int(Game.settings.get("aim_precision", 0)), ads)
 
 
 ## The Aim precision setting: 0 assisted (the assist always works), 1 manual while aiming down a

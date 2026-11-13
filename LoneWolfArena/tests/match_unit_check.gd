@@ -138,7 +138,18 @@ func _challenge_rows() -> void:
 	_check(row_a.find_child("Cancel_" + Cloud.friend_code(a), true, false) != null and row_b.find_child("Duel_" + Cloud.friend_code(b), true, false) != null
 		and row_b.find_child("Cancel_" + Cloud.friend_code(b), true, false) == null and free_b.find_child("Duel_" + Cloud.friend_code(b), true, false) != null,
 		"while a challenge to one player waits, only their row reads CANCEL; the others keep DUEL 1 VS 1")
-	for n: Node in [row_a, row_b, free_b, cl]:
+	# Fixed-width columns: a row without DUEL 1 VS 1 (the player is not online) keeps the place.
+	var c := "c".sha256_text().left(32)
+	cl.directory[c] = {"name": "CHARLIE", "ts": 0}
+	var off_c: HBoxContainer = lf._player_row(cl, c, "CHARLIE", "")
+	var widths := func(r: HBoxContainer) -> Array:
+		var out := []
+		for k: Node in r.get_children():
+			out.append((k as Control).get_combined_minimum_size().x if k.name.begins_with("Player_") == false else -1.0)
+		return out
+	_check(off_c.get_child_count() == free_b.get_child_count() and widths.call(off_c) == widths.call(free_b),
+		"the list rows' columns have fixed widths: a row without DUEL 1 VS 1 keeps that place (%s / %s)" % [str(widths.call(off_c)), str(widths.call(free_b))])
+	for n: Node in [row_a, row_b, free_b, off_c, cl]:
 		n.free()
 	Game.profile = saved
 	Game.autotest = saved_at

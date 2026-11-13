@@ -565,7 +565,7 @@ func _draw_board() -> void:
 				vc = Color(team.lightened(0.35), a)
 			HudDraw.text(self, String(vals[c]), Vector2(x0 + name_w + col_w * (c + 0.5), cy - (0.008 * u if c == 5 else 0.0)), vfs, vc, 1, 0, "number")
 		# HP mini bar under the number.
-		var hpf := clampf(float(row.get("hp", 0)) / Fighter.MAX_HP, 0.0, 1.0)
+		var hpf := clampf(float(row.get("hp", 0)) / float(row.get("hp_max", Fighter.MAX_HP)), 0.0, 1.0)
 		var bw := col_w * 0.6
 		var bx := x0 + name_w + col_w * 5.5 - bw * 0.5
 		draw_rect(Rect2(bx, cy + 0.016 * u, bw, 0.006 * u), Color(0, 0, 0, 0.5 * a))

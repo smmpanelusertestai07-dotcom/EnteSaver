@@ -68,6 +68,7 @@ signal directory_changed               # a player card came in (the ALL PLAYERS 
 signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
 signal voice_received(frame: PackedByteArray)    # the opponent's push-to-talk audio (a NetVoice frame)
 signal friend_chat_changed(id: String) # a friend's chat message came in (NetChat)
+signal group_chat_changed               # a TEAM / ROOM chat message came in or went out (NetChat.group_*)
 signal seeker_seen(id: String, saw: Array)    # QUICK MATCH: another searching player's "seek" (NetMatch)
 ## GROUPS and all-human team matches (design/GROUPS.txt section 3; the lobby uses only these):
 signal group_changed                   # members, leader, sides, status or search progress changed
@@ -168,6 +169,8 @@ var directory := {}
 var room_code := ""            # custom room this phone hosts: 6 digits ("" = none)
 var room_pin := ""             # its password (digits)
 var room_rules := {}
+var _gchat_ms := 0             # when this phone last sent a TEAM / ROOM chat line
+var joined_rules := {}         # the rules of the room this phone joined (its host's roster: RoomRules.text)
 var room_guest := {}           # {"id", "name"}: who joined it with the right password
 var join_state := ""           # custom room this phone joins: "", "asking", "in", "wrong", "full", "none"
 var room_notice := ""          # why this phone is out of the room it joined (KICK, closed, host gone): the lobby says it once
@@ -739,7 +742,7 @@ func _tick_room(delta: float, now := Time.get_ticks_msec()) -> void:
 		if _join.ask_t <= 0.0 and join_state in ["asking", "in"]:
 			_join.ask_t = 2.0 if join_state == "asking" else 5.0
 			_publish_json(ROOT + "/c/" + String(_join.code), {"t": "ask", "from": my_id, "name": String(Game.profile.name),
-				"bundle": String(Game.profile.bundle), "pk": _pk_pem, "mac": _room_tag(_join.key, "ask", my_id)})
+				"bundle": String(Game.profile.bundle), "pk": _pk_pem, "mac": _room_tag(_join.key, "ask", my_id), "rv": RoomRules.TEXT_V})
 		if now - int(_join.t) > JOIN_TIMEOUT_MS and join_state in ["asking", "in"]:
 			join_state = "none"
 			room_changed.emit()
@@ -1047,7 +1050,17 @@ func _on_inbox(d: Dictionary) -> void:
 			# room's password, so it is accepted at once with the room's rules.
 			if join_state == "in" and typeof(d.get("rc")) == TYPE_STRING and _crypto.constant_time_compare(
 					_room_tag(_join.key, "inv", from).to_utf8_buffer(), String(d.rc).to_utf8_buffer()):
-				answer(true, rules_from(d.get("rules")))
+				# This build's host adds the whole rules as text, tagged with the password's key
+				# (RoomRules.text); an older host sends only its four rules.
+				var got := rules_from(d.get("rules"))
+				if typeof(d.get("rr")) == TYPE_STRING:
+					if typeof(d.get("rrt")) != TYPE_STRING or not _crypto.constant_time_compare(
+							_room_tag(_join.key, "rules" + String(d.rr), from).to_utf8_buffer(), String(d.rrt).to_utf8_buffer()):
+						return
+					got = RoomRules.parse(d.rr)
+					if got.is_empty():
+						return
+				answer(true, got)
 				return
 			# The leader of this phone's group of two starts a DUEL (group_duel): taken at once from
 			# the leader, and only with the group's own tag over it.
@@ -2230,6 +2243,43 @@ func send_friend_chat(id: String, text: String) -> String:
 	return ""
 
 
+## TEAM / ROOM chat: a line to every member of this phone's group (a custom room is one too) over
+## the group room's own end-to-end encryption ("gchat" {x: text, ts}); "" when it went, else why not
+## ("NO GROUP", "OFFLINE", "EMPTY", "WAIT": one a second). Builds before this one ignore "gchat".
+func send_group_chat(text: String) -> String:
+	if _grp.is_empty() or bool(_grp.get("joining", false)):
+		return "NO GROUP"
+	if not _connected:
+		return "OFFLINE"
+	var line := NetChat.clean(text, NetChat.FRIEND_MAX)
+	if line == "":
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _gchat_ms > 0 and now - _gchat_ms < NetChat.FRIEND_RATE_MS:
+		return "WAIT"
+	_gchat_ms = now
+	var ts := int(Time.get_unix_time_from_system())
+	_group_send({"k": "gchat", "x": line, "ts": ts})
+	NetChat.group_add(String(_grp.gid), ts, true, String(Game.profile.name), line)
+	group_chat_changed.emit()
+	return ""
+
+
+## A member's "gchat": cleaned again, at most one a second from each member (the rest dropped).
+func _on_gchat(f: String, d: Dictionary) -> void:
+	if typeof(d.get("x")) != TYPE_STRING or String(d.x).length() > NetChat.FRIEND_MAX * 4:
+		return
+	var line := NetChat.clean(String(d.x), NetChat.FRIEND_MAX)
+	if line == "" or not _bucket("gc" + f, 1.0, 3.0):
+		return
+	var who := "PLAYER"
+	for m: Dictionary in group.members:
+		if String(m.id) == f:
+			who = String(m.get("name", "PLAYER"))
+	NetChat.group_add(String(_grp.gid), int(Time.get_unix_time_from_system()), false, who, line)
+	group_chat_changed.emit()
+
+
 ## A friend's public key: from the lobby, their player card or their last message.
 func friend_key(id: String) -> String:
 	if peers.has(id):
@@ -2282,7 +2332,7 @@ func open_room(pin: String, rules: Dictionary, code := "", size := 1) -> String:
 	room_code = code if code.length() == 6 and code.is_valid_int() and not OS.has_feature("template") \
 		else "%06d" % (r.decode_u32(0) % 1000000)
 	room_pin = pin
-	room_rules = rules_from(rules)
+	room_rules = rules_from(rules if not rules.is_empty() or size <= 1 else RoomRules.classic(size))   # ({}: today's)
 	room_guest = {}
 	_room_kicked = {}
 	if my_id != "" and not in_session and not session_multi:
@@ -2360,7 +2410,9 @@ func start_room_match() -> bool:
 	if room_guest.is_empty():
 		return false
 	var key := _room_key(room_code, room_pin)
-	var ok := invite(String(room_guest.id), {"rc": _room_tag(key, "inv", my_id), "rules": room_rules})
+	var rr := RoomRules.text(room_rules)
+	var ok := invite(String(room_guest.id), {"rc": _room_tag(key, "inv", my_id), "rules": room_rules,
+		"rr": rr, "rrt": _room_tag(key, "rules" + rr, my_id)})
 	if ok:
 		session_rules = room_rules
 	return ok
@@ -2460,6 +2512,14 @@ func _on_room_ask(d: Dictionary) -> void:
 		return
 	if _room_kicked.has(from):
 		return                       # KICKed from this room: not let in again
+	var old_build := not (d.get("rv") is float or d.get("rv") is int)
+	var team_room := in_room() and int(group.size) > 1
+	if old_build and (not RoomRules.is_classic(room_rules, true) if team_room else RoomRules.needs_new(room_rules)):
+		# An older build (no "rv") plays a DUO / SQUAD room by today's rules whatever the room's,
+		# and a SOLO room by its rounds / ammo / walls / frags only: it would play this room's
+		# rules differently, so it is not let in (it reads ROOM IS FULL).
+		_publish_json(ROOT + "/u/" + from, {"t": "rno", "from": my_id, "code": room_code, "full": true})
+		return
 	var slots := in_room()
 	if slots and not _room_let_in(from):
 		_publish_json(ROOT + "/u/" + from, {"t": "rno", "from": my_id, "code": room_code, "full": true})
@@ -2497,16 +2557,16 @@ func _room_tag(key: PackedByteArray, what: String, sender: String) -> String:
 
 
 ## A room's rules from untrusted data: known keys only, values in range.
+## (RoomRules.sanitize: today's four keys as before, and this build's other rules.)
 static func rules_from(v: Variant) -> Dictionary:
-	var out := ROOM_RULES.duplicate()
-	if v is Dictionary:
-		var d := v as Dictionary
-		var r: Variant = d.get("rounds", 5)
-		if typeof(r) == TYPE_INT or typeof(r) == TYPE_FLOAT:
-			out.rounds = clampi(int(r), 1, 7)
-		for k in ["ammo", "walls", "frags"]:
-			out[k] = d.get(k, false) == true
-	return out
+	return RoomRules.sanitize(v)
+
+
+## The rules of the room this phone is in: its own room's, or the one it joined ({} out of a room).
+func room_rules_now() -> Dictionary:
+	if not in_room():
+		return {}
+	return room_rules if String(group.leader) == my_id else joined_rules
 
 
 # ---------------------------------------------------------------- the room (end-to-end encrypted)
@@ -3766,6 +3826,8 @@ func _roster_msg() -> Dictionary:
 	if not in_room():
 		msg.code = group_code()          # (inside the group room's encryption: only members read it)
 		msg.cj = code_join
+	else:
+		msg.rr = RoomRules.text(room_rules)       # the room's rules for its players (older builds ignore it)
 	return msg
 
 
@@ -3781,6 +3843,7 @@ func _group_close(tell: bool) -> void:
 	_mm_stop()
 	_grp = {}
 	group = {}
+	joined_rules = {}
 	search_found = 0
 	search_needed = 0
 
@@ -3853,6 +3916,8 @@ func _on_group(payload: PackedByteArray) -> void:
 		"gslot":
 			if leader == my_id and in_room():
 				_on_gslot(f, d)
+		"gchat":
+			_on_gchat(f, d)
 
 
 ## The room's host: a player taps an empty place ("gslot" {"t": team, "s": the roster slot}); a
@@ -3919,6 +3984,13 @@ func _on_groster(d: Dictionary) -> void:
 	if typeof(gc) == TYPE_STRING and is_group_code(String(gc)):
 		group.code = String(gc)
 	group.code_join = typeof(d.get("cj")) == TYPE_BOOL and bool(d.cj)
+	var rules_before := JSON.stringify(joined_rules)
+	if in_room() and typeof(d.get("rr")) == TYPE_STRING:
+		var rr := RoomRules.parse(d.rr)
+		if not rr.is_empty():
+			joined_rules = rr
+	if JSON.stringify(joined_rules) != rules_before:
+		room_changed.emit()
 	group.members = list
 	group.status = g_status
 	group.mode = mode
@@ -4053,7 +4125,7 @@ func _multi_enter(room: String, aes: PackedByteArray, mac: PackedByteArray, size
 	session_roster = roster.duplicate(true)
 	session_host_id = host_id
 	is_host = host_id == my_id
-	session_rules = {}
+	session_rules = room_rules_now().duplicate()      # a custom room's DUO / SQUAD plays by its rules
 	session_team = {"size": size, "coop": false}
 	var ids := {}
 	for e: Dictionary in roster:

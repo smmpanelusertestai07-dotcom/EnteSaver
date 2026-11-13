@@ -20,6 +20,8 @@ extends Node
 ##  - The unread badge (`set_badge`, `UnreadBadge`) on the ONLINE 1 VS 1 menu row
 ##    (NetChat.unread_total).
 
+## The chat panel's id for the TEAM / ROOM channel (the group this phone is in), not a friend's.
+const GROUP := "#group"
 const WINDOW_W := 760.0
 ## The chat panel's share of the screen width, and its friends column.
 const PANEL_W := 0.53
@@ -30,7 +32,7 @@ const TOAST_H := 64.0
 const LIST_H := 300.0
 const REASONS := {"OFFLINE": "YOU ARE OFFLINE: TRY AGAIN WHEN CONNECTED", "OFF": "FRIENDS CHAT IS OFF (SETTINGS, ONLINE)",
 	"NOT A FRIEND": "ONLY FRIENDS CAN CHAT", "EMPTY": "TYPE A MESSAGE FIRST", "WAIT": "ONE MESSAGE A SECOND",
-	"NO KEY": "LOOKING FOR YOUR FRIEND'S PLAYER CARD: TRY AGAIN IN A MOMENT"}
+	"NO KEY": "LOOKING FOR YOUR FRIEND'S PLAYER CARD: TRY AGAIN IN A MOMENT", "NO GROUP": "YOU ARE NOT IN A TEAM ANY MORE"}
 
 var lobby: Lobby
 var id := ""
@@ -59,7 +61,10 @@ static func chat_button(owner_lobby: Lobby, friend_id: String, friend_name: Stri
 
 ## Opens the chat with a friend: the panel from the left over the lobby.
 static func open(owner_lobby: Lobby, friend_id: String, friend_name: String, back: String) -> void:
-	if not Game.is_friend(friend_id) or Game.is_blocked(friend_id):
+	if friend_id == GROUP:
+		if not Game.cloud_service().in_group():
+			return
+	elif not Game.is_friend(friend_id) or Game.is_blocked(friend_id):
 		return
 	var dlg := owner_lobby.dialogs
 	dlg.close_modal()
@@ -118,14 +123,48 @@ static func open(owner_lobby: Lobby, friend_id: String, friend_name: String, bac
 		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 
 
+## The TEAM / ROOM channel: the group's chat (open_group), its tab first while in a group.
+static func open_group(owner_lobby: Lobby, back := "") -> void:
+	open(owner_lobby, GROUP, group_title(), back)
+
+
+## The group channel's tab: ROOM in a custom room, else TEAM.
+static func group_title() -> String:
+	return "ROOM" if Game.cloud_service().in_room() else "TEAM"
+
+
+func is_group() -> bool:
+	return id == GROUP
+
+
 func build(v: VBoxContainer) -> void:
-	# The tabs along the top (one channel: FRIENDS; a match's chat stays in the match HUD) and X.
+	# The tabs along the top (TEAM or ROOM first while in a group, then FRIENDS; a match's chat
+	# stays in the match HUD) and X.
+	var cloud0 := Game.cloud_service()
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 0)
 	tabs.custom_minimum_size = Vector2(0, 56)
 	v.add_child(tabs)
-	var ft := UI.top_tab("FRIENDS", true, 21, Vector2(190, 56))
+	if cloud0.in_group():
+		var gt := UI.top_tab(group_title(), is_group(), 21, Vector2(150, 56))
+		gt.name = "ChatTab_" + group_title().to_lower()
+		gt.pressed.connect(func() -> void:
+			if not is_group():
+				LobbyNet.open_group(lobby, back_to))
+		var gn := NetChat.group_unread(String(cloud0.group.get("gid", "")))
+		gt.set_meta("unread", gn)
+		if gn > 0 and not is_group():
+			gt.text += "  %d" % mini(gn, 9)
+		tabs.add_child(gt)
+	var ft := UI.top_tab("FRIENDS", not is_group(), 21, Vector2(190, 56))
 	ft.name = "ChatTab_friends"
+	ft.pressed.connect(func() -> void:
+		if is_group():
+			var f := lobby.chat_ticker_friend()
+			if f == "":
+				_note.text = "NO FRIENDS YET: ADD PLAYERS FROM FRIENDS"
+			else:
+				LobbyNet.open(lobby, f, String(Game.profile.friends[f].name), back_to))
 	tabs.add_child(ft)
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -177,7 +216,7 @@ func build(v: VBoxContainer) -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 12)
 	conv.add_child(head)
-	var name_l := UI.ellipsis(UI.label("%s  #%s" % [who, Cloud.friend_code(id)], 22, UI.TEXT, "heavy"))
+	var name_l := UI.ellipsis(UI.label("%s CHAT" % who if is_group() else "%s  #%s" % [who, Cloud.friend_code(id)], 22, UI.TEXT, "heavy"))
 	name_l.name = "ChatWith"
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(name_l)
@@ -196,7 +235,8 @@ func build(v: VBoxContainer) -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 12)
 	_scroll.add_child(_list)
-	_note = UI.label("END-TO-END ENCRYPTED. WHILE YOUR FRIEND IS OFFLINE, YOUR LAST MESSAGE WAITS FOR THEM.", 14, UI.TEXT_DIM, "semi")
+	_note = UI.label("END-TO-END ENCRYPTED WITH YOUR %s'S OWN KEY: ONLY ITS PLAYERS READ IT." % who if is_group()
+		else "END-TO-END ENCRYPTED. WHILE YOUR FRIEND IS OFFLINE, YOUR LAST MESSAGE WAITS FOR THEM.", 14, UI.TEXT_DIM, "semi")
 	_note.name = "ChatNote"
 	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	conv.add_child(_note)
@@ -232,7 +272,9 @@ func build(v: VBoxContainer) -> void:
 	var cloud := Game.cloud_service()
 	cloud.friend_chat_changed.connect(_on_message)
 	cloud.peers_changed.connect(_refresh_people)
-	if cloud.friend_key(id) == "":
+	cloud.group_chat_changed.connect(_on_group_message)
+	cloud.group_changed.connect(_on_group_changed)
+	if not is_group() and cloud.friend_key(id) == "":
 		_dir_on = true
 		cloud.start_directory("chat")       # their key comes with their player card
 	refresh()
@@ -246,6 +288,16 @@ func _refresh_people() -> void:
 		return
 	var cloud := Game.cloud_service()
 	var sig := ""
+	if is_group():
+		sig = "g" + JSON.stringify(cloud.group_members())
+		if sig == _people_sig:
+			return
+		_people_sig = sig
+		for c in _people.get_children():
+			_people.remove_child(c)
+			c.queue_free()
+		_fill_members(_people)
+		return
 	for f: String in Game.profile.friends:
 		sig += "%s:%s:%d:%s:%s|" % [f, String(Game.profile.friends[f].name), NetChat.unread(f) if f != id else 0,
 			cloud.peers.has(f), String((cloud.directory.get(f, {}) as Dictionary).get("avatar", "")) + ("b" if Game.is_blocked(f) else "")]
@@ -320,6 +372,29 @@ func _fill_people(people: VBoxContainer) -> void:
 		people.add_child(b)
 
 
+## The TEAM / ROOM channel's column: the group's players (the leader / host marked).
+func _fill_members(people: VBoxContainer) -> void:
+	var n := 0
+	for m: Dictionary in Game.cloud_service().group_members():
+		var row := HBoxContainer.new()
+		row.name = "ChatMember_%d" % n
+		row.custom_minimum_size = Vector2(0, 44)
+		row.add_theme_constant_override("separation", 6)
+		var nm := UI.ellipsis(UI.label(String(m.get("name", "PLAYER")), 16, UI.ACCENT if bool(m.get("me", false)) else UI.TEXT, "bold"))
+		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(Control.new())
+		(row.get_child(0) as Control).custom_minimum_size = Vector2(6, 0)
+		row.add_child(nm)
+		if bool(m.get("leader", false)):
+			var tag := UI.label("HOST" if Game.cloud_service().in_room() else "LEAD", 11, UI.INK, "heavy")
+			tag.add_theme_stylebox_override("normal", UI.chamfer(UI.ACCENT, 3, 0, Color.TRANSPARENT, 4.0, ["br"]))
+			tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			row.add_child(tag)
+		people.add_child(row)
+		n += 1
+
+
 func _exit_tree() -> void:
 	var cloud := Game.cloud
 	if cloud == null:
@@ -328,6 +403,10 @@ func _exit_tree() -> void:
 		cloud.friend_chat_changed.disconnect(_on_message)
 	if cloud.peers_changed.is_connected(_refresh_people):
 		cloud.peers_changed.disconnect(_refresh_people)
+	if cloud.group_chat_changed.is_connected(_on_group_message):
+		cloud.group_chat_changed.disconnect(_on_group_message)
+	if cloud.group_changed.is_connected(_on_group_changed):
+		cloud.group_changed.disconnect(_on_group_changed)
 	if _dir_on:
 		cloud.stop_directory("chat")
 
@@ -337,6 +416,22 @@ func _process(delta: float) -> void:
 	if _t <= 0.0:
 		_t = 0.5
 		refresh()
+
+
+func _on_group_message() -> void:
+	if is_group():
+		refresh()
+
+
+## The group changed: its members column follows; out of the group its channel closes (to FRIENDS).
+func _on_group_changed() -> void:
+	if not is_group():
+		return
+	if not Game.cloud_service().in_group():
+		go_back()
+		return
+	_people_sig = "-"
+	_refresh_people()
 
 
 func _on_message(from: String) -> void:
@@ -351,6 +446,9 @@ func refresh() -> void:
 	if _list == null or not is_instance_valid(_list):
 		return
 	var cloud := Game.cloud_service()
+	if is_group():
+		_refresh_group(cloud)
+		return
 	var msgs := NetChat.messages(id)
 	var online := cloud.peers.has(id)
 	_status.text = "ONLINE NOW" if online else ("OFFLINE" if cloud.status == "online" else "YOU ARE OFFLINE")
@@ -374,6 +472,32 @@ func refresh() -> void:
 	_scroll_to_end.call_deferred()
 
 
+func _refresh_group(cloud: Cloud) -> void:
+	var gid := String(cloud.group.get("gid", ""))
+	var msgs := NetChat.group_messages(gid)
+	var members := cloud.group_members().size()
+	_status.text = "%d PLAYER%s" % [members, "" if members == 1 else "S"]
+	_status.add_theme_color_override("font_color", LobbyProfile.ONLINE_GREEN)
+	NetChat.group_mark_read(gid)
+	_refresh_people()
+	var key := "g%s|%d|%s" % [gid, msgs.size(), str(msgs.back()) if not msgs.is_empty() else ""]
+	if key == _shown:
+		return
+	_shown = key
+	for c in _list.get_children():
+		_list.remove_child(c)
+		c.queue_free()
+	if msgs.is_empty():
+		var e := UI.label("NO MESSAGES YET: SAY HI TO YOUR %s!" % who, 18, UI.TEXT_DIM, "semi")
+		e.name = "ChatEmpty"
+		e.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_list.add_child(e)
+	for m: Array in msgs:
+		_list.add_child(_bubble(bool(m[1]), String(m[3]), int(m[0]), String(m[2])))
+	UI.drag_scroll(_scroll, _list)
+	_scroll_to_end.call_deferred()
+
+
 func _scroll_to_end() -> void:
 	if _scroll and is_instance_valid(_scroll):
 		await get_tree().process_frame
@@ -381,7 +505,7 @@ func _scroll_to_end() -> void:
 			_scroll.scroll_vertical = int(_scroll.get_v_scroll_bar().max_value)
 
 
-func _bubble(mine: bool, text: String, ts: int) -> Control:
+func _bubble(mine: bool, text: String, ts: int, sender := "") -> Control:
 	var row := HBoxContainer.new()
 	# numbered: a name repeated among siblings would be replaced by an automatic one
 	row.name = ("ChatMine_%d" if mine else "ChatTheirs_%d") % _list.get_child_count()
@@ -404,7 +528,7 @@ func _bubble(mine: bool, text: String, ts: int) -> Control:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 10)
 	col.add_child(head)
-	head.add_child(UI.label(String(Game.profile.name) if mine else who, 16, UI.ACCENT if mine else UI.TEXT, "bold"))
+	head.add_child(UI.label(String(Game.profile.name) if mine else (sender if sender != "" else who), 16, UI.ACCENT if mine else UI.TEXT, "bold"))
 	head.add_child(UI.label(time_text(ts, int(Time.get_unix_time_from_system()), _tz_s()), 14, UI.TEXT_DIM, "semi"))
 	var p := PanelContainer.new()
 	p.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -437,7 +561,7 @@ static func _tz_s() -> int:
 
 ## SEND: through the relay, encrypted to the friend (Cloud.send_friend_chat); why not, if not.
 func send() -> void:
-	var why := Game.cloud_service().send_friend_chat(id, _field.text)
+	var why := Game.cloud_service().send_group_chat(_field.text) if is_group() else Game.cloud_service().send_friend_chat(id, _field.text)
 	if why == "":
 		_field.text = ""
 		_note.text = "SENT, END-TO-END ENCRYPTED."

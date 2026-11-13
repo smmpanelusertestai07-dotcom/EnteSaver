@@ -113,6 +113,29 @@ func _slot_row(t: int, i: int, e: Dictionary) -> HBoxContainer:
 	return row
 
 
+## The room's rules for its lobby: the room's name and a strip of tags (FIRST TO 5, HP 100, ONE GUN...:
+## RoomRules.summary), node "RoomRules" with "RoomName" and "RuleTag_<n>".
+static func rules_strip(rules: Dictionary, team: bool) -> Control:
+	var box := HFlowContainer.new()
+	box.name = "RoomRules"
+	box.add_theme_constant_override("h_separation", 8)
+	box.add_theme_constant_override("v_separation", 6)
+	var s := RoomRules.sanitize(rules)
+	if String(s.name) != "":
+		var nm := UI.label(String(s.name), 19, UI.TEXT, "heavy")
+		nm.name = "RoomName"
+		box.add_child(nm)
+	var n := 0
+	for t: String in RoomRules.summary(s, team):
+		var tag := UI.label(t, 14, UI.INK if n == 0 else UI.TEXT, "heavy")
+		tag.name = "RuleTag_%d" % n
+		tag.add_theme_stylebox_override("normal", UI.chamfer(UI.ACCENT if n == 0 else Color(1, 1, 1, 0.12), 4, 0, Color.TRANSPARENT, 8.0, ["br"]))
+		tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		box.add_child(tag)
+		n += 1
+	return box
+
+
 ## A tap on a place: the leader picks a player, then the place they go to; a room's player takes an
 ## empty place.
 func _on_slot(t: int, i: int) -> void:

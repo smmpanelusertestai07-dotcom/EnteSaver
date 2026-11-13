@@ -241,7 +241,42 @@ static func forget(id: String) -> void:
 		_save()
 
 
+# ---------------------------------------------------------------- team / room chat
+## The TEAM chat (a group's) and the ROOM chat (a custom room's: a room is a group too): text over
+## the group room's own end-to-end encryption (Cloud.send_group_chat, "gchat"), at most FRIEND_MAX
+## characters, one message a second from a phone (the others drop faster ones: Cloud's group rate).
+## Kept in memory only, for the group it was said in (a new group starts empty): [[ts, mine, name,
+## text], ...], the last HISTORY_MAX.
+static var _group := {"gid": "", "msgs": [], "unread": 0}
+
+
+static func group_add(gid: String, ts: int, mine: bool, who: String, text: String) -> void:
+	if String(_group.gid) != gid:
+		_group = {"gid": gid, "msgs": [], "unread": 0}
+	var msgs: Array = _group.msgs
+	msgs.append([ts, mine, who, text])
+	while msgs.size() > HISTORY_MAX:
+		msgs.pop_front()
+	if not mine:
+		_group.unread = mini(int(_group.unread) + 1, HISTORY_MAX)
+
+
+## The group's messages, oldest first ([] for another group than the one they were said in).
+static func group_messages(gid: String) -> Array:
+	return (_group.msgs as Array).duplicate() if gid != "" and String(_group.gid) == gid else []
+
+
+static func group_unread(gid: String) -> int:
+	return int(_group.unread) if gid != "" and String(_group.gid) == gid else 0
+
+
+static func group_mark_read(gid: String) -> void:
+	if String(_group.gid) == gid:
+		_group.unread = 0
+
+
 ## Tests: an empty, unsaved store.
 static func reset_for_test() -> void:
 	_store = {}
+	_group = {"gid": "", "msgs": [], "unread": 0}
 	_loaded = true
