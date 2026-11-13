@@ -136,6 +136,17 @@ func run(at: Node) -> int:
 	_check(chat != null and chat.find_child("ChatWindow", true, false) != null and chat.find_children("ChatMine*", "", true, false).size() == 2
 		and chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) != null, "the chat panel shows the messages and the friends")
 	await at.shot("l08_chat")
+	# (round 8) the quick phrases behind the square button left of SEND, as a list above it
+	var qb := chat.find_child("ChatQuickButton", true, false) as Button if chat else null
+	if qb:
+		qb.pressed.emit()
+		await at.wait(0.3)
+		_check(lobby.ui.find_child("ChatQuickList", true, false) != null and lobby.ui.find_child("Quick_0", true, false) != null,
+			"the quick button opens the quick phrases as a list")
+		await at.shot("l08b_chat_quick")
+		qb.pressed.emit()
+		await at.wait(0.2)
+	_check(qb != null and lobby.ui.find_child("ChatQuickList", true, false) == null, "the quick button closes its list again")
 	# The friends column follows another friend's new message and who is online.
 	var kite_row := chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) if chat else null
 	var kite_n := int(kite_row.get_meta("unread", -1)) if kite_row else -1

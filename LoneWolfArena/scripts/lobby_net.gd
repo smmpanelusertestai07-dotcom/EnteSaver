@@ -42,6 +42,7 @@ var _list: VBoxContainer
 var _scroll: ScrollContainer
 var _field: LineEdit
 var _note: Label
+var _quick_list: Control         # the quick phrases' list while it is open (ChatQuickList)
 var _status: Label
 var _shown := ""
 var _t := 0.0
@@ -240,27 +241,28 @@ func build(v: VBoxContainer) -> void:
 	_note.name = "ChatNote"
 	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	conv.add_child(_note)
-	# our own quick phrases: a tap sends one
-	var quick_sc := ScrollContainer.new()
-	quick_sc.name = "ChatQuick"
-	quick_sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	quick_sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
-	quick_sc.custom_minimum_size = Vector2(0, 48)
-	conv.add_child(quick_sc)
-	var quick := HBoxContainer.new()
-	quick.add_theme_constant_override("separation", 6)
-	quick_sc.add_child(quick)
-	for q: String in NetChat.QUICK:
-		var qb := UI.button(q, 15, "dark", Vector2(0, 44))
-		qb.name = "Quick_%d" % quick.get_child_count()
-		qb.pressed.connect(func() -> void:
-			_field.text = q
-			send())
-		quick.add_child(qb)
-	UI.drag_scroll(quick_sc, quick)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	conv.add_child(row)
+	# Our own quick phrases behind a square button left of SEND (ChatQuickButton): a tap opens them
+	# as a list above it (ChatQuickList, Quick_<n>: a tap sends one), a tap beside the list closes it;
+	# the messages get the height a row of phrases took.
+	var qbtn := UI.button("", 15, "dark", Vector2(56, 56))
+	qbtn.name = "ChatQuickButton"
+	var bubble := Control.new()
+	bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bubble.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bubble.draw.connect(func() -> void:
+		var c := bubble.size * 0.5
+		var r := Rect2(c + Vector2(-14, -11), Vector2(28, 19))
+		bubble.draw_rect(r, UI.TEXT, false, 2.5)
+		bubble.draw_colored_polygon(PackedVector2Array([Vector2(r.position.x + 5, r.end.y), Vector2(r.position.x + 13, r.end.y),
+			Vector2(r.position.x + 3, r.end.y + 8)]), UI.TEXT)
+		for i in 3:
+			bubble.draw_circle(r.get_center() + Vector2((i - 1) * 7.0, 0), 2.0, UI.TEXT))
+	qbtn.add_child(bubble)
+	qbtn.pressed.connect(func() -> void: _toggle_quick(qbtn))
+	row.add_child(qbtn)
 	_field = lobby.friends._text_field("MESSAGE (%d CHARACTERS)" % NetChat.FRIEND_MAX, NetChat.FRIEND_MAX, false)
 	_field.name = "ChatField"
 	_field.text_submitted.connect(func(_t2: String) -> void: send())
@@ -278,6 +280,47 @@ func build(v: VBoxContainer) -> void:
 		_dir_on = true
 		cloud.start_directory("chat")       # their key comes with their player card
 	refresh()
+
+
+## The quick phrases' list above the quick button (opened / closed by it; a tap beside it closes it).
+func _toggle_quick(qbtn: Control) -> void:
+	if _quick_list != null and is_instance_valid(_quick_list):
+		_quick_list.queue_free()
+		_quick_list = null
+		return
+	var catcher := Button.new()
+	catcher.name = "ChatQuickList"
+	catcher.focus_mode = Control.FOCUS_NONE
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		catcher.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	UI.full_rect(catcher)
+	catcher.pressed.connect(func() -> void: _toggle_quick(qbtn))
+	lobby.ui.add_child(catcher)
+	_quick_list = catcher
+	qbtn.tree_exiting.connect(func() -> void:
+		if is_instance_valid(catcher):
+			catcher.queue_free(), CONNECT_ONE_SHOT)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UI.box(Color(0.05, 0.045, 0.06, 0.97), 8, 1, Color(1, 1, 1, 0.2), 8.0))
+	catcher.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	panel.add_child(v)
+	for i in NetChat.QUICK.size():
+		var q := String(NetChat.QUICK[i])
+		var qb := UI.button(q, 16, "dark", Vector2(300, 50))
+		qb.name = "Quick_%d" % i
+		qb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		qb.pressed.connect(func() -> void:
+			_toggle_quick(qbtn)
+			_field.text = q
+			send())
+		v.add_child(qb)
+	# above the button, kept on screen
+	var at := qbtn.get_global_rect()
+	var h := NetChat.QUICK.size() * 56.0 + 16.0
+	var vs: Vector2 = lobby.ui.get_viewport_rect().size
+	panel.position = Vector2(clampf(at.position.x, 8.0, vs.x - 324.0), maxf(at.position.y - h - 8.0, 8.0))
 
 
 ## The friends column follows every friend's unread count and online dot: filled again whenever
