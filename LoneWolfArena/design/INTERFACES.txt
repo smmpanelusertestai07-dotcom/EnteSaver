@@ -348,10 +348,19 @@ listed here. If a part needs something new from the core, add it in its own file
 - `SettingsPanel.new()` (Control): signal `closed`; writes `Game.settings` keys listed in
   `autoload/game.gd` DEFAULT_SETTINGS and calls `Game.save_settings()` on close; a graphics or
   visual-effects change emits `Game.settings_changed` so the arena and the lobby re-apply them at
-  once. Tabs (`TABS`, the reference's groups): DISPLAY, CONTROLS (with VIBRATION), SENSITIVITY,
-  SOUND, ONLINE, ACCOUNT (scripts/settings_account.gd: the player ID, CLEAR CACHE, and along the
-  bottom DELETE MY DATA, TERMS OF USE, PRIVACY NOTICE). `TAB_KEYS` lists each tab's settings (its
-  RESET; ACCOUNT has none and no RESET), `NOT_SHOWN` the rest; RESET, EXTREME, CLEAR CACHE
+  once. Pages (`TABS`, indices used by `_show_tab(i)`): 0 DISPLAY, 1 SENSITIVITY, 2 CONTROLS, 3 SOUND,
+  4 ONLINE, 5 ACCOUNT (scripts/settings_account.gd: the player ID, CLEAR CACHE, and along the
+  bottom DELETE MY DATA, TERMS OF USE, PRIVACY NOTICE), 6 HUD, 7 VIBRATION; `MENU` puts them in
+  the tab column: IN-MATCH (sub-tabs `SubTabs`, buttons `Sub_<PAGE>`: HUD, CONTROLS, SENSITIVITY,
+  VIBRATION), DISPLAY, SOUND, ONLINE, ACCOUNT; it opens on HUD. CONTROLS and SENSITIVITY
+  (`PREVIEW_TABS`) show `Preview` (our HUD picture, the selected row's button ringed) and
+  `PreviewText`; their rows are `Row_<id>`, `_select(id)` / `preview_info()` ({pic, spot,
+  callout, value, text}). Sensitivity rows read 0-100: `sens_shown(key, stored)` /
+  `sens_value(key, shown)` map to the stored 1-200 (`SENS_SHOWN`: where the default sits).
+  Graphics tiles `GraphicsTiles`, minimap tiles `Toggle_minimap_turns` (child index = choice).
+  Pictures: `PIC_DIR` (assets/ui/settings/, made by tests/shots_settings_pics.gd), `SPOTS` (the
+  HUD widgets' places in them). `TAB_KEYS` lists each page's settings (its RESET, node `Reset`;
+  HUD and ACCOUNT have none and no RESET), `NOT_SHOWN` the rest; RESET, EXTREME, CLEAR CACHE
   (ACCOUNT, `ClearCache`: `CacheCleaner.scan()` / `clear()` delete only the shader and pipeline
   caches, old logs and the saves' leftover .tmp / older .bak, never a save or the identity key;
   the row's note then says what was freed) and DELETE MY DATA ask first in a `Confirm` layer
@@ -359,7 +368,7 @@ listed here. If a part needs something new from the core, add it in its own file
   (`open_help()`: `HowToPlay.page()`, scripts/how_to_play.gd) as a page over the panel
   (`open_sheet(title)`: node `Sheet`, its header X `Close`; `open_doc(title, sections)` adds
   `DocScroll` and `SheetOk`); back closes a question, then a page, then the panel. `busy` (DELETE
-  MY DATA running): back and the X do nothing. With `in_match` (also detected when the current scene has `open_pause()`), EDIT CUSTOM HUD
+  MY DATA running): back and the X do nothing. With `in_match` (also detected when the current scene has `open_pause()`), the HUD page's CUSTOM
   (`EditHud`) calls `edit_hud` (a Callable the in-match menu sets: the editor over the match);
   without one it is a note (`EditHudNote`): the lobby's editor would abandon the match; DELETE MY
   DATA becomes `DeleteNote`. A finger drag that starts
