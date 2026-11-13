@@ -897,7 +897,10 @@ func _parse() -> void:
 						Game.save_profile()
 					if not _dir_wants.is_empty():
 						_subscribe(ROOT + "/p/+")
+						_subscribe(ROOT + "/rm/+")                 # public room cards (scripts/net_rooms.gd)
 					_card_t = 0.0                                  # (re)publish this phone's card now
+					if room_code == "":
+						_publish(ROOT + "/rm/" + my_id, PackedByteArray(), true)   # a room card left by a killed app goes (NetRooms)
 					if _want_lobby:
 						_subscribe(ROOT + "/lobby")
 						_announce_t = 0.0
@@ -939,6 +942,10 @@ func _parse() -> void:
 func _on_publish(topic: String, payload: PackedByteArray) -> void:
 	if topic.begins_with(ROOT + "/p/"):
 		_on_card(topic, payload)
+		return
+	if topic.begins_with(ROOT + "/rm/"):        # a public room's card (scripts/net_rooms.gd)
+		if NetRooms.hub().take(topic.trim_prefix(ROOT + "/rm/"), payload, int(Time.get_unix_time_from_system()), my_id):
+			room_changed.emit()
 		return
 	if topic.begins_with(ROOT + "/mm/g"):
 		if not _mm.is_empty() and topic == _mm_topic():
@@ -1504,7 +1511,7 @@ func forget_me() -> bool:
 	var told := _connected and my_id != ""
 	if told:
 		var p: Dictionary = Game.profile
-		var gone := {ROOT + "/p/" + my_id: true}
+		var gone := {ROOT + "/p/" + my_id: true, ROOT + "/rm/" + my_id: true}     # (the room card: NetRooms)
 		for id: Variant in (p.friend_out as Dictionary).keys() + (p.withdrawn as Array):
 			gone[ROOT + "/fr/" + String(id) + "/" + my_id] = true
 			gone[ROOT + "/fa/" + my_id + "/" + String(id)] = true
@@ -1953,6 +1960,7 @@ func start_directory(by := "window") -> void:
 	_dir_wants[by] = true
 	if first and _connected:
 		_subscribe(ROOT + "/p/+")
+		_subscribe(ROOT + "/rm/+")                 # public room cards (scripts/net_rooms.gd)
 
 
 func stop_directory(by := "window") -> void:
@@ -1961,6 +1969,7 @@ func stop_directory(by := "window") -> void:
 	_dir_queue.clear()
 	if _connected:
 		_unsubscribe(ROOT + "/p/+")
+		_unsubscribe(ROOT + "/rm/+")
 
 
 func _sign(text: String) -> String:
@@ -2328,6 +2337,17 @@ func _on_friend_chat(from: String, d: Dictionary) -> void:
 
 
 # ---------------------------------------------------------------- custom rooms
+
+## A PUBLIC room's card (scripts/net_rooms.gd: NetRooms.card_json, signed with this phone's key) as
+## a retained message on this phone's own room topic; {} clears it. False when offline.
+func publish_room_card(fields: Dictionary) -> bool:
+	if not _connected or _key == null or my_id == "":
+		return false
+	var body := PackedByteArray() if fields.is_empty() \
+		else NetRooms.card_json(fields, my_id, _pk_pem, int(Time.get_unix_time_from_system()), _key).to_utf8_buffer()
+	_publish(ROOT + "/rm/" + my_id, body, true)
+	return true
+
 
 ## Opens a custom room: a random 6-digit number plus the host's numeric password. A player who
 ## sends both is listed in the room; the host starts the match with the room's rules.

@@ -4,7 +4,8 @@ extends RefCounted
 ## arcs) and the round trip as a plain number of milliseconds (no unit), in white below GOOD_MS,
 ## yellow below FAIR_MS, red from there on, grey "--" while offline or not measured yet; fewer arcs
 ## are lit as it gets worse (bars - 1).
-##  - Lobby top bar (`NetPing.Chip`, right of the gear): the round trip to the relay
+##  - Lobby top bar (`NetPing.Chip`, right of the gear): the wifi mark alone (the number on a tap):
+##    the round trip to the relay
 ##    (Cloud.relay_rtt: an MQTT PINGREQ answered by the broker's PINGRESP, one every Cloud.PING_S
 ##    while connected: 2 bytes).
 ##  - Match HUD (HudNet, top left beside the gear column): Cloud.match_ping, the round trip of the
@@ -101,22 +102,29 @@ static func wifi(ci: CanvasItem, base: Vector2, h: float, lit: int, col: Color, 
 
 
 ## The lobby's chip, the last item of the top bar's right group (right of FRIENDS and SETTINGS, as
-## the reference puts its wifi mark; Lobby._build_top_bar): the relay round trip.
+## the reference puts its wifi mark; Lobby._build_top_bar): the relay round trip as the wifi mark
+## alone, coloured and lit by quality; a tap shows the number beside it for a few seconds.
 static func lobby_chip() -> Control:
 	return Chip.new()
 
 
-## The chip itself: refreshed twice a second (no input; the bars are the whole icon).
+## The chip itself: refreshed twice a second; a tap shows the number (`show_number`) for SHOW_S.
 class Chip extends Control:
+	const SHOW_S := 4.0
 	var _t := 0.0
 	var _shown := -2
+	var number_t := 0.0              # > 0: the number is shown beside the mark
 
 	func _init() -> void:
 		name = "PingChip"
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mouse_filter = Control.MOUSE_FILTER_STOP
 		custom_minimum_size = Vector2(68, 56)
 
 	func _process(delta: float) -> void:
+		if number_t > 0.0:
+			number_t -= delta
+			if number_t <= 0.0:
+				queue_redraw()
 		_t -= delta
 		if _t > 0.0:
 			return
@@ -133,5 +141,18 @@ class Chip extends Control:
 			return -1
 		return cloud.relay_rtt
 
+	## A tap: the number beside the mark for a few seconds.
+	func show_number() -> void:
+		number_t = SHOW_S
+		queue_redraw()
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and (event as InputEventMouseButton).pressed \
+				and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			accept_event()
+			show_number()
+
 	func _draw() -> void:
-		NetPing.draw(self, Vector2(2, size.y * 0.5), 20.0, _shown, 17)
+		var w := NetPing.draw(self, Vector2(2, size.y * 0.5), 20.0, _shown, 17, 1.0, true)
+		if number_t > 0.0:
+			HudDraw.text(self, NetPing.label(_shown), Vector2(2 + w, size.y * 0.5 + 0.8), 17, NetPing.color(_shown), 0, 3, "bold")

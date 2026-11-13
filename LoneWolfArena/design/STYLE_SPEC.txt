@@ -283,3 +283,26 @@ VOICE (the reference's places and defaults, our icons)
   anchored, beside the minimap; SPEAKER toggles at once (slash = OFF), MIC opens MIC MODE to its
   right (GROUP only with teammates). TALK under MIC only with PUSH TO TALK. Who speaks: small rows
   (sound mark + name) under the buttons.
+
+ROUND 8 - OUT OF THE MATCH (checklist)
+- [ ] Lobby hero edges smooth at MEDIUM graphics (2x MSAA on the stage; FXAA at LOW).
+- [ ] Group lobby: no floating names; small dark plates (level square, yellow flag for the leader,
+      18 px name) under each character's feet, the hero's above its voice pill with a leave glyph;
+      plates never overlap each other or the mode card and hide under popups and pages.
+- [ ] Every page has the X box top-right with its caps title right-aligned beside it (FRIENDS,
+      CUSTOM ROOM, PLAY WITHOUT INTERNET, PROFILE, WARDROBE).
+- [ ] FRIENDS rows: avatar, the player's banner behind the name with LV in its corner, the status in
+      yellow (online / in a match) or grey (last seen); no REMOVE in the rows.
+- [ ] No guide paragraphs on the pages: a 36 px "?" square beside the section title opens a dark
+      tooltip with a thin yellow border.
+- [ ] Popups blur the lobby behind them (about half brightness); plain dark shade at LOW graphics.
+- [ ] The quit question is a normal popup (light header, X, CANCEL / QUIT), not a band.
+- [ ] CUSTOM ROOM list rows: map picture, room name, ID and host, rules, LONE WOLF + team size, n / max,
+      a password mark, the yellow join disc; under it the ID field, QUICK JOIN and the yellow CREATE.
+- [ ] WARDROBE: OUTFIT / LOBBY POSE / VICTORY POSE tabs on the left; a tap shows the item at once with a
+      name tag by the character; EQUIP yellow, EQUIPPED grey and inert.
+- [ ] Match loading: a teaching card (yellow-bar title, grey line, a diagram with dashed yellow
+      callouts), the logo top right, a 4 px full-width line at y 0.92 with the % at its right end,
+      "LOADING <MODE> (CARGO CAGE)..." above its left end, a caps tip under it.
+- [ ] Lobby ping chip: the wifi mark alone (coloured by quality); the number on a tap.
+- [ ] HISTORY: a forfeit win reads VICTORY over a grey OPPONENT LEFT.

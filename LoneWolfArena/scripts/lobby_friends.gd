@@ -41,7 +41,7 @@ var _net_refresh_t := 0.0
 var _friend_query := ""                # FRIENDS tab search (an ID or a name)
 ## The next custom room as the create page (RoomCreate) edits it: its page (ROOM / GAME), name,
 ## password, mode (SOLO 1, DUO 2, SQUAD 4) and rules (RoomRules); kept while the tab is redrawn.
-var room_draft := {"page": "room", "name": "", "pin": "", "size": 1, "rules": RoomRules.classic(1)}
+var room_draft := {"page": "room", "name": "", "pin": "", "pin_auto": false, "size": 1, "rules": RoomRules.classic(1), "public": false}
 var _room_join_code := ""              # the room this phone asked to join (for its status line)
 var _dir_on := false                   # this window asked the cloud for the player cards
 var _place := {}                       # the tab and scroll a player's card was opened from: {"kind", "scroll"}
@@ -54,7 +54,6 @@ var _kb_seen := false                  # the on-screen keyboard was up for it (_
 const ADD_W := 150.0                   # the list rows' fixed columns (_player_row)
 const DUEL_W := 170.0
 const CHAT_W := 130.0
-const REMOVE_W := 112.0
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -117,6 +116,7 @@ func on_lobby_exit() -> void:
 	if cloud == null:
 		return
 	_disconnect_net(cloud)
+	NetRooms.hub().stop(cloud)          # a public room's card leaves the list with the lobby
 	if _dir_on:
 		_dir_on = false
 		cloud.stop_directory("window")
@@ -131,9 +131,11 @@ func on_lobby_exit() -> void:
 	# presence stays on through a match: friends keep seeing this phone online
 
 
-## Every frame: the open list follows the service (players, requests, invites); the unread badge.
+## Every frame: the open list follows the service (players, requests, invites); the unread badge;
+## a PUBLIC room this phone hosts keeps its card on the relay (NetRooms).
 func process(delta: float) -> void:
 	_follow_keyboard()
+	NetRooms.hub().process(delta, Game.cloud)
 	_badge_t -= delta
 	if _badge_t <= 0.0:
 		_badge_t = 0.5
@@ -166,11 +168,21 @@ func process(delta: float) -> void:
 ## back: it opens again under a player's card that closed (X, back, BLOCK, DUEL 1 VS 1): the list
 ## scrolls back to where that card was opened from, so a long ALL PLAYERS keeps the player's place.
 ## The page's tabs: [kind, caption]. REQUESTS shows the count of requests waiting.
-const PAGE_TABS := [["friends", "FRIENDS"], ["requests", "REQUESTS"], ["online", "PLAYERS"], ["room", "CUSTOM ROOM"],
-	["local", "PLAY WITHOUT INTERNET"]]
-## Each tab's heading (the yellow-barred section title) and its short guide line.
-const PAGE_HEADS := {"friends": "MY FRIENDS", "requests": "FRIEND REQUESTS", "online": "PLAYERS", "room": "CUSTOM ROOM",
-	"local": "PLAY WITHOUT INTERNET"}
+## CUSTOM ROOM ("rooms": the public room list; "room": create / the room this phone is in) and PLAY
+## WITHOUT INTERNET ("local") are pages of their own (SELECT MODE's bottom row opens them), each with
+## its title and X, no side tabs.
+const PAGE_TABS := [["friends", "FRIENDS"], ["requests", "REQUESTS"], ["online", "PLAYERS"]]
+const OWN_PAGES := {"rooms": "CUSTOM ROOM", "room": "CUSTOM ROOM", "local": "PLAY WITHOUT INTERNET"}
+## Each tab's heading (the yellow-barred section title); its help is behind the "?" beside it.
+const PAGE_HEADS := {"friends": "MY FRIENDS", "requests": "FRIEND REQUESTS", "online": "PLAYERS", "room": "CREATE A ROOM",
+	"rooms": "PUBLIC ROOMS", "local": "PLAY WITHOUT INTERNET"}
+const PAGE_HELP := {
+	"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
+	"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
+	"requests": "Players who asked to be your friend. ACCEPT adds them to your friends on both phones.",
+	"room": "PUBLIC rooms are listed for every player online; a private one is joined with its ID and password. The host picks SOLO, DUO or SQUAD; players take the places they tap. Only the host starts, empty places stay empty.",
+	"rooms": "Rooms their hosts made PUBLIC. Tap one to join it (a password is asked only when it has one), type a room ID, or QUICK JOIN the newest room with a free place.",
+}
 
 
 ## The REQUESTS side tab's caption: "REQUESTS  n" while n requests wait (kept current by
@@ -187,9 +199,12 @@ func open(kind := "online", back := false) -> void:
 	cloud.start_lobby()
 	cloud.start_directory("window")  # every registered player, online or not
 	_dir_on = true
-	var page := lobby.dialogs.open_page("FRIENDS")
+	var own := OWN_PAGES.has(kind)
+	var page := lobby.dialogs.open_page(String(OWN_PAGES.get(kind, "FRIENDS")), not own)
+	if kind == "room" and cloud.room_code == "" and cloud.join_state == "":
+		lobby.dialogs.modal.set_meta("on_back", open.bind("rooms"))     # the create form's X: back to the list
 	var tabs: VBoxContainer = page.tabs
-	for t: Array in PAGE_TABS:
+	for t: Array in ([] if own else PAGE_TABS):
 		var tk := String(t[0])
 		var cap := requests_caption(cloud.friend_requests.size()) if tk == "requests" else String(t[1])
 		var b := UI.side_tab(cap, tk == kind, 19 if tk != "local" else 16, Vector2(0, 64))
@@ -199,27 +214,25 @@ func open(kind := "online", back := false) -> void:
 				open(tk))
 		tabs.add_child(b)
 	# BLOCKED (bottom left, as the reference's list of blocked players): PROFILE's BLOCKED tab.
-	var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 56))
-	blk.name = "FriendsBlocked"
-	blk.icon = UI.icon_texture("v_guest")
-	blk.add_theme_constant_override("icon_max_width", 24)
-	blk.pressed.connect(func() -> void: lobby.profile_ui.open("blocked"))
-	(page.foot as VBoxContainer).add_child(blk)
+	if not own:
+		var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 56))
+		blk.name = "FriendsBlocked"
+		blk.icon = UI.icon_texture("v_guest")
+		blk.add_theme_constant_override("icon_max_width", 24)
+		blk.pressed.connect(func() -> void: lobby.profile_ui.open("blocked"))
+		(page.foot as VBoxContainer).add_child(blk)
 	var v: VBoxContainer = page.body
-	var notes := {
-		"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
-		"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
-		"requests": "Players who asked to be your friend. ACCEPT adds them to your friends on both phones.",
-		"room": "A private room: share its ID and password. The host picks SOLO, DUO or SQUAD; players take the places they tap. Only the host starts, empty places stay empty.",
-		"local": LobbyLan.GUIDE,
-	}
 	if kind == "friends":
 		_build_friends_tab(v)
 	else:
-		v.add_child(UI.section(String(PAGE_HEADS.get(kind, "")), 21))
-	var info := UI.label(String(notes[kind]), 16, UI.TEXT_DIM, "semi")
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(info)
+		# the section title and its "?" (the guide behind it, no paragraph on the page)
+		var title := String(PAGE_HEADS.get(kind, ""))
+		if kind == "room" and (cloud.room_code != "" or cloud.join_state != ""):
+			title = "YOUR ROOM"           # (a room open or being joined: not the create form)
+		var head := UI.section(title, 21)
+		head.add_child(UI.help_button(LobbyLan.GUIDE if kind == "local" else String(PAGE_HELP.get(kind, ""))))
+		head.mouse_filter = Control.MOUSE_FILTER_PASS
+		v.add_child(head)
 	_net_status = UI.label("", 20, UI.ACCENT, "bold")
 	_net_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART      # (a room option's help is a sentence)
 	v.add_child(_net_status)
@@ -239,6 +252,8 @@ func open(kind := "online", back := false) -> void:
 	if kind == "room":
 		_build_room_tab(_net_list)       # (in the list's scroll: the create page is taller than the screen)
 		UI.drag_scroll(_net_scroll, _net_list)
+	elif kind == "rooms":
+		_build_rooms_bar(v)              # (the ID field, QUICK JOIN, CREATE under the list)
 	_net_sig = "-"
 	_net_note = ""
 	_refresh_friends()
@@ -250,7 +265,10 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	var cloud := Game.cloud_service()
 	var me := HBoxContainer.new()
 	me.add_theme_constant_override("separation", 10)
-	me.add_child(UI.section(String(PAGE_HEADS.friends), 21))
+	var fh := UI.section(String(PAGE_HEADS.friends), 21)
+	fh.add_child(UI.help_button(String(PAGE_HELP.friends)))
+	fh.mouse_filter = Control.MOUSE_FILTER_PASS
+	me.add_child(fh)
 	var code := Cloud.friend_code(cloud.my_id) if cloud.my_id != "" else "--------"
 	var my_id := UI.label("YOUR ID:  %s" % code, 20, UI.TEXT, "heavy")
 	my_id.name = "MyId"
@@ -347,8 +365,11 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		v.add_child(back)
 		return
 	# Create (RoomCreate: the ROOM and GAME pages), then join by ID and password below it.
-	if String(room_draft.pin) == "":
+	# A private room gets a made-up password to start from; a PUBLIC one none (pin_auto: made up
+	# here, not typed, so switching PUBLIC on clears it).
+	if String(room_draft.pin) == "" and not bool(room_draft.get("public", false)):
 		room_draft.pin = "%04d" % randi_range(0, 9999)
+		room_draft.pin_auto = true
 	v.add_child(RoomCreate.build(self))
 	# Join: room ID + password.
 	var join := HBoxContainer.new()
@@ -374,6 +395,148 @@ func _build_room_tab(v: VBoxContainer) -> void:
 	v.add_child(join)
 
 
+## CUSTOM ROOM's list page under the list: a room ID field (and its password, asked only when
+## needed), JOIN, QUICK JOIN (the newest public room with a free place and no password) and the
+## yellow CREATE (the create form, "room"). Node names: RoomsIdField, RoomsPinField, RoomsJoin,
+## RoomsQuick, RoomsCreate; rows PublicRoom_<code> (fill_rooms).
+func _build_rooms_bar(v: VBoxContainer) -> void:
+	var bar := HBoxContainer.new()
+	bar.name = "RoomsBar"
+	bar.add_theme_constant_override("separation", 10)
+	var code := _text_field("TAP TO ENTER A ROOM ID", 6, true)
+	code.name = "RoomsIdField"
+	bar.add_child(code)
+	var pin := _text_field("PASSWORD", 6, true)
+	pin.name = "RoomsPinField"
+	pin.custom_minimum_size.x = 150
+	pin.size_flags_horizontal = Control.SIZE_FILL
+	pin.visible = false                # shown when the ID's room needs one (or is not listed)
+	bar.add_child(pin)
+	code.text_changed.connect(func(t: String) -> void:
+		var known := NetRooms.hub().by_code(t, int(Time.get_unix_time_from_system()))
+		pin.visible = t.length() == 6 and (known.is_empty() or bool(known.pw)))
+	var join := UI.button("JOIN", 19, "light", Vector2(120, 56))
+	join.name = "RoomsJoin"
+	join.pressed.connect(func() -> void:
+		if code.text.length() != 6:
+			note("ENTER THE 6-DIGIT ROOM ID")
+			return
+		if pin.visible and pin.text.length() < 4:
+			note("THIS ROOM NEEDS ITS PASSWORD (4 TO 6 DIGITS)")
+			return
+		join_public(code.text, pin.text if pin.visible else ""))
+	bar.add_child(join)
+	var quick := UI.button("QUICK JOIN", 19, "light", Vector2(170, 56))
+	quick.name = "RoomsQuick"
+	quick.pressed.connect(func() -> void:
+		var e := NetRooms.hub().quick_pick(int(Time.get_unix_time_from_system()))
+		if e.is_empty():
+			note("NO OPEN PUBLIC ROOM RIGHT NOW: CREATE ONE")
+			return
+		join_public(String(e.code), ""))
+	bar.add_child(quick)
+	var make := UI.button("CREATE", 22, "primary", Vector2(180, 56))
+	make.name = "RoomsCreate"
+	make.pressed.connect(open.bind("room"))
+	bar.add_child(make)
+	v.add_child(bar)
+
+
+## Joins a room by its ID (and password, "" for none) and shows how it goes ("room").
+func join_public(code: String, pin: String) -> void:
+	Audio.play("ui_click", -4.0)
+	_room_join_code = code
+	Game.cloud_service().join_room(code, pin)
+	open("room")
+
+
+## The public rooms, newest first: a row per room (fill: the map picture, the room's name and ID,
+## the mode and team size, n / max players, a lock when it has a password, the join arrow); a tap
+## joins it (asks the password first when it has one). Blocked hosts never show (NetRooms).
+func _fill_rooms(cloud: Cloud) -> void:
+	var now := int(Time.get_unix_time_from_system())
+	var rooms := NetRooms.hub().list(now)
+	var sig := "rooms|%s|%s" % [cloud.status, str(rooms)]
+	if sig == _net_sig:
+		return
+	_net_sig = sig
+	for c in _net_list.get_children():
+		_net_list.remove_child(c)
+		c.queue_free()
+	if rooms.is_empty():
+		_net_list.add_child(UI.empty_state("NO PUBLIC ROOMS RIGHT NOW" if cloud.status == "online" else "CONNECTING..."))
+	for e: Dictionary in rooms:
+		_net_list.add_child(_room_row(e))
+	UI.drag_scroll(_net_scroll, _net_list)
+
+
+const ROOM_SIZES := {1: "SOLO · 1 VS 1", 2: "DUO · 2 VS 2", 4: "SQUAD · 4 VS 4"}
+func _room_row(e: Dictionary) -> Button:
+	var b := Button.new()
+	b.name = "PublicRoom_" + String(e.code)
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 86)
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var map := UI.texture("mode_lonewolf.jpg")
+	var full := int(e.filled) >= int(e.total)
+	b.draw.connect(func() -> void:
+		var sz := b.size
+		var bg := Color(0.2, 0.15, 0.06, 0.92) if not b.is_pressed() else Color(0.32, 0.24, 0.08, 0.95)
+		b.draw_colored_polygon(UI.chamfer_points(Rect2(Vector2.ZERO, sz), 12.0, ["br"]), bg)
+		b.draw_rect(Rect2(0, sz.y - 3.0, sz.x - 12.0, 3.0), Color(UI.ACCENT, 0.85))
+		var pic := Rect2(6, 6, 150, sz.y - 15)
+		if map:
+			b.draw_texture_rect(map, pic, false)
+		else:
+			b.draw_rect(pic, Color(0.1, 0.1, 0.12))
+		b.draw_rect(Rect2(pic.position.x, pic.end.y - 20, pic.size.x, 20), Color(0, 0, 0, 0.6))
+		HudDraw.text(b, "CARGO CAGE", Vector2(pic.get_center().x, pic.end.y - 10), 13, UI.TEXT, 1, 0, "heavy")
+		var x := pic.end.x + 16.0
+		HudDraw.text(b, String(e.name), Vector2(x, 24), 22, UI.TEXT, 0, 0, "heavy")
+		HudDraw.text(b, "ID %s  ·  HOST %s" % [String(e.code), String(e.host)], Vector2(x, 50), 15, UI.TEXT_DIM, 0, 0, "bold")
+		HudDraw.text(b, String(e.rules), Vector2(x, 70), 14, UI.TEXT_DIM, 0, 0, "semi")
+		var cx := sz.x * 0.62
+		HudDraw.text(b, "LONE WOLF", Vector2(cx, 26), 17, UI.TEXT, 0, 0, "heavy")
+		HudDraw.text(b, String(ROOM_SIZES.get(int(e.size), "")), Vector2(cx, 52), 15, UI.ACCENT, 0, 0, "heavy")
+		var px := sz.x - 190.0
+		HudDraw.text(b, "%d / %d" % [int(e.filled), int(e.total)], Vector2(px, sz.y * 0.5), 22, UI.BAD if full else UI.TEXT, 0, 0, "number")
+		if bool(e.pw):
+			HudDraw.text(b, "PASSWORD", Vector2(px, sz.y * 0.5 + 24), 12, UI.TEXT_DIM, 0, 0, "heavy")
+		# the join mark: a flag with a plus, ours
+		var jc := Vector2(sz.x - 50.0, sz.y * 0.5)
+		b.draw_circle(jc, 24.0, Color(UI.ACCENT, 0.95 if not full else 0.35), true, -1.0, true)
+		LobbyTeam.draw_flag(b, jc + Vector2(-3, 0), 22.0, UI.INK)
+		b.draw_rect(Rect2(jc.x + 7, jc.y + 3, 10, 3), UI.INK)
+		b.draw_rect(Rect2(jc.x + 10.5, jc.y - 0.5, 3, 10), UI.INK))
+	b.pressed.connect(func() -> void:
+		if full:
+			note("ROOM %s IS FULL" % String(e.code))
+			return
+		if bool(e.pw):
+			_ask_room_pin(String(e.code), String(e.name))
+		else:
+			join_public(String(e.code), ""))
+	return b
+
+
+## A public room with a password: the password asked in a popup, then JOIN.
+func _ask_room_pin(code: String, room_name: String) -> void:
+	var v := lobby.dialogs.open_modal("ROOM PASSWORD", 620.0, true)
+	lobby.dialogs.modal.set_meta("on_back", open.bind("rooms"))
+	v.add_child(UI.label("%s  ·  ID %s" % [room_name, code], 20, UI.TEXT, "heavy"))
+	var pin := _text_field("PASSWORD", 6, true)
+	pin.name = "RoomPinAsk"
+	v.add_child(pin)
+	var go := UI.button("JOIN", 22, "primary", Vector2(200, 56))
+	go.name = "RoomPinJoin"
+	go.size_flags_horizontal = Control.SIZE_SHRINK_END
+	go.pressed.connect(func() -> void:
+		if pin.text.length() >= 4:
+			join_public(code, pin.text))
+	v.add_child(go)
+
+
 ## The create page changed (a tab, a mode, a rule): the tab again, the draft kept.
 func redraw_room() -> void:
 	var at := _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0
@@ -384,16 +547,20 @@ func redraw_room() -> void:
 ## CREATE ROOM: the draft's password (4 to 6 digits), mode and rules (the name with them).
 func create_room() -> void:
 	var p := String(room_draft.pin)
-	if p.length() < 4:
-		_net_note = "THE PASSWORD NEEDS 4 TO 6 DIGITS"
+	var public := bool(room_draft.get("public", false))
+	if p.length() < 4 and not (public and p == ""):
+		_net_note = "THE PASSWORD NEEDS 4 TO 6 DIGITS" if not public else "THE PASSWORD NEEDS 4 TO 6 DIGITS (OR NONE)"
 		_net_sig = "-"
 		_refresh_friends()
 		return
 	var rules: Dictionary = (room_draft.rules as Dictionary).duplicate()
 	rules.name = String(room_draft.name).strip_edges() if String(room_draft.name).strip_edges() != "" \
 		else "%s'S ROOM" % String(Game.profile.name)
-	Game.cloud_service().open_room(p, rules, "", int(room_draft.size))
+	var code := Game.cloud_service().open_room(p, rules, "", int(room_draft.size))
+	if public:
+		NetRooms.hub().host(code)        # its card on the relay every 30 s while it is open
 	room_draft.pin = ""
+	room_draft.pin_auto = false
 	open("room")
 
 
@@ -602,6 +769,8 @@ func _refresh_friends() -> void:
 		_net_status.text = ""
 	elif _net_kind == "room":
 		_net_status.text = "ROOM OPEN: SHARE ITS ID AND PASSWORD" if cloud.room_code != "" else ""
+	elif _net_kind == "rooms":
+		_net_status.text = ""
 	elif listed.is_empty():
 		_net_status.text = "LOOKING FOR PLAYERS ONLINE..."
 	else:
@@ -611,6 +780,9 @@ func _refresh_friends() -> void:
 	var heading := _net_kind == "online" and _net_status.text in ["PLAYERS ONLINE", "LOOKING FOR PLAYERS ONLINE..."]
 	_net_status.visible = not heading and _net_status.text != ""
 	if _net_kind == "room":
+		return
+	if _net_kind == "rooms":
+		_fill_rooms(cloud)
 		return
 	if _net_kind == "friends" and lobby.dialogs.modal and cloud.my_id != "":
 		var my := lobby.dialogs.modal.find_child("MyId", true, false) as Label
@@ -713,8 +885,8 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 	row.add_child(status_label(cloud, id, presence_tag(online_tag, playing)))
 	# Fixed-width columns (the phone test: a row with DUEL 1 VS 1 had a shorter name and its status
 	# moved left): every row keeps its ADD FRIEND and DUEL places, empty ones held by a spacer. On
-	# MY FRIENDS a friend's row ends in CHAT and REMOVE (_fill_friends); a found player who is not a
-	# friend has ADD FRIEND across those two places instead.
+	# MY FRIENDS a friend's row ends in CHAT (_fill_friends; REMOVE FRIEND is on the player card); a
+	# found player who is not a friend has ADD FRIEND in that place instead.
 	var add: Control = null
 	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
@@ -738,20 +910,18 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 	if friends_tab:
 		row.add_child(column(duel, DUEL_W))
 		if not Game.is_friend(id):
-			row.add_child(column(add, CHAT_W + REMOVE_W + 12.0))
+			row.add_child(column(add, CHAT_W))
 	else:
 		row.add_child(column(add, ADD_W))
 		row.add_child(column(duel, DUEL_W))
 	return row
 
 
-## A player found by the search on MY FRIENDS: the friends' columns (a friend's CHAT, the REMOVE
-## place kept empty).
+## A player found by the search on MY FRIENDS: the friends' columns (a friend's CHAT).
 func _search_row(cloud: Cloud, id: String, who: String, waiting: String, tag: String) -> HBoxContainer:
 	var row := _player_row(cloud, id, who, waiting, tag, true)
 	if Game.is_friend(id):
 		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends", CHAT_W))
-		row.add_child(column(null, REMOVE_W))
 	return row
 
 
@@ -792,14 +962,12 @@ static func plain_row(id: String, cloud: Cloud) -> HBoxContainer:
 	return row
 
 
-## A row's status column: the level from the card ("LV 12") over ONLINE / IN A MATCH (yellow) or
-## when the player was last seen (grey). `tag` is the row's presence tag ("  ·  ONLINE"...).
-static func status_label(cloud: Cloud, id: String, tag: String) -> Label:
-	var card: Dictionary = cloud.directory.get(id, {}) if cloud else {}
+## A row's status column: ONLINE / IN A MATCH (yellow) or when the player was last seen (grey); the
+## level is on the name's banner (banner_cell). `tag` is the row's presence tag ("  ·  ONLINE"...).
+static func status_label(_cloud: Cloud, _id: String, tag: String) -> Label:
 	var text := tag.trim_prefix("  ·  ")
 	var on := text in ["ONLINE", "IN A MATCH"]
-	var lv := int(card.get("level", 0))
-	var l := UI.label(("LV %d\n" % lv if lv > 0 else "") + text, 16, UI.STATUS_ON if on else UI.TEXT_DIM, "bold")
+	var l := UI.label(text, 16, UI.STATUS_ON if on else UI.TEXT_DIM, "bold")
 	l.name = "RowStatus"
 	l.custom_minimum_size = Vector2(170, 0)
 	l.clip_text = true                       # (a fixed column: a long "last seen" never widens it)
@@ -808,6 +976,32 @@ static func status_label(cloud: Cloud, id: String, tag: String) -> Label:
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.size_flags_vertical = Control.SIZE_FILL
 	return l
+
+
+## A list row's name cell in the reference look: the player's banner from their card (the first of
+## our banners when they have none) behind the name, darkened for the text, and "LV n" in its
+## bottom-right corner, as on the NAME CARD. `b` is the row's name button (LobbyProfile.player_button).
+static func banner_cell(b: Button, card: Dictionary) -> void:
+	var art := LobbyProfile.banner_texture(String(card.get("banner", "")))
+	if art:
+		var crop := Rect2(0.0, art.get_height() * 0.25, art.get_width(), art.get_height() * 0.5)   # the band of a 3:1 banner
+		for st: Array in [["normal", 0.55], ["hover", 0.7], ["pressed", 0.4], ["hover_pressed", 0.4]]:
+			var sb := StyleBoxTexture.new()
+			sb.texture = art
+			sb.region_rect = crop
+			sb.modulate_color = Color(st[1], st[1], st[1])
+			sb.content_margin_left = 14
+			sb.content_margin_right = 40
+			b.add_theme_stylebox_override(String(st[0]), sb)
+	var lv := int(card.get("level", 0))
+	if lv <= 0:
+		return
+	b.draw.connect(func() -> void:
+		var t := "LV %d" % lv
+		var w := HudDraw.text_width(t, 14, "heavy")
+		var r := Rect2(b.size.x - 40.0 - w - 10.0, b.size.y - 20.0, w + 10.0, 18.0)
+		b.draw_rect(r, Color(0, 0, 0, 0.6))
+		HudDraw.text(b, t, r.get_center(), 14, UI.ACCENT, 1, 0, "heavy"))
 
 
 ## A list row's tag after the name: "  ·  ONLINE" reads "  ·  IN A MATCH" while the player plays.
@@ -819,6 +1013,8 @@ static func presence_tag(online_tag: String, playing: bool) -> String:
 ## to this tab when it closes.
 func _who_button(id: String, text: String) -> Button:
 	var b := LobbyProfile.player_button(id, text)
+	var cloud := Game.cloud_service()
+	banner_cell(b, cloud.directory.get(id, {}) if cloud else {})
 	b.pressed.connect(func() -> void:
 		_place = {"kind": _net_kind, "scroll": _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0}
 		lobby.profile_ui.open_player(id, _net_kind))
@@ -916,17 +1112,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen, true)
 		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends", CHAT_W))       # (scripts/lobby_net.gd)
-		var rm := UI.button("REMOVE", 15, "dark", Vector2(REMOVE_W, 56))
-		rm.name = "FriendRemove"
-		rm.pressed.connect(func() -> void:
-			# Asked first, as on the player card (it sits right beside DUEL 1 VS 1).
-			var back := open.bind("friends", true)
-			_place = {"kind": "friends", "scroll": _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0}
-			lobby.dialogs.confirm("REMOVE FRIEND", "Remove %s from your friends? You can send a new friend request later." % who, "REMOVE",
-				func() -> void:
-					Game.remove_friend(id)
-					back.call(), back, true))
-		row.add_child(rm)
+		# (no REMOVE here: the player card has REMOVE FRIEND, asked first)
 		_net_list.add_child(row)
 
 
@@ -1253,7 +1439,10 @@ func _on_room_changed() -> void:
 		lobby.dialogs.notice("CUSTOM ROOM", why)
 		return
 	if _net_kind == "room" and lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal) and _net_list and is_instance_valid(_net_list):
-		open("room")
+		if cloud.room_code != "" or cloud.join_state != "":
+			open("room")                 # (the create form keeps what is being typed: no redraw on a room card)
+	elif _net_kind == "rooms":
+		_net_sig = "-"                   # a public room card came or went: the list on the next refresh
 
 
 ## A room's players or places changed (its group): the room tab follows.

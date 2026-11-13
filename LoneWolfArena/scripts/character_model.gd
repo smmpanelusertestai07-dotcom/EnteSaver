@@ -951,6 +951,11 @@ func play_victory(clip := "victory") -> void:
 		anim.play(clip, 0.25)
 
 
+## The lobby gesture the player chose in WARDROBE > LOBBY POSE (a LOBBY_GESTURES clip), "" = a
+## random one each time (set by the lobby, scripts/lobby.gd).
+var pose_choice := ""
+
+
 func play_lobby(cheer := false) -> void:
 	_lobby = true
 	_lobby_cheer = cheer
@@ -1001,7 +1006,7 @@ func _process(delta: float) -> void:
 			_cheer_left = anim.get_animation("victory").length / anim.speed_scale - 0.2
 		elif _gesture_n % 2 == 0 and not clips.is_empty():
 			# a gesture clip (the hand on the hip, the weight over, a look round), then the idle again
-			var g: String = clips[randi() % clips.size()]
+			var g: String = pose_choice if clips.has(pose_choice) else clips[randi() % clips.size()]
 			anim.play(g, 0.4)
 			_cheer_left = anim.get_animation(g).length / anim.speed_scale - 0.35
 		else:

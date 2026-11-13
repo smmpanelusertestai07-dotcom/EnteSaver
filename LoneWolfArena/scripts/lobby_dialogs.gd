@@ -54,8 +54,7 @@ func open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
 	UI.full_rect(modal)
 	modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	lobby.ui.add_child(modal)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.72)
+	var shade := UI.blur_shade(0.72)         # the lobby blurred and darkened behind (plain at LOW)
 	UI.full_rect(shade)
 	modal.add_child(shade)
 	var frame := VBoxContainer.new()
@@ -110,25 +109,9 @@ func open_page(title: String, side_tabs := true) -> Dictionary:
 	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	modal.add_child(inner)
 	UI.keep_clear_of_cutout(inner)
-	var close := UI.close_button(60.0)
-	close.name = "Close"
-	close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	close.offset_left = -64
-	close.offset_right = -4
-	close.offset_top = 4
-	close.offset_bottom = 64
-	close.pressed.connect(back)
-	inner.add_child(close)
-	var t := UI.label(title.to_upper(), 30, UI.TEXT, "heavy")
-	t.name = "PageTitle"
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	t.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	t.offset_left = -420
-	t.offset_right = -84
-	t.offset_top = 4
-	t.offset_bottom = 64
-	inner.add_child(t)
+	var corner := UI.page_corner(inner, title, back)      # the X box and the title beside it
+	var close := corner[0] as Button
+	var t := corner[1] as Label
 	var tabs := VBoxContainer.new()
 	tabs.name = "PageTabs"
 	tabs.add_theme_constant_override("separation", 6)
@@ -247,14 +230,14 @@ func notice(title: String, text: String) -> void:
 ## in big white caps at the lower left, CARGO CAGE and what START plays under it, the size chips,
 ## TRAINING GROUND's opponent chips, the player's numbers ModeStats, the "?" Help_<m> in the top
 ## right corner; the picked card has a 2 px yellow frame); and a bottom row of dark buttons with an
-## icon and a caps label for the other ways to play (ModeWays: ModeWay_room CUSTOM ROOM and
-## ModeWay_local PLAY WITHOUT INTERNET open FRIENDS on those tabs, ModeWay_help HOW TO PLAY opens
+## icon and a caps label for the other ways to play (ModeWays: ModeWay_rooms CUSTOM ROOM and
+## ModeWay_local PLAY WITHOUT INTERNET open those pages of their own, ModeWay_help HOW TO PLAY opens
 ## the help as a page whose X and back come back here). A tap on a card picks its mode, which START
 ## then plays (kept as the setting "mode"), and closes the page; on TRAINING GROUND's card the
 ## chips pick its opponent too (a bot's level, kept as the setting "difficulty", or the target dummy
 ## for this session: Game.practice), which also picks TRAINING GROUND. A group member gets a notice
 ## instead (the leader picks).
-const MODE_WAYS := [["room", "CUSTOM ROOM", "v_friends"], ["local", "PLAY WITHOUT INTERNET", "v_online"],
+const MODE_WAYS := [["rooms", "CUSTOM ROOM", "v_friends"], ["local", "PLAY WITHOUT INTERNET", "v_online"],
 	["help", "HOW TO PLAY", "v_info"]]
 
 
@@ -916,76 +899,60 @@ func _focus_name_field(field_id: int) -> void:
 
 # ---------------------------------------------------------------- quit
 
-## "Quit the game?" as a system dialog: a full-width dark band with the emblem, the question,
-## CANCEL (grey) and QUIT (yellow). Back or CANCEL closes it.
+## "QUIT THE GAME?" in the normal popup frame, as every other question (quit_popup).
 func confirm_quit() -> void:
 	close_modal()
-	modal = Control.new()
-	modal.name = "QuitDialog"
-	UI.full_rect(modal)
-	modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	lobby.ui.add_child(modal)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.62)
+	modal = quit_popup(lobby.ui, close_modal, func() -> void: lobby.get_tree().quit(),
+		"Your name, outfits, settings and progress stay saved on this phone.")
+
+
+## The quit question as the normal popup (the light header with its X, the dark body, CANCEL and
+## QUIT), on `parent`; the lobby's and the login's. Node names: QuitDialog, QuitCancel, QuitConfirm.
+static func quit_popup(parent: Node, on_cancel: Callable, on_quit: Callable, text: String) -> Control:
+	var m := Control.new()
+	m.name = "QuitDialog"
+	UI.full_rect(m)
+	m.mouse_filter = Control.MOUSE_FILTER_STOP
+	parent.add_child(m)
+	var shade := UI.blur_shade(0.72)
 	UI.full_rect(shade)
-	modal.add_child(shade)
-	var band := Control.new()
-	band.anchor_right = 1.0
-	band.anchor_top = 0.30
-	band.anchor_bottom = 0.70
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	band.draw.connect(func() -> void: UI.draw_dialog_band(band, band.size))
-	modal.add_child(band)
-	var em := UI.texture("emblem.png")
-	if em:
-		var t := TextureRect.new()
-		t.texture = em
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		t.anchor_left = 0.16
-		t.anchor_right = 0.16
-		t.anchor_top = 0.5
-		t.anchor_bottom = 0.5
-		t.offset_left = -84
-		t.offset_right = 84
-		t.offset_top = -84
-		t.offset_bottom = 84
-		t.modulate = Color(1, 1, 1, 0.9)
-		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		band.add_child(t)
+	m.add_child(shade)
+	var frame := VBoxContainer.new()
+	frame.name = "Frame"
+	frame.add_theme_constant_override("separation", 0)
+	frame.anchor_left = 0.5
+	frame.anchor_right = 0.5
+	frame.anchor_top = 0.5
+	frame.anchor_bottom = 0.5
+	frame.offset_left = -340
+	frame.offset_right = 340
+	frame.grow_vertical = Control.GROW_DIRECTION_BOTH
+	m.add_child(frame)
+	var head := UI.popup_header("QUIT THE GAME?", 26, 56.0)
+	(head.get_node("Close") as Button).pressed.connect(on_cancel)
+	frame.add_child(head)
+	var panel := UI.popup_body()
+	frame.add_child(panel)
 	var v := VBoxContainer.new()
-	v.anchor_left = 0.3
-	v.anchor_right = 0.95
-	v.anchor_top = 0.0
-	v.anchor_bottom = 1.0
-	v.offset_top = 34
-	v.offset_bottom = -26
-	v.add_theme_constant_override("separation", 8)
-	band.add_child(v)
-	v.add_child(UI.label("QUIT THE GAME?", 38, UI.TEXT, "bold"))
-	var bar := ColorRect.new()
-	bar.color = UI.ACCENT
-	bar.custom_minimum_size = Vector2(64, 4)
-	bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(bar)
-	v.add_child(UI.spacer(2))
-	v.add_child(UI.label("Your name, outfits, settings and progress stay saved on this phone.", 19, Color(1, 1, 1, 0.86), "semi"))
-	var fill := UI.spacer(0)
-	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(fill)
+	v.add_theme_constant_override("separation", 12)
+	panel.add_child(v)
+	var t := UI.label(text, 20, UI.TEXT, "semi")
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.custom_minimum_size = Vector2(600, 0)
+	v.add_child(t)
+	v.add_child(UI.spacer(4))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 14)
+	row.add_theme_constant_override("separation", 12)
 	v.add_child(row)
 	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 56))
 	cancel.name = "QuitCancel"
-	cancel.pressed.connect(close_modal)
+	cancel.pressed.connect(on_cancel)
 	row.add_child(cancel)
-	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 56))
+	var quit := UI.button("QUIT", 22, "primary", Vector2(210, 56))
 	quit.name = "QuitConfirm"
-	quit.pressed.connect(func() -> void: lobby.get_tree().quit())
+	quit.pressed.connect(on_quit)
 	row.add_child(quit)
-	modal.modulate.a = 0.0
-	modal.create_tween().tween_property(modal, "modulate:a", 1.0, 0.12)
+	m.modulate.a = 0.0
+	m.create_tween().tween_property(m, "modulate:a", 1.0, 0.12)
+	return m

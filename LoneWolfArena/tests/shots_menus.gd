@@ -198,11 +198,40 @@ func run(at: Node) -> int:
 			listed += 1
 	_check(listed == CharacterModel.BUNDLE_INFO.size() and lobby.find_child("Tab_epic", true, false) == null,
 		"the wardrobe lists all %d outfits, with no rarity tabs" % CharacterModel.BUNDLE_INFO.size())
+	var equip_b := lobby.find_child("EquipButton", true, false) as Button
+	var tag := lobby.find_child("WardrobeTag", true, false) as Label
+	_check(lobby.model.bundle == "royal" and equip_b != null and not equip_b.disabled and tag != null and tag.text != "",
+		"a tapped outfit is worn at once, its name on the tag, EQUIP yellow")
 	await _settle(0.5)
 	await at.shot("m05_wardrobe")
+	# LOBBY POSE: a tile plays its pose on the character
+	await _tap(lobby.find_child("WardTab_lobby", true, false) as Control)
+	await _settle(0.3)
+	var hip := lobby.find_child("Pose_lobby_hip", true, false) as Control
+	_check(hip != null and lobby.find_child("Pose_random", true, false) != null, "LOBBY POSE lists RANDOM and the poses")
+	if hip:
+		await _tap(hip)
+		await _settle(0.6)
+	await at.shot("m05b_wardrobe_pose")
+	await _tap(lobby.find_child("WardrobeClose", true, false) as Control)
+	await _settle(0.8)
+	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle and lobby.model.bundle == saved_bundle
+		and String(Game.profile.lobby_pose) == "", "the X closes the wardrobe: nothing equipped, the outfit back")
+	# EQUIP saves the shown outfit and turns grey EQUIPPED
+	await _tap(ward_row)
+	await at.wait(1.0)
+	await _tap(lobby.find_child("Bundle_royal", true, false) as Control)
+	await _settle(0.3)
+	equip_b = lobby.find_child("EquipButton", true, false) as Button
+	await _tap(equip_b)
+	await _settle(0.3)
+	_check(String(Game.profile.bundle) == "royal" and equip_b.disabled and lobby.get("wardrobe") != null, "EQUIP saves the outfit, EQUIPPED greyed")
+	await at.shot("m05c_wardrobe_equipped")
+	Game.profile.bundle = saved_bundle
+	Game.save_profile()
 	_back()
 	await _settle(0.8)
-	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
+	_check(lobby.get("wardrobe") == null and lobby.model.bundle == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
 	# Settings: open from the gear, walk the tabs with taps, tap a few options.
 	await _tap(lobby.find_child("SettingsButton", true, false) as Control)
 	await _settle(0.6)
@@ -330,9 +359,14 @@ func run(at: Node) -> int:
 		lobby = next_lobby
 	# START (TRAINING GROUND, the bot) -> match loading overlay (back is ignored there) -> arena.
 	var start := lobby.get("start_btn") as Button
+	Loading.topic_for_test = "zone"
 	await _tap(start, 0.05)
 	await _settle(0.25)
 	await at.shot("m13_match_loading")
+	var ov0 := _find_overlay()
+	_check(ov0 != null and _label_text(ov0, "ProgressStatus") == "LOADING TRAINING GROUND (CARGO CAGE)..."
+		and ov0.find_child("TeachCard", true, false) != null and ov0.find_child("MatchLogo", true, false) != null,
+		"the match loading card: a teaching diagram, the logo, LOADING <MODE> (CARGO CAGE)... over the line")
 	_check(start.disabled and (start.get_node("Caption") as Label).text == "LOADING", "START says LOADING (not MATCHING) for a bot match")
 	var ov := _find_overlay()
 	_check(ov != null and _label_text(ov, "MatchMode") == "TRAINING GROUND"
@@ -642,6 +676,7 @@ func _tour_online_card(lobby: Node) -> Node:
 	Game.online = true
 	Game.session = cloud
 	(lobby.get("start_btn") as Button).disabled = true
+	Loading.topic_for_test = "wall"
 	Loading.start_match(lobby)
 	await _settle(0.25)
 	await _at.shot("m13b_match_loading_online")
@@ -650,6 +685,7 @@ func _tour_online_card(lobby: Node) -> Node:
 	_check(ov != null and _label_text(ov, "MatchMode") == "LONE WOLF" and texts.contains("1 VS 1 ONLINE")
 		and texts.contains("VS SHADOWHUNTER77") and texts.contains("FIRST TO %d" % Game.rounds_to_win(true))
 		and not texts.contains("BOT"), "the online match card: LONE WOLF, FIRST TO n, 1 VS 1 ONLINE, the opponent")
+	Loading.topic_for_test = ""
 	var t := 0.0
 	var next: Node = null
 	while t < 30.0:

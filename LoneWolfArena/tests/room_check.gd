@@ -6,7 +6,8 @@ extends Node
 ## the host opens room 424242 (ROOM chat: the guest says hi, the host answers) with password 4821 and rules (first to 1, unlimited walls
 ## and ammo, and this build's RoomRules off their defaults: HP 100, speed 125%, jump 150%, one gun
 ## the whole match (the sniper), no aim assist, a room name); the guest tries a wrong password (refused), then the right one; the host sees it in
-## the room and starts; both play the match with the room's rules (the host's walls never run out)
+## the room and starts (before that: a PUBLIC room the guest finds on its CUSTOM ROOM list and joins
+## with a tap, and the private room never shows there); both play the match with the room's rules (the host's walls never run out)
 ## (the room's rules reach the guest with the room before START; both phones' arenas play HP 100,
 ## the speed, the jump, the sniper without a pick panel, no aim assist) and the host wins. Prints "ROOM CHECK DONE bad=N".
 
@@ -86,6 +87,9 @@ func run(autotest: Node) -> int:
 		_fail("the friend's chat message never arrived")
 	else:
 		at.log_line("friends chat: \"%s\", unread %d" % [want, NetChat.unread(other)])
+	# A PUBLIC room (scripts/net_rooms.gd): the host's signed card reaches the guest's CUSTOM ROOM
+	# list, the guest joins it by tapping its row (no password), the host closes it again.
+	await _public_room(cloud, host, other)
 	# Custom room.
 	if host:
 		cloud.open_room(PIN, RULES, CODE)
@@ -116,6 +120,9 @@ func run(autotest: Node) -> int:
 			_fail("the room's rules never reached the joiner before the start (%s)" % str(cloud.room_rules_now()))
 		elif String(cloud.room_rules_now().name) != "CHECK ROOM":
 			_fail("the room's name did not come with its rules")
+		# a private room is never listed
+		if not NetRooms.hub().by_code(CODE, int(Time.get_unix_time_from_system())).is_empty():
+			_fail("the private room shows in the public list")
 		await _say(cloud, "hi host")
 		if not await _until(func() -> bool: return _room_lines(cloud, false).any(func(m: Array) -> bool: return String(m[3]) == "WELCOME IN"), 15.0):
 			_fail("the host's ROOM chat answer never arrived")
@@ -178,6 +185,53 @@ func run(autotest: Node) -> int:
 		_fail("guest should lose")
 	await at.wait(1.0)
 	return _done("")
+
+
+## The public room: the host opens PUB_CODE as PUBLIC (no password), the guest finds its row on the
+## CUSTOM ROOM page and taps it, the host sees the guest come in and closes the room; its card
+## leaves the guest's list.
+const PUB_CODE := "616161"
+func _public_room(cloud: Cloud, host: bool, other: String) -> void:
+	var lobby := get_tree().current_scene as Lobby
+	if lobby == null:
+		_fail("the public room needs the lobby")
+		return
+	if host:
+		cloud.open_room("", {"name": "OPEN DOORS"}, PUB_CODE, 1)
+		NetRooms.hub().host(PUB_CODE)
+		if not await _until(func() -> bool: return not cloud.room_guest.is_empty(), 40.0):
+			_fail("nobody joined the public room from the list")
+		elif String(cloud.room_guest.id) != other:
+			_fail("the wrong player joined the public room")
+		else:
+			at.log_line("public room: %s joined from the list" % String(cloud.room_guest.name))
+		await at.wait(1.0)
+		cloud.close_room()
+		await at.wait(1.0)
+		if NetRooms.hub().hosting != "":
+			_fail("the public room's card was not taken back when it closed")
+		await at.wait(3.0)
+		return
+	lobby.friends.open("rooms")
+	var row: Array = [null]
+	if not await _until(func() -> bool:
+			row[0] = lobby.dialogs.modal.find_child("PublicRoom_" + PUB_CODE, true, false) if lobby.dialogs.modal else null
+			return row[0] != null, 30.0):
+		_fail("the public room never showed on the CUSTOM ROOM list")
+		return
+	var e := NetRooms.hub().by_code(PUB_CODE, int(Time.get_unix_time_from_system()))
+	at.log_line("public room card: %s" % str(e))
+	if String(e.get("name", "")) != "OPEN DOORS" or String(e.get("id", "")) != other or bool(e.get("pw", true)) or int(e.get("total", 0)) != 2:
+		_fail("the public room's card does not say what the host opened (%s)" % str(e))
+	(row[0] as Button).pressed.emit()
+	if not await _until(func() -> bool: return cloud.join_state == "in", 20.0):
+		_fail("tapping the public room did not get in (state %s)" % cloud.join_state)
+	# the host closes the room: its card goes from the list
+	if not await _until(func() -> bool: return NetRooms.hub().by_code(PUB_CODE, int(Time.get_unix_time_from_system())).is_empty(), 20.0):
+		_fail("the closed public room stayed on the list")
+	cloud.leave_join()
+	lobby.dialogs.close_modal()
+	await at.wait(1.0)
 
 
 ## The ROOM chat's lines here (mine or theirs).

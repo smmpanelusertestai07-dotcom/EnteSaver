@@ -143,7 +143,10 @@ static func privacy_sections() -> Array:
 			+ "challenges and TEAM INVITES) and friend requests carry no more than that: a TEAM INVITE's team size "
 			+ "travels encrypted inside it. While you search for a random match (QUICK MATCH, or a DUO or SQUAD "
 			+ "match), your phone also tells the relay your player ID and the IDs of the other players it saw "
-			+ "searching, so two searching players can find each other. Like any internet service, the relay sees "
+			+ "searching, so two searching players can find each other. If you make a custom room PUBLIC, every "
+			+ "player online can see its name, your name and player ID, its room ID, its mode and rules, how many "
+			+ "players are in it and whether it has a password (never the password) while it is open; a private room "
+			+ "is never listed. Like any internet service, the relay sees "
 			+ "your phone's internet (IP) address while it is connected.") % relay],
 		["Matches and chat are end-to-end encrypted", "Everything sent during an online match, chat included, is "
 			+ "encrypted on the two phones, with keys only they hold, before it leaves them: the relay only passes on "
@@ -474,80 +477,13 @@ func _close_modal() -> void:
 		_modal = null
 
 
-## "Quit the game?" as the lobby's system dialog: a full-width dark band with the emblem, the
-## question, CANCEL (grey) and QUIT (yellow). Back or CANCEL closes it.
+## "QUIT THE GAME?" in the normal popup frame, as in the lobby (LobbyDialogs.quit_popup). Back,
+## its X or CANCEL closes it.
 func _confirm_quit() -> void:
 	_close_modal()
-	_modal = Control.new()
-	_modal.name = "QuitDialog"
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	UI.full_rect(_modal)
-	add_child(_modal)
+	_modal = LobbyDialogs.quit_popup(self, _close_modal, func() -> void: get_tree().quit(),
+		"Come back any time to create your profile.")
 	move_child(_fade, -1)
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.62)
-	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UI.full_rect(shade)
-	_modal.add_child(shade)
-	var band := Control.new()
-	band.anchor_right = 1.0
-	band.anchor_top = 0.30
-	band.anchor_bottom = 0.70
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	band.draw.connect(func() -> void: UI.draw_dialog_band(band, band.size))
-	_modal.add_child(band)
-	var em := UI.texture("emblem.png")
-	if em:
-		var t := TextureRect.new()
-		t.texture = em
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		t.anchor_left = 0.16
-		t.anchor_right = 0.16
-		t.anchor_top = 0.5
-		t.anchor_bottom = 0.5
-		t.offset_left = -84
-		t.offset_right = 84
-		t.offset_top = -84
-		t.offset_bottom = 84
-		t.modulate = Color(1, 1, 1, 0.9)
-		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		band.add_child(t)
-	var v := VBoxContainer.new()
-	v.anchor_left = 0.3
-	v.anchor_right = 0.95
-	v.anchor_bottom = 1.0
-	v.offset_top = 30
-	v.offset_bottom = -24
-	v.add_theme_constant_override("separation", 8)
-	band.add_child(v)
-	v.add_child(UI.label("QUIT THE GAME?", 38, UI.TEXT, "bold"))
-	var bar := ColorRect.new()
-	bar.color = UI.ACCENT
-	bar.custom_minimum_size = Vector2(64, 4)
-	bar.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(bar)
-	v.add_child(UI.spacer(2))
-	v.add_child(UI.label("Come back any time to create your profile.", 19, Color(1, 1, 1, 0.86), "semi"))
-	var fill := UI.spacer(0)
-	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(fill)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 14)
-	v.add_child(row)
-	var cancel := UI.button("CANCEL", 20, "light", Vector2(190, 56))
-	cancel.name = "QuitCancel"
-	cancel.pressed.connect(_close_modal)
-	row.add_child(cancel)
-	var quit := UI.button("QUIT", 22, "primary", Vector2(190, 56))
-	quit.name = "QuitConfirm"
-	quit.pressed.connect(func() -> void: get_tree().quit())
-	row.add_child(quit)
-	_modal.modulate.a = 0.0
-	_modal.create_tween().tween_property(_modal, "modulate:a", 1.0, 0.12)
 
 
 # ---------------------------------------------------------------- create profile

@@ -37,7 +37,8 @@ extends Node3D
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
 ## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader, MatchingPlate, SearchLayer
 ## with SearchTab (SearchLine, SearchTimer, SearchPlayers, SearchCancel); 3D: GroupMembers with
-## GroupModel_<1..3> (CharacterModel), each with NamePlate and, on the leader, LeaderMark.
+## GroupModel_<1..3> (CharacterModel), each with NamePlate and, on the leader, LeaderMark (data: the
+## 2D plates HeroPlate and MemberPlate_<1..3>, scripts/lobby_plate.gd, show them under the feet).
 
 const PODIUM_TOP := 0.24
 ## Camera: distance and heights of the main and wardrobe views; the x offset is worked out per
@@ -61,9 +62,6 @@ const MEMBER_SCALE := 0.86
 const MEMBER_SPOTS := [Vector3(0.76, PODIUM_TOP, -0.38), Vector3(1.5, 0.0, -1.45), Vector3(2.2, 0.0, -2.1)]
 const MEMBER_YAWS := [PI - 0.42, PI - 0.55, PI - 0.66]
 const HERO_X_GROUP := 0.40
-## Name plate and LEADER mark heights over a member's feet (the model's own units, before its scale).
-const PLATE_Y := 2.02
-const MARK_Y := 2.24
 const SKYLINE := "res://assets/ui/lobby_skyline.png"
 ## The art each mode shows (mode card, SELECT MODE): [texture, the part of it to show]. LONE
 ## WOLF is the two fighters facing off, TRAINING GROUND our hero aiming at a far-off target.
@@ -113,16 +111,24 @@ var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_from_look := Vector3(0, CAM_LOOK_Y, 0)
 var _cam_to_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_to_look := Vector3(0, CAM_LOOK_Y, 0)
-## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME.
-const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X],
+## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME. MEDIUM (what AUTO picks on most phones) keeps
+## 2x MSAA: the stage is static and light (~150 draw calls) and without it the hero's outline
+## shows jagged steps on a phone; LOW has no MSAA but gets FXAA (_apply_quality).
+const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X], [1.0, Viewport.MSAA_2X],
 	[1.0, Viewport.MSAA_4X]]
 
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
+var _vp_ssaa := Viewport.SCREEN_SPACE_AA_DISABLED
 ## The group's other members on the podium: the node GroupMembers, id -> CharacterModel, id -> spot.
 var group_view: Node3D
 var _member_models := {}
 var _member_slot := {}
+## The 2D name plates (scripts/lobby_plate.gd): the hero's and, by member id, the members'.
+var _hero_plate: LobbyPlate
+var _member_plates := {}
+## ADD (AddFriendButton): hidden while the team-size box covers its place.
+var _add_btn: Button
 var _group_gid := ""
 ## In START's place for a member: WAITING FOR <LEADER> TO START (or the group's search).
 var _wait_leader: PanelContainer
@@ -169,6 +175,7 @@ func _apply_quality() -> void:
 	var vp := get_viewport()
 	vp.scaling_3d_scale = float(q[0])
 	vp.msaa_3d = int(q[1]) as Viewport.MSAA
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if g == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
 	var stage_env := get_node_or_null(^"StageEnv") as WorldEnvironment
 	if stage_env:
 		stage_env.environment.glow_enabled = g >= 1
@@ -194,6 +201,7 @@ func _exit_tree() -> void:
 	if vp:
 		vp.msaa_3d = _vp_msaa
 		vp.scaling_3d_scale = _vp_scale
+		vp.screen_space_aa = _vp_ssaa
 
 
 ## Camera x that puts the character (at x = 0) at `frac` of the screen width on this aspect
@@ -235,6 +243,7 @@ func _on_viewport_resized() -> void:
 func _build_stage() -> void:
 	var vp := get_viewport()
 	_vp_msaa = vp.msaa_3d
+	_vp_ssaa = vp.screen_space_aa
 	_vp_scale = vp.scaling_3d_scale
 	var env := WorldEnvironment.new()
 	env.name = "StageEnv"
@@ -306,6 +315,7 @@ func _build_stage() -> void:
 	model.position = Vector3(0, PODIUM_TOP, 0)
 	model.rotation.y = hero_yaw
 	model.setup(String(Game.profile.bundle), false)
+	model.pose_choice = String(Game.profile.lobby_pose)    # WARDROBE > LOBBY POSE ("" = random)
 	model.play_lobby(true)          # the hero also cheers now and then
 	group_view = Node3D.new()
 	group_view.name = "GroupMembers"
@@ -613,6 +623,9 @@ func _build_ui() -> void:
 	_build_add_button(root)
 	team.build(root)
 	social.build(root)
+	_hero_plate = LobbyPlate.make(self, null, true)    # the anchor: the hero, set with the stage
+	_hero_plate.name = "HeroPlate"
+	root.add_child(_hero_plate)
 	VoiceButtons.lobby_pill(self, root)        # [mic | speaker] under the character (scripts/voice_buttons.gd)
 	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
 	# so the search stays in sight and its X in reach while the player looks around.
@@ -968,6 +981,7 @@ func _build_add_button(root: Control) -> void:
 		Audio.play("ui_click", -4.0)
 		_open_friends("online"))
 	root.add_child(b)
+	_add_btn = b
 
 
 ## One button of the bottom bar: the glyph and the caption, white, accent while pressed.
@@ -1344,8 +1358,7 @@ func close_layers() -> void:
 	if profile_ui.layer:
 		profile_ui.close()
 	if wardrobe:
-		model.apply_bundle(String(Game.profile.bundle))
-		_close_wardrobe()
+		_close_wardrobe()            # (what was not equipped goes back: LobbyWardrobe.close)
 
 
 ## The group changed (Cloud.group_changed): a member's mode card follows the leader's choice, the
@@ -1447,6 +1460,11 @@ func show_group_members(list: Array) -> void:
 		var mark := cm.get_node_or_null(^"LeaderMark") as Label3D
 		if mark:
 			mark.visible = bool(m.get("leader", false))
+		var p2 := _member_plates.get(id) as LobbyPlate
+		if p2 and is_instance_valid(p2):
+			p2.name = "MemberPlate_%d" % (int(_member_slot[id]) + 1)
+			p2.show_member(String(m.get("name", "PLAYER")), LobbyTeam.member_level(m), bool(m.get("leader", false)), false)
+	_refresh_hero_plate()
 	# the hero steps left while members stand beside it (back to the middle when alone again)
 	var view := _main_view()
 	if camera != null and wardrobe == null and not (view[0] as Vector3).is_equal_approx(_cam_to_pos):
@@ -1463,12 +1481,19 @@ func _add_member(id: String, slot: int, bundle: String) -> CharacterModel:
 	cm.setup(bundle, false)
 	cm.play_lobby()
 	_share_looks(cm)
-	var plate := _plate("PLAYER", UI.TEXT, 44, PLATE_Y)
+	# the member's name and leader mark as data on the model (NamePlate, LeaderMark: never drawn,
+	# render layers 0); the 2D LobbyPlate under the feet shows them
+	var plate := _plate("PLAYER")
 	plate.name = "NamePlate"
 	cm.add_child(plate)
-	var mark := _plate("LEADER", UI.ACCENT, 34, MARK_Y)
+	var mark := _plate("LEADER")
 	mark.name = "LeaderMark"
 	cm.add_child(mark)
+	var p2 := LobbyPlate.make(self, cm, false)
+	p2.name = "MemberPlate_%d" % (slot + 1)
+	_main_ui.add_child(p2)
+	_main_ui.move_child(p2, _hero_plate.get_index())
+	_member_plates[id] = p2
 	cm.scale = Vector3.ONE * 0.01
 	cm.create_tween().tween_property(cm, "scale", Vector3.ONE * MEMBER_SCALE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_member_models[id] = cm
@@ -1478,6 +1503,10 @@ func _add_member(id: String, slot: int, bundle: String) -> CharacterModel:
 func _drop_member(id: String) -> void:
 	var cm := _member_models.get(id) as CharacterModel
 	_member_models.erase(id)
+	var p2 := _member_plates.get(id) as LobbyPlate
+	_member_plates.erase(id)
+	if p2 and is_instance_valid(p2):
+		p2.queue_free()
 	if cm == null or not is_instance_valid(cm):
 		return
 	cm.name = "GroupModelGone"
@@ -1501,23 +1530,55 @@ func _share_looks(cm: CharacterModel) -> void:
 				mine.set_surface_override_material(s, mat)
 
 
-## A floating text over a member (always facing the camera, drawn over the yard).
-static func _plate(text: String, color: Color, font_size: int, y: float) -> Label3D:
+## A member's name or leader mark kept on its model as data (a Label3D on render layer 0: never
+## drawn; the 2D LobbyPlate shows them).
+static func _plate(text: String) -> Label3D:
 	var l := Label3D.new()
 	l.text = text
-	l.font = UI.font("heavy")
-	l.font_size = font_size
-	l.outline_size = 12
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.85)
-	l.pixel_size = 0.004
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
-	l.double_sided = true
-	l.render_priority = 10
-	l.outline_render_priority = 9
-	l.position = Vector3(0, y, 0)
+	l.layers = 0
 	return l
+
+
+## The name plates' places this frame: each under its character's feet (LobbyPlate.place), then,
+## nearest the camera first (lowest on screen), a plate that would overlap one already placed or
+## the mode card moves up just clear of it.
+func _place_plates() -> void:
+	var shown: Array = []
+	for p2: Variant in [_hero_plate] + _member_plates.values():
+		if p2 is LobbyPlate and is_instance_valid(p2) and (p2 as LobbyPlate).place():
+			shown.append(p2)
+	shown.sort_custom(func(a: LobbyPlate, b: LobbyPlate) -> bool: return a.global_position.y > b.global_position.y)
+	var taken: Array = []
+	if mode_card and mode_card.is_visible_in_tree():
+		taken.append(mode_card.get_global_rect().grow(4.0))
+	var pill := _main_ui.get_node_or_null(^"VoicePill") as Control
+	if pill and pill.visible:
+		taken.append(pill.get_global_rect())
+	for p2: LobbyPlate in shown:
+		var r := Rect2(p2.global_position, p2.size)
+		for _i in 4:
+			var hit := false
+			for t: Rect2 in taken:
+				if t.intersects(r):
+					r.position.y = t.position.y - r.size.y - 4.0
+					hit = true
+			if not hit:
+				break
+		p2.global_position = r.position
+		taken.append(r)
+
+
+## This player's own plate: the name, the level, the flag when leading a group, the leave glyph in
+## a group (polled with START's gate and on every group change). A CUSTOM ROOM is a group too,
+## but it is left on its own page (LEAVE / CLOSE ROOM): no leave glyph there.
+func _refresh_hero_plate() -> void:
+	if _hero_plate == null:
+		return
+	if _hero_plate.anchor == null and model != null:
+		_hero_plate.anchor = model
+	var grouped := LobbyTeam.in_group()
+	_hero_plate.show_member(String(Game.profile.name), Game.level(), grouped and LobbyTeam.is_leader(),
+		grouped and not Game.cloud_service().in_room())
 
 
 ## What START does for a mode and a team size: "training" (the 1 vs 1 against the bot or the
@@ -1650,10 +1711,14 @@ func _process(delta: float) -> void:
 	_follow_search(delta)
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
+	_place_plates()
+	if _add_btn:
+		_add_btn.visible = dialogs.size_box == null
 	_gate_t -= delta
 	if _gate_t <= 0.0:
 		_gate_t = 0.25
 		update_start_gate()
+		_refresh_hero_plate()
 
 
 ## Android back: closes the top-most layer (settings, the team-size box, a popup: its own way
@@ -1674,7 +1739,6 @@ func _notification(what: int) -> void:
 	elif profile_ui.layer:
 		profile_ui.close()
 	elif wardrobe:
-		model.apply_bundle(String(Game.profile.bundle))
 		_close_wardrobe()
 	elif search_kind() != "" and search_tab.on_cancel.is_valid():
 		cancel_search()             # with no window open, back cancels the search (not a member's)

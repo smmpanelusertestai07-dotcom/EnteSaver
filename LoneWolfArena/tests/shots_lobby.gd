@@ -13,9 +13,11 @@ const PEOPLE := [["tour-l-fox", "NIGHTFOX21", "shadow", 23, true, false], ["tour
 const STRANGERS := [["tour-l-rook", "ROOKIE99", 3, true], ["tour-l-vex", "VEXA", 15, false]]
 
 var _fails := 0
+var _at_ref: Node
 
 
 func run(at: Node) -> int:
+	_at_ref = at
 	OS.set_environment("LW_MQTT_URL", "ws://127.0.0.1:9")
 	if DisplayServer.get_name() == "headless":
 		get_tree().root.size = Vector2i(1280, 720)
@@ -35,6 +37,28 @@ func run(at: Node) -> int:
 	cloud.relay_rtt = 64
 	var now := int(Time.get_unix_time_from_system())
 	await at.shot("l01_lobby")
+	# What most phones see: AUTO picks MEDIUM there (the hero's outline must stay smooth: 2x MSAA).
+	var g_was := int(Game.settings.graphics)
+	Game.settings.graphics = 1
+	Game.settings_changed.emit()
+	await at.wait(0.4)
+	_check(get_viewport().msaa_3d == Viewport.MSAA_2X, "MEDIUM graphics keep 2x MSAA on the lobby stage")
+	await at.shot("l01b_lobby_medium")
+	Game.settings.graphics = g_was
+	Game.settings_changed.emit()
+	await at.wait(0.2)
+	# the ping chip: the wifi mark alone, the number on a tap
+	var chip := lobby.find_child("PingChip", true, false) as Control
+	if chip:
+		var tap := InputEventMouseButton.new()
+		tap.button_index = MOUSE_BUTTON_LEFT
+		tap.pressed = true
+		chip._gui_input(tap)
+		await at.wait(0.6)
+		_check(float(chip.get("number_t")) > 0.0, "a tap on the ping chip shows the number")
+		await at.shot("l01c_ping_number")
+		chip.set("number_t", 0.0)
+		chip.queue_redraw()
 	# FRIENDS with nobody yet: the empty state and its link.
 	lobby._open_friends("friends")
 	await at.wait(0.6)
@@ -66,6 +90,18 @@ func run(at: Node) -> int:
 	_check(page != null and page.find_child("Tab_requests", true, false) != null and page.find_child("RequestsLink", true, false) != null
 		and page.find_child("Duel_" + Cloud.friend_code(ids.NIGHTFOX21), true, false) != null, "FRIENDS lists the friends and links the requests")
 	await at.shot("l03_friends")
+	# the guide is behind the "?" beside the title (no paragraph on the page)
+	var help_b := page.find_child("Help", true, false) as Button if page else null
+	_check(help_b != null and page.find_child("Help", true, false).get_parent() != null, "FRIENDS has the '?' beside its title")
+	if help_b:
+		help_b.pressed.emit()
+		await at.wait(0.3)
+		var tip := get_tree().root.find_child("HelpTip", false, false)
+		_check(tip != null and tip.find_child("HelpTipText", true, false) != null, "the '?' opens its tooltip")
+		await at.shot("l03b_help_tip")
+		if tip:
+			tip.queue_free()
+		await at.wait(0.1)
 	lobby.friends.open("requests")
 	await at.wait(0.6)
 	_check(lobby.dialogs.modal.find_child("FriendAccept", true, false) != null, "REQUESTS has ACCEPT")
@@ -74,11 +110,12 @@ func run(at: Node) -> int:
 	var tab_req := lobby.dialogs.modal.find_child("Tab_requests", true, false) as Button
 	var asker2 := "tour-l-asker2".sha256_text().left(32)
 	cloud.friend_requests[asker2] = {"name": "ORBIT", "pk": "", "ts": now}
-	await at.wait(0.6)
+	# (the page polls every 0.4 s; a loaded machine's slow frames get up to 2 s)
+	await _until(func() -> bool: return tab_req != null and tab_req.text == "REQUESTS  2", 2.0)
 	_check(tab_req != null and tab_req.text == "REQUESTS  2", "a new request counts on the REQUESTS tab (%s)" % (tab_req.text if tab_req else "none"))
 	cloud.friend_requests.erase(asker2)
 	cloud.friend_requests.erase(asker)
-	await at.wait(0.6)
+	await _until(func() -> bool: return tab_req != null and tab_req.text == "REQUESTS", 2.0)
 	_check(tab_req != null and tab_req.text == "REQUESTS", "answered requests leave the REQUESTS tab's count (%s)" % (tab_req.text if tab_req else "none"))
 	cloud.friend_requests[asker] = {"name": "SABRE", "pk": "", "ts": now}
 	lobby.friends.open("online")
@@ -89,8 +126,34 @@ func run(at: Node) -> int:
 	await at.wait(0.6)
 	_check(lobby.dialogs.modal.find_child("OnlineHead", true, false) != null, "PLAYERS lists who is online (status %s)" % cloud.status)
 	await at.shot("l05_players")
+	_check(lobby.dialogs.modal.find_child("Tab_room", true, false) == null and lobby.dialogs.modal.find_child("Tab_local", true, false) == null,
+		"FRIENDS keeps FRIENDS / REQUESTS / PLAYERS (CUSTOM ROOM and PLAY WITHOUT INTERNET are pages of their own)")
+	# CUSTOM ROOM: the public rooms (made-up cards), the ID field, QUICK JOIN and CREATE.
+	var hub := NetRooms.hub()
+	var rooms_was := hub.cards.duplicate(true)
+	var rnow := int(Time.get_unix_time_from_system())
+	for r: Array in [["tour-r-1", "FRIDAY FIGHTS", "NIGHTFOX21", 1, 1, "FIRST TO 5 - HP 200", false, "314159"],
+			["tour-r-2", "SQUAD NIGHT", "EMBER_7", 4, 5, "FIRST TO 4 - ONE GUN", true, "271828"],
+			["tour-r-3", "SNIPERS ONLY", "VEXA", 2, 4, "FIRST TO 4 - HP 100", false, "161803"]]:
+		var rid := String(r[0]).sha256_text().left(32)
+		hub.cards[rid] = {"id": rid, "name": r[1], "host": r[2], "size": r[3], "filled": r[4], "total": 2 * int(r[3]), "rules": r[5],
+			"pw": r[6], "code": r[7], "ts": rnow - hub.cards.size()}
+	lobby.friends.open("rooms")
+	await at.wait(0.8)
+	var rpage := lobby.dialogs.modal
+	_check(rpage != null and rpage.find_child("PublicRoom_314159", true, false) != null and rpage.find_child("RoomsQuick", true, false) != null
+		and rpage.find_child("RoomsCreate", true, false) != null and rpage.find_child("Tab_friends", true, false) == null
+		and (rpage.find_child("PageTitle", true, false) as Label).text == "CUSTOM ROOM", "CUSTOM ROOM lists the public rooms (own page, no FRIENDS tabs)")
+	await at.shot("l06a_rooms")
+	(rpage.find_child("PublicRoom_271828", true, false) as Button).pressed.emit()
+	await at.wait(0.4)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("RoomPinAsk", true, false) != null, "a room with a password asks for it")
+	await at.shot("l06c_room_password")
+	hub.cards = rooms_was
 	lobby.friends.open("room")
 	await at.wait(0.6)
+	_check(lobby.dialogs.modal.find_child("RoomPublic_yes", true, false) != null and lobby.dialogs.modal.find_child("RoomMap", true, false) != null,
+		"CREATE has the PUBLIC switch and the map tile")
 	await at.shot("l06_room")
 	# A RUNNING room (SQUAD, this phone hosts): the ID and password, the places, CLOSE ROOM and START,
 	# all inside the page's height.
@@ -115,6 +178,9 @@ func run(at: Node) -> int:
 		and rstart.get_global_rect().end.x <= vs_r.x, "a running room's places and START fit the page (START ends at %.0f of %.0f)" % [
 		rstart.get_global_rect().end.y if rstart else -1.0, vs_r.y])
 	await at.shot("l06b_room_running")
+	lobby._refresh_hero_plate()
+	var room_plate := lobby.find_child("HeroPlate", true, false) as LobbyPlate
+	_check(room_plate != null and not room_plate.can_leave, "in a CUSTOM ROOM the hero's plate has no leave glyph (the room page has LEAVE)")
 	cloud.group = {}
 	cloud._grp = {}
 	cloud.room_code = ""
@@ -248,6 +314,9 @@ func run(at: Node) -> int:
 	lobby.dialogs.close_modal()
 	lobby.dialogs.open_size_box()
 	await at.wait(0.4)
+	await at.wait(0.1)
+	var add_b := lobby.find_child("AddFriendButton", true, false) as Control
+	_check(add_b != null and not add_b.visible, "the team-size box hides ADD under it")
 	await at.shot("l11_size_box")
 	lobby.dialogs.close_size_box()
 	# LONE WOLF: the GROUP bar.
@@ -293,7 +362,28 @@ func _team_screens(at: Node, lobby: Lobby, cloud: Cloud) -> void:
 	await at.wait(1.4)
 	var bar := lobby.find_child("TeamBar", true, false) as Control
 	_check(bar != null and bar.is_visible_in_tree() and lobby.find_child("PodiumInvite", true, false) == null, "a group shows the TEAM bar, no + plate")
+	# the name plates: small 2D plates under the feet (the hero's above its voice pill, with the leave
+	# glyph and the leader's flag), none up over the skyline
+	var hero_plate := lobby.find_child("HeroPlate", true, false) as LobbyPlate
+	var plates := lobby.find_children("MemberPlate_*", "LobbyPlate", true, false)
+	var low := true
+	for p2: LobbyPlate in plates:
+		low = low and p2.visible and p2.get_global_rect().position.y > lobby.get_viewport().get_visible_rect().size.y * 0.45 and p2.player_name != ""
+	_check(hero_plate != null and hero_plate.visible and hero_plate.can_leave and hero_plate.leader and plates.size() == 3 and low,
+		"group lobby: the hero's plate (flag, leave glyph) and 3 member plates under the feet")
 	await at.shot("l14_group_lobby")
+	if hero_plate:
+		var tap := InputEventMouseButton.new()
+		tap.button_index = MOUSE_BUTTON_LEFT
+		tap.pressed = true
+		tap.position = hero_plate.leave_rect().get_center()
+		hero_plate._gui_input(tap)
+		await at.wait(0.4)
+		_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("ConfirmOk", true, false) != null and not hero_plate.visible,
+			"the leave glyph asks DISBAND GROUP first (the plates step aside)")
+		await at.shot("l14e_leave_confirm")
+		lobby.dialogs.close_modal()
+		await at.wait(0.2)
 	lobby.team.open_panel()
 	await at.wait(1.0)
 	var panel := lobby.dialogs.modal.find_child("TeamPanel", true, false) as Control if lobby.dialogs.modal else null
@@ -358,9 +448,17 @@ func _check_mode_page(lobby: Lobby) -> void:
 	_check(absf(ra.position.y - rb.position.y) < 1.0 and ra.end.x < rb.position.x and ra.size.y >= 300.0 and rb.end.x <= vs.x
 		and ra.end.y < ways.get_global_rect().position.y and ways.get_global_rect().end.y <= vs.y,
 		"the mode cards stand side by side above the bottom row, on the screen (%s %s)" % [str(ra), str(rb)])
-	for k: String in ["room", "local", "help"]:
+	for k: String in ["rooms", "local", "help"]:
 		var w := ways.find_child("ModeWay_" + k, true, false) as Button
 		_check(w != null and w.size.y >= UI.TOUCH_MIN and w.get_global_rect().end.x <= vs.x, "the bottom row has %s" % k)
 	var ta := a.find_child("ModeTitle", true, false) as Control
 	var tb := b.find_child("ModeTitle", true, false) as Control
 	_check(ta != null and tb != null and absf(ta.global_position.y - tb.global_position.y) < 1.0, "both cards' names line up")
+
+
+## Waits (game time, 0.1 s steps) until cond() is true or `seconds` pass.
+func _until(cond: Callable, seconds: float) -> void:
+	var t := 0.0
+	while not cond.call() and t < seconds:
+		await _at_ref.wait(0.1)
+		t += 0.1

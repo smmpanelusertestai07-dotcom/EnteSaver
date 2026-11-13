@@ -329,22 +329,17 @@ func open(start_tab := "career") -> void:
 	layer.mouse_filter = Control.MOUSE_FILTER_STOP
 	lobby.ui.add_child(layer)
 	lobby._main_ui.visible = false
-	var shade := UI.gradient_rect([[0.0, Color(0.035, 0.035, 0.045, 0.97)], [0.55, Color(0.045, 0.042, 0.045, 0.96)],
-		[1.0, Color(0.075, 0.058, 0.045, 0.95)]], true)
+	# the lobby blurred behind the page (plain at LOW graphics), then the page's dark ramp over it
+	var blur := UI.blur_shade(0.8)
+	UI.full_rect(blur)
+	layer.add_child(blur)
+	var shade := UI.gradient_rect([[0.0, Color(0.035, 0.035, 0.045, 0.9)], [0.55, Color(0.045, 0.042, 0.045, 0.78)],
+		[1.0, Color(0.075, 0.058, 0.045, 0.72)]], true)
 	UI.full_rect(shade)
 	layer.add_child(shade)
-	var head := UI.section("PROFILE", 30)
-	head.position = Vector2(MARGIN, 22)
-	layer.add_child(head)
-	var close_b := UI.button("CLOSE", 20, "light", Vector2(150, 56))
+	# the page frame's corner as on FRIENDS: the X box in the corner, PROFILE right-aligned beside it
+	var close_b := UI.page_corner(layer, "PROFILE", close)[0] as Button
 	close_b.name = "ProfileClose"
-	close_b.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	close_b.offset_left = -MARGIN - 150.0
-	close_b.offset_right = -MARGIN
-	close_b.offset_top = 14.0
-	close_b.offset_bottom = 70.0
-	close_b.pressed.connect(close)
-	layer.add_child(close_b)
 	var tabs := VBoxContainer.new()
 	tabs.name = "ProfileTabs"
 	tabs.position = Vector2(MARGIN, TOP)
@@ -691,9 +686,15 @@ func _history_content(e: Dictionary, now: int) -> HBoxContainer:
 	var word := UI.label(String(RESULT_WORDS.get(r, "DEFEAT")), 23, col, "heavy")
 	word.name = "Result"
 	sv.add_child(word)
-	var score := UI.label("%d - %d" % [int(e.get("score", 0)), int(e.get("enemy_score", 0))], 20, UI.TEXT, "number")
-	score.name = "Score"
-	sv.add_child(score)
+	if e.get("left_by_them", false) == true:
+		# a win because the opponent left: the rounds (often 0 - 2) would read as a loss
+		var gone := UI.label("OPPONENT LEFT", 12, UI.TEXT_DIM, "heavy")
+		gone.name = "OpponentLeft"
+		sv.add_child(gone)
+	else:
+		var score := UI.label("%d - %d" % [int(e.get("score", 0)), int(e.get("enemy_score", 0))], 20, UI.TEXT, "number")
+		score.name = "Score"
+		sv.add_child(score)
 	hb.add_child(slab)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -969,6 +970,31 @@ func _field(caption: String, value: String, font_size: int, kind: String, color:
 	l.name = value_name
 	v.add_child(l)
 	return v
+
+
+## An outfit as its wardrobe picture (node PlayerOutfit, the name as its tooltip): the portrait on
+## the outfit's colour glow with its colour bar, as the WARDROBE's cards.
+static func outfit_thumb(id: String) -> Control:
+	var t := Control.new()
+	t.name = "PlayerOutfit"
+	t.custom_minimum_size = Vector2(66, 86)
+	t.tooltip_text = String(CharacterModel.bundle_info(id).name)
+	t.mouse_filter = Control.MOUSE_FILTER_PASS
+	t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var col := LobbyWardrobe.outfit_color(id)
+	var pic := UI.texture("bundle_%s.png" % id)
+	var glow := UI.radial_glow(Color(col, 0.55))
+	t.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, t.size)
+		t.draw_rect(r, Color(0.075, 0.072, 0.07, 0.97))
+		t.draw_texture_rect(glow, Rect2(0, 0, r.size.x, r.size.y - 4), false)
+		if pic:
+			var ph := r.size.y - 8.0
+			var pw := ph * 0.75
+			t.draw_texture_rect(pic, Rect2((r.size.x - pw) * 0.5, 2, pw, ph), false)
+		t.draw_rect(Rect2(0, r.size.y - 4, r.size.x, 4), col)
+		t.draw_rect(r, Color(1, 1, 1, 0.18), false, 1.0))
+	return t
 
 
 ## COPY says COPIED for a moment.
@@ -1252,9 +1278,7 @@ func _fill_player() -> void:
 	row.add_child(gap)
 	if not (peer.is_empty() and card.is_empty()):           # the outfit only when this phone has seen it
 		var outfit := CharacterModel.bundle_info(String(peer.get("bundle", card.get("bundle", "default"))))
-		var of := _field("OUTFIT", String(outfit.name), 21, "bold", LobbyWardrobe.outfit_color(String(outfit.id)), "PlayerOutfit")
-		of.custom_minimum_size = Vector2(200, 0)
-		row.add_child(of)
+		row.add_child(outfit_thumb(String(outfit.id)))
 	var sig := String(card.get("signature", ""))
 	var sig_text := "“%s”" % sig
 	if sig == "":

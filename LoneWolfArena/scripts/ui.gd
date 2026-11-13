@@ -591,6 +591,66 @@ static func section(title: String, size := 20) -> HBoxContainer:
 	return h
 
 
+## A small "?" square beside a section title (node "Help"): a tap shows `text` in a tooltip (a dark
+## box with a thin yellow border) under it; a tap anywhere closes it. It stands in for the guide
+## paragraphs the pages had (the reference keeps its pages to the lists and puts help behind "?").
+static func help_button(text: String, size := 36.0) -> Button:
+	var b := Button.new()
+	b.name = "Help"
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(TOUCH_MIN, TOUCH_MIN)    # the touch area; the square drawn is `size`
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var r := Rect2((b.size - Vector2(size, size)) * 0.5, Vector2(size, size))
+		var on := b.is_pressed()
+		b.draw_rect(r, Color(ACCENT, 0.35) if on else (Color(0.22, 0.21, 0.23, 0.95) if b.is_hovered() else Color(0.16, 0.15, 0.17, 0.95)))
+		b.draw_rect(r, ACCENT if on else Color(1, 1, 1, 0.3), false, 1.0)
+		HudDraw.text(b, "?", r.get_center(), int(size * 0.6), TEXT, 1, 0, "heavy"))
+	b.mouse_entered.connect(b.queue_redraw)
+	b.mouse_exited.connect(b.queue_redraw)
+	b.set_meta("help", text)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		show_tooltip(b, text))
+	return b
+
+
+## The tooltip of a "?" (help_button) under `at`, on its own layer over everything; a tap anywhere
+## closes it. Node "HelpTip" (with the text in "HelpTipText").
+static func show_tooltip(at: Control, text: String) -> CanvasLayer:
+	var layer := CanvasLayer.new()
+	layer.name = "HelpTip"
+	layer.layer = 90
+	at.get_tree().root.add_child(layer)
+	at.tree_exiting.connect(layer.queue_free, CONNECT_ONE_SHOT)     # (its page closed or the scene changed: gone too)
+	var catcher := Control.new()
+	full_rect(catcher)
+	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	catcher.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and (e as InputEventMouseButton).pressed:
+			layer.queue_free())
+	layer.add_child(catcher)
+	var tip := PanelContainer.new()
+	var ts := box(Color(0.05, 0.045, 0.055, 0.96), 0, 1, ACCENT, 14.0)
+	tip.add_theme_stylebox_override("panel", ts)
+	tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l := label(text, 17, TEXT, "semi")
+	l.name = "HelpTipText"
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(420, 0)
+	tip.add_child(l)
+	catcher.add_child(tip)
+	var vs := at.get_viewport_rect().size
+	var r := at.get_global_rect()
+	tip.reset_size()
+	var sz := tip.get_combined_minimum_size()
+	tip.position = Vector2(clampf(r.position.x, 8.0, vs.x - sz.x - 8.0),
+		r.end.y + 6.0 if r.end.y + 6.0 + sz.y < vs.y - 8.0 else maxf(8.0, r.position.y - sz.y - 6.0))
+	return layer
+
+
 static func panel(color := PANEL, radius := 14, border := 1) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", chamfer(color, clampi(radius, 4, 18), border, Color(1, 1, 1, 0.1), 18.0))
@@ -710,6 +770,76 @@ static func close_button(size := 52.0) -> Button:
 		b.draw_colored_polygon(PackedVector2Array([Vector2(b.size.x - k, 0), Vector2(b.size.x, 0), Vector2(b.size.x, k)]), ACCENT))
 	b.pressed.connect(func() -> void: Audio.play("ui_back", -4.0))
 	return b
+
+
+## The shade behind a popup or a page over the lobby: the screen under it blurred and darkened to
+## about half (a canvas shader reading the screen at a lower mip level, 9 taps), or at LOW graphics
+## the plain black shade (`dim` its alpha). Node name "BlurShade" / "Shade". The chat panel keeps
+## the lobby sharp beside it (it does not use this).
+static var _blur_shader: Shader
+static func blur_shade(dim := 0.72) -> ColorRect:
+	var r := ColorRect.new()
+	r.mouse_filter = Control.MOUSE_FILTER_STOP
+	if int(Game.settings.get("graphics", 1)) <= 0:
+		r.name = "Shade"
+		r.color = Color(0, 0, 0, dim)
+		return r
+	if _blur_shader == null:
+		_blur_shader = Shader.new()
+		_blur_shader.code = """shader_type canvas_item;
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+uniform float lod = 2.5;
+uniform float spread = 7.0;
+uniform float keep = 0.5;
+void fragment() {
+	vec2 px = SCREEN_PIXEL_SIZE * spread;
+	vec3 c = vec3(0.0);
+	float w = 0.0;
+	for (int x = -1; x <= 1; x++) {
+		for (int y = -1; y <= 1; y++) {
+			float k = (x == 0 && y == 0) ? 2.0 : ((x == 0 || y == 0) ? 1.0 : 0.6);
+			c += textureLod(screen_tex, SCREEN_UV + vec2(float(x), float(y)) * px, lod).rgb * k;
+			w += k;
+		}
+	}
+	COLOR = vec4(c / w * keep, 1.0);
+}
+"""
+	var m := ShaderMaterial.new()
+	m.shader = _blur_shader
+	m.set_shader_parameter("keep", clampf(1.0 - dim * 0.7, 0.2, 0.8))
+	r.name = "BlurShade"
+	r.material = m
+	r.color = Color.WHITE
+	return r
+
+
+## The page frame's corner (FRIENDS, PROFILE, WARDROBE, the mode pages): the X box in the top-right
+## corner (node "Close", 60 px, `on_close` on a tap) and the page's title in caps right-aligned
+## beside it (node "PageTitle"), both added to `parent` (a full-rect control). Returns [X, title].
+static func page_corner(parent: Control, title: String, on_close: Callable) -> Array:
+	var close := close_button(60.0)
+	close.name = "Close"
+	close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	close.offset_left = -64
+	close.offset_right = -4
+	close.offset_top = 4
+	close.offset_bottom = 64
+	if on_close.is_valid():
+		close.pressed.connect(on_close)
+	parent.add_child(close)
+	var t := label(title.to_upper(), 30, TEXT, "heavy")
+	t.name = "PageTitle"
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	t.offset_left = -420
+	t.offset_right = -84
+	t.offset_top = 4
+	t.offset_bottom = 64
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(t)
+	return [close, t]
 
 
 ## Yellow corner triangle with a black tick (selected / equipped marker) for a card of
