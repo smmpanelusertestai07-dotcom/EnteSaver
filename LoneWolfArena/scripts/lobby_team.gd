@@ -1,52 +1,46 @@
 class_name LobbyTeam
 extends RefCounted
-## The lobby's GROUP bar (LONE WOLF, design/GROUPS.txt 1): under the player card top-left. Up to
-## GROUP_MAX (4) players: the first invite makes this player the LEADER. The bar lists the members
-## (leader first, then in join order: GroupMember_<n>, a LEADER tag on the leader, YOU on this
-## player), the leader's REMOVE on each other member (GroupRemove_<n>), "+ INVITE" (GroupInvite:
-## the leader's, or a solo's; greyed for a member; no row at all in a full group), TEAMS (GroupTeams: the
-## BLUE / ORANGE slot panel, the leader moves members, the others see it), and EXIT GROUP
-## (GroupExit, a member) or DISBAND GROUP (GroupDisband, the leader). INVITE opens the list of online
-## friends (GroupInviteList: Cloud.peers ∩ friends, never blocked ones; GroupAsk_<code> ->
-## Cloud.group_invite(id)), then a popup says INVITED <NAME> and how they answered (GroupInvited).
-## Every group has a GROUP CODE (Cloud.group_code; a solo's is the code of the group it would lead)
-## shown under the head with COPY and, for the leader, the switch JOIN BY CODE: ON / OFF (a member
-## sees the code and COPY only while the leader's switch is on, Cloud.code_open, else the line
-## GroupCodeNote THE LEADER SHARES THE GROUP CODE); a solo also
-## has JOIN BY CODE: a friend's code puts this player in their group at once, no invite needed
-## (Cloud.join_group_code; full, wrong code, blocked: the popup says so).
-## Hidden while Game.TEAMS_ONLINE is off, and outside LONE WOLF unless the player is in a group.
+## The lobby's group (LONE WOLF, design/GROUPS.txt 1). Up to GROUP_MAX (4) players: the first
+## invite makes this player the LEADER. While this player is in a group the TEAM bar (TeamBar)
+## shows under the player card top-left; a tap opens the TEAM panel from the left (TeamPanel,
+## open_panel): TEAM n/4 (GroupHead), the GROUP CODE with COPY (GroupCodeRow: GroupCode,
+## GroupCodeCopy; a member sees it only while the leader's JOIN BY CODE is on, Cloud.code_open, else
+## GroupCodeNote THE LEADER SHARES THE GROUP CODE), the members (leader first, then in join order:
+## GroupMember_<n> with the level, the name, LEADER / YOU, the leader's flag LeaderTag, a free place
+## SpeakMark_<n> for the voice's speaking mark, the leader's REMOVE GroupRemove_<n> on others),
+## + INVITE (GroupInvite: the right-hand social panel, LobbySocial; greyed for a member and in a
+## full group), TEAMS (GroupTeams: the BLUE / ORANGE slot panel, the leader moves members, the
+## others see it) and EXIT GROUP (GroupExit, a member) or DISBAND GROUP (GroupDisband, the leader),
+## both asked first. Where the rest lives: the switch JOIN BY CODE and the team size are the mode
+## card's TEAM panel (LobbyDialogs.open_size_box), a solo's invites and JOIN BY CODE the social
+## panel (its "+" calls ask_friend: Cloud.group_invite, then the popup GroupInvited says INVITED
+## <NAME> and how they answered; its GROUP CODE keypad: Cloud.join_group_code).
 ## The lobby makes it (Lobby.team), builds it (build), redraws it on Cloud.group_changed and on
 ## SELECT MODE (refresh) and calls process() every frame; LobbyFriends hands it a declined invite
 ## (on_answered).
 ## It reads and calls Cloud's group API (GROUPS.txt 3) through the helpers below (group / members /
 ## in_group / is_leader / group_max / search_progress). A CUSTOM ROOM with slots is a group too
-## (Cloud.in_room): its players show in the room's own slot panel (LobbyFriends), not in this bar.
-## Node names: GroupBar, GroupHead, GroupMember_<n>, GroupRemove_<n>, GroupInvite, GroupTeams,
-## GroupExit, GroupDisband, GroupCodeRow (GroupCode, GroupCodeCopy, GroupCodeSwitch), GroupCodeNote, GroupJoinCode,
-## JoinCodePopup (JoinGroupCode, JoinGroupGo, JoinGroupState), GroupInviteList, GroupFriend_<code>, GroupAsk_<code>, GroupListNote,
-## GroupFriends, GroupInvited, GroupInvitedOk, GroupTeamPanel (with a SlotPanel).
+## (Cloud.in_room): its players show in the room's own slot panel (LobbyFriends), no TEAM bar.
+## Node names: TeamBar, TeamPanel (TeamOutside, TeamPanelClose, GroupHead, GroupCodeRow,
+## GroupCodeNote, GroupMember_<n>, LeaderTag, SpeakMark_<n>, GroupRemove_<n>, GroupInvite,
+## GroupTeams, GroupExit, GroupDisband), GroupInvited, GroupInvitedOk, GroupTeamPanel (with a SlotPanel).
 
-const TILE_W := 280.0
+const BAR_W := 236.0                    # the TEAM bar's width
+const PANEL_W := 0.36                   # the TEAM panel's right edge (share of the width)
+const PANEL_MIN_W := 440.0
 const ONLINE_GREEN := Color(0.38, 0.86, 0.44)
 const GROUP_MAX_DEFAULT := 4
 ## A member's line where the GROUP CODE would be while the leader's JOIN BY CODE is off.
 const CODE_NOTE := "THE LEADER SHARES THE GROUP CODE"
 
 var lobby: Lobby
-var bar: VBoxContainer
-var _list: VBoxContainer                 # the open invite list's rows (null when it is not open)
-var _list_sig := ""
-var _list_note := ""
-var _refresh_t := 0.0
-var _sig := ""                           # what the bar shows now (redrawn only when it changes)
+var bar: Button                          # the TEAM bar (TeamBar)
+var _panel_v: VBoxContainer              # the open TEAM panel's rows (null when it is not open)
+var _sig := ""                           # what the panel shows now (drawn again only when it changes)
 var _invited_id := ""                    # the friend the last GROUP INVITE went to
 var _invited_name := ""
 var _invited_label: Label
 var _slot_panel: SlotPanel               # the open TEAMS popup's panel
-var _code_state: Label                   # the open JOIN BY CODE popup's status line
-var _code_field: LineEdit
-var _code_asked := false                 # the popup's JOIN went out: its line follows Cloud.code_state
 
 
 func _init(owner_lobby: Lobby) -> void:
@@ -171,57 +165,171 @@ static func _entry(m: Dictionary, t: int, s: int) -> Dictionary:
 		"host": bool(m.get("leader", false)), "me": bool(m.get("me", false))}
 
 
-# ---------------------------------------------------------------- the bar
+# ---------------------------------------------------------------- the TEAM bar and its panel
 
+## The TEAM bar (TeamBar): under the player card top-left, only while this player is in a group
+## (not in a custom room); "TEAM n/4" and the group's mark. A tap opens the TEAM panel.
 func build(root: Control) -> void:
-	bar = VBoxContainer.new()
-	bar.name = "GroupBar"
-	bar.add_theme_constant_override("separation", 6)
-	bar.position = Vector2(12, 90)
-	bar.custom_minimum_size = Vector2(TILE_W, 0)
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar = Button.new()
+	bar.name = "TeamBar"
+	bar.focus_mode = Control.FOCUS_NONE
+	bar.position = Vector2(0, 70)
+	bar.size = Vector2(BAR_W, UI.TOUCH_MIN)
+	bar.custom_minimum_size = bar.size
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		bar.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	bar.draw.connect(_draw_bar)
+	for sig in ["button_down", "button_up"]:
+		bar.connect(sig, bar.queue_redraw)
+	bar.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		open_panel())
+	bar.visible = false
 	root.add_child(bar)
 	refresh()
 
 
-## Follows the group (Cloud.group_changed), SELECT MODE and the invite list.
+## The bar: an amber band fading to the right with TEAM, the count and a flag at its right end.
+func _draw_bar() -> void:
+	var sz := bar.size
+	var y := 6.0
+	var h := sz.y - 12.0
+	var a := 1.0 if not bar.is_pressed() else 0.8
+	var pts := PackedVector2Array([Vector2(0, y), Vector2(sz.x, y), Vector2(sz.x - 10.0, y + h), Vector2(0, y + h)])
+	var c0 := Color(0.86, 0.45, 0.08, 0.92 * a)
+	var c1 := Color(0.86, 0.45, 0.08, 0.35 * a)
+	bar.draw_polygon(pts, PackedColorArray([c0, c1, c1, c0]))
+	bar.draw_rect(Rect2(0, y + h - 2.0, sz.x - 10.0, 2.0), Color(UI.ACCENT, 0.9))
+	var n := maxi(members().size(), 1)
+	HudDraw.text(bar, "TEAM", Vector2(12, sz.y * 0.5), 19, UI.TEXT, 0, 0, "heavy")
+	HudDraw.text(bar, "%d/%d" % [n, group_max()], Vector2(80, sz.y * 0.5), 15, Color(UI.TEXT, 0.85), 0, 0, "bold")
+	var fc := Vector2(sz.x - 30.0, sz.y * 0.5)
+	bar.draw_circle(fc, 13.0, Color(0, 0, 0, 0.45), true, -1.0, true)
+	draw_flag(bar, fc, 15.0, UI.ACCENT)
+
+
+## A small flag (the leader's mark): a pole and a notched cloth, `s` px tall, centred on `c`.
+static func draw_flag(ci: CanvasItem, c: Vector2, s: float, col: Color) -> void:
+	var x0 := c.x - s * 0.38
+	var top := c.y - s * 0.5
+	ci.draw_rect(Rect2(x0, top, maxf(1.5, s * 0.1), s), col)
+	ci.draw_colored_polygon(PackedVector2Array([Vector2(x0, top), Vector2(x0 + s * 0.78, top), Vector2(x0 + s * 0.6, top + s * 0.25),
+		Vector2(x0 + s * 0.78, top + s * 0.5), Vector2(x0, top + s * 0.5)]), col)
+
+
+## Follows the group (Cloud.group_changed) and SELECT MODE: the bar shows in a group, and an open
+## TEAM panel is drawn again when what it shows changed.
 func refresh() -> void:
 	if bar == null or not is_instance_valid(bar):
 		return
-	var list := members()
-	var grouped := in_group()
-	var leader := is_leader()
 	var cloud := Game.cloud_service()
-	var sig := "%s|%s|%s|%d|%s|%s|%s|%s" % [str(list), grouped, leader, Game.team_size, Game.mode, _invited_id, cloud.group_code(), cloud.code_open()]
+	var on := in_group() and bar_shown(Game.mode, true) and not cloud.in_room()
+	bar.visible = on
+	bar.queue_redraw()
+	var sig := "%s|%s|%s|%d|%s|%s" % [str(members()), in_group(), is_leader(), Game.team_size, cloud.group_code(), cloud.code_open()]
 	if sig == _sig:
 		return
 	_sig = sig
-	for c in bar.get_children():
-		bar.remove_child(c)
-		c.queue_free()
-	bar.visible = bar_shown(Game.mode, grouped) and not Game.cloud_service().in_room()
-	if not bar.visible:
+	if _panel_v != null and is_instance_valid(_panel_v):
+		if on:
+			_fill_panel()
+		else:
+			lobby.dialogs.close_modal()          # (the group is gone: so is its panel)
+
+
+## The TEAM panel (TeamPanel): slides in from the left over the lobby's left part (a tap beside it,
+## its "<" (TeamPanelClose) or Android back closes it). TEAM n/4; the GROUP CODE row (code_row: the
+## code and COPY; a member's only while the leader's JOIN BY CODE is on, else GroupCodeNote); a row
+## per member (GroupMember_<n>: the level, the name, YOU, the LEADER flag on the leader, a free
+## place for the voice's speaking mark SpeakMark_<n>, and the leader's REMOVE on other members:
+## GroupRemove_<n>, asked first); INVITE (GroupInvite: the right-hand social panel, LobbySocial;
+## greyed for a member or a full group); TEAMS (GroupTeams: the BLUE / ORANGE places, DUO / SQUAD);
+## EXIT GROUP (GroupExit, a member) or DISBAND GROUP (GroupDisband, the leader), both asked first.
+func open_panel() -> void:
+	if not in_group():
 		return
-	var acts := bar_actions(grouped, leader, list.size(), Game.team_size, group_max())
-	var head := UI.shadowed(UI.label("YOUR GROUP  %d/%d" % [maxi(list.size(), 1), group_max()], 15, UI.TEXT, "heavy"))
-	head.name = "GroupHead"
-	bar.add_child(head)
+	var dlg := lobby.dialogs
+	dlg.close_modal()
+	var modal := Control.new()
+	modal.name = "Modal"
+	UI.full_rect(modal)
+	modal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lobby.ui.add_child(modal)
+	dlg.modal = modal
+	modal.set_meta("on_back", dlg.close_modal)
+	var outside := Button.new()
+	outside.name = "TeamOutside"
+	outside.focus_mode = Control.FOCUS_NONE
+	UI.full_rect(outside)
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		outside.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	outside.pressed.connect(dlg.close_modal)
+	modal.add_child(outside)
+	var frame := PanelContainer.new()
+	frame.name = "TeamPanel"
+	frame.anchor_right = PANEL_W
+	frame.anchor_bottom = 1.0
+	frame.custom_minimum_size = Vector2(PANEL_MIN_W, 0)
+	var fs := UI.box(Color(0.045, 0.035, 0.06, 0.96), 0, 0, Color.TRANSPARENT, 0.0)
+	fs.border_width_right = 1
+	fs.border_color = Color(1, 1, 1, 0.14)
+	frame.add_theme_stylebox_override("panel", fs)
+	frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	modal.add_child(frame)
+	var safe := MarginContainer.new()
+	frame.add_child(safe)
+	UI.pad_clear_of_cutout(safe)
+	var pad := MarginContainer.new()
+	for side: String in ["left", "right", "top", "bottom"]:
+		pad.add_theme_constant_override("margin_" + side, 14 if side != "top" else 8)
+	safe.add_child(pad)
+	_panel_v = VBoxContainer.new()
+	_panel_v.add_theme_constant_override("separation", 8)
+	pad.add_child(_panel_v)
+	_fill_panel()
+	frame.offset_left = -40.0
+	frame.offset_right = -40.0
+	var tw := modal.create_tween().set_parallel()
+	for side: String in ["offset_left", "offset_right"]:
+		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+
+
+func _fill_panel() -> void:
+	for c in _panel_v.get_children():
+		_panel_v.remove_child(c)
+		c.queue_free()
+	var list := members()
+	var leader := is_leader()
+	var cloud := Game.cloud_service()
+	var acts := bar_actions(true, leader, list.size(), Game.team_size, group_max())
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	_panel_v.add_child(head)
+	var title := UI.label("TEAM  %d/%d" % [list.size(), group_max()], 24, UI.TEXT, "heavy")
+	title.name = "GroupHead"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var close := UI.button("<", 24, "dark", Vector2(UI.TOUCH_MIN, UI.TOUCH_MIN))
+	close.name = "TeamPanelClose"
+	close.pressed.connect(lobby.dialogs.close_modal)
+	head.add_child(close)
 	if cloud.group_code() != "" and (leader or cloud.code_open()):
-		bar.add_child(_code_row(cloud.group_code(), leader, cloud.code_open()))
-	elif grouped and not leader:
-		bar.add_child(_code_note())
+		_panel_v.add_child(code_row(cloud.group_code(), leader))
+	elif not leader:
+		_panel_v.add_child(code_note())
 	for i in list.size():
-		bar.add_child(_member_tile(i + 1, list[i], bool(acts.remove)))
-	if not grouped or list.size() < group_max():
-		bar.add_child(_invite_tile(list.size() + 1 if grouped else 2, bool(acts.invite_on)))   # (none in a full group)
-	if not grouped:
-		bar.add_child(_action_button("JOIN BY CODE", "GroupJoinCode", "dark", open_join_code))
+		_panel_v.add_child(_member_tile(i + 1, list[i], bool(acts.remove)))
+	var inv := _action_button("+ INVITE", "GroupInvite", "light", func() -> void:
+		lobby.dialogs.close_modal()
+		lobby.social.open("friends"))
+	inv.disabled = not bool(acts.invite_on)
+	_panel_v.add_child(inv)
 	if acts.teams:
-		bar.add_child(_action_button("TEAMS", "GroupTeams", "dark", open_teams))
+		_panel_v.add_child(_action_button("TEAMS", "GroupTeams", "dark", open_teams))
 	if acts.exit:
-		bar.add_child(_action_button("EXIT GROUP", "GroupExit", "light", _ask_exit))
+		_panel_v.add_child(_action_button("EXIT GROUP", "GroupExit", "light", _ask_exit))
 	if acts.disband:
-		bar.add_child(_action_button("DISBAND GROUP", "GroupDisband", "danger", _ask_disband))
+		_panel_v.add_child(_action_button("DISBAND GROUP", "GroupDisband", "danger", _ask_disband))
 
 
 func _tile_style(bg: Color, edge: Color) -> StyleBoxFlat:
@@ -233,17 +341,31 @@ func _tile_style(bg: Color, edge: Color) -> StyleBoxFlat:
 	return st
 
 
-## The place's number in the group, on blue (the player's own team colour in a match).
-func _badge(n: int) -> PanelContainer:
+## A member's level as this phone knows it: its own, else the member's card (Cloud.directory), 0
+## when unknown.
+static func member_level(m: Dictionary) -> int:
+	if bool(m.get("me", false)):
+		return Game.level()
+	var card: Variant = Game.cloud_service().directory.get(String(m.get("id", "")))
+	return int((card as Dictionary).get("level", 0)) if card is Dictionary else 0
+
+
+## The member's level in a small square (the member row's first mark): "LV" over the number.
+func _level_badge(lv: int) -> PanelContainer:
 	var p := PanelContainer.new()
-	p.add_theme_stylebox_override("panel", UI.box(UI.BLUE, 3, 0, Color.TRANSPARENT, 4.0))
-	p.custom_minimum_size = Vector2(30, 30)
+	p.add_theme_stylebox_override("panel", UI.box(Color(0.12, 0.11, 0.14), 3, 1, Color(UI.ACCENT, 0.5), 2.0))
+	p.custom_minimum_size = Vector2(40, 40)
 	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var l := UI.label(str(n), 18, UI.TEXT, "heavy")
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	p.add_child(l)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", -6)
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(v)
+	for t: Array in [["LV", 10, UI.TEXT_DIM], [str(lv) if lv > 0 else "-", 17, UI.ACCENT]]:
+		var l := UI.label(String(t[0]), int(t[1]), t[2], "heavy")
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(l)
 	return p
 
 
@@ -258,32 +380,43 @@ func _tile_text(title: String, title_color: Color, sub: String, sub_color := UI.
 	return v
 
 
-## A member (GroupMember_<n>): the number, the name, LEADER / YOU, the leader's REMOVE on others.
+## A member (GroupMember_<n>): the level, the name (yellow for this player), YOU / MEMBER, a free
+## place for the speaking mark (SpeakMark_<n>, the voice fills it), the leader's flag (LeaderTag)
+## or, for the leader, REMOVE on the others.
 func _member_tile(n: int, m: Dictionary, can_remove: bool) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.name = "GroupMember_%d" % n
 	var lead := bool(m.get("leader", false))
 	var me := bool(m.get("me", false))
-	p.add_theme_stylebox_override("panel", _tile_style(Color(0.02, 0.02, 0.025, 0.66), Color(UI.ACCENT, 0.7) if lead else Color(1, 1, 1, 0.14)))
-	p.custom_minimum_size = Vector2(TILE_W, UI.TOUCH_MIN)
+	p.add_theme_stylebox_override("panel", _tile_style(Color(1, 1, 1, 0.06), Color(UI.ACCENT, 0.7) if lead else Color(1, 1, 1, 0.12)))
+	p.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 8)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.add_child(h)
-	h.add_child(_badge(n))
+	h.add_child(_level_badge(member_level(m)))
 	var tags := PackedStringArray()
 	if lead:
 		tags.append("LEADER")
 	if me:
 		tags.append("YOU")
-	h.add_child(_tile_text(String(m.get("name", "PLAYER")), UI.TEXT, "  ·  ".join(tags) if not tags.is_empty() else "MEMBER",
-		UI.ACCENT if lead else UI.TEXT_DIM))
+	h.add_child(_tile_text(String(m.get("name", "PLAYER")), UI.ACCENT if me else UI.TEXT, "  ·  ".join(tags) if not tags.is_empty() else "MEMBER"))
+	var speak := Control.new()
+	speak.name = "SpeakMark_%d" % n
+	speak.custom_minimum_size = Vector2(24, 24)
+	speak.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	speak.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(speak)
 	if lead:
-		var tag := UI.label("LEADER", 12, UI.INK, "heavy")
+		var tag := Control.new()
 		tag.name = "LeaderTag"
-		tag.add_theme_stylebox_override("normal", UI.chamfer(UI.ACCENT, 4, 0, Color.TRANSPARENT, 4.0, ["br"]))
+		tag.custom_minimum_size = Vector2(30, 30)
 		tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tag.draw.connect(func() -> void:
+			tag.draw_circle(tag.size * 0.5, 15.0, UI.ACCENT, true, -1.0, true)
+			draw_flag(tag, tag.size * 0.5, 16.0, UI.INK))
 		h.add_child(tag)
 	elif can_remove and not me:
 		var rm := UI.button("REMOVE", 13, "dark", Vector2(84, UI.TOUCH_MIN))
@@ -297,61 +430,35 @@ func _member_tile(n: int, m: Dictionary, can_remove: bool) -> PanelContainer:
 	return p
 
 
-## "+ INVITE" (GroupInvite): the leader's (or a solo's) while the group is not full; greyed otherwise.
-func _invite_tile(n: int, on: bool) -> Button:
-	var b := Button.new()
-	b.name = "GroupInvite"
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(TILE_W, UI.TOUCH_MIN)
-	b.disabled = not on
-	var normal := _tile_style(Color(0.02, 0.02, 0.025, 0.66), Color(UI.ACCENT, 0.55))
-	var lit := _tile_style(Color(UI.ACCENT, 0.22), UI.ACCENT)
-	for st in ["normal", "focus"]:
-		b.add_theme_stylebox_override(st, normal)
-	for st in ["hover", "pressed", "hover_pressed"]:
-		b.add_theme_stylebox_override(st, lit)
-	b.add_theme_stylebox_override("disabled", _tile_style(Color(0.02, 0.02, 0.025, 0.45), Color(1, 1, 1, 0.1)))
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 10)
-	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	h.offset_left = 8
-	h.offset_right = -10
-	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	b.add_child(h)
-	h.add_child(_badge(mini(n, group_max())))
-	var sub := "A FRIEND ONLINE JOINS" if on else "THE LEADER INVITES"
-	h.add_child(_tile_text("+ INVITE", UI.ACCENT if on else UI.TEXT_DIM, sub))
-	if not on:
-		h.modulate = Color(1, 1, 1, 0.55)
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_click", -4.0)
-		open_list())
-	return b
-
-
-## The GROUP CODE (GroupCodeRow): the code (GroupCode, grouped "12 3456 7890"), COPY (GroupCodeCopy:
-## the bare digits; for the leader or a solo it also turns JOIN BY CODE on, since copying means
-## sharing) and, for the leader (or a solo), the switch JOIN BY CODE: ON / OFF (GroupCodeSwitch:
-## Cloud.set_code_join, OFF at the start of every run).
-func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
+## The GROUP CODE (GroupCodeRow) in the TEAM panel and on the mode card's TEAM panel: the group's
+## flag, the code (GroupCode, grouped "12 3456 7890") and COPY (GroupCodeCopy: the bare digits; for
+## the leader or a solo it also turns JOIN BY CODE on, since copying means sharing). The switch
+## JOIN BY CODE is the mode card's TEAM panel's tick (LobbyDialogs: GroupCodeSwitch).
+func code_row(code: String, leader: bool) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.name = "GroupCodeRow"
 	p.add_theme_stylebox_override("panel", _tile_style(Color(0.02, 0.02, 0.025, 0.66), Color(1, 1, 1, 0.14)))
-	p.custom_minimum_size = Vector2(TILE_W, UI.TOUCH_MIN)
+	p.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 6)
+	h.add_theme_constant_override("separation", 8)
 	p.add_child(h)
+	var flag := Control.new()
+	flag.custom_minimum_size = Vector2(22, 22)
+	flag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	flag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flag.draw.connect(func() -> void: draw_flag(flag, flag.size * 0.5, 20.0, Color.WHITE))
+	h.add_child(flag)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", -4)
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(UI.label("GROUP CODE", 11, UI.TEXT_DIM, "bold"))
-	var l := UI.label(Cloud.code_display(code), 18, UI.ACCENT, "heavy")
+	var l := UI.label(Cloud.code_display(code), 20, UI.ACCENT, "heavy")
 	l.name = "GroupCode"
 	v.add_child(l)
 	h.add_child(v)
-	var copy := UI.button("COPY", 13, "dark", Vector2(UI.TOUCH_MIN + 4, UI.TOUCH_MIN))
+	var copy := UI.button("COPY", 13, "dark", Vector2(UI.TOUCH_MIN + 16, UI.TOUCH_MIN))
 	copy.name = "GroupCodeCopy"
 	copy.pressed.connect(func() -> void:
 		DisplayServer.clipboard_set(code)
@@ -359,24 +466,18 @@ func _code_row(code: String, leader: bool, on: bool) -> PanelContainer:
 			Game.cloud_service().set_code_join(true)
 		LobbyNet.toast(lobby, "GROUP CODE COPIED", "JOIN BY CODE IS ON" if leader else Cloud.code_display(code), Callable()))
 	h.add_child(copy)
-	if leader:
-		var sw := UI.button("JOIN BY CODE\n%s" % ("ON" if on else "OFF"), 11, "ghost" if not on else "dark", Vector2(96, UI.TOUCH_MIN))
-		sw.name = "GroupCodeSwitch"
-		sw.add_theme_color_override("font_color", UI.ACCENT if on else UI.TEXT_DIM)
-		sw.pressed.connect(func() -> void: Game.cloud_service().set_code_join(not Game.cloud_service().code_join))
-		h.add_child(sw)
 	return p
 
 
 ## A member's line in the code's place while the leader's JOIN BY CODE is off (GroupCodeNote): the
 ## code would not let anyone in, and a member's COPY cannot turn the leader's switch on.
-func _code_note() -> PanelContainer:
+func code_note() -> PanelContainer:
 	var p := PanelContainer.new()
 	p.name = "GroupCodeNote"
 	p.add_theme_stylebox_override("panel", _tile_style(Color(0.02, 0.02, 0.025, 0.5), Color(1, 1, 1, 0.1)))
-	p.custom_minimum_size = Vector2(TILE_W, 34)
+	p.custom_minimum_size = Vector2(0, 40)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var l := UI.label(CODE_NOTE, 12, UI.TEXT_DIM, "bold")
+	var l := UI.label(CODE_NOTE, 13, UI.TEXT_DIM, "bold")
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	p.add_child(UI.ellipsis(l))
 	return p
@@ -400,61 +501,8 @@ static func code_state_text(state: String) -> String:
 	return ""
 
 
-## JOIN BY CODE (a solo's GROUP bar): the Cloud.CODE_LEN-digit code (JoinGroupCode, spaces allowed) and JOIN (JoinGroupGo):
-## Cloud.join_group_code; the line under it (JoinGroupState) follows Cloud.code_state, and the popup
-## closes once this player is in the group (no invite needed). A join the leader never lets in, or
-## an answer that cannot be taken, reads COULD NOT JOIN: TRY AGAIN; JOIN then asks again, and the
-## popup's X closes it at any time.
-func open_join_code() -> void:
-	var v := lobby.dialogs.open_modal("JOIN BY CODE", 640.0, true)
-	v.name = "JoinCodePopup"
-	_code_asked = false
-	var t := UI.label("Enter a friend's %d-digit GROUP CODE to join their group at once (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN,
-		18, UI.TEXT_DIM, "semi")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	t.custom_minimum_size = Vector2(560, 0)
-	v.add_child(t)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
-	v.add_child(row)
-	_code_field = lobby.friends._text_field("GROUP CODE", Cloud.CODE_LEN + 2, true)
-	_code_field.name = "JoinGroupCode"
-	row.add_child(_code_field)
-	var go := UI.button("JOIN", 22, "primary", Vector2(170, UI.TOUCH_MIN))
-	go.name = "JoinGroupGo"
-	row.add_child(go)
-	_code_state = UI.label("", 18, UI.ACCENT, "heavy")
-	_code_state.name = "JoinGroupState"
-	_code_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_code_state.custom_minimum_size = Vector2(560, 0)
-	v.add_child(_code_state)
-	var join := func() -> void:
-		var why := Game.cloud_service().join_group_code(_code_field.text)
-		_code_asked = why == ""
-		_code_state.text = why if why != "" else code_state_text(Game.cloud_service().code_state)
-	go.pressed.connect(join)
-	_code_field.text_submitted.connect(func(_t: String) -> void: join.call())
-
-
-## The open JOIN BY CODE popup follows Cloud.code_state (and closes once in the group).
-func _follow_join_code() -> void:
-	if _code_state == null:
-		return
-	if not is_instance_valid(_code_state) or not _code_state.is_inside_tree():
-		_code_state = null
-		return
-	var c := Game.cloud_service()
-	if in_group():
-		_code_state = null
-		lobby.dialogs.close_modal()
-		return
-	var st := code_state_text(c.code_state)
-	if _code_asked and st != "" and _code_state.text != st:
-		_code_state.text = st
-
-
 func _action_button(text: String, node_name: String, style: String, action: Callable) -> Button:
-	var b := UI.button(text, 18, style, Vector2(TILE_W, UI.TOUCH_MIN))
+	var b := UI.button(text, 18, style, Vector2(0, UI.TOUCH_MIN))
 	b.name = node_name
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
@@ -474,114 +522,13 @@ func _ask_disband() -> void:
 		func() -> void: Game.cloud_service().leave_group(), Callable(), true)
 
 
-# ---------------------------------------------------------------- the invite list
+# ---------------------------------------------------------------- invites
 
-## INVITE: the friends (GroupInviteList) with INVITE on the ones online now.
-func open_list() -> void:
-	if not bool(bar_actions(in_group(), is_leader(), members().size(), Game.team_size, group_max()).invite_on):
-		return
-	var v := lobby.dialogs.open_modal("INVITE TO YOUR GROUP", 760.0)
-	var t := UI.label("An online friend joins your group (up to %d players). The leader picks the mode and starts: real players only, no bots." % group_max(),
-		18, UI.TEXT_DIM, "semi")
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	t.custom_minimum_size = Vector2(680, 0)
-	v.add_child(t)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(700, 0)
-	v.add_child(scroll)
-	_list = VBoxContainer.new()
-	_list.name = "GroupInviteList"
-	_list.add_theme_constant_override("separation", 6)
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_list)
-	_list_sig = ""
-	_list_note = ""
-	Game.cloud_service().start_lobby()
-	_fill_list()
-
-
-func _fill_list() -> void:
-	if _list == null or not is_instance_valid(_list):
-		return
-	var cloud := Game.cloud_service()
-	var ids: Array = members().map(func(m: Dictionary) -> String: return String(m.get("id", "")))
-	var rows := invite_rows(Game.profile.friends, cloud.peers, ids)
-	var sig := str(rows) + _list_note + cloud.status
-	if sig == _list_sig:
-		return
-	_list_sig = sig
-	for c in _list.get_children():
-		_list.remove_child(c)
-		c.queue_free()
-	if _list_note != "":
-		var n := UI.label(_list_note, 17, UI.ACCENT, "bold")
-		n.name = "GroupListNote"
-		_list.add_child(n)
-	if rows.is_empty():
-		var none := UI.label("No friends to invite yet. Add players as friends in FRIENDS, then invite them here.", 19, UI.TEXT, "semi")
-		none.name = "GroupListEmpty"
-		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		none.custom_minimum_size = Vector2(660, 0)
-		_list.add_child(none)
-		var fb := UI.button("FRIENDS", 20, "primary", Vector2(220, 56))
-		fb.name = "GroupFriends"
-		fb.pressed.connect(func() -> void:
-			lobby.dialogs.close_modal()
-			lobby._open_friends("friends"))
-		_list.add_child(fb)
-	else:
-		var online_n := 0
-		for r: Dictionary in rows:
-			online_n += 1 if r.online else 0
-			_list.add_child(_friend_row(r))
-		if online_n == 0:
-			var off := UI.label("None of your friends is online right now." if cloud.status == "online" else "CONNECTING...", 16, UI.TEXT_DIM, "bold")
-			off.name = "GroupListOffline"
-			_list.add_child(off)
-	var scroll := _list.get_parent() as ScrollContainer
-	if scroll:
-		scroll.custom_minimum_size.y = minf(_list.get_combined_minimum_size().y, 330.0)
-
-
-func _friend_row(r: Dictionary) -> PanelContainer:
-	var id := String(r.id)
-	var code := Cloud.friend_code(id)
-	var p := PanelContainer.new()
-	p.name = "GroupFriend_" + code
-	var st := UI.chamfer(Color(1, 1, 1, 0.06), 6, 0, Color.TRANSPARENT, 10.0, ["br"])
-	st.content_margin_top = 4
-	st.content_margin_bottom = 4
-	p.add_theme_stylebox_override("panel", st)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 12)
-	p.add_child(h)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", -4)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.alignment = BoxContainer.ALIGNMENT_CENTER
-	v.add_child(UI.ellipsis(UI.label(String(r.name), 22, UI.TEXT, "heavy")))
-	var playing := bool(r.online) and bool(r.get("in_match", false))
-	v.add_child(UI.label("#%s  ·  %s" % [code, "IN A MATCH" if playing else ("ONLINE" if r.online else "OFFLINE")], 13,
-		ONLINE_GREEN if r.online and not playing else UI.TEXT_DIM, "bold"))
-	h.add_child(v)
-	var ask := UI.button("INVITE", 20, "primary", Vector2(160, 56))
-	ask.name = "GroupAsk_" + code
-	ask.disabled = not bool(r.online) or playing
-	ask.pressed.connect(ask_friend.bind(id, String(r.name)))
-	h.add_child(ask)
-	if not r.online:
-		p.modulate = Color(1, 1, 1, 0.5)
-	return p
-
-
-## GroupAsk_<code>: the GROUP INVITE goes to this friend (Cloud.group_invite); then a popup says
-## INVITED <NAME> and, when it comes, their answer.
+## The GROUP INVITE goes to this friend (Cloud.group_invite; the social panel's "+"); then a popup
+## says INVITED <NAME> and, when it comes, their answer. One that cannot go out says so (a toast).
 func ask_friend(id: String, who: String) -> void:
 	if not Game.cloud_service().group_invite(id):
-		_list_note = "%s COULD NOT BE REACHED" % who
-		_list_sig = ""
-		_fill_list()
+		LobbyNet.toast(lobby, "%s COULD NOT BE REACHED" % who, "INVITE AGAIN WHEN THEY ARE ONLINE", Callable())
 		return
 	_invited_id = id
 	_invited_name = who
@@ -590,7 +537,6 @@ func ask_friend(id: String, who: String) -> void:
 
 ## The popup after an invite went out: INVITED <NAME>, then JOINED / DECLINED.
 func _show_invited() -> void:
-	_list = null
 	var v := lobby.dialogs.open_modal("GROUP INVITE", 640.0)
 	_invited_label = UI.label("INVITED %s" % _invited_name, 28, UI.ACCENT, "heavy")
 	_invited_label.name = "GroupInvited"
@@ -653,23 +599,17 @@ func open_teams() -> void:
 	_slot_panel.show_slots(NetGroup.per_team(Game.team_size), team_entries(members(), Game.team_size))
 
 
-## The group changed: the bar, the invite's popup and the open TEAMS panel follow.
+## The group changed: the bar, its panel, the invite's popup, the open TEAMS panel and the mode
+## card's TEAM panel follow.
 func on_group_changed() -> void:
 	refresh()
 	_follow_invited()
-	_follow_join_code()
+	lobby.dialogs.refresh_size_box()
 	if _slot_panel and is_instance_valid(_slot_panel):
 		_slot_panel.editable = is_leader()
 		_slot_panel.show_slots(NetGroup.per_team(Game.team_size), team_entries(members(), Game.team_size))
 
 
-func process(delta: float) -> void:
-	_refresh_t -= delta
-	if _refresh_t > 0.0:
-		return
-	_refresh_t = 0.5
-	_follow_join_code()
-	if _list and is_instance_valid(_list):
-		_fill_list()
-	elif _list:
-		_list = null
+func process(_delta: float) -> void:
+	if _panel_v != null and not is_instance_valid(_panel_v):
+		_panel_v = null

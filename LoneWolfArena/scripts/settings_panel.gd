@@ -67,8 +67,9 @@ const PREVIEW_TABS := [1, 2]
 const SCENE_KEYS := ["visual_effects"]
 ## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
 ## the pick) or the game's own bookkeeping.
-## (team_status is the lobby social panel's status choice, LobbySocial: set there, not in SETTINGS.)
-const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size", "team_status"]
+## (team_status is the lobby social panel's status choice, LobbySocial: set there, not in SETTINGS;
+## team_fill the mode card's TEAM panel's FILL EMPTY PLACES tick, LobbyDialogs: set there.)
+const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size", "team_status", "team_fill"]
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
 ## The minimap (setting minimap_turns: TURNS WITH VIEW true, NORTH UP false) and what each does.
 const MINIMAP_NAMES := ["TURNS WITH VIEW", "NORTH UP"]

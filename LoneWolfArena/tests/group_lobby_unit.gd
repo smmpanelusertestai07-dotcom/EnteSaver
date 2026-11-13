@@ -84,17 +84,24 @@ func _gating() -> void:
 
 func _placement() -> void:
 	_check(Lobby.MEMBER_SPOTS.size() == 3, "up to 3 other members on the podium")
-	_check(Lobby.podium_invite_shown(true, true, 1, 4, false) and Lobby.podium_invite_shown(true, true, 3, 4, false)
-		and not Lobby.podium_invite_shown(true, true, 4, 4, false) and not Lobby.podium_invite_shown(true, false, 2, 4, false)
-		and not Lobby.podium_invite_shown(true, true, 2, 4, true) and not Lobby.podium_invite_shown(false, true, 1, 4, false),
-		"the podium's +: the leader or a solo with room, never full, for a member, during a search or without the GROUP bar")
-	_check(Lobby.podium_invite_spot({}) == 1 and Lobby.podium_invite_spot({"a": 0}) == 1 and Lobby.podium_invite_spot({"a": 0, "b": 1}) == 2
-		and Lobby.podium_invite_spot({"a": 1, "b": 2}) == -1, "the podium's + stands over the first free spot right of the hero")
-	for i: int in Lobby.INVITE_SPOTS:
-		_check((Lobby.MEMBER_SPOTS[i] as Vector3).x > 0.0, "the + plate's spot %d is right of the hero" % i)
+	# (moved on purpose, round 7: no "+" plate on the podium any more; the hero steps left and the
+	# members stand to its right, as the reference's team lobby)
+	var names: Array = (load("res://scripts/lobby.gd") as Script).get_script_method_list().map(func(d: Dictionary) -> String: return String(d.name))
+	_check(not names.has("podium_invite_shown") and not names.has("_build_podium_invite") and Lobby.HERO_X_GROUP < Lobby.HERO_X,
+		"no podium + plate; with members the hero stands further left")
+	for i in Lobby.MEMBER_SPOTS.size():
+		_check((Lobby.MEMBER_SPOTS[i] as Vector3).x > 0.5, "member spot %d is right of the hero" % i)
+	_check(Lobby.fill_needed(2, 1) and Lobby.fill_needed(2, 2) and not Lobby.fill_needed(2, 4) and Lobby.fill_needed(4, 4),
+		"FILL EMPTY PLACES matters unless a DUO group of 4 fills the match by itself")
+	_check(LobbyDialogs.size_box_allowed(true, false) and LobbyDialogs.size_box_allowed(false, false) and not LobbyDialogs.size_box_allowed(false, true),
+		"the TEAM panel opens for a member too (read-only), never during a search")
+	_check(LobbyDialogs.team_rows_shown("lonewolf", false, false, true) and not LobbyDialogs.team_rows_shown("training", false, false, true)
+		and not LobbyDialogs.team_rows_shown("lonewolf", true, true, true) and not LobbyDialogs.team_rows_shown("lonewolf", false, false, false),
+		"the TEAM panel's code and ticks: in LONE WOLF with online teams, not in a room")
+	_check(Game.DEFAULT_SETTINGS.has("team_fill") and bool(Game.DEFAULT_SETTINGS.team_fill), "FILL EMPTY PLACES is on by default")
 	for i in Lobby.MEMBER_SPOTS.size():
 		var p: Vector3 = Lobby.MEMBER_SPOTS[i]
-		_check(p.z < -0.3 and absf(p.x) > 0.5, "member spot %d stands behind and beside the hero (%s)" % [i, str(p)])
+		_check(p.z < -0.3 and p.x > 0.5, "member spot %d stands behind and right of the hero (%s)" % [i, str(p)])
 		if p.y > 0.0:
 			_check(Vector2(p.x, p.z).length() < 0.86, "member spot %d on the podium stays on it" % i)
 	_check(Lobby.MEMBER_SCALE < 1.0, "members are a bit smaller than the hero")
