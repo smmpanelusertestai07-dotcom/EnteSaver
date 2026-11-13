@@ -282,6 +282,13 @@ func build(v: VBoxContainer) -> void:
 	refresh()
 
 
+## The chat closed with the quick list open: the list goes too.
+func _drop_quick() -> void:
+	if _quick_list != null and is_instance_valid(_quick_list):
+		_quick_list.queue_free()
+	_quick_list = null
+
+
 ## The quick phrases' list above the quick button (opened / closed by it; a tap beside it closes it).
 func _toggle_quick(qbtn: Control) -> void:
 	if _quick_list != null and is_instance_valid(_quick_list):
@@ -297,9 +304,8 @@ func _toggle_quick(qbtn: Control) -> void:
 	catcher.pressed.connect(func() -> void: _toggle_quick(qbtn))
 	lobby.ui.add_child(catcher)
 	_quick_list = catcher
-	qbtn.tree_exiting.connect(func() -> void:
-		if is_instance_valid(catcher):
-			catcher.queue_free(), CONNECT_ONE_SHOT)
+	if not qbtn.tree_exiting.is_connected(_drop_quick):
+		qbtn.tree_exiting.connect(_drop_quick)
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", UI.box(Color(0.05, 0.045, 0.06, 0.97), 8, 1, Color(1, 1, 1, 0.2), 8.0))
 	catcher.add_child(panel)
@@ -319,7 +325,7 @@ func _toggle_quick(qbtn: Control) -> void:
 	# above the button, kept on screen
 	var at := qbtn.get_global_rect()
 	var h := NetChat.QUICK.size() * 56.0 + 16.0
-	var vs: Vector2 = lobby.ui.get_viewport_rect().size
+	var vs: Vector2 = qbtn.get_viewport_rect().size
 	panel.position = Vector2(clampf(at.position.x, 8.0, vs.x - 324.0), maxf(at.position.y - h - 8.0, 8.0))
 
 
