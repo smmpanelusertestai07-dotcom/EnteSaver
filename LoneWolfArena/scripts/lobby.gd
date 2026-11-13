@@ -82,6 +82,7 @@ var friends := LobbyFriends.new(self)
 var wardrobe_ui := LobbyWardrobe.new(self)
 var profile_ui := LobbyProfile.new(self)
 var team := LobbyTeam.new(self)
+var social := LobbySocial.new(self)       # the right-hand social panel and its arrow tab (scripts/lobby_social.gd)
 ## The open popup, the wardrobe layer while it is open and the outfit it previews: the parts keep
 ## them, the screenshot tours read them here.
 var _modal: Control:
@@ -604,6 +605,7 @@ func _build_ui() -> void:
 	_build_chat_strip(root)
 	_build_add_button(root)
 	team.build(root)
+	social.build(root)
 	_build_podium_invite(root)
 	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
 	# so the search stays in sight and its X in reach while the player looks around.
@@ -1670,6 +1672,7 @@ func _process(delta: float) -> void:
 	wardrobe_ui.process()
 	profile_ui.process(delta)
 	team.process(delta)
+	social.process()
 	_follow_search(delta)
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone

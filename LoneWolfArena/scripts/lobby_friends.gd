@@ -982,6 +982,15 @@ static func group_invite_text(who: String) -> String:
 ## A GROUP INVITE came in (Cloud.group_invited): the popup at once, unless the open one is busy or a
 ## match loads; then it shows when that popup closes (_on_modal_closed), as a duel challenge does.
 func _on_group_invited(who: String) -> void:
+	# The social panel's status (LobbySocial): READY TO TEAM joins at once, DO NOT DISTURB declines.
+	match LobbySocial.invite_answer(LobbySocial.status()) if not lobby.start_btn.disabled else "ask":
+		"accept":
+			Game.cloud_service().answer_group_invite(true)
+			LobbyNet.toast(lobby, "YOU JOINED %s'S TEAM" % who, "READY TO TEAM", func() -> void: pass)
+			return
+		"decline":
+			Game.cloud_service().answer_group_invite(false)
+			return
 	Audio.play("ui_select", 0.0)
 	if bool(Game.settings.get("vibration", true)):
 		Input.vibrate_handheld(250)
