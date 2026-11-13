@@ -283,3 +283,20 @@ VOICE (the reference's places and defaults, our icons)
   anchored, beside the minimap; SPEAKER toggles at once (slash = OFF), MIC opens MIC MODE to its
   right (GROUP only with teammates). TALK under MIC only with PUSH TO TALK. Who speaks: small rows
   (sound mark + name) under the buttons.
+
+ROUND 8 - THE MATCH (checklist)
+- [ ] 16:9: the ELIMINATED BY card ends left of the HP block's first icon; no HP 0/200 after a death.
+- [ ] Damage numbers: small bold yellow (heads warm orange), up-left of the head, one per burst.
+- [ ] A hit blooms the crosshair into an orange ring (~1/16 of the width) with a red splash on the target.
+- [ ] One tap on WALL places the shield wall (QUICK WALL on by default).
+- [ ] The minimap shows the whole arena with a white wall outline on dark slate.
+- [ ] The controls stay through the round break for a living player.
+- [ ] LEFT FIRE only while aiming by default.
+- [ ] Enemies carry a thin red outline; teammates never.
+- [ ] The 1 vs 1 kill feed: two lines (0.767, 0.80), about 3.5 s; zone deaths name no killer.
+- [ ] Zone damage: red splats at the screen edges.
+- [ ] The break: near-black screen, one blue / orange split band, the changed number sparks.
+- [ ] A won match: VICTORY! band, the big gold VICTORY! with sparks, then the band at the top over the score.
+- [ ] Results page 1: the hero in the centre on a bright stage, the plate over the chest, the title above.
+- [ ] Gunshot alerts: pale orange marks toward unseen shooters within 60 m.
+- [ ] Our own sounds for weapon draw, punches, the empty click, near misses, impacts and grunts.

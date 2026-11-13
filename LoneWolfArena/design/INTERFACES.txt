@@ -1090,3 +1090,54 @@ listed here. If a part needs something new from the core, add it in its own file
   declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
 - FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,
   DUEL DUEL_W; on MY FRIENDS CHAT CHAT_W and REMOVE REMOVE_W), empty places held by ColumnGap.
+
+ROUND 8 - THE MATCH
+- Settings (Game.DEFAULT_SETTINGS, SETTINGS_VERSION 8; on / off in Game.BOOL_SETTINGS_R8): wall_quick
+  (QUICK WALL, CONTROLS > ITEMS: one tap on WALL places the wall at once, Player.quick_wall; off:
+  the old take-in-hand, FIRE places it; online the same "wall" event), hit_ring (HIT MARKER RING /
+  TICKS), enemy_outline (CharacterModel.set_outline, Arena.apply_outlines / is_enemy; TeamArena:
+  the other team only; SettingsPanel.SCENE_KEYS emits settings_changed for it), gunshot_alerts
+  (HUD.gun_alert, GUN_ALERT_M 60 m, GUN_ALERT_S 1.2 s), kill_badges; damage_numbers and
+  dynamic_crosshair are settings now (no longer FIXED_SETTINGS). left_fire defaults to 1 (WHEN
+  AIMING). _migrate_settings v8: a file older than v8 with left_fire 0 (the old default) reads 1;
+  damage_numbers / dynamic_crosshair of an older file are dropped (start on).
+- SETTINGS > IN-MATCH > INFORMATION (TABS index 8, MENU IN-MATCH [6, 2, 1, 7, 8], a preview page):
+  rows damage_numbers, hit_ring (Toggle_hit_ring RING / TICKS), dynamic_crosshair (DYNAMIC / FIXED),
+  enemy_outline, gunshot_alerts, kill_badges; pictures info_hit.png / info_outline.png /
+  info_gunshot.png (SettingsPanel.INFO_PIC, tests/shots_settings_pics.gd), hud.png until made.
+- HUD: hp_subject() (the player alive; out of a 1 vs 1 round the spectated fighter; else none: no HP
+  block of a dead player); hp_geometry(vs, u).x0 = the first armour icon; death_card_rect(vs, u)
+  ends 0.01u before it. Damage numbers: one per burst (DMG_MERGE 0.3 s while younger than
+  DMG_MERGE_MAX 1 s), 0.032u-0.05u, up-left of the target's head (dmg_offset), DMG_RISE 0.25 m/s,
+  DMG_LIFE 0.7 s. Hit marker: HIT_T 0.22 s, the ring grows in HIT_BLOOM 0.18 s to
+  hit_bloom_radius(vs, head) (1/16 of the width across); Effects.hit_splash (pooled, SPLASH_LIFE
+  0.25 s, sprite assets/ui/icons/v_splat.png). controls_shown(): through the round break for a
+  living player, for everyone from RoundRules.BREAK_BAND_AT, never at the match's end. The 1 vs 1
+  kill feed: two lines (solo_feed_y: 0.767, a second under it at 0.80), FEED_LIFE_SOLO 3.5 s; a
+  zone / fall death reads "<NAME> ELIMINATED" (no killer). Zone damage: red splats round the edges
+  (ZONE_SPLATS). Kill badge: the plate names the player; streak_word(n, teams, head) DOUBLE / TRIPLE
+  in DUO / SQUAD. zoom_label(def): the scope button's 1X / 2X / 8X. Tips (TIPS): the profile's
+  first match only, under MOVE / FIRE / WALL. The pick ring shows HudPanels.ring_seconds() (the prep
+  clock while in the prep).
+- Minimap: HudMinimap.view_m(map_rect) = the long side x 1.05 (VIEW_M 28 m only past WHOLE_MAP_MAX
+  80 m), view_center keeps at most ~10 % of the view outside the map, a white wall outline always,
+  a dark slate (0.16, 0.17, 0.19) outside.
+- RoundRules: zone_start_for(map_rect, fallback) = 0.58 x the diagonal (Arena.zone_start_radius);
+  the match's end: MATCH_BAND_AT 2.5, VICTORY_WORD_AT 3.3, VICTORY_WORD_S 1.5, VICTORY_TOP_AT,
+  RESULTS_WIN_AT 6.0, RESULTS_LOSS_AFTER 1.6; results_at(won), match_end_step(t, won): beat, band,
+  (a win:) word, top, results. Arena.results_delay() = results_at(hud.result_won()). The break's
+  score step: a near-black screen and one split band (HUD.split_band_rect: x 0.12-0.93 W), the
+  changed number flashing with sparks at BREAK_TICK_AT.
+- Bot: EASY / NORMAL wait 0.6-0.9 s (EASY 0.9-1.2 s) more before the first shot at a player who
+  has not fired for 3 s; their chest-aimed spread stays under HEAD_CLEAR_M over the chest.
+- Results page 1: HeroView centred (x 0.3-0.7, y 0.2-0.99) on a bright stage (HeroBackdrop),
+  HeroPlate over the chest (x 0.42-0.58, y 0.57-0.67), Title / Tagline above (y 0.07-0.23), Medal at
+  x 0.85; the header line is VS <opponent> · <level> (no gun). REMATCH after an opponent left keeps
+  its yellow for REMATCH_GREY_MS 5 s, then greys with OPPONENT LEFT. Page 2: ResultsScreen.left_mark()
+  (LeftMark) in front of a row whose player left.
+- Sounds (tools/media/make_sfx.py, synthesised): weapon_draw (Fighter.switch_weapon), punch_swish /
+  punch_hit (Fighter._melee), dry_click (Player.set_firing on an empty magazine), bullet_whiz
+  (Fighter._near_miss: another fighter's shot within 1.5 m of the player's head), impact_metal /
+  impact_wood / impact_concrete (Effects.impact_sound by Effects.impact_kind: group "metal" /
+  "wood" or the collider's name), grunt_1..3 (HUD._on_damaged, about 1 hit in 3).
+- Weapons: the .50 pistol is BRUTE .50.
