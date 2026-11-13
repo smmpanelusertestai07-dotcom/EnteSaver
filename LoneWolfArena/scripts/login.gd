@@ -156,7 +156,10 @@ static func privacy_sections() -> Array:
 			+ "relay. To find the way, your phone asks public STUN servers (%s) for the internet address they see, "
 			+ "so they see your phone's IP address, and the two phones swap their network addresses, encrypted, "
 			+ "inside the match. So your opponent's game learns your phone's IP address (and yours learns theirs); "
-			+ "the game never shows or keeps it. What goes directly is end-to-end encrypted too. Both players need "
+			+ "the game never shows or keeps it. In a DUO or SQUAD match against other players, your phone does the "
+			+ "same with each other player of that match who has it on too: your addresses go to each of them, "
+			+ "encrypted inside the match, so each of their games learns your phone's IP address. "
+			+ "What goes directly (moves and voice) is end-to-end encrypted too. Both players need "
 			+ "it on. Turned off, your phone never sends its address and the match goes only through the relay.") % ", ".join(stun)],
 		["Voice chat", "Your microphone is off unless you turn MIC on (under your character, or in a match), which "
 			+ "asks for the microphone the first time. It is used only with MIC on while you are in an online match, "

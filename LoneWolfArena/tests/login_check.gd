@@ -85,7 +85,7 @@ func _check_texts() -> void:
 			"last %d chat messages with each friend" % NetChat.HISTORY_MAX, "only your friend's phone can read it",
 			"keeps your last unread message", "never a blocked player", "sent only while you speak", "never stored",
 			"no microphone unless you turn MIC on",
-			"On unless you turn DIRECT CONNECTION off", "your opponent's game learns your phone's IP address",
+			"On unless you turn DIRECT CONNECTION off", "your opponent's game learns your phone's IP address", "each other player of that match who has it on too",
 			"Turned off, your phone never sends its address", "Apart from the relay and the direct connection above",
 			"No account, no e-mail address or phone number, no ads, no analytics", "Uninstall the game, or clear its data",
 			"these games never leave the local network", "your name, outfit, player ID and public key", "pairing code",

@@ -27,7 +27,11 @@ extends Node
 ## The state can take a faster way: with DIRECT CONNECTION on for both players, the two phones open
 ## a direct UDP path (NetDirect: candidates swapped in the room, hole punching, packets sealed with
 ## keys derived from the room's) and the state goes over it while it works both ways (direct_up),
-## through the relay again after NetDirect.TIMEOUT_MS of silence; everything else stays here.
+## through the relay again after NetDirect.TIMEOUT_MS of silence; everything else stays here. An
+## all-human DUO / SQUAD does the same with one path per other player (_pairs: hello and candidates
+## addressed to that one player in the match room), so with DIRECT CONNECTION on this phone's
+## addresses go, end-to-end encrypted inside the match room, to each other player of that match
+## who has it on too. Voice frames take the direct paths too when every phone they are for has one up.
 ## Anyone can publish to a public broker, so invites are rate limited and the list is capped. The
 ## lobby shows names, outfits and public keys only; nothing is stored by the game anywhere but on
 ## the phone (a live 1 vs 1's sealed session file, so a closed app can rejoin it: see "the session
@@ -275,9 +279,18 @@ var _direct_peer := false      # the other phone can go direct too (its "dh" or 
 var _direct_sent := false      # this phone's candidates went out (for the current gathering)
 var _direct_hello_n := 0
 var _direct_hello_t := 0.0
+var _direct_voice := false     # the other phone takes voice over the direct path ("v": 2 in its "dh" / "dc"; not 1.9.1)
 var _state_in_t := -1          # sender's clock on the newest state taken (either path): older ones are dropped
 var relay_states_out := 0      # states sent through the relay this session (tests)
 var relay_states_in := 0       # states taken from the relay this session (tests)
+## An all-human match's direct paths (DIRECT CONNECTION): one NetDirect per other member (a pair),
+## member id -> NetDirect, at most PAIRS_MAX; _pair_meta: id -> {"peer", "sent", "hn", "ht"} (that
+## member said hello or sent candidates; ours went out; hellos sent; s to the next).
+const PAIRS_MAX := 7
+var _pairs := {}
+var _pair_meta := {}
+var pair_states_in := 0        # states taken from the pairs this session (tests)
+var relay_voice_out := 0       # voice frames sent through the relay this session (tests)
 var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
 var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
 ## DUO / SQUAD over this 1 vs 1 session: the team of the session a team invite ("tinv") started, on
@@ -579,6 +592,8 @@ func _process(delta: float) -> void:
 			_save_resume()
 	if direct != null:
 		_tick_direct(delta)
+	if not _pairs.is_empty():
+		_tick_pairs(delta)
 	if _keygen != -1 and not _keygen_out.is_empty():
 		WorkerThreadPool.wait_for_task_completion(_keygen)
 		_keygen = -1
@@ -1839,6 +1854,8 @@ func try_resume() -> bool:
 	queue.clear()
 	if multi.is_empty():
 		_direct_begin()
+	else:
+		_pairs_begin()
 	if _connected:
 		_subscribe(ROOT + "/r/" + _room)
 		session_started.emit.call_deferred(is_host)
@@ -2704,10 +2721,12 @@ func _on_room(msg: PackedByteArray) -> void:
 			# The other phone can go direct (DIRECT CONNECTION on there): ours go out once gathered.
 			if in_session and direct != null:
 				_direct_peer = true
+				_direct_voice = _direct_voice or _says_direct_voice(d as Dictionary)
 		"dc":
 			# Its candidates (checked: real unicast addresses, ports from 1024): punching starts.
 			if in_session and direct != null:
 				_direct_peer = true
+				_direct_voice = _direct_voice or _says_direct_voice(d as Dictionary)
 				var list := NetDirect.candidates_from((d as Dictionary).get("c"), direct.local_mode)
 				if not list.is_empty():
 					direct.set_peer_candidates(list, Time.get_ticks_msec())
@@ -2741,23 +2760,7 @@ func _on_room(msg: PackedByteArray) -> void:
 			if in_session:
 				_vk_on(d as Dictionary, String(opponent.get("id", "")))
 		"vo", "vg":
-			# Voice (NetVoice, "vo": to everyone; "vg" to teammates only, under the sender's GROUP
-			# key: a co-op DUO's other phone, never a 1 vs 1's opponent): with the SPEAKER on here,
-			# never from a blocked player, at most NetVoice.MAX_FRAMES_S frames a second, each a
-			# frame NetVoice can play.
-			var mate := voice_mate(String(opponent.get("id", "")))
-			var a: Variant = (d as Dictionary).get("a") if kind == "vo" \
-				else _vk_b64((d as Dictionary).get("s"), String(opponent.get("id", "")), mate)
-			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or (kind == "vg" and not mate) \
-					or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
-				return
-			var now := Time.get_ticks_msec()
-			var tokens := minf(NetVoice.MAX_FRAMES_S, float(_voice_in[0]) + float(now - int(_voice_in[1])) / 1000.0 * NetVoice.MAX_FRAMES_S)
-			_voice_in = [tokens - 1.0 if tokens >= 1.0 else tokens, now]
-			var frame := Marshalls.base64_to_raw(String(a))
-			if tokens >= 1.0 and NetVoice.frame_ok(frame):
-				voice_received.emit(frame)
-				voice_from.emit(frame, String(opponent.get("id", "")), mate)
+			_on_voice_msg(d as Dictionary)
 		"ev":
 			var ev: Variant = (d as Dictionary).get("e", "")
 			var data: Variant = (d as Dictionary).get("d", [])
@@ -2773,6 +2776,26 @@ func _on_room(msg: PackedByteArray) -> void:
 					queue.append([String(ev), data])
 			else:
 				event_received.emit(String(ev), data)
+
+
+## The 1 vs 1's voice frame (the room's or the direct path's). Voice (NetVoice, "vo": to everyone;
+## "vg" to teammates only, under the sender's GROUP key: a co-op DUO's other phone, never a 1 vs 1's
+## opponent): with the SPEAKER on here, never from a blocked player, at most NetVoice.MAX_FRAMES_S
+## frames a second, each a frame NetVoice can play.
+func _on_voice_msg(d: Dictionary) -> void:
+	var kind := String(d.get("k", ""))
+	var mate := voice_mate(String(opponent.get("id", "")))
+	var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), String(opponent.get("id", "")), mate)
+	if not in_session or not kind in ["vo", "vg"] or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or (kind == "vg" and not mate) \
+			or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
+		return
+	var now := Time.get_ticks_msec()
+	var tokens := minf(NetVoice.MAX_FRAMES_S, float(_voice_in[0]) + float(now - int(_voice_in[1])) / 1000.0 * NetVoice.MAX_FRAMES_S)
+	_voice_in = [tokens - 1.0 if tokens >= 1.0 else tokens, now]
+	var frame := Marshalls.base64_to_raw(String(a))
+	if tokens >= 1.0 and NetVoice.frame_ok(frame):
+		voice_received.emit(frame)
+		voice_from.emit(frame, String(opponent.get("id", "")), mate)
 
 
 ## Ends the match's session: "left" (the other phone said bye, `theirs`, or went silent, or this
@@ -2848,7 +2871,19 @@ func send_state(s: PackedFloat32Array) -> bool:
 		_same_n = 0
 		_last_state = a
 	_state_ms = now
-	if direct != null and direct.can_send(now):
+	if session_multi:
+		# Through every pair that is up, and once through the relay unless every live member's is.
+		var all_up := true
+		for id: String in _live_members():
+			var p: NetDirect = _pairs.get(id)
+			if p != null and p.can_send(now):
+				p.send_state(a, now, now)
+			else:
+				all_up = false
+		if not all_up:
+			relay_states_out += 1
+			_room_send({"k": "st", "s": a, "t": now})
+	elif direct != null and direct.can_send(now):
 		direct.send_state(a, now, now)
 	else:
 		relay_states_out += 1
@@ -2913,6 +2948,8 @@ func _direct_end() -> void:
 		direct.close()
 	direct = null
 	_direct_peer = false
+	_direct_voice = false
+	_pairs_end()
 
 
 func _tick_direct(delta: float) -> void:
@@ -2925,14 +2962,131 @@ func _tick_direct(delta: float) -> void:
 		if _direct_hello_t <= 0.0 and _direct_hello_n < 5:
 			_direct_hello_t = 2.0
 			_direct_hello_n += 1
-			_room_send({"k": "dh"})
+			_room_send({"k": "dh", "v": 2})
 	if direct.wants_regather(now):
 		_direct_sent = false
 	if _direct_peer and direct.gathered and not _direct_sent:
 		_direct_sent = true
-		_room_send({"k": "dc", "c": direct.candidates})
+		_room_send({"k": "dc", "c": direct.candidates, "v": 2})
 	for d: Dictionary in direct.poll(now, delta):
-		_on_state_msg(d)
+		if String(d.get("k", "")) == "st":
+			_on_state_msg(d)
+		else:
+			_on_voice_msg(d)
+
+
+# An all-human match's pairs: one direct path per other member (NetDirect with the pair's label),
+# opened when the match starts (or is entered again from the session file) while DIRECT CONNECTION
+# is on. Each pair says hello ("dh" {"to"}) up to 5 times, 2 s apart; its candidates ("dc" {"to",
+# "c"}) go only to a member whose hello (or candidates) came, so a player with DIRECT CONNECTION off
+# never sends or gets an address. A pair closes when its member LEFT or is blocked, and with the
+# session. What comes over it is taken as that member's (never an id from the packet).
+
+## The members of this all-human match still in it (not LEFT), this phone left out.
+func _live_members() -> Array:
+	var out := []
+	if _multi.is_empty():
+		return out
+	for id: String in (_multi.ids as Dictionary):
+		if id != my_id and not (_multi.left as Dictionary).has(id):
+			out.append(id)
+	return out
+
+
+func _pairs_begin() -> void:
+	_pairs_end()
+	pair_states_in = 0
+	relay_voice_out = 0
+	var m := NetDirect.mode()
+	if m == "off" or not direct_allowed() or not session_multi or _mac.is_empty():
+		return
+	for id: String in _live_members():
+		if _pairs.size() >= PAIRS_MAX or Game.is_blocked(id):
+			continue
+		var p := NetDirect.new(NetDirect.dir_low_for(my_id, id), _mac, m == "local", NetDirect.pair_label_for(my_id, id))
+		if p.open(Time.get_ticks_msec()):
+			_pairs[id] = p
+			_pair_meta[id] = {"peer": false, "sent": false, "hn": 0, "ht": 0.0}
+
+
+func _pairs_end() -> void:
+	for id: String in _pairs:
+		(_pairs[id] as NetDirect).close()
+	_pairs.clear()
+	_pair_meta.clear()
+
+
+func _pair_close(id: String) -> void:
+	if _pairs.has(id):
+		(_pairs[id] as NetDirect).close()
+	_pairs.erase(id)
+	_pair_meta.erase(id)
+
+
+## A member's "dh" / "dc": taken only when addressed to this phone ("to") and its pair is open.
+func _pair_on(d: Dictionary, f: String) -> void:
+	if not in_session or not _pairs.has(f) or typeof(d.get("to")) != TYPE_STRING or String(d.to) != my_id:
+		return
+	var meta: Dictionary = _pair_meta[f]
+	if not bool(meta.peer) or String(d.get("k", "")) == "dh":
+		meta.sent = false            # (a hello again: it started over, so its candidates go out again)
+	meta.peer = true
+	if String(d.get("k", "")) == "dc":
+		var p: NetDirect = _pairs[f]
+		var list := NetDirect.candidates_from(d.get("c"), p.local_mode)
+		if not list.is_empty():
+			p.set_peer_candidates(list, Time.get_ticks_msec())
+
+
+func _tick_pairs(delta: float) -> void:
+	if not in_session or not session_multi or _room == "":
+		_pairs_end()
+		return
+	var now := Time.get_ticks_msec()
+	for id: String in _pairs.keys():
+		if (_multi.left as Dictionary).has(id) or Game.is_blocked(id):
+			_pair_close(id)
+			continue
+		var p: NetDirect = _pairs[id]
+		var meta: Dictionary = _pair_meta[id]
+		if not bool(meta.peer):
+			meta.ht = float(meta.ht) - delta
+			if float(meta.ht) <= 0.0 and int(meta.hn) < 5:
+				meta.ht = 2.0
+				meta.hn = int(meta.hn) + 1
+				_room_send({"k": "dh", "to": id})
+		if p.wants_regather(now):
+			meta.sent = false
+		if bool(meta.peer) and p.gathered and not bool(meta.sent):
+			meta.sent = true
+			_room_send({"k": "dc", "to": id, "c": p.candidates})
+		for d: Dictionary in p.poll(now, delta):
+			if not _pairs.has(id) or not _bucket("m" + id, MULTI_RATE, MULTI_RATE):
+				continue
+			if String(d.get("k", "")) == "st":
+				if in_session and _arena_listens():
+					_multi.heard[id] = now        # (a state is a sign of life, as any room message)
+					_multi.live[id] = now
+					_set_away(id, false)
+				_on_multi_state(d, id, true)
+			else:
+				_on_multi_voice(d, id)
+
+
+## Whether that member's pair is up now (tests, the HUD tag).
+func pair_up(id: String) -> bool:
+	return _pairs.has(id) and (_pairs[id] as NetDirect).can_send(Time.get_ticks_msec())
+
+
+## The pairs open now (tests): member id -> NetDirect.
+func pairs() -> Dictionary:
+	return _pairs
+
+
+## A 1 vs 1 "dh" / "dc" from a build that takes voice frames over the direct path (from 1.10).
+static func _says_direct_voice(d: Dictionary) -> bool:
+	var v: Variant = d.get("v")
+	return (v is int or v is float) and int(v) >= 2
 
 
 ## Whether the state goes straight to the other phone right now (the match HUD's DIRECT tag).
@@ -2940,9 +3094,25 @@ func direct_up() -> bool:
 	return direct != null and direct.can_send(Time.get_ticks_msec())
 
 
-## How the match state travels, for the tag under the match HUD's ping: "DIRECT" or "RELAY".
+## How the match state travels, for the tag under the match HUD's ping: "DIRECT" or "RELAY"; in an
+## all-human match "DIRECT" when every live member's pair is up, "DIRECT n/m" when some are.
 func link_tag() -> String:
+	if session_multi:
+		var live := _live_members()
+		var now := Time.get_ticks_msec()
+		var up := 0
+		for id: String in live:
+			if _pairs.has(id) and (_pairs[id] as NetDirect).can_send(now):
+				up += 1
+		return link_tag_for(up, live.size())
 	return "DIRECT" if direct_up() else "RELAY"
+
+
+## The tag for `up` pairs up out of `live` members.
+static func link_tag_for(up: int, live: int) -> String:
+	if up <= 0 or live <= 0:
+		return "RELAY"
+	return "DIRECT" if up >= live else "DIRECT %d/%d" % [up, live]
 
 
 ## The relay's round trip while this phone is connected to it, else -1 (the ping chip of a match
@@ -2955,6 +3125,16 @@ func relay_ping() -> int:
 func match_ping() -> int:
 	if direct_up() and direct.rtt >= 0:
 		return direct.rtt
+	if session_multi and not _pairs.is_empty():
+		# A member: its pair with the host while up; the host: the slowest of its pairs that are up.
+		var now := Time.get_ticks_msec()
+		var worst := -1
+		for id: String in _pairs:
+			var p: NetDirect = _pairs[id]
+			if p.can_send(now) and p.rtt >= 0 and (is_host or id == session_host_id):
+				worst = maxi(worst, p.rtt)
+		if worst >= 0:
+			return worst
 	return NetPing.match_ms(peer_rtt, relay_rtt, status == "online")
 
 
@@ -2989,14 +3169,35 @@ func send_chat(text: String) -> String:
 
 ## One voice frame (NetVoice, only while the player speaks) to the match: everyone ("vo", what
 ## every build plays), or the own team only ("vg": older builds ignore it, the other team's drop it).
+## When every phone it is for has its direct path up (the 1 vs 1's, or each recipient's pair) it
+## goes over those paths only, else through the relay only.
 func send_voice(frame: PackedByteArray, group_only := false) -> void:
 	if not in_session or not NetVoice.frame_ok(frame):
 		return
+	var d := {"k": "vo", "a": Marshalls.raw_to_base64(frame)}
 	if group_only:
 		_vk_sync()
-		_room_send({"k": "vg", "s": Marshalls.raw_to_base64(_vk_seal(frame))})
+		d = {"k": "vg", "s": Marshalls.raw_to_base64(_vk_seal(frame))}
+	# Over the direct path when every phone it is for has one up (never both ways: no frame twice).
+	var now := Time.get_ticks_msec()
+	if not session_multi:
+		if direct != null and _direct_voice and direct.can_send(now):
+			direct.send_voice(d, now)
+			return
 	else:
-		_room_send({"k": "vo", "a": Marshalls.raw_to_base64(frame)})
+		var to := _live_members()
+		if group_only:
+			to = to.filter(func(id: String) -> bool: return voice_mate(id))
+		var all_up := not to.is_empty()
+		for id: String in to:
+			if not (_pairs.has(id) and (_pairs[id] as NetDirect).can_send(now)):
+				all_up = false
+		if all_up:
+			for id: String in to:
+				(_pairs[id] as NetDirect).send_voice(d, now)
+			return
+	relay_voice_out += 1
+	_room_send(d)
 
 
 ## The voice channel the GROUP keys belong to: the match room, or the group / room.
@@ -4390,7 +4591,8 @@ func _on_gstart(d: Dictionary) -> void:
 # session and answers "joined", which starts it on each member. Events and states come with their
 # sender (event_from, state_from), at most MULTI_RATE a second from one member; "bye" from a member
 # is member_left, from the host (or the host silent) the session's end ("left"). The host hears
-# every member, so it ends the session when all of them left. No direct UDP path in these matches.
+# every member, so it ends the session when all of them left. With DIRECT CONNECTION on, the states
+# (and voice) also take one direct UDP path per other member (_pairs, see "An all-human match's pairs").
 
 func _multi_enter(room: String, aes: PackedByteArray, mac: PackedByteArray, size: int, roster: Array, host_id: String) -> void:
 	if in_session:
@@ -4458,6 +4660,7 @@ func _multi_start() -> void:
 	_in_match_unix = Time.get_unix_time_from_system()
 	_save_resume()                   # (a closed app can come back into it: the session file)
 	_decline_waiting()
+	_pairs_begin()
 	session_started.emit(is_host)
 	if is_host:
 		for id: String in (_multi.left as Dictionary).keys():
@@ -4475,6 +4678,7 @@ func _multi_abort() -> void:
 
 
 func _multi_reset() -> void:
+	_pairs_end()
 	session_multi = false
 	session_roster = []
 	session_host_id = ""
@@ -4544,16 +4748,12 @@ func _on_multi(d: Dictionary) -> void:
 			if in_session:
 				_vk_on(d, f)
 		"vo", "vg":
-			# Voice: "vo" to everyone, "vg" to the sender's team only (under its GROUP key, _vk_open).
-			var mate := voice_mate(f)
-			var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), f, mate)
-			if in_session and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and NetVoice.speaker_mode() != NetVoice.OFF \
-					and (kind == "vo" or mate) and not Game.is_blocked(f) and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
-				var frame := Marshalls.base64_to_raw(String(a))
-				if NetVoice.frame_ok(frame):
-					voice_from.emit(frame, f, mate)
+			_on_multi_voice(d, f)
 		"st":
 			_on_multi_state(d, f)
+		"dh", "dc":
+			# A member's direct-path hello / candidates: only those addressed to this phone count.
+			_pair_on(d, f)
 		"ev":
 			var ev: Variant = d.get("e", "")
 			var data: Variant = d.get("d", [])
@@ -4571,8 +4771,23 @@ func _on_multi(d: Dictionary) -> void:
 				event_from.emit(String(ev), data, f)
 
 
-## A member's state: STATE_SIZE numbers and its clock "t" (older than its newest: dropped).
-func _on_multi_state(d: Dictionary, f: String) -> void:
+## A member's voice frame (the room's or its pair's): "vo" to everyone, "vg" to the sender's team only
+## (under its GROUP key, _vk_open); with the SPEAKER on, never from a blocked player, at most
+## NetVoice.MAX_FRAMES_S a second from one member, each a frame NetVoice can play.
+func _on_multi_voice(d: Dictionary, f: String) -> void:
+	var kind := String(d.get("k", ""))
+	var mate := voice_mate(f)
+	var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), f, mate)
+	if in_session and kind in ["vo", "vg"] and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and NetVoice.speaker_mode() != NetVoice.OFF \
+			and (kind == "vo" or mate) and not Game.is_blocked(f) and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
+		var frame := Marshalls.base64_to_raw(String(a))
+		if NetVoice.frame_ok(frame):
+			voice_from.emit(frame, f, mate)
+
+
+## A member's state: STATE_SIZE numbers and its clock "t" (older than its newest: dropped, so the
+## copy the other path brings too counts once). `direct`: it came over that member's pair.
+func _on_multi_state(d: Dictionary, f: String, via_pair := false) -> void:
 	var s: Variant = d.get("s", [])
 	if not in_session or not s is Array or (s as Array).size() != RemoteFighter.STATE_SIZE:
 		return
@@ -4588,7 +4803,10 @@ func _on_multi_state(d: Dictionary, f: String) -> void:
 			return
 		_multi.state_t[f] = sent
 	last_state_sent_ms = sent
-	relay_states_in += 1
+	if via_pair:
+		pair_states_in += 1
+	else:
+		relay_states_in += 1
 	state_from.emit(out, f)
 
 
