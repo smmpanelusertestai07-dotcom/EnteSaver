@@ -1052,6 +1052,12 @@ func _draw_controls(vs: Vector2) -> void:
 			_draw_button(id, vs)
 
 
+## The scope button's small zoom label for a gun's sight: red dot 1X, 2x scope 2X, sniper 8X; none
+## without a sight (iron sights, fists).
+static func zoom_label(def: Dictionary) -> String:
+	return String({"reddot": "1X", "2x": "2X", "sniper": "8X"}.get(Player.sight_of(def), ""))
+
+
 func _draw_button(id: String, vs: Vector2) -> void:
 	var w: Dictionary = layout[id]
 	var c := HudLayout.center(w, vs)
@@ -1117,6 +1123,10 @@ func _draw_button(id: String, vs: Vector2) -> void:
 	HudDraw.button(self, c, r, glyph, o, pressed, act, en, gscale)
 	if count >= 0:
 		HudDraw.count_badge(self, c, r, count, o)
+	if id == "scope" and player != null and not editor_mode:
+		var zl := zoom_label(player.weapon().def)
+		if zl != "":
+			HudDraw.text(self, zl, c + Vector2(0, r * 0.98), maxi(int(r * 0.42), 10), Color(1, 1, 1, 0.92 * o), 1, 3, "number")
 	if id == "medkit" and act and player != null:
 		HudDraw.ring(self, c, r + 2.0, Color(HudDraw.GOLD, 0.95 * o), 3.0, player.heal_progress())
 	if id == "reload" and act and player != null:

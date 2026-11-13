@@ -17,6 +17,7 @@ static func run(runner: Node) -> void:
 	me._test_break_controls()
 	me._test_solo_feed()
 	me._test_kill_badge()
+	me._test_zoom_label()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -193,3 +194,14 @@ func _test_kill_badge() -> void:
 	_check(String(hud._kill_banner.by) == "WOLF", "the badge's plate names the player")
 	hud.free()
 	me.free()
+
+
+## The scope button's zoom label follows the gun's sight.
+func _test_zoom_label() -> void:
+	var ok := true
+	for id: String in Weapons.DEFS:
+		var d: Dictionary = Weapons.DEFS[id]
+		var want := String({"reddot": "1X", "2x": "2X", "sniper": "8X"}.get(Player.sight_of(d), ""))
+		ok = ok and HUD.zoom_label(d) == want
+	_check(ok, "every gun's scope label matches its sight (none without one)")
+	_check(HUD.zoom_label({"scope": "none"}) == "" and HUD.zoom_label({"scope": "sniper"}) == "8X", "no sight, no label; a sniper scope 8X")
