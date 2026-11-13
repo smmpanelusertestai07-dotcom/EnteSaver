@@ -3,6 +3,8 @@ extends Node
 ##   godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
 ## - every extra clip is merged into the character's player
 ## - the base-clip toe fix holds and is applied once (clips are shared by all characters)
+## - procedural layers: the lean into a running turn, the sprint's forward bend, the lobby's look
+##   round (and none of it after the lobby)
 ## - weapon swap changes the model at the lowest point of the clip, not at once
 ## - hit flinches are rate limited
 ## - a thrown grenade leaves the hand at the release frame, not on the input
@@ -23,6 +25,7 @@ func run(autotest: Node) -> int:
 	await at.wait(0.5)
 	_check_clips_and_toes()
 	_check_gait_playback()
+	_check_procedural_layers()
 	await _check_swap_and_flinch()
 	await _check_throw()
 	at.log_line("ANIM CHECK DONE bad=%d" % bad)
@@ -135,6 +138,45 @@ func _check_gait_playback() -> void:
 	_expect(dip > 0.3 and first < 0.15 and m.land_dip() == 0.0,
 		"a fall ends in a short knee dip (peak %.2f, eases in from %.2f, over in 0.67 s)" % [dip, first])
 	_expect(float(m.tree.get("parameters/crouch_blend/blend_amount")) < 0.01, "standing straight again after the dip")
+	m.queue_free()
+
+
+## On top of the clips: a running body leans into its turn (a roll about the feet toward the inside,
+## none standing or crouched), a sprint bends the chest forward, the lobby's idle looks round
+## with the head and leaves no twist behind once the model leaves the lobby.
+func _check_procedural_layers() -> void:
+	var m := _model()
+	var dt := 1.0 / 60.0
+	for _i in 40:
+		m.rotation.y += 2.0 * dt                    # turning left at 2 rad/s
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	var lean_left := m.root_scene.rotation.z
+	for _i in 60:
+		m.rotation.y -= 2.0 * dt
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	var lean_right := m.root_scene.rotation.z
+	for _i in 60:
+		m.rotation.y += 2.0 * dt
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	var still := m.root_scene.rotation.z
+	_expect(lean_left < -0.05 and lean_right > 0.05 and absf(still) < 0.01,
+		"a running turn leans into it (left %.2f, right %.2f), turning on the spot does not (%.2f)" % [lean_left, lean_right, still])
+	m.sprint = true
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.SPRINT_SPEED), Fighter.Stance.STAND, true, dt)
+	var bend := m.aim_mod.kick
+	m.sprint = false
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	_expect(bend < -0.1 and absf(m.aim_mod.kick) < 0.01, "a sprint bends the chest forward (%.2f), a run does not (%.2f)" % [bend, m.aim_mod.kick])
+	m.play_lobby(true)
+	m._gesture_in = 0.0
+	m._lobby_cheer = false
+	for _i in 90:
+		m._process(dt)
+	_expect(absf(m.aim_mod.twist) > 0.3, "the lobby idle looks round (%.2f rad)" % m.aim_mod.twist)
+	m.revive()
+	_expect(m.aim_mod.twist == 0.0 and m.anim.speed_scale == 1.0, "no look round or pace change after the lobby")
 	m.queue_free()
 
 

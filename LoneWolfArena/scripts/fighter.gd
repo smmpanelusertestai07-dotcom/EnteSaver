@@ -1066,6 +1066,7 @@ func _physics_process(delta: float) -> void:
 	_was_air = not now_floor
 	_footsteps(delta, now_floor)
 	var local_v := Basis(Vector3.UP, drawn_yaw()).inverse() * velocity
+	model.sprint = sprinting
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, now_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
 

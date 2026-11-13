@@ -63,6 +63,7 @@ const ASSIST := {
 ## Free look button) still turns only the camera, also while running.
 const BODY_TURN_RATE := 16.0
 const BODY_HOLD_SPEED := 1.0     # m/s: slower than this the body counts as standing still
+const HEAD_FOLLOW := 0.9         # rad the held body's head turns at most toward the camera's look
 const DRAG_SHOT_WINDOW := 0.15   # s the first shot may wait for a drag that starts with the press
 const DRAG_SHOT_START := 0.04    # no drag by then (or the drag paused): it fires
 const DRAG_SHOT_SETTLE := 0.15   # more s it waits while a drag that ended high on the head or just over it is pulled in
@@ -286,6 +287,8 @@ func face_aim() -> void:
 	_turn_aim = aim_yaw
 	if model != null:
 		model.rotation.y = 0.0
+		if model.aim_mod:
+			model.aim_mod.twist = 0.0
 
 
 ## Each frame: while the body holds, the aim's turn since the last frame goes into body_turn (the
@@ -305,6 +308,11 @@ func _update_body_turn(delta: float) -> void:
 			body_turn = 0.0
 	if model != null:
 		model.rotation.y = body_turn
+		if model.aim_mod:
+			# The held body looks where the camera looks (the head and a little of the chest),
+			# up to HEAD_FOLLOW; with the camera round at its face it looks ahead again.
+			var want := clampf(-body_turn, -HEAD_FOLLOW, HEAD_FOLLOW) if absf(body_turn) < 1.9 else 0.0
+			model.aim_mod.twist = lerpf(model.aim_mod.twist, want, 1.0 - exp(-6.0 * delta))
 
 
 ## The drawn body's yaw (locomotion is played relative to it, so a body still turning back to the

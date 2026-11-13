@@ -131,6 +131,15 @@ var _cheer_left := 0.0
 var _look := 0.0
 var _look_to := 0.0
 var _look_hold := 0.0
+## In a match, on top of the clips: the body leans into a turn while it runs (a roll about the feet,
+## from the change of facing) and forward while it sprints (sprint: set by the fighter each tick).
+const LEAN_PER_TURN := 0.045     # rad of roll per rad/s of turn at a full run
+const LEAN_MAX := 0.12
+const SPRINT_LEAN := 0.14        # rad the chest bends forward at a sprint
+var sprint := false
+var _lean := 0.0
+var _sprint_lean := 0.0
+var _last_yaw := INF
 var _next_flinch := 0.0
 
 
@@ -514,14 +523,28 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	elif fallback:
 		_animate_fallback(delta)
 	_kick = move_toward(_kick, 0.0, delta * 0.6)
+	_update_lean(delta, on_floor)
 	if aim_mod:
-		aim_mod.kick = _kick
+		aim_mod.kick = _kick - _sprint_lean
 		aim_mod.pitch_scale = 1.0 - 0.7 * _prone_amt
 	var now := Time.get_ticks_msec() / 1000.0
 	var want_follow := 1.0 if (now < _follow_until or _healing) else 0.0
 	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
 	if weapon_node and weapon_id != "":
 		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
+
+
+## The lean into turns and the sprint's forward bend (see LEAN_PER_TURN).
+func _update_lean(delta: float, on_floor: bool) -> void:
+	var yaw := global_rotation.y
+	var rate := 0.0 if _last_yaw == INF or delta <= 0.0 else wrapf(yaw - _last_yaw, -PI, PI) / delta
+	_last_yaw = yaw
+	var run := clampf((_speed - 2.0) / 2.6, 0.0, 1.0) * (1.0 - _crouch_amt) * (1.0 - _prone_amt) * (1.0 if on_floor else 0.4)
+	var want := clampf(-rate * LEAN_PER_TURN * run, -LEAN_MAX, LEAN_MAX)
+	_lean = lerpf(_lean, want, 1.0 - exp(-8.0 * delta))
+	_sprint_lean = move_toward(_sprint_lean, SPRINT_LEAN * run if sprint else 0.0, delta * 0.8)
+	if root_scene:
+		root_scene.rotation.z = _lean
 
 
 ## Speed (m/s) at which a stance's moving cycle was authored (x), and the speed from which it has
