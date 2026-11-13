@@ -681,9 +681,10 @@ listed here. If a part needs something new from the core, add it in its own file
   key, no version bump). `NetVoice.channel()`: "match" (Game.session in session) / "group"
   (`Cloud.voice_group_ready()`) / ""; `sends(mode, channel, mates)`, `hears(mate, mode, muted)`,
   `gate_next(state, rms, need)` (GATE_FRAMES loud frames in a row from `need` open it, GATE_HANG
-  quiet ones close it; `gate_need()`: NEVER while another player's voice played here within
-  ECHO_MS, GATE_LOUD while the SFX / Voice bus peaked over OUT_LOUD_DB, else GATE_OPEN: the phone's
-  own loudspeaker is not sent back), `speaking(id)` ("" = this phone),
+  quiet ones close it; `gate_need()`: GATE_ECHO while another player's voice played here within
+  ECHO_MS (the own voice close to the phone gets through, the loudspeaker's quieter echo does not,
+  so a talker who never stops cannot shut the others out), GATE_LOUD while the SFX / Voice bus
+  peaked over OUT_LOUD_DB, else GATE_OPEN), `speaking(id)` ("" = this phone),
   `set_muted(id, on)` / `is_muted(id)` (session; blocked always), `hub().set_mic_mode(m)` (asks
   RECORD_AUDIO; refused: OFF + `mic_refused`), `set_speaker_mode(m)`, `toggle_speaker()`,
   `set_push_to_talk(on)`, `ptt_held`, `test_loop` (MIC TEST), `level`, `tone_source`; the app's

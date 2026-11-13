@@ -576,7 +576,8 @@ func _voice_units(frame: PackedByteArray) -> void:
 	for i in 12:
 		v.on_voice(frame, "x".repeat(32), false)
 	_check(((v._talkers["x".repeat(32)] as Dictionary).queue as Array).size() <= NetVoice.MAX_QUEUE, "a talker far behind catches up")
-	# A talker's voice queued here: the gate's need is NEVER (its echo), then back to GATE_OPEN.
+	# A talker's voice queued here: the gate needs GATE_ECHO (the own voice gets through, its echo
+	# does not; a talker who never stops cannot shut the others out), then back to GATE_OPEN.
 	v._echo_until = 0
 	v._loud_until = 0
 	var calm := v.gate_need()
@@ -587,8 +588,13 @@ func _voice_units(frame: PackedByteArray) -> void:
 	v._loud_until = Time.get_ticks_msec() + 1000
 	var loud := v.gate_need()
 	v._loud_until = 0
-	_check(calm == NetVoice.GATE_OPEN and echo == NetVoice.NEVER and loud == NetVoice.GATE_LOUD,
-		"the open mic stays shut while another player's voice plays on this phone, needs more while the game is loud: %s" % str([calm, echo, loud]))
+	var talk_over := {"open": false, "hang": 0, "loud": 0}
+	var echo_in := {"open": false, "hang": 0, "loud": 0}
+	var over := [NetVoice.gate_next(talk_over, 0.2, echo), NetVoice.gate_next(talk_over, 0.2, echo)]
+	var leak := [NetVoice.gate_next(echo_in, 0.06, echo), NetVoice.gate_next(echo_in, 0.06, echo)]
+	_check(calm == NetVoice.GATE_OPEN and echo == NetVoice.GATE_ECHO and loud == NetVoice.GATE_LOUD
+		and over == [false, true] and leak == [false, false],
+		"while another player's voice plays here the open mic needs the own voice (not the loudspeaker's echo), more while the game is loud: %s" % str([calm, echo, loud, over, leak]))
 	# The app goes to the background: the microphone stops at once, TALK is let go; back, it starts afresh.
 	var tone_was := NetVoice.tone_source
 	NetVoice.tone_source = false

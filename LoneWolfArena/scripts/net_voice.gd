@@ -13,10 +13,11 @@ extends Node
 ##    opponent too) / GROUP (the player's own group or team; with no teammates it sends nothing).
 ##    The open microphone sends only while the player speaks (`gate_next`: GATE_FRAMES frames in a
 ##    row louder than GATE_OPEN open it, GATE_HANG quiet frames close it, the frame before the voice
-##    goes too). A phone without headphones hears its own loudspeaker, so the gate does not open
-##    while another player's voice plays here (until ECHO_MS after it: half duplex, no echo sent
-##    back) and needs GATE_LOUD while the game's own sound is loud (shots, steps: OUT_LOUD_DB on the
-##    SFX or Voice bus); PUSH TO TALK (setting push_to_talk) sends only while TALK is held (`ptt_held`) and
+##    goes too). A phone without headphones hears its own loudspeaker, so while another player's
+##    voice plays here (until ECHO_MS after it) the gate needs GATE_ECHO: the player's own voice,
+##    close to the phone, gets through and the quieter echo of the loudspeaker does not (a talker who
+##    never stops cannot shut the others out), and it needs GATE_LOUD while the game's own sound is
+##    loud (shots, steps: OUT_LOUD_DB on the SFX or Voice bus); PUSH TO TALK (setting push_to_talk) sends only while TALK is held (`ptt_held`) and
 ##    runs the microphone only then.
 ##  - SPEAKER MODE (setting speaker_mode): OFF / ALL / GROUP (only teammates: Cloud.voice_from's
 ##    `mate`). A player muted for this session (`set_muted`) or blocked is never played.
@@ -59,7 +60,9 @@ const GATE_OPEN := 0.02
 const GATE_HANG := 6
 const GATE_FRAMES := 2                                   # loud frames in a row that open it (a click does not)
 const GATE_LOUD := 0.07                                  # what opens it while the game itself is loud (-23 dBFS)
-const ECHO_MS := 400                                     # after another player's voice played here: shut
+const ECHO_MS := 400                                     # after another player's voice played here: GATE_ECHO
+const GATE_ECHO := 0.12                                  # what opens it while another player's voice plays here (-18 dBFS:
+                                                         # the own voice close to the phone, not the loudspeaker's echo)
 const OUT_LOUD_DB := -12.0                               # the SFX / Voice bus peak that counts as loud (shots; not the ambience)
 const NEVER := 2.0                                       # (above any frame's RMS: the gate stays shut)
 const SPEAKING_MS := 450
@@ -177,8 +180,8 @@ static func sends(mode: int, ch: String, mate_n: int) -> String:
 
 
 ## The open microphone's gate over one frame's RMS. Shut, GATE_FRAMES frames in a row from `need`
-## open it (GATE_OPEN; GATE_LOUD while the game is loud; NEVER while another player's voice plays
-## here). Open, frames from GATE_OPEN keep it open (GATE_LOUD when `need` is higher: the player's own
+## open it (GATE_OPEN; GATE_LOUD while the game is loud; GATE_ECHO while another player's voice
+## plays here; NEVER: shut). Open, frames from GATE_OPEN keep it open (GATE_LOUD when `need` is higher: the player's own
 ## voice, close to the phone, is louder than its loudspeaker), GATE_HANG quieter ones close it.
 ## `state`: {"open", "hang", "loud"}.
 static func gate_next(state: Dictionary, rms: float, need := GATE_OPEN) -> bool:
@@ -532,12 +535,12 @@ func _frame(samples: PackedFloat32Array) -> void:
 		_prev.pop_front()
 
 
-## What opens the gate now: NEVER while another player's voice plays here (or just did: its echo),
-## GATE_LOUD while the game's own sound is loud, else GATE_OPEN.
+## What opens the gate now: GATE_ECHO while another player's voice plays here (or just did: its
+## echo), GATE_LOUD while the game's own sound is loud, else GATE_OPEN.
 func gate_need() -> float:
 	var now := Time.get_ticks_msec()
 	if now < _echo_until:
-		return NEVER
+		return GATE_ECHO
 	return GATE_LOUD if now < _loud_until else GATE_OPEN
 
 
