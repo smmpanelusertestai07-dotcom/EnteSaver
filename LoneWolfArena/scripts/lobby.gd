@@ -716,8 +716,8 @@ func _build_top_bar(root: Control) -> void:
 		root.add_child(lr)
 	var top_right := HBoxContainer.new()
 	top_right.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	top_right.offset_left = -200
-	top_right.offset_right = -10
+	top_right.offset_left = -220
+	top_right.offset_right = -6
 	top_right.offset_top = 6
 	top_right.offset_bottom = 6 + UI.TOUCH_MIN
 	top_right.alignment = BoxContainer.ALIGNMENT_END
@@ -732,7 +732,7 @@ func _build_top_bar(root: Control) -> void:
 	gear.name = "SettingsButton"
 	gear.pressed.connect(_open_settings)
 	top_right.add_child(gear)
-	root.add_child(NetPing.lobby_chip())        # the round trip to the relay (scripts/net_ping.gd)
+	top_right.add_child(NetPing.lobby_chip())   # the round trip to the relay, rightmost (scripts/net_ping.gd)
 
 
 ## The pencil (EDIT) button: a 56 px touch target (the 720 px canvas) with its plate drawn in the

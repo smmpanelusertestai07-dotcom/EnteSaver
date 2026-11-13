@@ -724,10 +724,12 @@ func _tick_room(delta: float, now := Time.get_ticks_msec()) -> void:
 		if _keep_t <= 0.0:
 			_keep_t = 1.0
 			_room_send({"k": "ka"})
-	if in_session and _arena_listens() and not (session_multi and is_host):
+	if in_session and _arena_listens():
 		# The round trip to the other phone: a numbered ping it answers at once (NetPing). Only
 		# once the arena is up on both: a phone that never gets its match loaded must still fall
-		# silent after LOAD_KEEP_MS, so the other one stops waiting for it.
+		# silent after LOAD_KEEP_MS, so the other one stops waiting for it. In an all-human match
+		# the members ping the host and the host pings the members (the first answer counts:
+		# builds before 1.9 do not answer the host, which then shows the relay's round trip).
 		_peer_ping_t -= delta
 		if _peer_ping_t <= 0.0:
 			_peer_ping_t = PEER_PING_S
@@ -4242,13 +4244,17 @@ func _on_multi(d: Dictionary) -> void:
 			if is_host or f == session_host_id:
 				_peer_ka_ms = now
 		"pi":
+			# (the host answers every member, a member only the host; "to" names whose ping it
+			# answers, so a member does not take the host's answer to another member's ping)
 			var i: Variant = d.get("i")
-			if is_host and in_session and (i is float or i is int) and _pong_budget >= 1.0 and _arena_listens():
+			if (is_host or f == session_host_id) and in_session and (i is float or i is int) and _pong_budget >= 1.0 \
+					and _arena_listens():
 				_pong_budget -= 1.0
-				_room_send({"k": "po", "i": int(i)})
+				_room_send({"k": "po", "i": int(i), "to": f})
 		"po":
 			var i: Variant = d.get("i")
-			if f == session_host_id and (i is float or i is int) and _peer_pings.has(int(i)):
+			var to: Variant = d.get("to", my_id)
+			if (is_host or f == session_host_id) and typeof(to) == TYPE_STRING and String(to) == my_id and (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, now - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
 		"chat":

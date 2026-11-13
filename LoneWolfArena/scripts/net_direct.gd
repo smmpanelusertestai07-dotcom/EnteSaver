@@ -24,6 +24,12 @@ extends RefCounted
 ##     TIMEOUT_MS: back to the relay at once, punching on in the background (and new candidates are
 ##     gathered and swapped every REGATHER_MS while it stays down).
 ##  5. A ping every PING_S over the direct path gives `rtt`, the match HUD's ping while it is up.
+##  6. Punching reaches the other phone by every address that works, so packets can come from
+##     several (its Wi-Fi address on a shared network, its IPv6 address, its IPv4 address behind the
+##     carrier's NAT). This phone sends to the best one heard within PATH_FRESH_MS (path_rank: the same
+##     local network first, then IPv6, which most Indian mobile networks give and which needs no
+##     NAT, then IPv4), not to whichever packet came last, so the path and its ping do not flip
+##     between them.
 ## What comes in goes through the same checks as the relay's (Cloud, Arena's token buckets and item
 ## caps, RemoteFighter's finite numbers). Automated runs stay off unless LW_DIRECT=local: then the
 ## only candidate is 127.0.0.1 and no STUN server is asked (two copies on one machine).
@@ -37,6 +43,7 @@ const PUNCH_MS := 4000           # the punching burst after candidates come (or 
 const PUNCH_S := 0.2
 const RETRY_S := 1.0             # punching while the path is down after the burst
 const TIMEOUT_MS := 1500         # nothing heard this long: the state goes back to the relay
+const PATH_FRESH_MS := 1000      # an address heard from within this counts for the choice of path
 const REGATHER_MS := 15000       # down this long: gather and swap candidates again
 const PING_S := 0.5
 const MAX_CANDIDATES := 8
@@ -71,6 +78,7 @@ var _rx_ms := -1                 # when the last valid packet came (-1: never)
 var _peer_hears := false         # the last valid packet said its sender heard us
 var _peer_ip := ""               # where the last valid packet came from (sent to first)
 var _peer_port := 0
+var _paths := {}                 # "ip|port" -> [ip, port, ms last heard]: every address the other phone answered from
 var _down_ms := 0                # when the path was last seen down (for REGATHER_MS)
 var _mapped := {}                # STUN answers: "ip|port" -> [ip, port]
 var _regathers := 0
@@ -180,8 +188,7 @@ func poll(now: int, delta: float) -> Array:
 			continue
 		_rx_ms = now
 		_peer_hears = d.get("h") == 1
-		_peer_ip = ip
-		_peer_port = from_port
+		_heard_from(ip, from_port, now)
 		match String(d.get("k", "")):
 			"pi":
 				var i: Variant = d.get("i")
@@ -221,6 +228,57 @@ func poll(now: int, delta: float) -> Array:
 			_pings.erase(_ping_n - 6)
 			_send({"k": "pi", "i": _ping_n}, now)
 	return out
+
+
+## A valid packet came from ip:from_port: the address this phone sends to is the best one heard
+## lately (best_path), so a worse path's packets do not pull the sends over to it.
+func _heard_from(ip: String, from_port: int, now: int) -> void:
+	var key := ip + "|" + str(from_port)
+	if not _paths.has(key) and _paths.size() >= MAX_CANDIDATES * 2:
+		for k: String in _paths.keys():
+			if now - int(_paths[k][2]) >= TIMEOUT_MS:
+				_paths.erase(k)
+		if _paths.size() >= MAX_CANDIDATES * 2:
+			_peer_ip = ip
+			_peer_port = from_port
+			return
+	_paths[key] = [ip, from_port, now]
+	var best := best_path(_paths.values(), now, PATH_FRESH_MS)
+	_peer_ip = String(best[0])
+	_peer_port = int(best[1])
+
+
+## The address to send to among `paths` ([ip, port, ms last heard]): the best path_rank heard within
+## `fresh_ms` of `now`, the most recent of those on a tie; [] when none is fresh.
+static func best_path(paths: Array, now: int, fresh_ms: int) -> Array:
+	var best := []
+	for p: Array in paths:
+		if now - int(p[2]) >= fresh_ms:
+			continue
+		if best.is_empty() or path_rank(String(p[0])) > path_rank(String(best[0])) \
+				or (path_rank(String(p[0])) == path_rank(String(best[0])) and int(p[2]) > int(best[2])):
+			best = p
+	return best
+
+
+## How good a path to the other phone at `ip` is: 3 the same local network (a private IPv4 address
+## or an IPv6 unique-local one: both phones on one Wi-Fi or hotspot, a few ms), 2 a global IPv6
+## address (no carrier NAT on the way), 1 an IPv4-mapped IPv6 or 100.64/10 (carrier NAT) address,
+## 0 any other (public IPv4).
+static func path_rank(ip: String) -> int:
+	var a := ip.to_lower()
+	if a.begins_with("::ffff:"):
+		a = a.substr(7)
+	if not a.contains(":"):
+		var o := a.split(".")
+		if o.size() != 4:
+			return 0
+		var x := int(o[0])
+		var y := int(o[1])
+		if x == 10 or (x == 192 and y == 168) or (x == 172 and y >= 16 and y < 32):
+			return 3
+		return 1 if x == 100 and y >= 64 and y < 128 else 0
+	return 3 if a.begins_with("fc") or a.begins_with("fd") else 2
 
 
 ## The path has been down REGATHER_MS (and candidates were swapped): gather again (true once).
