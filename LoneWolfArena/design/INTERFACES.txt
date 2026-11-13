@@ -1118,10 +1118,15 @@ Voice over the direct paths (X10): Cloud.send_voice sends a frame over the direc
   through the relay only, never both. Received frames pass every existing check (_on_multi_voice / _on_voice_msg).
 Team chat and quick talk (cloud.gd _on_talk, hud_net.gd):
   - "tc" {"s"}: a TEAM line sealed under the sender's GROUP key (_vk_seal; team_line_open on the receiver,
-    only from a voice_mate). Cloud.send_chat(text, team_only := false) -> "", "WAIT", "OFF", "EMPTY", "NO TEAM".
-  - "qc" {"i"} / "tq" {"s": sealed id}: a quick phrase by id (NetChat.quick_text: QUICK 0.., TEAM_QUICK from
-    TEAM_BASE 100); "stk" {"i"}: a sticker (NetChat.STICKERS, 0..5). Ids only, each phone shows its own copy;
-    the chat's rate (NetChat.RATE_S, receiver bucket "c"+id). Cloud.send_quick(id, team_only), send_sticker(id).
+    only from a voice_mate). Cloud.send_chat(text, team_only := false) -> "", "WAIT", "OFF", "EMPTY", "NO TEAM",
+    "OLD TEAM" (no live teammate takes TEAM lines). A 1.10 phone gives its GROUP key with "vk" {..., "v": 2};
+    Cloud.team_line_mates() -> [live teammates, those that said v 2]; 1.9.1 drops "tc" / "tq" / "tm". HudNet's
+    chat starts on ALL and goes to TEAM by itself once every teammate takes TEAM lines (unless picked).
+  - To ALL a quick phrase goes as "chat" {"x": its text, "i": id} and a sticker as "chat" {"x": its name,
+    "stk": id}: 1.9.1 shows "x"; 1.10 takes them as "qc" / "stk" by the id (Cloud._talk_kind). "tq" {"s": sealed
+    id}: a TEAM phrase (NetChat.quick_text: QUICK 0.., TEAM_QUICK from TEAM_BASE 100); stickers NetChat.STICKERS
+    0..5. Each phone shows its own copy of the phrase; the chat's rate (NetChat.RATE_S, receiver bucket "c"+id).
+    Cloud.send_quick(id, team_only), send_sticker(id).
   - "tm" {"s": sealed "x,y,z"}: a teammate's map marker; Cloud.send_marker(pos) at most one per MARKER_EVERY_MS
     (2 s), Cloud.markers id -> {"p", "t"}, live_markers() drops them after MARKER_MS (15 s).
   - Signals: chat_from(text, from_id, team_only) (chat_received stays for old listeners), sticker_from(id,
