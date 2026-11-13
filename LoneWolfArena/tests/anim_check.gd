@@ -2,6 +2,12 @@ extends Node
 ## Animation integration check (runs inside the game, headless is fine):
 ##   godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
 ## - every extra clip is merged into the character's player
+## - the hip carry: standing without a shot for Character.READY_HOLD s the gun hangs low in the
+##   right hand (carry_idle, carry_run_a/b on the arms while moving), a shot or the aim puts it on
+##   the crosshair at once and shots leave from the aim pose's muzzle (also the first one on the
+##   way up, after a crouch or prone, at any pitch); the sprint plays sprint_fwd
+##   at the speed it was made for (no foot sliding) and stops with the sprint
+## - an online opponent's jump plays the take-off, a step off a ledge the fall
 ## - the base-clip toe fix holds and is applied once (clips are shared by all characters)
 ## - procedural layers: the lean into a running turn, the sprint's forward bend, the lobby's look
 ##   round (and none of it after the lobby)
@@ -27,6 +33,10 @@ func run(autotest: Node) -> int:
 	_check_clips_and_toes()
 	_check_gait_playback()
 	_check_procedural_layers()
+	await _check_carry_and_sprint()
+	await _check_carry_muzzle()
+	_check_remote_jump()
+	_check_stance_clips()
 	await _check_swap_and_flinch()
 	await _check_throw()
 	at.log_line("ANIM CHECK DONE bad=%d" % bad)
@@ -67,14 +77,17 @@ func _lowest_toe(m: CharacterModel, clip: String) -> float:
 
 func _check_clips_and_toes() -> void:
 	var m1 := _model()
-	for clip in ["reload", "pump", "heal", "throw", "swap", "hit_react", "prone_idle", "prone_fwd", "punch_r", "punch_l"]:
+	for clip in ["reload", "pump", "heal", "throw", "swap", "hit_react", "prone_idle", "prone_fwd", "punch_r", "punch_l",
+			"carry_idle", "carry_run_a", "carry_run_b", "sprint_fwd", "jump_air", "jump_land", "victory_pose", "prone_up",
+			"lobby_hip", "lobby_shift", "lobby_look"]:
 		_expect(m1.anim.has_animation(clip), "clip merged: " + clip)
 	var toe1 := _lowest_toe(m1, "run_fwd")
 	var m2 := _model()      # second character: must not flip the shared clips back
 	var toe2 := _lowest_toe(m2, "run_fwd")
 	_expect(toe1 > -0.035, "run_fwd toes stay above the floor (lowest tip %.3f m)" % toe1)
 	_expect(absf(toe1 - toe2) < 0.002, "toe fix applied once (second model %.3f m)" % toe2)
-	for clip in ["crouch_fwd", "prone_fwd", "reload"]:
+	for clip in ["crouch_fwd", "prone_fwd", "reload", "sprint_fwd", "carry_idle", "runx_fwd", "runx_left", "runx_right", "runx_back",
+			"jump_land", "prone_up", "victory_pose", "lobby_hip", "lobby_shift", "lobby_look"]:
 		var lo := _lowest_toe(m1, clip)
 		_expect(lo > -0.035, "%s toes stay above the floor (lowest tip %.3f m)" % [clip, lo])
 	m1.queue_free()
@@ -179,6 +192,184 @@ func _check_procedural_layers() -> void:
 	m.revive()
 	_expect(m.aim_mod.twist == 0.0 and m.anim.speed_scale == 1.0, "no look round or pace change after the lobby")
 	m.queue_free()
+
+
+## anims_extra2's one-shots: a jump plays jump_air from its take-off, walking off a ledge from its
+## fall; a touch-down standing still plays jump_land (no crouch dip), running it is the dip; standing
+## up from prone plays prone_up (about 1 s), which moving cuts short; the results' victory pose
+## and the lobby's gesture clips.
+func _check_stance_clips() -> void:
+	var m := _model()
+	m.equip_weapon("weapon_ar")
+	var dt := 1.0 / 60.0
+	for _i in 30:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	_expect(String((m.tree.tree_root as AnimationNodeBlendTree).get_node("jump").get("animation")) == "jump_air", "the air layer plays jump_air")
+	m.on_jump()
+	_expect(m._jumped and m._air >= 0.5, "a jump goes straight into the take-off")
+	for _i in 40:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, false, dt)
+	m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	_expect(m._land_clip and int(m.tree.get("parameters/jump_land_shot/request")) == AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE,
+		"a touch-down standing still plays jump_land")
+	var dip := 0.0
+	for _i in 30:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		dip = maxf(dip, float(m.tree.get("parameters/crouch_blend/blend_amount")))
+	_expect(dip < 0.01, "and no crouch dip on top of it (%.2f)" % dip)
+	for _i in 40:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, false, dt)
+	m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	dip = 0.0
+	for _i in 20:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+		dip = maxf(dip, float(m.tree.get("parameters/crouch_blend/blend_amount")))
+	_expect(not m._land_clip and dip > 0.2, "a touch-down running bends the knees in step (dip %.2f), no landing clip" % dip)
+	for _i in 60:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.PRONE, true, dt)
+	m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	var up_len := m.anim.get_animation("prone_up").length
+	_expect(m.standing_up() and up_len > 0.8 and up_len < 1.2, "prone -> stand plays prone_up (%.2f s)" % up_len)
+	for _i in 10:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	_expect(not m.standing_up(), "moving cuts the stand-up short")
+	m.play_victory("victory_pose")
+	_expect(m.anim.current_animation == "victory_pose" and not m.tree.active, "the results' victory pose plays")
+	m.revive()
+	m.play_lobby()
+	m._gesture_in = 0.0
+	m._process(dt)                  # first gesture: the look round
+	m._look_to = 0.0
+	m._look = 0.0
+	m._gesture_in = 0.0
+	m._process(dt)                  # second: a gesture clip
+	_expect(String(m.anim.current_animation) in CharacterModel.LOBBY_GESTURES, "the lobby plays a gesture clip (%s)" % m.anim.current_animation)
+	m.revive()
+	m.queue_free()
+
+
+## The reference's hip carry and sprint (anims_extra2).
+func _check_carry_and_sprint() -> void:
+	var m := _model()
+	m.equip_weapon("weapon_ar")
+	var dt := 1.0 / 60.0
+	for _i in 10:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		await get_tree().process_frame
+	_expect(m.gun_up() and m._carry < 0.05, "a new model starts with the gun up (it learns the grip)")
+	var aimed_muzzle := m.muzzle_position()
+	var aimed_y := m.weapon_node.global_position.y
+	m._ready_until = 0.0
+	for _i in 40:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		await get_tree().process_frame
+	var idle_mix := float(m.tree.get("parameters/loco/idle/carry/blend_amount"))
+	var gun := m.weapon_node
+	var barrel := -gun.global_basis.z
+	var fwd := -m.global_basis.z
+	_expect(m._carry > 0.99 and idle_mix > 0.99, "no shot for a while: the relaxed carry_idle plays (%.2f)" % idle_mix)
+	_expect(gun.global_position.y < aimed_y - 0.25 and barrel.y < -0.4 and Vector3(barrel.x, 0, barrel.z).normalized().dot(fwd) > 0.95,
+		"the gun hangs low by the hip, muzzle down-forward (%.2f m lower, barrel %s)" % [aimed_y - gun.global_position.y, barrel])
+	var hand := m.bone_position("hand_r")
+	_expect(gun.global_position.distance_to(hand) < 0.12, "the carried gun stays in the right hand (%.3f m)" % gun.global_position.distance_to(hand))
+	_expect(m.muzzle_position().distance_to(aimed_muzzle) < 0.05, "a shot from the carry leaves from the aim pose's muzzle")
+	m.set_aim(0.0, -m.global_basis.z)
+	m.place_gun()
+	_expect((-gun.global_basis.z).dot(-m.global_basis.z) > 0.99 and m.gun_up(), "FIRE: the gun points along the aim at once")
+	_expect(m.muzzle_position().distance_to(aimed_muzzle) < 0.05,
+		"and that first shot leaves from the aim pose's muzzle, not the hip (%.3f m off)" % m.muzzle_position().distance_to(aimed_muzzle))
+	for _i in 12:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		await get_tree().process_frame
+	_expect(m._carry < 0.01 and gun.global_position.y > aimed_y - 0.05, "and the arms are up in the aim pose 0.2 s later")
+	m.aiming = true
+	m._ready_until = 0.0
+	for _i in 30:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	_expect(m._carry < 0.01, "scoped in, the gun stays up")
+	m.aiming = false
+	# Moving relaxed: the arms layer carries the gun and swings the free arm with the stride.
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	_expect(float(m.tree.get("parameters/carry_blend/blend_amount")) > 0.95, "running relaxed: the carry arms are on")
+	# The sprint: sprint_fwd at the speed it was made for, its feet as fast as the body.
+	m.sprint = true
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.SPRINT_SPEED), Fighter.Stance.STAND, true, dt)
+	var sb := float(m.tree.get("parameters/sprint_blend/blend_amount"))
+	var feet := float(m.tree.get("parameters/sprint_ts/scale")) * CharacterModel.SPRINT_AUTHORED
+	_expect(sb > 0.99 and absf(feet - m._speed) / m._speed < 0.03,
+		"sprinting: sprint_fwd plays (%.2f), its feet at %.2f m/s for a body at %.2f m/s" % [sb, feet, m._speed])
+	_expect(float(m.tree.get("parameters/carry_blend/blend_amount")) < 0.01 and m._carry_gun > 0.99,
+		"the sprint's own arms pump (no carry layer), the gun in the hand")
+	m.sprint = false
+	for _i in 30:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	_expect(float(m.tree.get("parameters/sprint_blend/blend_amount")) < 0.01, "the sprint cycle stops with the sprint")
+	m.queue_free()
+
+
+## Carried after a crouch or prone, or at another pitch, a shot still leaves from where the aim
+## pose's muzzle is now (bots and online opponents read muzzle_position before raising the gun).
+func _check_carry_muzzle() -> void:
+	var m := _model()
+	m.equip_weapon("weapon_ar")
+	var dt := 1.0 / 60.0
+	var steps := func(n: int, v: Vector2, stance: int) -> void:
+		for _i in n:
+			m.update_locomotion(v, stance, true, dt)
+			await get_tree().process_frame
+	var fresh := func(pitch: float) -> Vector3:
+		m.aiming = true
+		m.set_aim(pitch, (-m.global_basis.z).rotated(m.global_basis.x, pitch))
+		await steps.call(40, Vector2.ZERO, Fighter.Stance.STAND)
+		m.aiming = false
+		return m.muzzle_position()
+	var level: Vector3 = await fresh.call(0.0)
+	var up: Vector3 = await fresh.call(0.5)
+	var cases := [["crouch", Fighter.Stance.CROUCH, Vector2.ZERO], ["prone", Fighter.Stance.PRONE, Vector2(0, Fighter.RUN_SPEED)]]
+	for c: Array in cases:
+		m.set_aim(0.0, -m.global_basis.z)
+		m._ready_until = Time.get_ticks_msec() / 1000.0 + 5.0
+		await steps.call(90, Vector2.ZERO, c[1])          # the gun up in that stance
+		m._ready_until = 0.0
+		await steps.call(90, c[2], Fighter.Stance.STAND)   # standing (running) and carried a while
+		var dy := absf(m.muzzle_position().y - level.y)
+		_expect(m._carry > 0.5 and dy < 0.15, "carried after %s: the shot's muzzle is at the standing aim's height (%.3f m off)" % [c[0], dy])
+		await steps.call(30, Vector2.ZERO, Fighter.Stance.STAND)
+		var off := m.muzzle_position().distance_to(level)
+		_expect(m._carry > 0.9 and off < 0.05, "and standing still carried, at the standing aim muzzle (%.3f m off)" % off)
+	m.set_aim(0.5, (-m.global_basis.z).rotated(m.global_basis.x, 0.5))
+	await steps.call(5, Vector2.ZERO, Fighter.Stance.STAND)
+	var off_up := m.muzzle_position().distance_to(up)
+	_expect(m._carry > 0.9 and off_up < 0.08, "carried, aiming up: the muzzle follows the pitch (%.3f m off)" % off_up)
+	m.queue_free()
+
+
+## An online opponent's jump plays the take-off (a rise off the floor), a step off a ledge the fall.
+func _check_remote_jump() -> void:
+	var r := RemoteFighter.new()
+	r.process_mode = Node.PROCESS_MODE_DISABLED
+	add_child(r)
+	r.setup_fighter("default", "ar")
+	var st := RemoteFighter.pack(r)
+	st[0] = 0.0
+	st[1] = 1.0
+	st[2] = 0.0
+	st[6] = 8.0
+	r.apply_state(st)
+	st[1] = 1.15
+	st[6] = 0.0
+	r.apply_state(st)
+	_expect(r.model._jumped, "an online opponent rising off the floor: its jump plays the take-off")
+	r.model._jumped = false
+	st[6] = 8.0
+	r.apply_state(st)
+	st[1] = 1.1
+	st[6] = 0.0
+	r.apply_state(st)
+	_expect(not r.model._jumped, "stepping off a ledge (no rise): the fall pose, no take-off")
+	r.free()
 
 
 func _check_swap_and_flinch() -> void:

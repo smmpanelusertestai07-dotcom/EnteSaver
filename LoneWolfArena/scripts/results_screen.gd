@@ -474,7 +474,7 @@ func _build_hero_view() -> void:
 	model.rotation.y = PI - 0.3              # (faces the camera a little turned, as on the lobby podium)
 	model.setup(String(Game.profile.get("bundle", "default")), false)
 	if _kind == "victory":
-		model.play_victory()
+		model.play_victory("victory_pose")
 	else:
 		model.play_lobby()
 

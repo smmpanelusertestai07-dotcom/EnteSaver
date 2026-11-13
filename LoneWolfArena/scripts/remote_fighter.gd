@@ -16,6 +16,7 @@ var _net_pos := Vector3.INF
 var _net_yaw := 0.0
 var _net_pitch := 0.0
 var _net_floor := true
+var _net_y := INF          # the height in the last state (a rise off the floor is a jump)
 var _net_heal := false
 ## Its HP as this phone's own hits leave it: its reports come back a round trip late, so a hit
 ## shows (and counts) what it will really take there, never more than is left (hit_points: the
@@ -106,7 +107,10 @@ func apply_state(s: PackedFloat32Array, sent_ms := -1) -> void:
 	var on_floor := (flags & 8) != 0
 	if on_floor and not _net_floor:
 		Audio.play_at("land", pos, -9.0)       # back on its feet after a jump or a drop
+	elif _net_floor and not on_floor and pos.y > _net_y + 0.02 and model != null:
+		model.on_jump()                         # off the floor going up: the take-off, not the fall
 	_net_floor = on_floor
+	_net_y = pos.y
 	var heal := (flags & 4) != 0 or (flags & 32) != 0      # (a revive plays the healing motion)
 	if heal != _net_heal:
 		_net_heal = heal
@@ -172,6 +176,7 @@ func _physics_process(delta: float) -> void:
 	w.tick(delta)
 	var local_v := Basis(Vector3.UP, aim_yaw).inverse() * velocity
 	model.sprint = sprinting
+	model.aiming = ads
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, _net_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
 	# Its steps as loud as a bot's (a run carries, a walk or a crouch only close by) and its
