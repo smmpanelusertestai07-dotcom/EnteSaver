@@ -264,7 +264,7 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	le.size_flags_horizontal = Control.SIZE_FILL
 	le.custom_minimum_size = Vector2(250, 52)
 	me.add_child(le)
-	var go := UI.glyph_button("v_scope", 52.0, "GO")
+	var go := UI.search_button(52.0)
 	go.name = "FriendSearchGo"
 	go.tooltip_text = "SEARCH"
 	var search := func() -> void:

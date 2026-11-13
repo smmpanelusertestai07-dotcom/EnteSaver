@@ -190,6 +190,7 @@ func build(v: VBoxContainer) -> void:
 	var quick_sc := ScrollContainer.new()
 	quick_sc.name = "ChatQuick"
 	quick_sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	quick_sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	quick_sc.custom_minimum_size = Vector2(0, 48)
 	conv.add_child(quick_sc)
 	var quick := HBoxContainer.new()
@@ -251,7 +252,7 @@ func _fill_people(people: VBoxContainer) -> void:
 			b.add_theme_stylebox_override(stn, StyleBoxEmpty.new())
 		var card: Dictionary = cloud.directory.get(f, {})
 		var avatar := String(card.get("avatar", Game.DEFAULT_PROFILE.avatar))
-		var unread := NetChat.unread(f)
+		var unread := NetChat.unread(f) if f != id else 0     # (the open one is marked read)
 		var online := cloud.peers.has(f)
 		b.draw.connect(func() -> void:
 			var s := b.size

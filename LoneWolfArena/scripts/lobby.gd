@@ -598,6 +598,8 @@ func _build_ui() -> void:
 	_build_top_bar(root)
 	_build_right_column(root)
 	_build_bottom_bar(root)
+	_build_chat_strip(root)
+	_build_add_button(root)
 	team.build(root)
 	_build_podium_invite(root)
 	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
@@ -782,6 +784,7 @@ func _build_bottom_bar(root: Control) -> void:
 	bar.add_child(row)
 	var items := [
 		["WARDROBE", "v_wardrobe", "BundlesButton", _open_wardrobe],
+		["PROFILE", "v_profile", "ProfileButton", _open_profile],
 		["ONLINE 1 VS 1", "v_online", "OnlineButton", _open_friends.bind("online")],
 	]
 	for i in items.size():
@@ -794,6 +797,126 @@ func _build_bottom_bar(root: Control) -> void:
 			row.add_child(line)
 		var it: Array = items[i]
 		row.add_child(_bar_button(String(it[0]), String(it[1]), String(it[2]), it[3]))
+
+
+## The chat strip above the bottom bar (the reference's chat icons and one-line ticker): a speech
+## bubble button (ChatButton) and the newest friend message as "[FRIEND] NAME: text" (ChatTicker,
+## "[FRIENDS] TAP TO CHAT WITH A FRIEND" when there is none); a tap opens the chat panel with that
+## friend, or FRIENDS when there is nobody to chat with yet.
+func _build_chat_strip(root: Control) -> void:
+	var strip := Button.new()
+	strip.name = "ChatStrip"
+	strip.focus_mode = Control.FOCUS_NONE
+	strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	strip.offset_left = 12
+	strip.offset_right = 12 + 470
+	strip.offset_top = -12 - UI.TOUCH_MIN - 8 - 48
+	strip.offset_bottom = -12 - UI.TOUCH_MIN - 8
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		strip.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var ticker := UI.ellipsis(UI.label("", 17, UI.TEXT, "semi"))
+	ticker.name = "ChatTicker"
+	UI.outlined(ticker, 3, Color(0, 0, 0, 0.6))
+	ticker.position = Vector2(62, 0)
+	ticker.size = Vector2(404, 48)
+	ticker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	strip.add_child(ticker)
+	strip.draw.connect(func() -> void:
+		var hot := strip.is_pressed()
+		var r := Rect2(0, 2, 52, 44)
+		strip.draw_rect(r, Color(0, 0, 0, 0.62) if not hot else Color(UI.ACCENT, 0.35))
+		strip.draw_rect(r, Color(1, 1, 1, 0.22), false, 1.0)
+		# our speech bubble: a rounded box with a tail and three dots
+		var b := Rect2(r.position + Vector2(11, 9), Vector2(30, 21))
+		strip.draw_rect(b, UI.TEXT)
+		strip.draw_colored_polygon(PackedVector2Array([b.position + Vector2(6, b.size.y), b.position + Vector2(15, b.size.y),
+			b.position + Vector2(5, b.size.y + 8)]), UI.TEXT)
+		for i in 3:
+			strip.draw_circle(b.position + Vector2(8 + i * 7, b.size.y * 0.5), 2.2, UI.INK)
+		strip.draw_rect(Rect2(58, 12, 2, 24), Color(1, 1, 1, 0.5))
+		var n := NetChat.unread_total()
+		if n > 0:
+			strip.draw_circle(Vector2(48, 6), 9.0, UI.BAD)
+			strip.draw_string(UI.font("bold"), Vector2(39, 11), str(mini(n, 9)), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE))
+	strip.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		var who := chat_ticker_friend()
+		if who == "":
+			_open_friends("friends")
+		else:
+			LobbyNet.open(self, who, String(Game.profile.friends[who].name), ""))
+	root.add_child(strip)
+	_refresh_chat_strip()
+
+
+## The friend the chat strip opens: the newest message's (unread first), else the first friend
+## online, else the first friend; "" with no friends (not blocked).
+func chat_ticker_friend() -> String:
+	var best := ""
+	var best_ts := -1
+	for f: String in Game.profile.friends:
+		if Game.is_blocked(f):
+			continue
+		var msgs := NetChat.messages(f)
+		var ts := int((msgs.back() as Array)[0]) if not msgs.is_empty() else -1
+		if NetChat.unread(f) > 0:
+			ts += 1 << 40
+		if ts > best_ts or best == "":
+			best = f
+			best_ts = ts
+	return best
+
+
+var _chat_shown := ""
+var _chat_t := 0.0
+
+
+## The ticker follows the newest friend message (checked twice a second from _process).
+func _refresh_chat_strip() -> void:
+	var strip := _main_ui.get_node_or_null("ChatStrip") as Button if _main_ui else null
+	if strip == null:
+		return
+	var who := chat_ticker_friend()
+	var text := "[FRIENDS] TAP TO CHAT WITH A FRIEND"
+	if who != "":
+		var msgs := NetChat.messages(who)
+		if not msgs.is_empty():
+			var m: Array = msgs.back()
+			text = "[FRIEND] %s: %s" % [String(Game.profile.name) if bool(m[1]) else String(Game.profile.friends[who].name),
+				NetChat.first_words(String(m[2]), 40)]
+	var key := text + "|" + str(NetChat.unread_total())
+	if key == _chat_shown:
+		return
+	_chat_shown = key
+	(strip.get_node("ChatTicker") as Label).text = text
+	strip.queue_redraw()
+
+
+## ADD (right side, as the reference's add-friend button): a person with a plus over its caption;
+## opens FRIENDS on PLAYERS, where every player can be added.
+func _build_add_button(root: Control) -> void:
+	var b := Button.new()
+	b.name = "AddFriendButton"
+	b.focus_mode = Control.FOCUS_NONE
+	b.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	b.offset_left = -84
+	b.offset_right = -14
+	b.offset_top = -10
+	b.offset_bottom = 60
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var col := UI.ACCENT if b.is_pressed() else UI.TEXT
+		HudDraw.icon(b, HudDraw.tex("v_friend_add"), Vector2(b.size.x * 0.5, 22), Vector2(36, 36), col)
+		var f := UI.font("heavy")
+		b.draw_string_outline(f, Vector2(0, 60), "ADD", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 18, 4, Color(0, 0, 0, 0.6))
+		b.draw_string(f, Vector2(0, 60), "ADD", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 18, col))
+	b.button_down.connect(b.queue_redraw)
+	b.button_up.connect(b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		_open_friends("online"))
+	root.add_child(b)
 
 
 ## One button of the bottom bar: the glyph and the caption, white, accent while pressed.
@@ -898,7 +1021,7 @@ func _build_right_column(root: Control) -> void:
 	text.add_theme_constant_override("separation", -4)
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mode_card.add_child(text)
-	_mode_label = UI.shadowed(UI.label("", 32, UI.AMBER, "heavy"))
+	_mode_label = UI.shadowed(UI.label("", 32, UI.TEXT, "heavy"))
 	_mode_label.name = "ModeName"
 	text.add_child(_mode_label)
 	var line := HBoxContainer.new()
@@ -967,9 +1090,10 @@ func _draw_mode_card() -> void:
 	var s := c.size
 	var a := 0.98 if c.is_pressed() else 0.92
 	var pts := UI.chamfer_points(Rect2(Vector2.ZERO, s), 12.0, ["tl"])
-	var warm := Color(0.16, 0.12, 0.07, a)
-	var dark := Color(0.07, 0.06, 0.05, a)
-	c.draw_polygon(pts, PackedColorArray([warm, warm, dark, dark, Color(0.12, 0.09, 0.06, a)]))
+	var purple := Color(0.37, 0.21, 0.58, a)        # (#5E3595)
+	var blue := Color(0.23, 0.33, 0.77, a)          # (#3B55C4)
+	c.draw_polygon(pts, PackedColorArray([purple, purple.lerp(blue, 0.6), blue, blue.lerp(purple, 0.3), purple]))
+	c.draw_rect(Rect2(0, 0, s.x * 0.55, s.y), Color(0, 0, 0, 0.18))
 	var thumb := Rect2(s.x - 128, 6, 120, s.y - 12)
 	draw_mode_art(c, Game.mode, thumb)
 	c.draw_rect(thumb, Color(1, 1, 1, 0.35), false, 1.5)
@@ -978,7 +1102,9 @@ func _draw_mode_card() -> void:
 	var cx := s.x - 150.0
 	c.draw_polyline(PackedVector2Array([Vector2(cx - 9, 18), Vector2(cx, 27), Vector2(cx + 9, 18)]),
 		UI.ACCENT if hot else Color(1, 1, 1, 0.8), 3.0, true)
-	c.draw_rect(Rect2(0, s.y - 2, s.x, 2), UI.ACCENT if hot else Color(UI.AMBER, 0.8))
+	var frame := pts.duplicate()
+	frame.append(pts[0])
+	c.draw_polyline(frame, UI.ACCENT if not hot else UI.ACCENT.lightened(0.3), 2.0, true)
 
 
 ## The mode card follows Game.mode and the opponent chosen in SELECT MODE (the bot's level, or
@@ -1504,6 +1630,10 @@ func _process(delta: float) -> void:
 	_time += delta
 	_idle_t += delta
 	friends.process(delta)
+	_chat_t -= delta
+	if _chat_t <= 0.0:
+		_chat_t = 0.5
+		_refresh_chat_strip()
 	if _cam_t < 1.0:
 		_cam_t = minf(1.0, _cam_t + delta / 0.45)
 		var k := 1.0 - pow(1.0 - _cam_t, 3.0)

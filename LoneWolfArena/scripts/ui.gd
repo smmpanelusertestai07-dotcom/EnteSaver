@@ -1009,5 +1009,25 @@ static func empty_state(text: String, link_text := "") -> VBoxContainer:
 ## A full page's backdrop: the dark purple-brown ramp with a soft warm glow up right.
 static func draw_page_bg(ci: CanvasItem, s: Vector2) -> void:
 	ci.draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(s.x, 0), s, Vector2(0, s.y)]),
-		PackedColorArray([Color(PAGE_TOP, 0.97), Color(PAGE_TOP.lerp(PAGE_BOTTOM, 0.4), 0.97), Color(PAGE_BOTTOM, 0.97), Color(PAGE_TOP.lerp(PAGE_BOTTOM, 0.6), 0.97)]))
+		PackedColorArray([PAGE_TOP, PAGE_TOP.lerp(PAGE_BOTTOM, 0.4), PAGE_BOTTOM, PAGE_TOP.lerp(PAGE_BOTTOM, 0.6)]))
 	ci.draw_texture_rect(radial_glow(Color(0.85, 0.45, 0.25, 0.14)), Rect2(s.x * 0.45, -s.y * 0.35, s.x * 0.7, s.y * 0.9), false)
+
+
+## The search button beside a search box: a white square with a dark magnifier (the reference's
+## search button shape, our own drawing).
+static func search_button(size := 52.0) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(size, size)
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", box(Color(0.92, 0.92, 0.92), 0, 0, Color.TRANSPARENT, 0.0))
+	b.add_theme_stylebox_override("hover", box(Color.WHITE, 0, 0, Color.TRANSPARENT, 0.0))
+	b.add_theme_stylebox_override("pressed", box(ACCENT, 0, 0, Color.TRANSPARENT, 0.0))
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var c := b.size * 0.5 - Vector2(3, 3)
+		var r := b.size.y * 0.2
+		b.draw_arc(c, r, 0.0, TAU, 28, INK, 3.0, true)
+		var d := Vector2(1, 1).normalized()
+		b.draw_line(c + d * (r + 1.0), c + d * (r + b.size.y * 0.2), INK, 4.0, true))
+	b.pressed.connect(func() -> void: Audio.play("ui_click", -4.0))
+	return b
