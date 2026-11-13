@@ -112,8 +112,8 @@ const RUN_MODE_NOTES := [
 ## needs no button: a drag while standing already turns the camera round the fighter; the eye
 ## button only matters while running (the run keeps its direction while the view turns).
 const FREELOOK_NOTES := [
-	"No eye button. Standing still, a drag on the right side already turns the camera round you; while you run, a drag turns the run with it",
-	"Hold the eye button and drag to look around while you run: the run keeps its direction. Standing still, a drag already turns the camera round",
+	"No eye button. Standing still, a drag turns the camera round you; running, a drag turns the run",
+	"Hold the eye button and drag to look round while you run; the run keeps its direction",
 ]
 ## The left fire choices left to right as values of the setting (0 always, 1 while aiming, 2 off:
 ## the values of version 5 keep their meaning).
