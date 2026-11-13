@@ -691,9 +691,15 @@ func _history_content(e: Dictionary, now: int) -> HBoxContainer:
 	var word := UI.label(String(RESULT_WORDS.get(r, "DEFEAT")), 23, col, "heavy")
 	word.name = "Result"
 	sv.add_child(word)
-	var score := UI.label("%d - %d" % [int(e.get("score", 0)), int(e.get("enemy_score", 0))], 20, UI.TEXT, "number")
-	score.name = "Score"
-	sv.add_child(score)
+	if e.get("left_by_them", false) == true:
+		# a win because the opponent left: the rounds (often 0 - 2) would read as a loss
+		var gone := UI.label("OPPONENT LEFT", 12, UI.TEXT_DIM, "heavy")
+		gone.name = "OpponentLeft"
+		sv.add_child(gone)
+	else:
+		var score := UI.label("%d - %d" % [int(e.get("score", 0)), int(e.get("enemy_score", 0))], 20, UI.TEXT, "number")
+		score.name = "Score"
+		sv.add_child(score)
 	hb.add_child(slab)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL

@@ -103,6 +103,9 @@ func run(at: Node) -> int:
 	_check(rows == (Game.profile.history as Array).size() and row0 != null and _text(row0, "Result") == "VICTORY"
 		and _text(row0, "Enemy") == "VS  NIGHTFOX21" and _text(row0, "Score") == "5 - 3" and _text(row0, "When").ends_with("MIN AGO"),
 		"HISTORY lists every match, newest first (%d rows)" % rows)
+	var row1 := layer.find_child("HistoryRow_1", true, false)
+	_check(row1 != null and _text(row1, "Result") == "VICTORY" and row1.find_child("OpponentLeft", true, false) != null
+		and row1.find_child("Score", true, false) == null, "a win because the opponent left: VICTORY over OPPONENT LEFT, no 0 - 2")
 	_touch_targets(layer, "HISTORY")
 	await _at.shot("p02_history")
 	# A match against another player opens their card (a bot match is a plain row); back returns.
@@ -392,7 +395,7 @@ func _sample_profile() -> Dictionary:
 		"blocked": [{"id": _id(BLOCKED_UNKNOWN), "name": "", "t": now - 9 * 86400},
 			{"id": _id(BLOCKED_KNOWN[0]), "name": BLOCKED_KNOWN[1], "t": now - 2 * 86400}]}, true)
 	# [result, mode, opponent, score, theirs, kills, damage, headshots, minutes ago]
-	var matches := [["won", "lonewolf", FRIEND[1], 5, 3, 5, 1214, 3, 25], ["lost", "lonewolf", "VIPERQUEEN", 2, 5, 2, 640, 1, 130],
+	var matches := [["won", "lonewolf", FRIEND[1], 5, 3, 5, 1214, 3, 25], ["won", "lonewolf", "VIPERQUEEN", 0, 2, 0, 180, 0, 130, true],
 		["won", "training", "BOT VIPER", 5, 2, 5, 1176, 3, 190], ["draw", "training", "BOT ONYX", 4, 4, 4, 912, 1, 300],
 		["won", "training", "BOT KAI", 5, 0, 5, 1003, 6, 1500], ["lost", "training", "BOT TITAN", 3, 5, 3, 801, 0, 1600],
 		["left", "training", "BOT ONYX", 1, 2, 1, 356, 0, 1700],
@@ -406,6 +409,8 @@ func _sample_profile() -> Dictionary:
 		var opp_id := "" if m[1] == "training" else String(ids.get(m[2], _id("tour-" + String(m[2]).to_lower())))
 		history.append({"result": m[0], "mode": m[1], "enemy": m[2], "id": opp_id,
 			"score": m[3], "enemy_score": m[4], "kills": m[5], "damage": m[6], "headshots": m[7], "t": now - int(m[8]) * 60})
+		if m.size() > 9:
+			history[-1]["left_by_them"] = true      # a win because the opponent left (no rounds played out)
 	p.history = history
 	return p
 

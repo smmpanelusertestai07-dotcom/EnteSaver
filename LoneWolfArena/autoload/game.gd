@@ -586,8 +586,9 @@ func _sanitize_profile() -> void:
 
 ## One HISTORY entry from saved or untrusted data (see DEFAULT_PROFILE "history"): every value
 ## checked, names cleaned; {} when it is not one (an unknown result). A match played without
-## internet (PLAY WITHOUT INTERNET) also has "local": true; a DUO / SQUAD match "size", "bots" and
-## "with" (1 vs 1 entries keep their ten keys).
+## internet (PLAY WITHOUT INTERNET) also has "local": true, a win because the opponent left the
+## match "left_by_them": true (old entries have neither: false); a DUO / SQUAD match "size", "bots"
+## and "with" (1 vs 1 entries keep their ten keys).
 func _history_entry(e: Variant) -> Dictionary:
 	if not e is Dictionary:
 		return {}
@@ -603,8 +604,10 @@ func _history_entry(e: Variant) -> Dictionary:
 		"score": _count(d.get("score"), 99), "enemy_score": _count(d.get("enemy_score"), 99),
 		"kills": _count(d.get("kills"), 999), "damage": _count(d.get("damage"), 999999),
 		"headshots": _count(d.get("headshots"), 9999), "t": _count(d.get("t"), UNIX_MAX)}
-	if d.get("local") == true:
+	if _flag(d.get("local")):
 		out["local"] = true          # PLAY WITHOUT INTERNET (HISTORY shows LONE WOLF · LOCAL)
+	if _flag(d.get("left_by_them")):
+		out["left_by_them"] = true   # won because the opponent left (HISTORY: VICTORY, OPPONENT LEFT)
 	var size := _count(d.get("size"), 4)
 	if size in [2, 4]:               # DUO / SQUAD (HISTORY shows "DUO · VS BOTS", "SQUAD · WITH NAME")
 		out["size"] = size
@@ -952,7 +955,7 @@ func record_match(result: Dictionary) -> void:
 		"mode": result.get("mode_id"), "enemy": result.get("enemy"), "id": result.get("enemy_id"),
 		"score": result.get("score_player"), "enemy_score": result.get("score_bot"), "kills": result.get("kills"),
 		"damage": result.get("damage"), "headshots": result.get("headshots"), "t": int(Time.get_unix_time_from_system()),
-		"local": result.get("local", false)}
+		"local": result.get("local", false), "left_by_them": won and _flag(result.get("opponent_left"))}
 	if bool(result.get("team", false)):
 		raw.merge({"size": result.get("team_size", team_match.get("size", 0)), "bots": result.get("bots", 0),
 			"with": result.get("with", team_mate_name(team_match))})

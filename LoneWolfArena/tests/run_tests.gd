@@ -107,6 +107,7 @@ func _ready() -> void:
 	TeamRulesUnit.run(self)       # DUO / SQUAD rules: knocks, revives, rounds (tests/team_rules_unit.gd)
 	TeamNetUnit.run(self)         # DUO / SQUAD between two phones (tests/team_net_unit.gd)
 	GroupLobbyUnit.run(self)      # GROUPS in the lobby: bar, START gating, podium, texts (tests/group_lobby_unit.gd)
+	preload("res://tests/menus_unit.gd").run(self)   # out of the match, round 8 (tests/menus_unit.gd)
 	print("TESTS: %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
 
