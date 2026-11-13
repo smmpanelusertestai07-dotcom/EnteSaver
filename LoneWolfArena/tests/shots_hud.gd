@@ -121,7 +121,7 @@ func run(at: Node) -> int:
 	_check(p.crosshair_on_target, "crosshair turns red on the bot", at)
 	# MINIMAP: the bot in sight is a red arrowhead pointing where it faces; shots fired out of sight
 	# leave fading red marks where they were (never its live position).
-	var mm_k := hud.minimap.size.x / HudMinimap.VIEW_M
+	var mm_k := hud.minimap.size.x / HudMinimap.view_m(arena.get("map_rect"))
 	var marks := HudMinimap.enemy_marks(arena.get("fighters"), p, null, hud.seen, Transform2D(0.0, Vector2(mm_k, mm_k), 0.0, Vector2.ZERO))
 	_check(marks.size() == 1 and (marks[0].dir as Vector2).is_equal_approx(Vector2(-sin(b.aim_yaw), -cos(b.aim_yaw))),
 		"the minimap draws the bot in sight as an arrowhead facing its way", at)

@@ -670,27 +670,27 @@ func _test_minimap() -> void:
 		var me := xf * pp
 		var ahead := xf * (pp + fwd * 5.0)
 		var to_right := xf * (pp + right * 5.0)
-		ok_mid = ok_mid and me.distance_to(c) < 0.01
-		ok_ahead = ok_ahead and ahead.y < me.y - 40.0 and absf(ahead.x - me.x) < 0.01
-		ok_right = ok_right and to_right.x > me.x + 40.0 and absf(to_right.y - me.y) < 0.01
-		ok_len = ok_len and is_equal_approx((ahead - me).length(), 5.0 * side / HudMinimap.VIEW_M)
+		ok_mid = ok_mid and (xf * mr.get_center()).distance_to(c) < 0.01
+		ok_ahead = ok_ahead and ahead.y < me.y - 25.0 and absf(ahead.x - me.x) < 0.01
+		ok_right = ok_right and to_right.x > me.x + 25.0 and absf(to_right.y - me.y) < 0.01
+		ok_len = ok_len and is_equal_approx((ahead - me).length(), 5.0 * side / HudMinimap.view_m(mr))
 		ok_ahead = ok_ahead and HudMinimap.view_dir(xf, fwd).is_equal_approx(Vector2(0, -1))
-	_check(ok_mid, "a turned minimap keeps the player in its middle")
+	_check(ok_mid, "a turned minimap shows the whole map round its centre (round 8)")
 	_check(ok_ahead, "turned with the view: a point ahead of the player is drawn straight above it, its arrow points up")
 	_check(ok_right, "turned with the view: a point to the player's right is drawn to its right")
-	_check(ok_len, "turning keeps the scale (VIEW_M metres edge to edge)")
+	_check(ok_len, "turning keeps the scale (view_m metres edge to edge)")
 	# North up: north (-Z) is up whatever way the player faces; the window stops at the map's edge.
 	var n_yaw := 1.2
 	var n_pp := Vector2(-20, 0)
 	var n_xf := HudMinimap.view_xform(n_pp, n_yaw, side, mr, false)
 	_check(HudMinimap.view_dir(n_xf, Vector2(0, -1)).is_equal_approx(Vector2(0, -1))
 		and (n_xf * Vector2(n_pp.x + 1, n_pp.y)).x > (n_xf * n_pp).x, "north up: north is up and east is right")
-	_check((n_xf * mr.position).x > -0.01 and (n_xf * mr.position).x < 0.01 and (n_xf * n_pp).x < c.x,
-		"north up: near the map's west edge the window stops there and the player is drawn left of the middle")
+	_check((n_xf * mr.position).x > 0.0 and (n_xf * mr.end).x < side and (n_xf * n_pp).x < c.x,
+		"north up: the whole map fits and the player near the west edge is drawn left of the middle")
 	var n_dir := HudMinimap.view_dir(n_xf, Vector2(-sin(n_yaw), -cos(n_yaw)))
 	_check(n_dir.is_equal_approx(Vector2(-sin(n_yaw), -cos(n_yaw))), "north up: the player's arrow turns instead")
 	var wr := HudMinimap.view_world_rect(HudMinimap.view_xform(Vector2.ZERO, PI / 4.0, side, mr, true), side)
-	_near(wr.size.x, HudMinimap.VIEW_M * sqrt(2.0), "a turned map at 45 degrees shows the window's diagonal", 0.01)
+	_near(wr.size.x, HudMinimap.view_m(mr) * sqrt(2.0), "a turned map at 45 degrees shows the window's diagonal", 0.01)
 	# Marks go through the same transform: an enemy ahead is drawn above, facing as drawn.
 	var foe := Fighter.new()
 	var me_f := Fighter.new()
@@ -703,7 +703,8 @@ func _test_minimap() -> void:
 	foe.position = me_f.position + Vector3(-sin(0.7), 0, -cos(0.7)) * 6.0
 	var xf2 := HudMinimap.view_xform(Vector2(2, 3), 0.7, side, mr, true)
 	var marks := HudMinimap.enemy_marks([foe, me_f], me_f, null, {foe: true}, xf2)
-	_check(marks.size() == 1 and (marks[0].pos as Vector2).y < c.y - 40.0 and absf((marks[0].pos as Vector2).x - c.x) < 0.01
+	var me2 := xf2 * Vector2(2, 3)
+	_check(marks.size() == 1 and (marks[0].pos as Vector2).y < me2.y - 30.0 and absf((marks[0].pos as Vector2).x - me2.x) < 0.01
 		and (marks[0].dir as Vector2).is_equal_approx(Vector2(0, -1)), "an enemy ahead, facing the same way, is drawn above the player pointing up")
 	foe.free()
 	me_f.free()

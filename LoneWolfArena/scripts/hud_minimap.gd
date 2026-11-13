@@ -1,15 +1,16 @@
 class_name HudMinimap
 extends Control
-## The HUD's square minimap: a window of the arena's top-down render (arena.minimap_texture over
-## arena.map_rect) around the player, the player arrow with its view cone, the enemy as a red
+## The HUD's square minimap: the arena's top-down render (arena.minimap_texture over arena.map_rect)
+## shown whole (round 8: view_m, the walls outlined in white on a dark slate), the player's arrow
+## where the player is, the player arrow with its view cone, the enemy as a red
 ## arrowhead at its place, pointing where it faces, only while in sight; out of sight its shots
 ## leave small red marks where they were fired that fade over HUD.SHOT_SHOW s (never its live
 ## position), its running steps red footprints; and the white safe-zone circle. By default (the
 ## setting minimap_turns, SETTINGS > DISPLAY > MINIMAP: TURNS WITH VIEW) the map turns with the
-## view: the player stays in the middle with its arrow pointing up, so what is ahead is drawn above
-## it and what is to its right to its right, and everything on it (marks, teammates, footprints,
+## view: the player's arrow points up, so what is ahead is drawn above it and what is to its right
+## to its right, and everything on it (marks, teammates, footprints,
 ## shots, the zone) turns with the map; a small N on the edge shows where north is. NORTH UP keeps
-## north up: the window follows the player, stops at the map's edges, and the arrow turns.
+## north up and the arrow turns.
 ## Both are one transform in the draw (view_xform: world X/Z to minimap pixels), no extra
 ## viewport. It clips its drawing to its own rect; until the render exists (first frames) a dark
 ## floor plan from arena.obstacles stands in, and the HUD editor shows a stand-in plan turned the
@@ -17,7 +18,7 @@ extends Control
 ## teammates always, as dots in their list colour with their number (a knocked one in a red ring, one out of the
 ## round not at all); every enemy as in the 1 vs 1 (ally_marks, enemy_marks).
 
-const VIEW_M := 28.0                       # metres shown edge to edge
+const VIEW_M := 28.0                       # metres shown edge to edge on a map too big to show whole (view_m)
 const ARROW := Color(0.16, 0.8, 0.88)      # player arrow (cyan, like the reference)
 
 var hud                                    # the HUD (untyped: data is read dynamically)
@@ -57,18 +58,38 @@ static func turns() -> bool:
 	return bool(Game.settings.get("minimap_turns", true))
 
 
-## World X/Z (metres) to minimap pixels for a minimap `side` px square around the player at `pp`
-## looking along `yaw` (Fighter.aim_yaw: forward is (-sin, -cos) in X/Z, north is -Z). `turn`: the
-## player in the middle with its forward up (the map turned by yaw); else north up, a VIEW_M
-## window following the player that stops at the map's edges (`mr`).
+## Metres the minimap shows edge to edge on a map: the whole map (its longer side + 5 %), like the
+## reference's whole-cage minimap; VIEW_M (a window round the player) only on maps too big for that.
+const WHOLE_MAP_MAX := 80.0
+static func view_m(mr: Rect2) -> float:
+	var whole := maxf(mr.size.x, mr.size.y) * 1.05
+	return whole if whole > 1.0 and whole <= WHOLE_MAP_MAX else VIEW_M
+
+
+## The world point (X/Z) in the minimap's middle: the player, moved in so that at most ~10 % of the
+## view lies outside the map (a view wider than the map: the map's centre on that axis).
+static func view_center(pp: Vector2, mr: Rect2, vm: float) -> Vector2:
+	var c := pp
+	var slack := vm * 0.1
+	for ax in 2:
+		if vm >= mr.size[ax]:
+			c[ax] = mr.get_center()[ax]
+		else:
+			c[ax] = clampf(pp[ax], mr.position[ax] + vm * 0.5 - slack, mr.end[ax] - vm * 0.5 + slack)
+	return c
+
+
+## World X/Z (metres) to minimap pixels for a minimap `side` px square on the map `mr` for the player
+## at `pp` looking along `yaw` (Fighter.aim_yaw: forward is (-sin, -cos) in X/Z, north is -Z). The
+## view (view_m metres across) centres on view_center. `turn`: the map turned by yaw so the
+## player's forward is up; else north up.
 static func view_xform(pp: Vector2, yaw: float, side: float, mr: Rect2, turn: bool) -> Transform2D:
-	var k := side / VIEW_M
+	var vm := view_m(mr)
+	var k := side / vm
+	var c := view_center(pp, mr, vm)
 	if turn:
-		return Transform2D(yaw, Vector2(k, k), 0.0, Vector2(side, side) * 0.5) * Transform2D(0.0, -pp)
-	var half := VIEW_M * 0.5
-	var origin := pp - Vector2(half, half)
-	origin.x = clampf(origin.x, mr.position.x, mr.end.x - VIEW_M) if mr.size.x > VIEW_M else mr.get_center().x - half
-	origin.y = clampf(origin.y, mr.position.y, mr.end.y - VIEW_M) if mr.size.y > VIEW_M else mr.get_center().y - half
+		return Transform2D(yaw, Vector2(k, k), 0.0, Vector2(side, side) * 0.5) * Transform2D(0.0, -c)
+	var origin := c - Vector2(vm, vm) * 0.5
 	return Transform2D(0.0, Vector2(k, k), 0.0, -origin * k)
 
 
@@ -90,7 +111,7 @@ static func view_world_rect(xf: Transform2D, side: float) -> Rect2:
 func _draw() -> void:
 	var s := size
 	var o := opacity
-	draw_rect(Rect2(Vector2.ZERO, s), Color(0.075, 0.085, 0.095, 0.9 * o))
+	draw_rect(Rect2(Vector2.ZERO, s), Color(0.16, 0.17, 0.19, 0.9 * o))     # dark slate outside the map
 	if hud == null or hud.editor_mode or hud.arena == null or hud.player == null:
 		_placeholder(s, o, turns())
 		_frame(s, o)
@@ -101,7 +122,7 @@ func _draw() -> void:
 	var pp := Vector2(player.global_position.x, player.global_position.z)
 	var turn := turns()
 	var xf := view_xform(pp, player.aim_yaw, s.x, mr, turn)
-	var k := s.x / VIEW_M
+	var k := s.x / view_m(mr)
 	# The floor plan: drawn in world units through the view's transform, only the part on screen.
 	var shown := view_world_rect(xf, s.x).intersection(mr)
 	var tex := _map_texture(arena)
@@ -116,8 +137,9 @@ func _draw() -> void:
 		for r: Rect2 in arena.get("obstacles"):
 			draw_rect(r, Color(0.55, 0.6, 0.66, 0.55 * o))
 		draw_set_transform_matrix(Transform2D.IDENTITY)
-		draw_polyline(PackedVector2Array([xf * mr.position, xf * Vector2(mr.end.x, mr.position.y), xf * mr.end,
-			xf * Vector2(mr.position.x, mr.end.y), xf * mr.position]), Color(1, 1, 1, 0.6 * o), 2.0)
+	# The arena's walls: a white outline, always (the reference's cage outline).
+	draw_polyline(PackedVector2Array([xf * mr.position, xf * Vector2(mr.end.x, mr.position.y), xf * mr.end,
+		xf * Vector2(mr.position.x, mr.end.y), xf * mr.position]), Color(1, 1, 1, 0.85 * o), 1.6, true)
 	# Safe zone (once the fight started).
 	var zr: float = arena.get("zone_radius")
 	if zr < 200.0:

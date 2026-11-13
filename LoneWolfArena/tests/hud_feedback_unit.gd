@@ -13,6 +13,7 @@ static func run(runner: Node) -> void:
 	me._test_damage_numbers()
 	me._test_migration_v8()
 	me._test_hit_bloom()
+	me._test_minimap_whole()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -106,3 +107,26 @@ func _test_hit_bloom() -> void:
 	var vs := Vector2(1280, 720)
 	_check(is_equal_approx(HUD.hit_bloom_radius(vs, false) * 2.0, 80.0), "the hit ring is 1/16 of the width across")
 	_check(HUD.hit_bloom_radius(vs, true) > HUD.hit_bloom_radius(vs, false), "a headshot's ring is larger")
+
+
+## At the spawn (an end alcove) the minimap shows the whole arena: the view covers map_rect along
+## its long side (a turned map may clip the corners), with at most ~10 % of the view outside it.
+func _test_minimap_whole() -> void:
+	var mr := Rect2(-27.6, -15.6, 55.2, 31.2)          # the arena's map_rect (MapBuilder)
+	var side := 200.0
+	var spawn := Vector2(-25.0, 0.0)
+	var vm := HudMinimap.view_m(mr)
+	_check(vm >= 55.2 and vm <= 60.0, "the view is the map's long side + 5 %% (%.1f m)" % vm)
+	var xf := HudMinimap.view_xform(spawn, 0.0, side, mr, false)
+	var shown := HudMinimap.view_world_rect(xf, side)
+	_check(shown.encloses(mr), "north up at the spawn: the view covers map_rect (%s)" % shown)
+	var xt := HudMinimap.view_xform(spawn, PI * 0.5, side, mr, true)
+	var a := xt * Vector2(mr.position.x, mr.get_center().y)
+	var b := xt * Vector2(mr.end.x, mr.get_center().y)
+	_check(Rect2(0, 0, side, side).grow(0.5).has_point(a) and Rect2(0, 0, side, side).grow(0.5).has_point(b),
+		"turned at the spawn: both short walls are on the minimap")
+	var outside := 1.0 - shown.intersection(mr.grow(0.0)).get_area() / shown.get_area()
+	_check(HudMinimap.view_center(spawn, Rect2(-100, -100, 200, 200), 28.0).distance_to(spawn) < 0.01,
+		"on a big map the view follows the player")
+	_check(HudMinimap.view_m(Rect2(-100, -100, 200, 200)) == HudMinimap.VIEW_M, "a map too big to show whole keeps the 28 m window")
+	_check(shown.get_center().distance_to(mr.get_center()) < 0.01, "the map sits in the middle of the view (%.0f %% of the view is outside its long walls)" % (outside * 100.0))
