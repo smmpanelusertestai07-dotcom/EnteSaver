@@ -44,7 +44,7 @@ static func build(panel: SettingsPanel) -> void:
 		DisplayServer.clipboard_set(id)
 		copy.text = "COPIED")
 	box.add_child(copy)
-	body.add_child(UI.plate_row("Player ID", box, "A guest profile: no account, kept only on this phone. Friends add you by this ID"))
+	body.add_child(panel._plate("Player ID", box, "A guest profile: no account, kept only on this phone. Friends add you by this ID"))
 	body.add_child(UI.spacer(4))
 	body.add_child(UI.section("TOOLS"))
 	body.add_child(panel.cache_row())

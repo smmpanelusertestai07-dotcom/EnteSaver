@@ -978,29 +978,47 @@ func _test_settings_panel() -> void:
 	_check(shown.keys().all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k))
 		and SettingsPanel.NOT_SHOWN.all(func(k: String) -> bool: return Game.DEFAULT_SETTINGS.has(k) and not shown.has(k)),
 		"the tabs and the not-shown list name real settings")
-	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT"] and SettingsPanel.ORDER == [0, 2, 1, 3, 4, 5],
-		"the tabs: DISPLAY, CONTROLS, SENSITIVITY, SOUND, ONLINE, ACCOUNT")
+	_check(SettingsPanel.TABS == ["DISPLAY", "SENSITIVITY", "CONTROLS", "SOUND", "ONLINE", "ACCOUNT", "HUD", "VIBRATION"]
+		and SettingsPanel.MENU.map(func(m: Array) -> String: return String(m[0])) == ["IN-MATCH", "DISPLAY", "SOUND", "ONLINE", "ACCOUNT"]
+		and SettingsPanel.MENU[0][1] == [6, 2, 1, 7], "the tabs: IN-MATCH (HUD, CONTROLS, SENSITIVITY, VIBRATION), DISPLAY, SOUND, ONLINE, ACCOUNT")
+	var pages := []
+	for m: Array in SettingsPanel.MENU:
+		pages.append_array(m[1])
+	pages.sort()
+	_check(pages == range(SettingsPanel.TABS.size()), "every page is in the tab column once")
 	_check(SettingsPanel.TAB_KEYS[0] == ["graphics_auto", "graphics", "fps", "visual_effects", "minimap_turns"],
 		"DISPLAY: graphics (AUTO), frame rate, visual effects, the minimap's turning")
-	_check(["dynamic_joystick", "aim_precision", "left_fire", "freelook_button", "vibrate_footsteps", "vibrate_damage", "vibrate_shooting"].all(
-		func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]), "CONTROLS: joystick, aim precision, left fire, free look and the vibration rows")
+	_check(["dynamic_joystick", "aim_precision", "left_fire", "freelook_button"].all(
+		func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]), "CONTROLS: joystick, aim precision, left fire, free look")
 	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and "vibration" in SettingsPanel.TAB_KEYS[4]
-		and (SettingsPanel.TAB_KEYS[5] as Array).is_empty(), "SOUND: effects, music, voice; ONLINE: the lobby's vibration; ACCOUNT: no setting")
-	_check(SettingsPanel.VIBRATION_ROWS.map(func(r: Array) -> String: return String(r[1])) == ["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"],
-		"VIBRATION: enemy footsteps, taking damage, shooting")
+		and (SettingsPanel.TAB_KEYS[5] as Array).is_empty() and (SettingsPanel.TAB_KEYS[6] as Array).is_empty(),
+		"SOUND: effects, music, voice; ONLINE: the lobby's vibration; ACCOUNT and HUD: no setting")
+	_check(SettingsPanel.VIBRATION_ROWS.map(func(r: Array) -> String: return String(r[1])) == ["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"]
+		and SettingsPanel.TAB_KEYS[7] == ["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"], "VIBRATION: enemy footsteps, taking damage, shooting")
 	var sens: Array = SettingsPanel.TAB_KEYS[1]
 	_check(sens == SettingsPanel.SENS_ROWS.map(func(r: Array) -> String: return String(r[1])) and sens.size() == 5 and not ("sens_fire" in sens),
 		"SENSITIVITY shows its five rows in order (no fire-button drag)")
-	_check(SettingsPanel.PRESET_NAMES == ["STANDARD", "FAST"] and SettingsPanel.SENS_PRESETS.size() == 2, "two presets: STANDARD and FAST")
-	var dp: Dictionary = SettingsPanel.SENS_PRESETS.STANDARD
-	var fp: Dictionary = SettingsPanel.SENS_PRESETS.FAST
+	_check(SettingsPanel.PRESET_NAMES == ["DEFAULT", "HIGH"] and SettingsPanel.SENS_PRESETS.size() == 2, "two presets: DEFAULT and HIGH")
+	var dp: Dictionary = SettingsPanel.SENS_PRESETS.DEFAULT
+	var fp: Dictionary = SettingsPanel.SENS_PRESETS.HIGH
 	_check(dp.size() == 5 and sens.all(func(k: String) -> bool: return dp.has(k) and int(dp[k]) == int(Game.DEFAULT_SETTINGS[k])),
-		"the STANDARD preset is the defaults of all five")
+		"the DEFAULT preset is the defaults of all five")
+	# The rows show the reference's 0-100 scale: our defaults read 65 / 85 / 65 / 75 / 65, the ends 0 and 100.
+	var scale_ok := true
+	for k: String in sens:
+		var lim: Array = Game.SETTING_RANGES[k]
+		scale_ok = scale_ok and SettingsPanel.sens_shown(k, int(Game.DEFAULT_SETTINGS[k])) == int(SettingsPanel.SENS_SHOWN[k])
+		scale_ok = scale_ok and SettingsPanel.sens_shown(k, int(lim[0])) == 0 and SettingsPanel.sens_shown(k, int(lim[1])) == 100
+		scale_ok = scale_ok and SettingsPanel.sens_value(k, int(SettingsPanel.SENS_SHOWN[k])) == int(Game.DEFAULT_SETTINGS[k])
+		scale_ok = scale_ok and SettingsPanel.sens_value(k, 0) == int(lim[0]) and SettingsPanel.sens_value(k, 100) == int(lim[1])
+		for x in range(0, 101, 5):
+			scale_ok = scale_ok and absi(SettingsPanel.sens_shown(k, SettingsPanel.sens_value(k, x)) - x) <= 1
+	_check(scale_ok and SettingsPanel.SENS_SHOWN.values() == [65, 85, 65, 75, 65], "sensitivity shows 0-100 with our defaults at 65 / 85 / 65 / 75 / 65")
 	var in_range := fp.size() == 5
 	for k: String in sens:
 		var lim: Array = Game.SETTING_RANGES[k]
 		in_range = in_range and fp.has(k) and int(fp[k]) >= int(lim[0]) and int(fp[k]) <= int(lim[1])
-	_check(in_range and int(fp.sens_general) > int(dp.sens_general), "the FAST preset sets all five, faster, within range")
+	_check(in_range and int(fp.sens_general) > int(dp.sens_general), "the HIGH preset sets all five, faster, within range")
 	_check(SettingsPanel.PRECISION_NAMES.size() == int(Game.SETTING_RANGES.aim_precision[1]) + 1
 		and SettingsPanel.PRECISION_NOTES.size() == SettingsPanel.PRECISION_NAMES.size()
 		and SettingsPanel.LEFT_FIRE_NAMES.size() == int(Game.SETTING_RANGES.left_fire[1]) + 1, "every aim precision and left fire value has a choice")
@@ -1026,31 +1044,57 @@ func _test_settings_panel() -> void:
 		"a confirmed RESET on SENSITIVITY restores all five")
 	panel._apply_preset(1)
 	_check(panel._preset_index() == 1 and Game.settings.sens_2x == fp.sens_2x and Game.settings.sens_freelook == fp.sens_freelook,
-		"the FAST preset applies all five")
+		"the HIGH preset applies all five")
 	var slider: HSlider = (panel._sens_rows.sens_freelook as Control).get_meta("slider")
-	slider.value = 90
-	_check(Game.settings.sens_freelook == 90 and panel._preset_index() == -1, "a slider moved off the preset applies at once")
+	_check(int(slider.value) == SettingsPanel.sens_shown("sens_freelook", int(fp.sens_freelook)), "the preset moves the sliders on the 0-100 scale")
+	slider.value = 50
+	_check(Game.settings.sens_freelook == SettingsPanel.sens_value("sens_freelook", 50) and panel._preset_index() == -1,
+		"a slider moved off the preset applies at once")
+	_check(panel._sel == "sens_freelook" and panel.find_child("Preview", true, false).visible, "moving a slider selects its row (the preview follows)")
 	panel._show_tab(2)
-	panel._set_precision(2)
-	_check(Game.settings.aim_precision == 2 and panel._aim_note.text == SettingsPanel.PRECISION_NOTES[2], "aim precision applies and explains itself")
+	_check(panel._sel == "aim" and panel.find_child("Preview", true, false).visible and panel.find_child("SubTabs", true, false).visible,
+		"CONTROLS: the preview picture and the IN-MATCH sub-tabs, the first row selected")
+	(panel.find_child("AimPrecision", true, false).get_child(2) as Button).pressed.emit()
+	_check(Game.settings.aim_precision == 2 and panel._desc.text.contains(SettingsPanel.PRECISION_NOTES[2])
+		and panel.preview_info().spot == "fire_r", "aim precision applies and explains itself under the picture")
+	(panel.find_child("Toggle_reload_button", true, false).get_child(0) as Button).pressed.emit()
+	_check(panel._sel == "reload_button" and Game.settings.reload_button == false and panel.preview_info().spot == "reload"
+		and panel.preview_info().value == "OFF", "a row's control selects the row: the picture rings its button, the text follows the value")
+	Game.settings.reload_button = true
 	var joy := panel.find_child("Toggle_dynamic_joystick", true, false)
 	_check(joy != null and (joy.get_child(0) as Button).text == "DYNAMIC" and (joy.get_child(0) as Button).button_pressed,
 		"MOVEMENT: the joystick reads DYNAMIC first, picked by default")
-	panel._set_joystick(1)
-	_check(Game.settings.dynamic_joystick == false and panel._joy_note.text == SettingsPanel.JOYSTICK_NOTES[1], "FIXED keeps the stick in its place")
+	(joy.get_child(1) as Button).pressed.emit()
+	_check(Game.settings.dynamic_joystick == false and panel._desc.text.contains(SettingsPanel.JOYSTICK_NOTES[1]), "FIXED keeps the stick in its place")
 	for r: Array in SettingsPanel.VIBRATION_ROWS:
-		_check(panel.find_child("Toggle_" + String(r[1]), true, false) != null, "CONTROLS has the vibration row %s" % r[0])
+		_check(panel.find_child("Toggle_" + String(r[1]), true, false) == null, "the vibration row %s is not on CONTROLS" % r[0])
 	_check(panel.find_child("CrosshairColor", true, false) == null and panel.find_child("CrosshairSize", true, false) == null
 		and panel.find_child("CrosshairPreview", true, false) == null and panel.find_child("AimPrecision", true, false) != null
 		and panel.find_child("LeftFire", true, false) != null, "CONTROLS: aim precision and the left fire button, no crosshair colour or size")
 	Game.settings.merge({"dynamic_joystick": false, "left_fire": 1, "vibrate_damage": true, "freelook_button": true}, true)
 	panel._reset_tab()
 	_check(Game.settings.dynamic_joystick == true and Game.settings.aim_precision == 0 and Game.settings.left_fire == 0
-		and Game.settings.vibrate_damage == false and Game.settings.freelook_button == false,
-		"RESET on CONTROLS restores the joystick, aim precision, left fire, free look and the vibration rows")
+		and Game.settings.vibrate_damage == true and Game.settings.freelook_button == false,
+		"RESET on CONTROLS restores the joystick, aim precision, left fire and free look (not VIBRATION's rows)")
+	panel._show_tab(7)
+	_check(SettingsPanel.VIBRATION_ROWS.all(func(r: Array) -> bool: return panel.find_child("Toggle_" + String(r[1]), true, false) != null)
+		and panel.find_child("SubTabs", true, false).visible and not panel.find_child("Preview", true, false).visible,
+		"VIBRATION: its three rows, under the IN-MATCH sub-tabs, no picture")
+	panel._reset_tab()
+	_check(Game.settings.vibrate_damage == false, "RESET on VIBRATION turns the rows back to their defaults")
+	panel._show_tab(6)
+	_check(panel.find_child("EditHud", true, false) != null and panel.find_child("HudTile", true, false) != null
+		and not (panel.find_child("Reset", true, false) as Control).visible, "HUD: our HUD's picture with CUSTOM on it, no RESET")
 	panel._show_tab(0)
 	var gseg := panel.find_child("GraphicsChoice", true, false)
 	_check(gseg != null and gseg.get_child_count() == 5, "graphics: AUTO and the four levels")
+	var gtiles := panel.find_child("GraphicsTiles", true, false)
+	_check(gtiles != null and gtiles.get_child_count() == 4 and not panel.find_child("SubTabs", true, false).visible,
+		"graphics: a picture tile for each level; DISPLAY has no sub-tabs")
+	for i in Game.GRAPHICS_NAMES.size():
+		_check(ResourceLoader.exists(SettingsPanel.PIC_DIR + "gfx_%d.png" % i), "the picture of %s is in the game" % Game.GRAPHICS_NAMES[i])
+	for pic in ["hud.png", "hud_eye.png", "map_turn.png", "map_north.png"]:
+		_check(ResourceLoader.exists(SettingsPanel.PIC_DIR + pic), "the settings picture %s is in the game" % pic)
 	_check(panel.find_child("Toggle_show_fps", true, false) == null and panel.find_child("Toggle_vibration", true, false) == null
 		and panel.find_child("ClearCache", true, false) == null, "DISPLAY: no FPS counter, vibration or cache rows")
 	panel._on_graphics(3)
@@ -1060,10 +1104,14 @@ func _test_settings_panel() -> void:
 	_check(panel._ask_layer != null and Game.settings.graphics == 2 and (gseg.get_child(3) as Button).button_pressed
 		and not (gseg.get_child(4) as Button).button_pressed, "EXTREME asks first (it can heat the phone); the row keeps HIGH meanwhile")
 	(panel._ask_layer.find_child("ConfirmOk", true, false) as Button).pressed.emit()
-	_check(Game.settings.graphics == 3 and (gseg.get_child(4) as Button).button_pressed, "confirmed: EXTREME")
+	_check(Game.settings.graphics == 3 and (gseg.get_child(4) as Button).button_pressed and (gtiles.get_child(3) as Button).button_pressed,
+		"confirmed: EXTREME (its picture framed)")
 	panel._on_graphics(0)
 	_check(Game.settings.graphics_auto == true and panel._graphics_note.text == "AUTO picked EXTREME for this phone",
 		"AUTO names the level it picked (%s)" % panel._graphics_note.text)
+	(gtiles.get_child(1) as Button).pressed.emit()
+	_check(Game.settings.graphics == 1 and Game.settings.graphics_auto == false and (gseg.get_child(2) as Button).button_pressed,
+		"a picture tile picks its level (MEDIUM), AUTO off")
 	var fseg := panel.find_child("FpsChoice", true, false)
 	_check(fseg != null and fseg.get_child_count() == Game.fps_choices().size(), "the frame-rate row offers this screen's rates")
 	var changes := [0]

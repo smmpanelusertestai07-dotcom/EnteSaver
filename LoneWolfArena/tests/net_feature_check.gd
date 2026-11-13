@@ -552,8 +552,8 @@ func _volumes() -> void:
 	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and sliders.size() == 3
 		and panel.find_child("Stepper_vol_voice", true, false) != null, "the SOUND tab: effects, music and voice chat")
 	if sliders.size() == 3:
-		(sliders[0] as HSlider).value = 30
-		(sliders[1] as HSlider).value = 20
+		(sliders[0] as HSlider).value = 20         # GAME AUDIO: music first, as the reference
+		(sliders[1] as HSlider).value = 30
 		(sliders[2] as HSlider).value = 0
 	var db := func(bus: String) -> float: return AudioServer.get_bus_volume_db(AudioServer.get_bus_index(bus))
 	_check(Game.settings.vol_sfx == 30 and absf(float(db.call("SFX")) - linear_to_db(0.3)) < 0.01
