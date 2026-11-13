@@ -151,7 +151,10 @@ func run(at: Node) -> int:
 	await at.wait(0.2)
 	var tn := HudNet.attach(hud)
 	await at.wait(0.3)
-	_check(tn.team_tabs() and tn.channel == "team", "a DUO with a human teammate: the chat starts on TEAM")
+	_check(tn.team_tabs() and tn.channel == "all", "a DUO whose teammate has not said it takes TEAM lines: the chat starts on ALL")
+	fake._vkeys = {"tour-m2": {"ch": fake._vk_channel(), "v2": true}}
+	await at.wait(0.2)
+	_check(tn.channel == "team", "a DUO with a human teammate that takes TEAM lines: the chat goes to TEAM")
 	_check(tn.button_centers().has("quickchat") and tn.button_centers().has("marker"), "the quick-chat bubble and MARKER show in a DUO")
 	tn._on_chat_from("PUSH LEFT, I COVER", "tour-m2", true)
 	tn._on_chat_from("GG EASY", "tour-e1", false)

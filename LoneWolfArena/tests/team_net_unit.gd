@@ -659,6 +659,28 @@ func _talk_unit() -> void:
 	_check(cl.live_markers().get("b") == Vector3(4.0, 0.5, -6.25), "a teammate's marker is kept")
 	cl.markers.b.t = Time.get_ticks_msec() - Cloud.MARKER_MS - 1
 	_check(not cl.live_markers().has("b"), "a marker is gone after 15 s")
+	# Phrases and stickers to ALL go as plain "chat" lines with the id beside the text (1.9.1 shows
+	# the text, 1.10 its own copy / the icon); TEAM lines only once a teammate says it takes them.
+	cl._buckets.clear()
+	room.call({"k": "chat", "x": "WHATEVER", "i": 1}, "c")
+	_check(got.size() == 4 and got[3] == [NetChat.QUICK[1], "c", false], "a phrase as a chat line shows this phone's own text (%s)" % str(got))
+	cl._buckets.clear()
+	room.call({"k": "chat", "x": "LAUGH", "stk": 1}, "c")
+	_check(got.size() == 4 and stk.size() == 2 and stk[1] == [1, "c"], "a sticker as a chat line shows as the sticker, not as text")
+	cl._aes = Crypto.new().generate_random_bytes(32)
+	cl._mac = Crypto.new().generate_random_bytes(32)
+	var out := func() -> Dictionary: return cl._unseal(cl.sent[cl.sent.size() - 1][1], cl._aes, cl._mac)
+	_check(cl.send_quick(2) == "" and out.call().k == "chat" and out.call().x == NetChat.QUICK[2] and int(out.call().i) == 2,
+		"a quick phrase to ALL goes as a chat line every build shows (%s)" % str(out.call()))
+	cl._chat_out_ms = 0
+	_check(cl.send_sticker(3) == "" and out.call().k == "chat" and out.call().x == NetChat.STICKERS[3] and int(out.call().stk) == 3,
+		"a sticker goes as a chat line with its name (%s)" % str(out.call()))
+	cl._chat_out_ms = 0
+	_check(cl.team_line_mates() == [1, 0] and cl.send_chat("hold here", true) == "OLD TEAM" and cl.send_quick(NetChat.TEAM_BASE, true) == "OLD TEAM",
+		"with a teammate that never said it takes TEAM lines (1.9.1), nothing goes out as TEAM")
+	cl._vkeys.b.v2 = true
+	_check(cl.team_line_mates() == [1, 1] and cl.send_chat("hold here", true) == "" and out.call().k == "tc",
+		"a teammate that takes TEAM lines gets them")
 	cl.in_session = false
 	cl.session_multi = false
 	for c: Cloud in [cl, mate, enemy, other_key]:

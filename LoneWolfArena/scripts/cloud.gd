@@ -2696,6 +2696,7 @@ func _on_room(msg: PackedByteArray) -> void:
 	_last_heard = Time.get_ticks_msec()
 	_present(_last_heard)            # (this phone is back in the match: it hears the other one)
 	var kind := String((d as Dictionary).get("k", ""))
+	kind = _talk_kind(d as Dictionary, kind)
 	if in_session and not kind in LOAD_KINDS:
 		# (a phone that comes back after a restart says "ka" while its arena loads, and offers
 		# its direct link: its fighter stays frozen here, and can be hit, until the arena is up)
@@ -2731,6 +2732,8 @@ func _on_room(msg: PackedByteArray) -> void:
 				_in_match_unix = Time.get_unix_time_from_system()
 				_save_resume()
 				_decline_waiting()
+				if voice_mates() > 0:
+					_vk_sync()       # (the co-op mate gets this phone's GROUP key: it learns TEAM lines go)
 				session_started.emit(is_host)
 		"st":
 			if _on_state_msg(d as Dictionary):
@@ -3194,6 +3197,9 @@ func send_chat(text: String, team_only := false) -> String:
 	if team_only:
 		if voice_mates() == 0:
 			return "NO TEAM"
+		if int(team_line_mates()[1]) == 0:
+			_vk_sync()
+			return "OLD TEAM"
 		_chat_out_ms = now
 		_vk_sync()
 		_room_send({"k": "tc", "s": Marshalls.raw_to_base64(_vk_seal(line.to_utf8_buffer()))})
@@ -3201,6 +3207,19 @@ func send_chat(text: String, team_only := false) -> String:
 	_chat_out_ms = now
 	_room_send({"k": "chat", "x": line})
 	return ""
+
+
+## A quick phrase or sticker to everyone goes as a plain "chat" line that every build shows (its
+## text in "x"), with the id beside it ("i" a NetChat.QUICK id, "stk" a sticker): builds from 1.10
+## take it as "qc" / "stk" by the id (their own copy of the phrase, the sticker's icon); 1.9.1 and
+## older show "x" and never see a "qc" or "stk" message, which they would drop.
+static func _talk_kind(d: Dictionary, kind: String) -> String:
+	if kind != "chat" or not (d.has("i") or d.has("stk")):
+		return kind
+	kind = "stk" if d.has("stk") else "qc"
+	d["i"] = d.get("stk", d.get("i"))
+	d["k"] = kind
+	return kind
 
 
 ## The quick-chat bubble's messages from a match player: a quick phrase by id ("qc" {"i"} to all,
@@ -3257,12 +3276,15 @@ func send_quick(id: int, team_only := false) -> String:
 	if team_only:
 		if voice_mates() == 0:
 			return "NO TEAM"
+		if int(team_line_mates()[1]) == 0:
+			_vk_sync()
+			return "OLD TEAM"
 		_vk_sync()
 		_chat_out_ms = now
 		_room_send({"k": "tq", "s": Marshalls.raw_to_base64(_vk_seal(str(id).to_utf8_buffer()))})
 		return ""
 	_chat_out_ms = now
-	_room_send({"k": "qc", "i": id})
+	_room_send({"k": "chat", "x": NetChat.quick_text(id), "i": id})     # (_talk_kind: 1.9.1 shows the text)
 	return ""
 
 
@@ -3276,7 +3298,7 @@ func send_sticker(id: int) -> String:
 	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
 		return "WAIT"
 	_chat_out_ms = now
-	_room_send({"k": "stk", "i": id})
+	_room_send({"k": "chat", "x": String(NetChat.STICKERS[id]), "stk": id})     # (_talk_kind: 1.9.1 shows its name)
 	return ""
 
 
@@ -3415,7 +3437,7 @@ func _vk_sync() -> void:
 		var pub := CryptoKey.new()
 		if pub.load_from_string(pem, true) != OK:
 			continue
-		_vk_out({"k": "vk", "to": id, "s": Marshalls.raw_to_base64(_crypto.encrypt(pub, _vk.raw))})
+		_vk_out({"k": "vk", "to": id, "s": Marshalls.raw_to_base64(_crypto.encrypt(pub, _vk.raw)), "v": 2})     # (v 2: takes TEAM lines)
 		_vk.given[id] = true
 
 
@@ -3492,7 +3514,8 @@ func _vk_on(d: Dictionary, from: String) -> void:
 			and String(d.s).length() < 1000 and _key != null and voice_mate(from):
 		var raw := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.s)))
 		if raw.size() == 64:
-			_vkeys[from] = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": ch}
+			var v: Variant = d.get("v")
+			_vkeys[from] = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": ch, "v2": (v is float or v is int) and float(v) >= 2.0}
 
 
 ## Whether that match or group player counts as GROUP for voice: the same team in a DUO / SQUAD
@@ -3516,6 +3539,22 @@ func voice_mate(id: String) -> bool:
 	for m: Dictionary in group.members:
 		teams[String(m.id)] = int(m.get("team", -1))
 	return int(teams.get(id, -2)) == int(teams.get(my_id, -3))
+
+
+## The live teammates in the match and how many of them take TEAM lines ("tc", "tq", "tm"): builds
+## from 1.10 say "v": 2 in the GROUP key they give ("vk"); 1.9.1 drops those kinds. [n, takers]
+func team_line_mates() -> Array:
+	var ch := _vk_channel()
+	var n := 0
+	var ok := 0
+	for id: String in _vk_mate_ids():
+		if in_session and session_multi and (_multi.get("left", {}) as Dictionary).has(id):
+			continue
+		n += 1
+		var k: Dictionary = _vkeys.get(id, {})
+		if bool(k.get("v2", false)) and String(k.get("ch", "")) == ch:
+			ok += 1
+	return [n, ok]
 
 
 ## How many players count as GROUP for voice (voice_mate) in the match, or else the group.
@@ -4912,7 +4951,7 @@ func _on_multi(d: Dictionary) -> void:
 	if is_host or f == session_host_id:
 		_last_heard = now            # (a member waits on the host; the host on anyone)
 		_present(now)
-	var kind := String(d.get("k", ""))
+	var kind := _talk_kind(d, String(d.get("k", "")))
 	if not kind in LOAD_KINDS:
 		_multi.live[f] = now         # (an AWAY member's "ka" while its resumed arena loads keeps it AWAY)
 		if in_session:

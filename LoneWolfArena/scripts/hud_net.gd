@@ -41,9 +41,12 @@ var _note_t := 0.0
 var _time := 0.0
 var _field: LineEdit
 var _panel_note: Label
-## The chat's channel in a DUO / SQUAD with human teammates (team_tabs): "team" (the default: only
-## the own team reads it) or "all"; a 1 vs 1 has only "all".
+## The chat's channel in a DUO / SQUAD with human teammates (team_tabs): "team" (only the own team
+## reads it) or "all"; a 1 vs 1 has only "all". It starts on ALL and goes to TEAM by itself once
+## every teammate takes TEAM lines (Cloud.team_line_mates: a 1.9.1 teammate drops them), unless the
+## player picked a tab first.
 var channel := "all"
+var _channel_picked := false
 var _tabs: Dictionary = {}       # "team" / "all" -> the panel's tab Button
 ## The quick-chat bubble's panel (HudLayout "quickchat": a round bubble right of the crosshair that
 ## turns into a round X while open): tabs QUICK (NetChat.QUICK, and in a DUO / SQUAD the team set
@@ -52,6 +55,7 @@ var _tabs: Dictionary = {}       # "team" / "all" -> the panel's tab Button
 ## DUO / SQUAD with teammates): a map marker where the crosshair points (Cloud.send_marker), shown
 ## to the team as a diamond in the player's colour with its distance, kept on screen at the edges.
 var bubble: PanelContainer
+const OLD_TEAM_NOTE := "TEAMMATE CANNOT READ TEAM LINES - USE ALL"     # (Cloud OLD TEAM: a 1.9.1 teammate)
 var bubble_tab := "quick"
 ## An online (or LOCAL) match: chat, voice and the other phone's round trip; false: the ping only.
 var net := true
@@ -74,7 +78,7 @@ func _ready() -> void:
 		return
 	cloud.chat_from.connect(_on_chat_from)
 	cloud.sticker_from.connect(_on_sticker)
-	channel = "team" if team_tabs() else "all"
+	channel = "all"
 	voice = NetVoice.hub()
 	voice.mic_refused.connect(_on_mic_refused)
 
@@ -321,7 +325,8 @@ func send(text: String) -> bool:
 		close_panel()
 		return true
 	if _panel_note and is_instance_valid(_panel_note):
-		_panel_note.text = {"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "EMPTY": "TYPE A MESSAGE FIRST", "NO TEAM": "NO TEAMMATE TO READ IT"}.get(why,
+		_panel_note.text = {"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "EMPTY": "TYPE A MESSAGE FIRST", "NO TEAM": "NO TEAMMATE TO READ IT",
+			"OLD TEAM": OLD_TEAM_NOTE}.get(why,
 			"CHAT IS OFF")
 	return false
 
@@ -391,9 +396,10 @@ func open_panel() -> void:
 
 
 ## TEAM or ALL for the next line (the panel's tabs).
-func set_channel(ch: String) -> void:
+func set_channel(ch: String, by_player := true) -> void:
 	if not ch in ["team", "all"] or (ch == "team" and not team_tabs()):
 		return
+	_channel_picked = _channel_picked or by_player
 	channel = ch
 	for k: String in _tabs:
 		var b: Button = _tabs[k]
@@ -544,7 +550,7 @@ func send_quick(id: int) -> bool:
 		add_line("YOU", NetChat.quick_text(id), true)
 		close_bubble()
 		return true
-	_say({"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "NO TEAM": "NO TEAMMATE TO READ IT"}.get(why, "CHAT IS OFF"))
+	_say({"WAIT": "ONE MESSAGE EVERY %d SECONDS" % int(NetChat.RATE_S), "NO TEAM": "NO TEAMMATE TO READ IT", "OLD TEAM": OLD_TEAM_NOTE}.get(why, "CHAT IS OFF"))
 	return false
 
 
@@ -678,6 +684,10 @@ func _process(delta: float) -> void:
 	_note_t = maxf(_note_t - delta, 0.0)
 	if voice and voice.ptt_held and not is_visible_in_tree():
 		voice.ptt_held = false           # the pause menu or the results came over the HUD: no hidden talking
+	if not _channel_picked and channel == "all" and team_tabs():
+		var tl: Array = Game.session.team_line_mates()
+		if int(tl[0]) > 0 and int(tl[1]) == int(tl[0]):
+			set_channel("team", false)
 	queue_redraw()
 
 

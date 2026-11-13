@@ -197,7 +197,7 @@ func open(tab := "") -> void:
 	for sig: Signal in [cloud.peers_changed, cloud.directory_changed, cloud.friends_changed, cloud.group_changed]:
 		if not sig.is_connected(_on_changed):
 			sig.connect(_on_changed)
-	modal.tree_exiting.connect(_unlisten)
+	modal.tree_exiting.connect(_unlisten.bind(modal))
 	frame.offset_left = 40.0
 	frame.offset_right = 40.0
 	var tw := modal.create_tween().set_parallel()
@@ -205,7 +205,11 @@ func open(tab := "") -> void:
 		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 
 
-func _unlisten() -> void:
+## When the panel's modal goes. A reopen (tab, REFRESH, status, search, ADD FRIEND) builds the new
+## panel before the old modal is freed: that old modal's exit must not cut the new panel's signals.
+func _unlisten(modal: Node) -> void:
+	if _list != null and is_instance_valid(_list) and is_instance_valid(modal) and not modal.is_ancestor_of(_list):
+		return
 	var cloud := Game.cloud_service()
 	for sig: Signal in [cloud.peers_changed, cloud.directory_changed, cloud.friends_changed, cloud.group_changed]:
 		if sig.is_connected(_on_changed):

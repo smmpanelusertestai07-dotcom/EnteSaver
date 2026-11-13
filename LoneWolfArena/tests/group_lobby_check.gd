@@ -174,6 +174,12 @@ func _social_live(lobby: Lobby) -> void:
 	await at.wait(0.3)
 	if lobby.social.rebuilds != built:
 		_fail("the social panel rebuilt its rows with nothing changed")
+	# A reopen inside the panel (here RECENT and back to FRIENDS) keeps it following the players:
+	# the old modal going away must not cut the new panel's signals.
+	await _tap(lobby.dialogs.modal.find_child("SocialTab_recent", true, false) as Control if lobby.dialogs.modal else null)
+	await at.wait(0.3)
+	await _tap(lobby.dialogs.modal.find_child("SocialTab_friends", true, false) as Control if lobby.dialogs.modal else null)
+	await at.wait(0.3)
 	# PLAYERS ONLINE: a stranger online shows with ADD FRIEND; the panel follows it leaving.
 	var vip := String(ids.VIPER)
 	cloud.peers[vip] = {"name": "VIPER", "bundle": "default", "pk": "", "seen": Time.get_ticks_msec() + 600000}
