@@ -56,7 +56,7 @@ const MODEL_YAW := PI - 0.32
 ## floor, further right (clear of the mode card); each turned a little toward the middle. Nothing
 ## stands under the hero (the voice's pill goes there) and there is no "+" plate on the podium.
 const MEMBER_SCALE := 0.86
-const MEMBER_SPOTS := [Vector3(0.76, PODIUM_TOP, -0.38), Vector3(1.6, 0.0, -1.0), Vector3(2.3, 0.0, -1.6)]
+const MEMBER_SPOTS := [Vector3(0.76, PODIUM_TOP, -0.38), Vector3(1.5, 0.0, -1.45), Vector3(2.2, 0.0, -2.1)]
 const MEMBER_YAWS := [PI - 0.42, PI - 0.55, PI - 0.66]
 const HERO_X_GROUP := 0.40
 ## Name plate and LEADER mark heights over a member's feet (the model's own units, before its scale).

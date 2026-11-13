@@ -4,7 +4,9 @@ extends Node
 ##   tools/qa/capture.sh <out_dir> 1280x720 script:res://tests/shots_lobby.gd
 ## The lobby, the FRIENDS page on each tab (friends, requests, players, custom room, no internet,
 ## and the empty friends list), the chat panel, a confirmation popup, SELECT MODE, the team-size
-## box and LONE WOLF with the GROUP bar. Returns the failed checks.
+## box (the TEAM panel) and LONE WOLF: a solo's TEAM panel, a group of 4 with the TEAM bar, the hero
+## left and the members to its right, the TEAM panel from the left (also with a left camera
+## cutout) and a member's read-only TEAM panel. Returns the failed checks.
 
 const PEOPLE := [["tour-l-fox", "NIGHTFOX21", "shadow", 23, true, false], ["tour-l-kite", "KITE", "default", 9, true, true],
 	["tour-l-ember", "EMBER_7", "default", 41, false, false]]
@@ -254,11 +256,80 @@ func run(at: Node) -> int:
 	lobby._refresh_mode()
 	await at.wait(0.6)
 	await at.shot("l12_lobby_lone_wolf")
+	await _team_screens(at, lobby, cloud)
 	Game.profile = saved_profile
 	Game.settings = saved_settings
 	NetChat.reset_for_test()
 	print("SHOTS_LOBBY fails=%d" % _fails)
 	return _fails
+
+
+## LONE WOLF's team screens (made-up group; Cloud held still).
+func _team_screens(at: Node, lobby: Lobby, cloud: Cloud) -> void:
+	var me_id := cloud.my_id if cloud.my_id != "" else "tour-l-me".sha256_text().left(32)
+	var my_was := cloud.my_id
+	cloud.my_id = me_id
+	if cloud.my_code == "":
+		cloud.my_code = "4213579086"
+	Game.team_size = 4
+	lobby._refresh_mode()
+	lobby.dialogs.open_size_box()
+	await at.wait(0.5)
+	var box := lobby.dialogs.size_box
+	_check(box != null and box.find_child("GroupCodeRow", true, false) != null and box.find_child("TeamFillTick", true, false) != null
+		and box.find_child("SizeTile_4", true, false) != null, "a solo's TEAM panel: code, ticks, tiles")
+	await at.shot("l13_team_panel_solo")
+	lobby.dialogs.close_size_box()
+	var ids := ["tour-l-fox", "tour-l-kite", "tour-l-ember"].map(func(x: String) -> String: return x.sha256_text().left(32))
+	var mem := [{"id": me_id, "name": String(Game.profile.name), "bundle": "default"},
+		{"id": ids[0], "name": "NIGHTFOX21", "bundle": "shadow"}, {"id": ids[1], "name": "KITE", "bundle": "default"},
+		{"id": ids[2], "name": "EMBER_7", "bundle": "default"}]
+	var key := Crypto.new().generate_random_bytes(32)
+	cloud._grp = {"gid": "c3".repeat(16), "aes": key, "mac": key, "seq": 0, "their": {}, "seen": {}, "invited": {}, "beat_t": 3.0,
+		"join_t": 0.0, "leader_ms": Time.get_ticks_msec(), "joining": false, "manual": false}
+	NetGroup.arrange(mem, 4, false)
+	cloud.group = {"gid": "c3".repeat(16), "leader": me_id, "status": "idle", "mode": "lonewolf", "size": 4, "members": mem}
+	cloud.group_changed.emit()
+	await at.wait(1.4)
+	var bar := lobby.find_child("TeamBar", true, false) as Control
+	_check(bar != null and bar.is_visible_in_tree() and lobby.find_child("PodiumInvite", true, false) == null, "a group shows the TEAM bar, no + plate")
+	await at.shot("l14_group_lobby")
+	lobby.team.open_panel()
+	await at.wait(1.0)
+	var panel := lobby.dialogs.modal.find_child("TeamPanel", true, false) as Control if lobby.dialogs.modal else null
+	var vs := lobby.get_viewport().get_visible_rect()
+	var exit := panel.find_child("GroupDisband", true, false) as Control if panel else null
+	_check(panel != null and exit != null and vs.encloses(exit.get_global_rect().grow(-0.5)), "the TEAM panel of 4 fits the screen (%s in %s)"
+		% [str(exit.get_global_rect()) if exit else "no DISBAND", str(vs)])
+	await at.shot("l14b_team_panel")
+	lobby.dialogs.close_modal()
+	UI.margins_for_test = Vector2(90, 0)
+	lobby.team.open_panel()
+	await at.wait(1.0)
+	panel = lobby.dialogs.modal.find_child("TeamPanel", true, false) as Control if lobby.dialogs.modal else null
+	var head := panel.find_child("GroupHead", true, false) as Control if panel else null
+	_check(head != null and head.global_position.x >= 90.0, "the TEAM panel's content keeps clear of a left cutout")
+	await at.shot("l14c_team_panel_cutout")
+	lobby.dialogs.close_modal()
+	await at.wait(0.3)
+	await at.shot("l14d_group_lobby_cutout")
+	UI.margins_for_test = Vector2(-1, -1)
+	# a member's view: the mode card's TEAM panel shows the leader's choice
+	mem.push_front(mem.pop_at(1))
+	NetGroup.arrange(mem, 2, false)
+	cloud.group = {"gid": "c3".repeat(16), "leader": ids[0], "status": "idle", "mode": "lonewolf", "size": 2, "members": mem,
+		"code": "4213579086", "code_join": true}
+	cloud.group_changed.emit()
+	await at.wait(0.8)
+	lobby.dialogs.open_size_box()
+	await at.wait(0.5)
+	await at.shot("l15_member_team_panel")
+	lobby.dialogs.close_size_box()
+	cloud.group = {}
+	cloud._grp = {}
+	cloud.group_changed.emit()
+	cloud.my_id = my_was
+	await at.wait(0.6)
 
 
 func _check(ok: bool, what: String) -> void:
