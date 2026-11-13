@@ -510,6 +510,17 @@ func _action_button(text: String, node_name: String, style: String, action: Call
 	return b
 
 
+## The leave glyph on this player's name plate (LobbyPlate): EXIT GROUP for a member, DISBAND GROUP
+## for the leader, each asked first.
+func ask_leave() -> void:
+	if not in_group():
+		return
+	if is_leader():
+		_ask_disband()
+	else:
+		_ask_exit()
+
+
 ## EXIT GROUP (a member), asked first.
 func _ask_exit() -> void:
 	lobby.dialogs.confirm("EXIT GROUP", "Leave %s's group? The others stay together." % leader_name(members()), "EXIT GROUP",

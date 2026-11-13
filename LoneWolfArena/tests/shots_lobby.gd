@@ -303,7 +303,28 @@ func _team_screens(at: Node, lobby: Lobby, cloud: Cloud) -> void:
 	await at.wait(1.4)
 	var bar := lobby.find_child("TeamBar", true, false) as Control
 	_check(bar != null and bar.is_visible_in_tree() and lobby.find_child("PodiumInvite", true, false) == null, "a group shows the TEAM bar, no + plate")
+	# the name plates: small 2D plates under the feet (the hero's above its voice pill, with the leave
+	# glyph and the leader's flag), none up over the skyline
+	var hero_plate := lobby.find_child("HeroPlate", true, false) as LobbyPlate
+	var plates := lobby.find_children("MemberPlate_*", "LobbyPlate", true, false)
+	var low := true
+	for p2: LobbyPlate in plates:
+		low = low and p2.visible and p2.get_global_rect().position.y > lobby.get_viewport().get_visible_rect().size.y * 0.45 and p2.player_name != ""
+	_check(hero_plate != null and hero_plate.visible and hero_plate.can_leave and hero_plate.leader and plates.size() == 3 and low,
+		"group lobby: the hero's plate (flag, leave glyph) and 3 member plates under the feet")
 	await at.shot("l14_group_lobby")
+	if hero_plate:
+		var tap := InputEventMouseButton.new()
+		tap.button_index = MOUSE_BUTTON_LEFT
+		tap.pressed = true
+		tap.position = hero_plate.leave_rect().get_center()
+		hero_plate._gui_input(tap)
+		await at.wait(0.4)
+		_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("ConfirmOk", true, false) != null and not hero_plate.visible,
+			"the leave glyph asks DISBAND GROUP first (the plates step aside)")
+		await at.shot("l14e_leave_confirm")
+		lobby.dialogs.close_modal()
+		await at.wait(0.2)
 	lobby.team.open_panel()
 	await at.wait(1.0)
 	var panel := lobby.dialogs.modal.find_child("TeamPanel", true, false) as Control if lobby.dialogs.modal else null
