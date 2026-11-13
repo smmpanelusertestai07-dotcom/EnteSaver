@@ -41,7 +41,7 @@ var _net_refresh_t := 0.0
 var _friend_query := ""                # FRIENDS tab search (an ID or a name)
 ## The next custom room as the create page (RoomCreate) edits it: its page (ROOM / GAME), name,
 ## password, mode (SOLO 1, DUO 2, SQUAD 4) and rules (RoomRules); kept while the tab is redrawn.
-var room_draft := {"page": "room", "name": "", "pin": "", "size": 1, "rules": RoomRules.classic(1), "public": false}
+var room_draft := {"page": "room", "name": "", "pin": "", "pin_auto": false, "size": 1, "rules": RoomRules.classic(1), "public": false}
 var _room_join_code := ""              # the room this phone asked to join (for its status line)
 var _dir_on := false                   # this window asked the cloud for the player cards
 var _place := {}                       # the tab and scroll a player's card was opened from: {"kind", "scroll"}
@@ -365,8 +365,11 @@ func _build_room_tab(v: VBoxContainer) -> void:
 		v.add_child(back)
 		return
 	# Create (RoomCreate: the ROOM and GAME pages), then join by ID and password below it.
-	if String(room_draft.pin) == "":
+	# A private room gets a made-up password to start from; a PUBLIC one none (pin_auto: made up
+	# here, not typed, so switching PUBLIC on clears it).
+	if String(room_draft.pin) == "" and not bool(room_draft.get("public", false)):
 		room_draft.pin = "%04d" % randi_range(0, 9999)
+		room_draft.pin_auto = true
 	v.add_child(RoomCreate.build(self))
 	# Join: room ID + password.
 	var join := HBoxContainer.new()
@@ -557,6 +560,7 @@ func create_room() -> void:
 	if public:
 		NetRooms.hub().host(code)        # its card on the relay every 30 s while it is open
 	room_draft.pin = ""
+	room_draft.pin_auto = false
 	open("room")
 
 

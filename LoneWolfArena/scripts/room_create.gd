@@ -22,7 +22,7 @@ const YES_NO := [["ammo", "UNLIMITED AMMO", "Reserve ammo never runs out."],
 	["aim", "AIM ASSIST", "NO: manual aim for everyone, whatever their own setting says."]]
 
 
-## The page: `lf` holds the draft (room_draft: {page, name, pin, size, rules}) and redraws on a change.
+## The page: `lf` holds the draft (room_draft: {page, name, pin, pin_auto, size, rules, public}) and redraws on a change.
 static func build(lf: LobbyFriends) -> Control:
 	var d: Dictionary = lf.room_draft
 	var page := HBoxContainer.new()
@@ -79,7 +79,8 @@ static func _room(lf: LobbyFriends, body: VBoxContainer, d: Dictionary) -> void:
 		if only != s:
 			pin.text = only
 			pin.caret_column = only.length()
-		d.pin = only)
+		d.pin = only
+		d.pin_auto = false)                 # (a password the player typed is kept)
 	body.add_child(_row("PASSWORD", pin))
 	# PUBLIC (default NO: private as before): the room is listed for every player online
 	var pub := HBoxContainer.new()
@@ -90,6 +91,9 @@ static func _room(lf: LobbyFriends, body: VBoxContainer, d: Dictionary) -> void:
 		r.name = "RoomPublic_%s" % ("yes" if on else "no")
 		r.pressed.connect(func() -> void:
 			d.public = on
+			if on and bool(d.get("pin_auto", false)):
+				d.pin = ""                       # a public room has no password unless the player types one
+				d.pin_auto = false
 			lf.redraw_room())
 		pub.add_child(r)
 	body.add_child(_row("PUBLIC", pub, help(lf, "public", "PUBLIC",

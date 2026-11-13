@@ -6,9 +6,19 @@ extends RefCounted
 ##   older than 2 minutes or from the future, a blocked host, this phone's own, malformed or
 ##   over-long fields are not; one card per host (a newer one replaces it, an empty message takes
 ##   it away); at most MAX_CARDS kept; QUICK JOIN picks the newest open room without a password.
+## - CREATE: a private room starts with a made-up password; switching PUBLIC on clears it (a public
+##   room has none unless the player types one); a typed password stays.
 ## - WARDROBE's poses: profile lobby_pose / victory_pose are kept when known, else "" (random).
 
 var t: Node
+
+
+## A LobbyFriends whose page redraw only counts (the create form is built by hand here).
+class DraftFriends extends LobbyFriends:
+	var redraws := 0
+
+	func redraw_room() -> void:
+		redraws += 1
 
 
 static func run(runner: Node) -> void:
@@ -17,6 +27,7 @@ static func run(runner: Node) -> void:
 	me._history_left_by_them()
 	me._poses()
 	me._rooms()
+	me._room_draft()
 
 
 func _check(ok: bool, what: String) -> void:
@@ -142,3 +153,30 @@ func _rooms() -> void:
 	locked.pw = true
 	r.take(id, _room_card(key, locked, now + 1), now + 1)
 	_check(r.quick_pick(now + 1).is_empty() and bool(r.by_code("123456", now + 1).pw), "QUICK JOIN skips a room with a password")
+
+
+func _room_draft() -> void:
+	var saved_cloud := Game.cloud
+	var cl := Cloud.new()
+	Game.cloud = cl
+	var lf := DraftFriends.new(null)
+	var d: Dictionary = lf.room_draft
+	var v := VBoxContainer.new()
+	lf._build_room_tab(v)
+	var auto_pin := String(d.pin)
+	_check(auto_pin.length() == 4 and bool(d.pin_auto), "a private room starts with a made-up password (%s)" % auto_pin)
+	(v.find_child("RoomPublic_yes", true, false) as Button).pressed.emit()
+	_check(bool(d.public) and String(d.pin) == "" and lf.redraws == 1, "switching PUBLIC on clears the made-up password")
+	v.free()
+	v = VBoxContainer.new()
+	lf._build_room_tab(v)
+	_check(String(d.pin) == "" and (v.find_child("RoomPin", true, false) as LineEdit).placeholder_text == "OPTIONAL",
+		"a PUBLIC room's form leaves the password empty (OPTIONAL)")
+	(v.find_child("RoomPin", true, false) as LineEdit).text_changed.emit("2468")
+	(v.find_child("RoomPublic_no", true, false) as Button).pressed.emit()
+	(v.find_child("RoomPublic_yes", true, false) as Button).pressed.emit()
+	_check(String(d.pin) == "2468" and not bool(d.pin_auto), "a password the player typed stays when PUBLIC is switched")
+	v.free()
+	lf.lan = null
+	Game.cloud = saved_cloud
+	cl.free()
