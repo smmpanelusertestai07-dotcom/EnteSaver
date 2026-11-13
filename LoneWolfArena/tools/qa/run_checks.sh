@@ -108,9 +108,10 @@ if [ "${1:-}" != "quick" ]; then
     h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/room_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/room_host.txt"
   # tests/voice_check.gd: voice between two copies (a generated tone for the microphone, LW_VOICE_TONE=1): the
-  # 1 vs 1, a custom room's group (DUO, waiting) and its DUO match; GROUP never reaches an enemy. Mock port 47834.
+  # 1 vs 1, a custom room's group (DUO, waiting) and its DUO match; GROUP never reaches an enemy; with LW_DIRECT=local
+  # the 1 vs 1's voice goes over the direct path while it is up (none through the relay), the relay once it is cut. Mock port 47834.
   step voice bash -c 'timeout 200 godot --headless -s res://tests/mqtt_mock.gd -- 47834 > /dev/null 2>&1 & m=$!
-    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47834 LW_VOICE_TONE=1 LW_ROUNDS_TO_WIN=1
+    sleep 2; export LW_MQTT_URL=ws://127.0.0.1:47834 LW_VOICE_TONE=1 LW_ROUNDS_TO_WIN=1 LW_DIRECT=local
     LW_NET_ROLE=host timeout 170 godot --headless --path . -- --autotest=script:res://tests/voice_check.gd > "$0" 2>&1 &
     h=$!; LW_NET_ROLE=guest timeout 170 godot --headless --path . -- --autotest=script:res://tests/voice_check.gd; g=$?
     wait $h; r=$?; kill $m 2>/dev/null; echo "--- host:"; cat "$0"; [ $g -eq 0 ] && [ $r -eq 0 ]' "$LOGS/voice_host.txt"

@@ -125,10 +125,9 @@ func run(autotest: Node) -> int:
 		for i in 16:
 			pl.global_position += Vector3(0.25, 0.0, 0.0)   # (it walks: its state changes)
 			await at.wait(0.25)
-			if i % 4 == 3:
-				at.log_line("m3: %d states through the relay since the block" % (cloud.relay_states_out - out0))
-		if cloud.relay_states_out < 10:
-			_fail("m3 did not send its states through the relay with its pairs blocked (%d)" % cloud.relay_states_out)
+		at.log_line("m3: %d states through the relay since the block" % (cloud.relay_states_out - out0))
+		if cloud.relay_states_out - out0 < 10:
+			_fail("m3 did not send its states through the relay with its pairs blocked (%d)" % (cloud.relay_states_out - out0))
 		if cloud.link_tag() != "RELAY":
 			_fail("m3's tag is not RELAY with its pairs blocked (%s)" % cloud.link_tag())
 	else:
@@ -141,7 +140,7 @@ func run(autotest: Node) -> int:
 				return false, 12.0):
 			return _done("no pair went down when m3 blocked its pairs")
 		var m3_id := String(down[0])
-		var c0: Array = cloud.state_counts.get(m3_id, [0, 0])
+		var c0: Array = (cloud.state_counts.get(m3_id, [0, 0]) as Array).duplicate()
 		var f := arena.call("slot_fighter", int(ids[m3_id])) as RemoteFighter
 		var pos0 := f.global_position
 		var away := [false]
@@ -149,9 +148,6 @@ func run(autotest: Node) -> int:
 			away[0] = away[0] or f.away
 			var c: Array = cloud.state_counts.get(m3_id, [0, 0])
 			return int(c[0]) - int(c0[0]) >= 10
-		for i in 6:
-			at.log_line("%s: m3's states %s" % [role, str(cloud.state_counts.get(m3_id))])
-			await at.wait(0.5)
 		if not await _until(watch, 3.0):
 			_fail("m3's states did not come through the relay within 3 s of its pair going down (%s -> %s)"
 				% [str(c0), str(cloud.state_counts.get(m3_id))])
