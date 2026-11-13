@@ -7,7 +7,9 @@ extends Node
 ##    (hud_eye.png with the free look button on), the bot ahead; arena.png the same view without
 ##    the HUD (the HUD page draws the player's own layout over it);
 ##  - map_turn.png / map_north.png (128x128): the minimap turned with the view and north up;
-##  - gfx_0.png .. gfx_3.png (256x144): the same view without the HUD at LOW .. EXTREME.
+##  - gfx_0.png .. gfx_3.png (256x144): the same view without the HUD at LOW .. EXTREME;
+##  - info_hit.png / info_outline.png / info_gunshot.png (455x256): INFORMATION's pictures (a hit
+##    with its ring and number, the enemy outline, gunshot alerts).
 ## It prints the HUD widgets' places in the picture (SPOTS) for settings_panel.gd.
 ## Returns 0, or 1 if a picture could not be made.
 
@@ -77,6 +79,24 @@ func run(at: Node) -> int:
 	await at.wait(0.4)
 	ok = await _save(at, dir + "hud_eye.png", Vector2i(roundi(PIC_H * vs.x / vs.y), PIC_H)) and ok
 	Game.settings.freelook_button = false
+	# INFORMATION's pictures (round 8): a hit (the ring bloom and a damage number), the enemy
+	# outline, gunshot alerts.
+	var pw := Vector2i(roundi(PIC_H * vs.x / vs.y), PIC_H)
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	hud._add_damage_number(b, 46.0, false, b.chest_position())
+	hud._hit_t = HUD.HIT_T * 0.35
+	hud.queue_redraw()
+	ok = await _save(at, dir + "info_hit.png", pw) and ok
+	hud._dmg_numbers.clear()
+	hud._hit_t = 0.0
+	hud.queue_redraw()
+	ok = await _save(at, dir + "info_outline.png", pw) and ok
+	hud._gun_alerts = [{"who": b, "pos": p.global_position + p.camera.global_basis.x * 12.0, "dist": 12.0, "t": 1.0},
+		{"who": null, "pos": p.global_position - p.camera.global_basis.x * 30.0, "dist": 30.0, "t": 1.0}]
+	hud.queue_redraw()
+	ok = await _save(at, dir + "info_gunshot.png", pw) and ok
+	hud._gun_alerts.clear()
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# The same view without the HUD: the HUD page draws the player's own layout over it.
 	hud.visible = false
 	await at.wait(0.3)
