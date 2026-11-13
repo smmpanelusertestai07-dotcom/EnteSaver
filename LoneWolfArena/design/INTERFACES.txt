@@ -633,20 +633,31 @@ listed here. If a part needs something new from the core, add it in its own file
   ALL) and push_to_talk (false); 1.8's voice_chat true becomes mic ALL + push to talk (migration by
   key, no version bump). `NetVoice.channel()`: "match" (Game.session in session) / "group"
   (`Cloud.voice_group_ready()`) / ""; `sends(mode, channel, mates)`, `hears(mate, mode, muted)`,
-  `gate_next(state, rms)` (GATE_OPEN, GATE_HANG), `speaking(id)` ("" = this phone),
+  `gate_next(state, rms, need)` (GATE_FRAMES loud frames in a row from `need` open it, GATE_HANG
+  quiet ones close it; `gate_need()`: NEVER while another player's voice played here within
+  ECHO_MS, GATE_LOUD while the SFX / Voice bus peaked over OUT_LOUD_DB, else GATE_OPEN: the phone's
+  own loudspeaker is not sent back), `speaking(id)` ("" = this phone),
   `set_muted(id, on)` / `is_muted(id)` (session; blocked always), `hub().set_mic_mode(m)` (asks
   RECORD_AUDIO; refused: OFF + `mic_refused`), `set_speaker_mode(m)`, `toggle_speaker()`,
-  `set_push_to_talk(on)`, `ptt_held`, `test_loop` (MIC TEST), `level`, `tone_source`
+  `set_push_to_talk(on)`, `ptt_held`, `test_loop` (MIC TEST), `level`, `tone_source`; the app's
+  pause stops the microphone at once and lets TALK go, the resume starts it afresh
   (LW_VOICE_TONE=1, debug builds: a tone instead of the microphone, and a "VOICE ..." log line every
-  3 s). Cloud: `send_voice(frame, group_only)` (match room "vo" everyone / "vg" own team; a 1.8 phone
-  plays "vo" with its VOICE CHAT on and ignores "vg"), `send_group_voice(frame, group_only)` (topic
-  ROOT/g/<gid>/v, sealed with the group keys, {"k": "gv", "a", "g"?}; listened to only while the
-  SPEAKER is on: `_sync_group_voice`; 1.8 phones never subscribe), `voice_from(frame, from_id, mate)`
+  3 s). Cloud: `send_voice(frame, group_only)` (match room "vo" {"a"} everyone / "vg" {"s"} own
+  team; a 1.8 phone plays "vo" with its VOICE CHAT on and ignores "vg", "vp", "vk"),
+  `send_group_voice(frame, group_only)` (topic ROOT/g/<gid>/v, sealed with the group keys,
+  {"k": "gv", "a"} or {"k": "gv", "g": true, "s"}; listened to while the SPEAKER is on or the MIC is
+  GROUP: `_sync_group_voice`; 1.8 phones never subscribe). GROUP frames ("s") are sealed under the
+  sender's own key (`_vk_sync`, `_vk_seal` / `_vk_open`: AES-256-CBC + HMAC-SHA256 over the sender
+  id, 64 random bytes per channel, new when a teammate stops being one), which it gives each
+  teammate RSA-encrypted to that player's public key ({"k": "vk", "to", "s"}); the public keys come
+  from the lobby (peers, directory) or {"k": "vp", "pk"} in the channel (answered once by each
+  newcomer). The other team holds the room's keys, never these. `voice_from(frame, from_id, mate)`
   (every voice frame, after the rate limit, blocks and the GROUP filter), `voice_mate(id)`,
   `voice_mates()`; `voice_received(frame)` stays for the 1 vs 1. Lobby: `VoiceButtons.lobby_pill`
   (node "VoicePill" [mic | speaker] under the character; popups "MicModeBox" / "SpeakerBox" with
   Mic_OFF / Mic_ALL / Mic_GROUP (Speaker_...), "PushToTalk", and a "Voice_<id>" row with "Mute" per
-  player of the channel). Settings tab ONLINE (scripts/settings_online.gd): chat,
+  player of the channel; "LobbyTalk", the TALK button right of the pill while PUSH TO TALK, the mic
+  on and the channel "group": `VoiceButtons.talk_wanted()`). Settings tab ONLINE (scripts/settings_online.gd): chat,
   friend_chat, show_career, direct_connect (NetDirect), vibration
   (out of a match: the lobby's buzz for a challenge or a friend request), challenges_from
   (`Game.CHALLENGES_EVERYONE` / `_FRIENDS` / `_NOBODY`: `Cloud.challenge_allowed(from)`, the others

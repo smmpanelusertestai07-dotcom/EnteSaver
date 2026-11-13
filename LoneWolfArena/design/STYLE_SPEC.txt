@@ -257,6 +257,8 @@ VOICE (the reference's places and defaults, our icons)
 - Lobby: a small dark pill [mic | speaker] (112x44, radius 22, near-black 66 %) under the player's
   character, also when alone. Mic: outline mic, a red slash when OFF, a small people mark for
   GROUP, yellow while this phone's voice goes out. Speaker: speaker with waves, slash when OFF.
+  With PUSH TO TALK and the mic on in a group or custom room: a TALK button (84x44, dark, yellow
+  while held) right of the pill; the mic sends only while it is held.
 - Popups: a dark translucent box with no border; MIC MODE title for the mic; items icon over word
   (OFF / ALL / GROUP), the chosen one yellow; PUSH TO TALK tick box (unticked by default); then
   PLAYERS: a sound mark (yellow while speaking), the name and MUTE / MUTED. A tap outside closes.
