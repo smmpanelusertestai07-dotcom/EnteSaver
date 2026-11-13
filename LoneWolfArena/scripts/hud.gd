@@ -33,6 +33,8 @@ const EXTRA_ICONS := ["v_fist", "v_mag", "v_headshot", "v_helmet", "v_vest", "v_
 const SHORT_LABELS := {"settings": "MENU", "fire_l": "L FIRE"}
 const LEFT_FIRE_OFF := 2           # setting left_fire: 0 always, 1 while aiming, 2 off
 const DMG_LIFE := 0.7
+const HIT_T := 0.22                # the hit marker's life
+const HIT_BLOOM := 0.18            # the hit ring's growth
 const FEED_LIFE := 6.0
 const ROUND_BANNER_TIME := 1.9
 ## The elimination badge stays through the break's beat only (the result band follows at
@@ -373,7 +375,7 @@ func _on_hit_landed(target: Fighter, amount: float, headshot: bool, pos: Vector3
 	var tick := Engine.get_physics_frames()
 	var same_shot := tick == _hit_tick
 	_hit_tick = tick
-	_hit_t = 0.22
+	_hit_t = HIT_T
 	_hit_head = headshot or (same_shot and _hit_head)
 	if headshot:
 		_head_icon_t = 0.7
@@ -1379,21 +1381,43 @@ func _draw_crosshair(c: Vector2, u: float) -> void:
 		HudDraw.ring(self, c, rr, Color(1, 1, 1, 0.95), 2.4, w.reload_progress())
 		var mp := c + Vector2(1, -1).normalized() * (rr + 0.022 * u)
 		HudDraw.icon(self, HudDraw.tex("v_mag"), mp, Vector2(0.026, 0.026) * u, Color(1, 1, 1, 0.95))
-	# Hit marker: short diagonal ticks (headshots in red-orange) + the headshot icon.
+	# Hit marker (round 8): the crosshair blooms into a large orange ring (about 1/16 of the
+	# screen width across) with an orange centre dot, out in HIT_BLOOM s and fading (a headshot
+	# redder and a little larger), faint white ticks inside it; setting hit_ring off: the
+	# short diagonal ticks alone.
 	if hit:
-		var ha := clampf(_hit_t / 0.22, 0.0, 1.0)
-		var hc := Color(1.0, 0.36, 0.2, ha) if _hit_head else Color(1, 1, 1, ha)
+		var age := HIT_T - _hit_t
+		var ha := clampf(_hit_t / HIT_T, 0.0, 1.0)
 		var r0 := maxf(ring_r, 10.0) + 4.0
-		for k in 4:
-			var d := Vector2(1, 1).normalized().rotated(k * PI * 0.5)
-			draw_line(c + d * r0, c + d * (r0 + 0.017 * u), Color(0, 0, 0, 0.5 * ha), 4.0, true)
-			draw_line(c + d * r0, c + d * (r0 + 0.017 * u), hc, 2.2, true)
+		if bool(Game.settings.get("hit_ring", true)):
+			var big := hit_bloom_radius(size, _hit_head)
+			var grow := 1.0 - pow(1.0 - clampf(age / HIT_BLOOM, 0.0, 1.0), 2.0)
+			var rr := lerpf(r0, big, grow)
+			var oc := Color(1.0, 0.22, 0.12) if _hit_head else Color(1.0, 0.52, 0.12)
+			HudDraw.ring(self, c, rr, Color(0, 0, 0, 0.35 * ha), 5.0)
+			HudDraw.ring(self, c, rr, Color(oc, 0.95 * ha), 2.6)
+			HudDraw.disk(self, c, 3.6 * sc, Color(0, 0, 0, 0.4 * ha))
+			HudDraw.disk(self, c, 2.6 * sc, Color(oc, ha))
+			for k in 4:
+				var d := Vector2(1, 1).normalized().rotated(k * PI * 0.5)
+				draw_line(c + d * rr * 0.55, c + d * rr * 0.8, Color(1, 1, 1, 0.35 * ha), 1.6, true)
+		else:
+			var hc := Color(1.0, 0.36, 0.2, ha) if _hit_head else Color(1, 1, 1, ha)
+			for k in 4:
+				var d := Vector2(1, 1).normalized().rotated(k * PI * 0.5)
+				draw_line(c + d * r0, c + d * (r0 + 0.017 * u), Color(0, 0, 0, 0.5 * ha), 4.0, true)
+				draw_line(c + d * r0, c + d * (r0 + 0.017 * u), hc, 2.2, true)
 	if _head_icon_t > 0.0:
 		var ia := clampf(_head_icon_t / 0.25, 0.0, 1.0)
 		var pop := 1.0 + 0.4 * clampf((_head_icon_t - 0.55) / 0.15, 0.0, 1.0)
 		var ip := c + Vector2(0.075 * u, -0.06 * u)
 		HudDraw.disk(self, ip, 0.026 * u * pop, Color(0.6, 0.06, 0.04, 0.75 * ia))
 		HudDraw.icon(self, HudDraw.tex("v_headshot"), ip, Vector2(0.04, 0.04) * u * pop, Color(1.0, 0.85, 0.75, ia))
+
+
+## The hit ring's full radius on `vs`: 1/16 of the width across (a headshot 15 % larger).
+static func hit_bloom_radius(vs: Vector2, head: bool) -> float:
+	return vs.x * 0.0625 * 0.5 * (1.15 if head else 1.0)
 
 
 ## Red-dot sight while aiming: a faint sight frame and a glowing red dot. Returns its radius.

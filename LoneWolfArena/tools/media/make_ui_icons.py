@@ -216,6 +216,28 @@ ICONS["online"] = svg(ring(64, 64, 50, 7)
                       + line(14, 64, 114, 64, 6) + line(24, 40, 104, 40, 5) + line(24, 88, 104, 88, 5))
 
 
+
+def _splat():
+    """An irregular blob with a few droplets around it (round 8: the hit splash on the target and the
+    zone-damage splats at the screen edges, tinted red where drawn). Seeded, so it never changes."""
+    import random
+    rnd = random.Random(808)
+    pts = []
+    n = 22
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        r = 30 + rnd.uniform(-6, 7) + (16 if i % 4 == 1 else 0) * rnd.uniform(0.4, 1.0)
+        pts.append((64 + r * math.cos(a), 64 + r * math.sin(a)))
+    body = poly(pts)
+    for _ in range(7):
+        a = rnd.uniform(0, 2 * math.pi)
+        d = rnd.uniform(46, 58)
+        body += dot(64 + d * math.cos(a), 64 + d * math.sin(a), rnd.uniform(3, 6.5))
+    return svg(body)
+
+
+ICONS["splat"] = _splat()
+
 # Coloured badge for the elimination banner (kept in colour, not converted to white).
 BADGE = svg(
     # Wings: three angular blades on each side.

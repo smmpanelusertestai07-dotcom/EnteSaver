@@ -11,6 +11,8 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._test_death_card()
 	me._test_damage_numbers()
+	me._test_migration_v8()
+	me._test_hit_bloom()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -81,3 +83,26 @@ func _test_damage_numbers() -> void:
 	_check(hud._dmg_size(20.0, false, u) <= int(0.05 * u) and hud._dmg_size(20.0, false, u) >= int(0.032 * u), "numbers are 0.032u .. 0.05u")
 	hud.free()
 	foe.free()
+
+
+## v8: LEFT FIRE moves from always (0) to while aiming (1) only in older files still on the old
+## default; a v8 file keeps 0, an older OFF stays OFF.
+func _test_migration_v8() -> void:
+	var keep := Game.settings.duplicate(true)
+	_check(int(Game.DEFAULT_SETTINGS.left_fire) == 1, "LEFT FIRE starts while aiming")
+	for case: Array in [[7, 0, 1], [5, 0, 1], [7, 2, 2], [8, 0, 0], [8, 1, 1]]:
+		Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+		Game._apply_saved_settings(JSON.parse_string(JSON.stringify({"settings_version": case[0], "left_fire": case[1]})))
+		_check(int(Game.settings.left_fire) == int(case[2]), "a v%d file with left_fire %d reads %d (got %d)" % [case[0], case[1], case[2], int(Game.settings.left_fire)])
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game._apply_saved_settings({"settings_version": 7, "wall_quick": "yes", "hit_ring": 3})
+	_check(Game.settings.wall_quick == true and Game.settings.hit_ring == true and Game.settings.enemy_outline == true
+		and Game.settings.gunshot_alerts == true and Game.settings.kill_badges == true, "round 8's switches start on and bad values fall back")
+	Game.settings = keep
+
+
+## The hit ring blooms to 1/16 of the screen width across (a headshot's larger).
+func _test_hit_bloom() -> void:
+	var vs := Vector2(1280, 720)
+	_check(is_equal_approx(HUD.hit_bloom_radius(vs, false) * 2.0, 80.0), "the hit ring is 1/16 of the width across")
+	_check(HUD.hit_bloom_radius(vs, true) > HUD.hit_bloom_radius(vs, false), "a headshot's ring is larger")

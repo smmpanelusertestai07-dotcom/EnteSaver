@@ -749,12 +749,12 @@ func _test_minimap() -> void:
 func _test_settings_v6() -> void:
 	var saved := Game.settings.duplicate(true)
 	var d: Dictionary = Game.DEFAULT_SETTINGS
-	_check(Game.SETTINGS_VERSION == 7 and d.settings_version == 7, "settings version 7 (version 7 added the minimap's turning, _test_minimap)")
+	_check(Game.SETTINGS_VERSION == 8 and d.settings_version == 8, "settings version 8 (version 8: LEFT FIRE while aiming, tests/hud_feedback_unit.gd)")
 	_check(d.mode == "training" and d.graphics_auto == true and d.graphics == 1 and d.fps == 60 and d.sens_general == 100
 		and d.sens_reddot == 100 and d.sens_2x == 100 and d.sens_sniper == 71 and d.sens_freelook == 100 and d.difficulty == 1
 		and d.vol_sfx == 90 and d.vol_music == 45 and d.vol_voice == 80 and d.last_pick == "ar", "the settings kept keep their defaults")
 	_check(d.dynamic_joystick == true and d.freelook_button == false, "the reference's defaults: the joystick follows the thumb, no free look button")
-	_check(d.left_fire == 0 and d.reload_button == true and d.switch_button == true, "the owner's: LEFT FIRE always, RELOAD and SWITCH on")
+	_check(d.left_fire == 1 and d.reload_button == true and d.switch_button == true, "LEFT FIRE while aiming (v8, the reference's), the owner's RELOAD and SWITCH on")
 	_check(d.vibrate_footsteps == true and d.vibrate_damage == false and d.vibrate_shooting == false and d.vibration == true,
 		"vibration as the reference's rows: enemy footsteps on, taking damage and shooting off, out of a match on")
 	for k in ["show_fps", "crosshair_color", "crosshair_size", "sens_fire", "vol_master"]:
@@ -907,7 +907,7 @@ func _test_sensitivity_per_sight() -> void:
 ## Aim precision, the left fire button and visual effects: defaults, sanitising and what they switch.
 func _test_controls_settings() -> void:
 	var d: Dictionary = Game.DEFAULT_SETTINGS
-	_check(d.aim_precision == 0 and d.left_fire == 0 and d.visual_effects == true, "aim assist, the left fire button and the effects start as before")
+	_check(d.aim_precision == 0 and d.left_fire == 1 and d.visual_effects == true, "aim assist and the effects start as before, the left fire button while aiming (v8)")
 	_check(Player.assist_allowed(0, false) and Player.assist_allowed(0, true), "ASSISTED: the assist works from the hip and while aiming")
 	_check(Player.assist_allowed(1, false) and not Player.assist_allowed(1, true), "MANUAL IN SCOPE: assisted from the hip only")
 	_check(not Player.assist_allowed(2, false) and not Player.assist_allowed(2, true), "FULL MANUAL: no assist")
@@ -1117,9 +1117,9 @@ func _test_settings_panel() -> void:
 	_check(panel.find_child("CrosshairColor", true, false) == null and panel.find_child("CrosshairSize", true, false) == null
 		and panel.find_child("CrosshairPreview", true, false) == null and panel.find_child("AimPrecision", true, false) != null
 		and panel.find_child("LeftFire", true, false) != null, "CONTROLS: aim precision and the left fire button, no crosshair colour or size")
-	Game.settings.merge({"dynamic_joystick": false, "left_fire": 1, "vibrate_damage": true, "freelook_button": true}, true)
+	Game.settings.merge({"dynamic_joystick": false, "left_fire": 0, "vibrate_damage": true, "freelook_button": true}, true)
 	panel._reset_tab()
-	_check(Game.settings.dynamic_joystick == true and Game.settings.aim_precision == 0 and Game.settings.left_fire == 0
+	_check(Game.settings.dynamic_joystick == true and Game.settings.aim_precision == 0 and Game.settings.left_fire == 1
 		and Game.settings.vibrate_damage == true and Game.settings.freelook_button == false,
 		"RESET on CONTROLS restores the joystick, aim precision, left fire and free look (not VIBRATION's rows)")
 	panel._show_tab(7)
