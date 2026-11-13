@@ -168,7 +168,9 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   unread count; the open one lit with a yellow edge); the conversation: NAME #CODE and ONLINE NOW /
   OFFLINE, message rows (picture, name (yours yellow), "TODAY 17:16", a dark bubble with a thin grey
   border, everyone's on the left), the encryption line, our quick phrases as dark chips (a tap
-  sends one), the field and the yellow SEND; a tap on the lobby beside the panel goes back.
+  sends one), the field and the yellow SEND; a tap on the lobby beside the panel goes back (the
+  dim behind it covers the whole lobby). Typing keeps the panel and its header in place: only the
+  input row and the quick phrases rise above the keyboard, the conversation shrinks.
 - Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);
   3-column item cards with the rendered outfit portrait and the outfit's own colour bar, live
   preview on the podium, EQUIP and BACK.

@@ -169,6 +169,12 @@ const PAGE_HEADS := {"friends": "MY FRIENDS", "requests": "FRIEND REQUESTS", "on
 	"local": "PLAY WITHOUT INTERNET"}
 
 
+## The REQUESTS side tab's caption: "REQUESTS  n" while n requests wait (kept current by
+## _refresh_friends: ACCEPT, DECLINE and a new request change it).
+static func requests_caption(n: int) -> String:
+	return "REQUESTS  %d" % n if n > 0 else "REQUESTS"
+
+
 func open(kind := "online", back := false) -> void:
 	_net_kind = kind
 	_scroll_back = int(_place.scroll) if back and String(_place.get("kind", "")) == kind else -1
@@ -181,9 +187,7 @@ func open(kind := "online", back := false) -> void:
 	var tabs: VBoxContainer = page.tabs
 	for t: Array in PAGE_TABS:
 		var tk := String(t[0])
-		var cap := String(t[1])
-		if tk == "requests" and not cloud.friend_requests.is_empty():
-			cap += "  %d" % cloud.friend_requests.size()
+		var cap := requests_caption(cloud.friend_requests.size()) if tk == "requests" else String(t[1])
 		var b := UI.side_tab(cap, tk == kind, 19 if tk != "local" else 16, Vector2(0, 64))
 		b.name = "Tab_" + tk
 		b.pressed.connect(func() -> void:
@@ -494,22 +498,20 @@ func _text_field(placeholder: String, max_len: int, digits_only: bool) -> LineEd
 
 ## The on-screen keyboard covers about the lower half of a landscape screen and the immersive
 ## window is not resized for it: while a text field is being typed in, the popup moves up until the
-## field sits in the top fifth of the screen (and back down when the typing ends).
+## field sits in the top fifth of the screen (and back down when the typing ends). The chat panel
+## stays where it is: only its input row and quick phrases rise (its conversation, ChatConv, gets a
+## bottom margin, so the history above them shrinks), with the field at about the screen's middle.
 func _lift_for_keyboard(le: LineEdit, on: bool) -> void:
-	# (a page lifts its content column, PageBody; a popup or the chat panel its Frame)
+	# (a page lifts its content column, PageBody; a popup its Frame; the chat panel pads ChatConv)
 	var modal := lobby.dialogs.modal
 	var frame := _lift_target(modal)
 	if frame == null or not le.is_inside_tree():
 		return
 	var lifted := float(frame.get_meta("lifted", 0.0))
-	frame.offset_top += lifted
-	frame.offset_bottom += lifted
-	frame.set_meta("lifted", 0.0)
+	_apply_lift(frame, 0.0)
 	if on:
-		var lift := maxf(le.get_global_rect().position.y + lifted - lobby.get_viewport().get_visible_rect().size.y * 0.2, 0.0)
-		frame.offset_top -= lift
-		frame.offset_bottom -= lift
-		frame.set_meta("lifted", lift)
+		var top := 0.42 if frame.has_meta("lift_pad") else 0.2
+		_apply_lift(frame, maxf(le.get_global_rect().position.y + lifted - lobby.get_viewport().get_visible_rect().size.y * top, 0.0))
 	_kb_field = le if on else null
 	_kb_seen = false
 
@@ -534,12 +536,33 @@ func _follow_keyboard() -> void:
 		le.release_focus()
 
 
-## What a text field's lift moves: a popup's or the chat panel's Frame, a page's PageBody.
+## What a text field's lift moves: the chat panel's conversation (ChatConv, padded from below),
+## a popup's Frame, a page's PageBody.
 static func _lift_target(modal: Control) -> Control:
 	if modal == null or not is_instance_valid(modal):
 		return null
+	var conv := modal.find_child("ChatConv", true, false) as Control
+	if conv:
+		return conv
 	var f := modal.get_node_or_null("Frame") as Control
 	return f if f else modal.find_child("PageBody", true, false) as Control
+
+
+## Sets a lift target's lift (pixels up): a popup or page moves up by it; the chat's conversation
+## (meta "lift_pad": its own bottom margin) gets that much more bottom margin, at most what its
+## history can give up, so the panel and its header never move.
+static func _apply_lift(t: Control, lift: float) -> void:
+	var was := float(t.get_meta("lifted", 0.0))
+	if t.has_meta("lift_pad"):
+		var pad := int(t.get_meta("lift_pad"))
+		var mc := t as MarginContainer
+		var spare := maxf(t.size.y - (mc.get_combined_minimum_size().y - was), 0.0)
+		lift = minf(lift, spare)
+		mc.add_theme_constant_override("margin_bottom", pad + int(lift))
+	else:
+		t.offset_top += was - lift
+		t.offset_bottom += was - lift
+	t.set_meta("lifted", lift)
 
 
 ## Lifts the popup just enough that the field clears a keyboard kb_px (screen pixels) high, at most
@@ -555,14 +578,15 @@ func _place_above_keyboard(le: LineEdit, kb_px: int) -> void:
 	var r := le.get_global_rect()
 	var lift := clampf(r.end.y + lifted + 12.0 - kb_top, 0.0, maxf(r.position.y + lifted - vh * 0.06, 0.0))
 	if absf(lift - lifted) > 1.0:
-		frame.offset_top += lifted - lift
-		frame.offset_bottom += lifted - lift
-		frame.set_meta("lifted", lift)
+		_apply_lift(frame, lift)
 
 
 func _refresh_friends() -> void:
 	if _net_list == null or not is_instance_valid(_net_list):
 		return
+	var req_tab := lobby.dialogs.modal.find_child("Tab_requests", true, false) as Button if lobby.dialogs.modal else null
+	if req_tab:                       # the REQUESTS count follows ACCEPT, DECLINE and new requests
+		req_tab.text = requests_caption(Game.cloud_service().friend_requests.size())
 	if _net_kind == "local":
 		_net_status.text = lan.status_text()
 		var lsig := lan.signature()
@@ -1099,8 +1123,9 @@ func _update_badge() -> void:
 
 
 ## A friend's chat message came in (Cloud.friend_chat_changed, after its checks: friends only,
-## FRIENDS CHAT on, never a blocked player): a notice with a soft sound, unless their chat is open
-## (it shows the message) or a match is loading.
+## FRIENDS CHAT on, never a blocked player): a notice with a soft sound, unless the chat panel is
+## open (their chat shows the message; another friend's only sounds, the panel's friends column
+## counts it) or a match is loading.
 func _on_friend_message(from: String) -> void:
 	_badge_t = 0.0
 	if lobby.start_btn.disabled or not Game.is_friend(from) or Game.is_blocked(from) or not bool(Game.settings.get("friend_chat", true)):
@@ -1108,7 +1133,9 @@ func _on_friend_message(from: String) -> void:
 	var m := lobby.dialogs.modal
 	if m and is_instance_valid(m):
 		var chat := m.find_child("ChatWindow", true, false) as LobbyNet
-		if chat and chat.id == from:
+		if chat:
+			if chat.id != from:
+				Audio.play("ui_select", -12.0, 1.3)    # (its friends column counts it; no notice over the panel's X)
 			return
 	var msgs := NetChat.messages(from)
 	if msgs.is_empty() or bool(msgs.back()[1]):
