@@ -38,6 +38,7 @@ static func run(runner: Node) -> void:
 	me._arena_net()
 	me._away_host()
 	me._pairs_unit()
+	me._talk_unit()
 	Game.profile = saved_profile
 	Game.settings = saved_settings
 	Game.autotest = saved_at
@@ -588,3 +589,77 @@ func _pairs_unit() -> void:
 	cl.in_session = false
 	cl.session_multi = false
 	cl.free()
+
+
+## TEAM lines ("tc"), quick ids ("qc" / "tq"), stickers ("stk") and map markers ("tm") as an
+## all-human match's phone "a" (team 0 with "b"; "c" the other team) takes them.
+func _talk_unit() -> void:
+	Game.settings.chat = true
+	var cl := RecordingCloud.new()
+	cl.my_id = "a"
+	cl.in_session = true
+	cl.session_multi = true
+	cl._room = "r1"
+	cl.session_roster = [{"id": "a", "team": 0, "slot": 0, "name": "A"}, {"id": "b", "team": 0, "slot": 1, "name": "B"},
+		{"id": "c", "team": 1, "slot": 2, "name": "C"}]
+	cl._multi = {"ids": {"a": 0, "b": 1, "c": 2}, "seq": {}, "heard": {}, "live": {}, "ka": {}, "joined": {}, "left": {}, "state_t": {}, "t0": 0}
+	var n := [0]
+	var room := func(d: Dictionary, f: String) -> void:
+		n[0] += 1
+		d["f"] = f
+		d["n"] = n[0]
+		cl._on_multi(d)
+	var raw := Crypto.new().generate_random_bytes(64)
+	var mate := Cloud.new()
+	mate.my_id = "b"
+	mate._vk = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64)}
+	var enemy := Cloud.new()
+	enemy.my_id = "c"
+	enemy._vk = mate._vk.duplicate()
+	var other_key := Cloud.new()
+	other_key.my_id = "b"
+	var raw2 := Crypto.new().generate_random_bytes(64)
+	other_key._vk = {"aes": raw2.slice(0, 32), "mac": raw2.slice(32, 64)}
+	cl._vkeys = {"b": {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": "m:r1"},
+		"c": {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": "m:r1"}}
+	var seal := func(c: Cloud, text: String) -> String: return Marshalls.raw_to_base64(c._vk_seal(text.to_utf8_buffer()))
+	var got := []
+	cl.chat_from.connect(func(x: String, f: String, team: bool) -> void: got.append([x, f, team]))
+	room.call({"k": "tc", "s": seal.call(mate, "PUSH LEFT")}, "b")
+	_check(got.size() == 1 and got[0] == ["PUSH LEFT", "b", true], "a teammate's TEAM line is shown as TEAM (%s)" % str(got))
+	cl._buckets.clear()
+	room.call({"k": "tc", "s": seal.call(enemy, "I SEE YOU")}, "c")
+	_check(got.size() == 1, "a TEAM line from the other team is dropped")
+	cl._buckets.clear()
+	room.call({"k": "tc", "s": seal.call(other_key, "FORGED")}, "b")
+	_check(got.size() == 1, "a TEAM line under a key the teammate did not give is dropped")
+	cl._buckets.clear()
+	cl._on_talk({"k": "tq", "s": seal.call(mate, str(NetChat.TEAM_BASE + 1))}, "b")
+	cl._buckets.clear()
+	cl._on_talk({"k": "qc", "i": 0}, "c")
+	cl._buckets.clear()
+	cl._on_talk({"k": "qc", "i": 57}, "c")
+	_check(got.size() == 3 and got[1] == [NetChat.TEAM_QUICK[1], "b", true] and got[2] == [NetChat.QUICK[0], "c", false],
+		"quick phrases come as ids and show this phone's own text; an unknown id is dropped (%s)" % str(got))
+	var stk := []
+	cl.sticker_from.connect(func(i: int, f: String) -> void: stk.append([i, f]))
+	cl._buckets.clear()
+	cl._on_talk({"k": "stk", "i": NetChat.STICKERS.size()}, "c")
+	cl._buckets.clear()
+	cl._on_talk({"k": "stk", "i": -1}, "c")
+	cl._buckets.clear()
+	cl._on_talk({"k": "stk", "i": 2}, "c")
+	_check(stk == [[2, "c"]], "a sticker id out of range is dropped (%s)" % str(stk))
+	cl._on_talk({"k": "tm", "s": seal.call(enemy, "1.00,2.00,3.00")}, "c")
+	_check(not cl.markers.has("c"), "a map marker from the other team is dropped")
+	cl._on_talk({"k": "tm", "s": seal.call(mate, "1.00,2.00,nan")}, "b")
+	_check(not cl.markers.has("b"), "a marker that is not a finite point is dropped")
+	cl._buckets.clear()
+	cl._on_talk({"k": "tm", "s": seal.call(mate, "4.00,0.50,-6.25")}, "b")
+	_check(cl.live_markers().get("b") == Vector3(4.0, 0.5, -6.25), "a teammate's marker is kept")
+	cl.markers.b.t = Time.get_ticks_msec() - Cloud.MARKER_MS - 1
+	_check(not cl.live_markers().has("b"), "a marker is gone after 15 s")
+	cl.in_session = false
+	cl.session_multi = false
+	for c: Cloud in [cl, mate, enemy, other_key]:
+		c.free()

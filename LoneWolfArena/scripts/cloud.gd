@@ -73,6 +73,10 @@ signal chat_received(text: String)     # the opponent's chat line in a match (cl
 ## Any match chat line with its sender: team_only for a TEAM line ("tc", sealed under the sender's
 ## GROUP key: only its teammates read it), else ALL ("chat"). chat_received still comes for both.
 signal chat_from(text: String, from_id: String, team_only: bool)
+## The match's quick-chat bubble (HudNet): a sticker ("stk", NetChat.STICKERS id) and a teammate's map
+## marker ("tm", sealed for the own team like "tc"; markers holds it MARKER_MS).
+signal sticker_from(id: int, from_id: String)
+signal marker_from(from_id: String, pos: Vector3)
 signal voice_received(frame: PackedByteArray)    # the opponent's audio (a NetVoice frame; 1 vs 1 only, as before)
 ## Any player's voice frame (NetVoice plays it): the sender and whether it is a teammate (voice_mate).
 signal voice_from(frame: PackedByteArray, from_id: String, mate: bool)
@@ -298,6 +302,13 @@ var _pair_meta := {}
 var pair_states_in := 0        # states taken from the pairs this session (tests)
 var state_counts := {}         # member id -> [states taken from the relay, from its pair] this session (tests)
 var relay_voice_out := 0       # voice frames sent through the relay this session (tests)
+## Map markers (HudNet's MARKER button): id (this phone: my_id) -> {"p": Vector3, "t": ms}, one live
+## marker per player for MARKER_MS; this phone places at most one per MARKER_EVERY_MS.
+const MARKER_MS := 15000
+const MARKER_EVERY_MS := 2000
+const MARKER_MAX_M := 80.0
+var markers := {}
+var _marker_out_ms := -100000
 var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
 var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
 ## DUO / SQUAD over this 1 vs 1 session: the team of the session a team invite ("tinv") started, on
@@ -2750,6 +2761,9 @@ func _on_room(msg: PackedByteArray) -> void:
 			if (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, Time.get_ticks_msec() - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
+		"qc", "tq", "stk", "tm":
+			if in_session:
+				_on_talk(d as Dictionary, String(opponent.get("id", "")))
 		"chat", "tc":
 			# A chat line: only with CHAT on, never from a blocked player, at most one per
 			# NetChat.RATE_S (a short burst of two), cleaned and cut to NetChat.MATCH_MAX. A TEAM
@@ -2848,6 +2862,7 @@ func end_session(reason := "left", theirs := false) -> void:
 	clear_resume()
 	_reset_away()
 	session_team = {}
+	markers = {}
 	if session_multi:
 		_multi_reset()
 	peer_rtt = -1
@@ -3186,6 +3201,111 @@ func send_chat(text: String, team_only := false) -> String:
 	_chat_out_ms = now
 	_room_send({"k": "chat", "x": line})
 	return ""
+
+
+## The quick-chat bubble's messages from a match player: a quick phrase by id ("qc" {"i"} to all,
+## "tq" sealed for the own team), a sticker ("stk" {"i"}) and a teammate's map marker ("tm", sealed:
+## x, y, z). Never from a blocked player; phrases and stickers with CHAT on and the chat's rate
+## (NetChat.RATE_S, a burst of two), markers at most one per MARKER_EVERY_MS. Unknown ids, other
+## teams' markers and points that are not finite or far out are dropped.
+func _on_talk(d: Dictionary, f: String) -> void:
+	var kind := String(d.get("k", ""))
+	if f == "" or f == my_id or Game.is_blocked(f):
+		return
+	if kind == "tm":
+		var raw: Variant = team_line_open(d.get("s"), f)
+		if typeof(raw) != TYPE_STRING or not _bucket("tm" + f, 1000.0 / MARKER_EVERY_MS, 2.0):
+			return
+		var parts := String(raw).split(",")
+		if parts.size() != 3:
+			return
+		var v := Vector3.ZERO
+		for i in 3:
+			if not parts[i].is_valid_float() or not is_finite(parts[i].to_float()) or absf(parts[i].to_float()) > 10000.0:
+				return
+			v[i] = parts[i].to_float()
+		markers[f] = {"p": v, "t": Time.get_ticks_msec()}
+		marker_from.emit(f, v)
+		return
+	if not bool(Game.settings.get("chat", true)):
+		return
+	if kind == "stk":
+		if NetChat.sticker_ok(d.get("i")) and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
+			sticker_from.emit(int(d.i), f)
+		return
+	var id: Variant = d.get("i")
+	if kind == "tq":
+		var raw: Variant = team_line_open(d.get("s"), f)
+		id = null
+		if typeof(raw) == TYPE_STRING and String(raw).is_valid_int():
+			id = int(String(raw))
+	var text := NetChat.quick_text(id)
+	if text != "" and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
+		chat_from.emit(text, f, kind == "tq")
+
+
+## A quick phrase by its id (NetChat.quick_text) to everyone, or to the own team (sealed, "tq"); the
+## same rate and answers as send_chat.
+func send_quick(id: int, team_only := false) -> String:
+	if not in_session or not bool(Game.settings.get("chat", true)):
+		return "OFF"
+	if NetChat.quick_text(id) == "":
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
+		return "WAIT"
+	if team_only:
+		if voice_mates() == 0:
+			return "NO TEAM"
+		_vk_sync()
+		_chat_out_ms = now
+		_room_send({"k": "tq", "s": Marshalls.raw_to_base64(_vk_seal(str(id).to_utf8_buffer()))})
+		return ""
+	_chat_out_ms = now
+	_room_send({"k": "qc", "i": id})
+	return ""
+
+
+## A sticker (NetChat.STICKERS id) to everyone in the match, at the chat's rate.
+func send_sticker(id: int) -> String:
+	if not in_session or not bool(Game.settings.get("chat", true)):
+		return "OFF"
+	if not NetChat.sticker_ok(id):
+		return "EMPTY"
+	var now := Time.get_ticks_msec()
+	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
+		return "WAIT"
+	_chat_out_ms = now
+	_room_send({"k": "stk", "i": id})
+	return ""
+
+
+## This player's map marker at `pos` to the own team only (sealed like a TEAM line), at most one per
+## MARKER_EVERY_MS; it replaces the last one and is kept MARKER_MS here too. "" when placed.
+func send_marker(pos: Vector3) -> String:
+	if not in_session:
+		return "OFF"
+	var now := Time.get_ticks_msec()
+	if now - _marker_out_ms < MARKER_EVERY_MS:
+		return "WAIT"
+	if voice_mates() == 0:
+		return "NO TEAM"
+	_marker_out_ms = now
+	markers[my_id] = {"p": pos, "t": now}
+	_vk_sync()
+	_room_send({"k": "tm", "s": Marshalls.raw_to_base64(_vk_seal(("%.2f,%.2f,%.2f" % [pos.x, pos.y, pos.z]).to_utf8_buffer()))})
+	return ""
+
+
+## The markers still live (MARKER_MS): id -> Vector3; the expired ones go.
+func live_markers(now := Time.get_ticks_msec()) -> Dictionary:
+	var out := {}
+	for id: String in markers.keys():
+		if now - int(markers[id].t) >= MARKER_MS or (id != my_id and not voice_mate(id)):
+			markers.erase(id)
+		else:
+			out[id] = markers[id].p
+	return out
 
 
 ## A teammate's TEAM line ("tc" "s") as text; null from anyone else, under a key it did not give
@@ -4824,6 +4944,9 @@ func _on_multi(d: Dictionary) -> void:
 			if (is_host or f == session_host_id) and typeof(to) == TYPE_STRING and String(to) == my_id and (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, now - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
+		"qc", "tq", "stk", "tm":
+			if in_session:
+				_on_talk(d, f)
 		"chat", "tc":
 			# ALL, or a TEAM line ("tc": only a teammate's, opened with its GROUP key).
 			var x: Variant = d.get("x") if kind == "chat" else team_line_open(d.get("s"), f)

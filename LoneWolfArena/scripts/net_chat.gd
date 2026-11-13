@@ -23,6 +23,28 @@ const FRIEND_RATE_MS := 1000      # friends chat: one message a second at most
 const HISTORY_MAX := 50
 const EXTRA := [",", "!", "?", "'", ":", "(", ")", "+", "/", "#"]
 const QUICK := ["GG", "NICE SHOT!", "WAIT!", "REMATCH?", "GOOD LUCK!", "WELL PLAYED", "OOPS!", "HELLO!"]
+## The match's quick-chat bubble (round 8, HudNet): a DUO / SQUAD's own team set (ids from TEAM_BASE),
+## and the stickers (ids 0..5); both travel as ids, never as text: each phone shows its own copy.
+const TEAM_QUICK := ["NEED BACKUP", "ENEMY HERE", "ON MY WAY", "FALL BACK", "COVER ME", "NICE ONE", "HOLD", "PUSH NOW"]
+const TEAM_BASE := 100
+const STICKERS := ["THUMBS UP", "LAUGH", "ANGRY", "CRY", "WAVE", "GG"]
+
+
+## A quick phrase's text by its id (QUICK, or TEAM_QUICK from TEAM_BASE); "" for any other id.
+static func quick_text(id: Variant) -> String:
+	if not (id is int or id is float) or not is_finite(float(id)) or float(id) != floorf(float(id)):
+		return ""
+	var i := int(id)
+	if i >= 0 and i < QUICK.size():
+		return String(QUICK[i])
+	if i >= TEAM_BASE and i < TEAM_BASE + TEAM_QUICK.size():
+		return String(TEAM_QUICK[i - TEAM_BASE])
+	return ""
+
+
+## Whether a sticker id is one this game has.
+static func sticker_ok(id: Variant) -> bool:
+	return (id is int or id is float) and is_finite(float(id)) and float(id) == floorf(float(id)) and int(id) >= 0 and int(id) < STICKERS.size()
 const CHAT_PATH := "user://chat.json"
 const GameCode := preload("res://autoload/game.gd")       # its static helpers
 const MAX_AGE_S := 30 * 86400     # a waiting message older than this is dropped (Cloud.REQUEST_MAX_AGE_S)
