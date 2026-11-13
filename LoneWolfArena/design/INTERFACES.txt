@@ -978,10 +978,10 @@ listed here. If a part needs something new from the core, add it in its own file
   the empty state is ChatEmpty; the lobby's chat strip shows "[TEAM] NAME: text" and opens it; the
   unread lines count on the strip's badge. A match's chat stays the match room's (HudNet).
 - Social panel (LobbySocial, Lobby.social): SocialArrow at the right edge opens SocialPanel
-  (SocialTab_<friends|recent>, SocialStatus, SocialRefresh, SocialSearch, SocialTeamCode,
-  SocialRow_<code> with SocialInvite_<code>, SocialEmpty / SocialAddFriends); TEAM CODE's keypad
-  TeamCodePad (TeamCodeShown, TeamKey_<0-9>, TeamKeyBack, TeamKeyPaste, TeamKeyGo, TeamCodeState).
-  Setting team_status (0 READY TO TEAM: a GROUP INVITE is taken at once; 1 ONLINE; 2 DO NOT
-  DISTURB: declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
+  (SocialTab_<friends|recent>, SocialStatus, SocialRefresh, SocialSearch, SocialGroupCode,
+  SocialRow_<code> with SocialInvite_<code>, SocialEmpty / SocialAddFriends); GROUP CODE's keypad
+  CodePad (CodePadShown, CodeKey_<0-9>, CodeKeyBack, CodeKeyPaste, CodeKeyGo, CodePadState).
+  Setting team_status (0 JOIN ME ANYTIME: a GROUP INVITE is taken at once; 1 ONLINE; 2 BUSY:
+  declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
 - FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,
   DUEL DUEL_W; on MY FRIENDS CHAT CHAT_W and REMOVE REMOVE_W), empty places held by ColumnGap.

@@ -3,16 +3,16 @@ extends RefCounted
 ## The lobby's right-hand social panel (the reference's invite panel): an arrow tab at the screen's
 ## right edge (SocialArrow, "<") slides it in over the lobby's right side (SocialPanel, its "Frame";
 ## a tap beside it or its ">" closes it). Tabs FRIENDS / RECENT (SocialTab_<friends|recent>), a
-## status choice (SocialStatus: READY TO TEAM = a GROUP INVITE is accepted at once, ONLINE = asked as
-## before, DO NOT DISTURB = declined at once; setting team_status 0 / 1 / 2), REFRESH, a search
-## (SocialSearch: name or ID) and TEAM CODE (SocialTeamCode: a numeric keypad, TeamCodePad, that
+## status choice (SocialStatus: JOIN ME ANYTIME = a GROUP INVITE is accepted at once, ONLINE = asked as
+## before, BUSY = declined at once; setting team_status 0 / 1 / 2), REFRESH, a search
+## (SocialSearch: name or ID) and GROUP CODE (SocialGroupCode: a numeric keypad, CodePad, that
 ## joins a friend's group by its code: Cloud.join_group_code). Each row (SocialRow_<code>): the
 ## player's picture, name and where they are, and the invite "+" (SocialInvite_<code>: a GROUP
 ## INVITE through LobbyTeam.ask_friend; greyed when they are offline, in a match, already in the
 ## group, or this player may not invite). No friends: ADD FRIENDS (opens FRIENDS > PLAYERS).
 ## Hidden while online teams are off and in a custom room. The lobby makes it (Lobby.social).
 
-const STATUS := [["READY TO TEAM", Color(0.38, 0.86, 0.44)], ["ONLINE", Color(0.98, 0.78, 0.2)], ["DO NOT DISTURB", Color(0.92, 0.3, 0.3)]]
+const STATUS := [["JOIN ME ANYTIME", Color(0.38, 0.86, 0.44)], ["ONLINE", Color(0.98, 0.78, 0.2)], ["BUSY", Color(0.92, 0.3, 0.3)]]
 const PANEL_X := 0.70                    # the panel's left edge (share of the width)
 const PANEL_BOTTOM := 0.75               # its bottom (the mode card and START stay clear below)
 
@@ -31,12 +31,12 @@ func _init(owner_lobby: Lobby) -> void:
 	lobby = owner_lobby
 
 
-## The status the player picked: 0 READY TO TEAM, 1 ONLINE, 2 DO NOT DISTURB.
+## The status the player picked: 0 JOIN ME ANYTIME, 1 ONLINE, 2 BUSY.
 static func status() -> int:
 	return clampi(int(Game.settings.get("team_status", 1)), 0, 2)
 
 
-## What a GROUP INVITE meets here: "accept" (READY TO TEAM), "decline" (DO NOT DISTURB) or "ask".
+## What a GROUP INVITE meets here: "accept" (JOIN ME ANYTIME), "decline" (BUSY) or "ask".
 static func invite_answer(st: int) -> String:
 	return "accept" if st == 0 else ("decline" if st == 2 else "ask")
 
@@ -144,8 +144,8 @@ func open(tab := "") -> void:
 		Game.cloud_service().start_lobby()
 		open())
 	tools.add_child(rf)
-	var tc := UI.button("TEAM CODE", 14, "light", Vector2(0, 46))
-	tc.name = "SocialTeamCode"
+	var tc := UI.button("GROUP CODE", 14, "light", Vector2(0, 46))
+	tc.name = "SocialGroupCode"
 	tc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tc.pressed.connect(open_pad)
 	tools.add_child(tc)
@@ -248,18 +248,18 @@ func _row(cloud: Cloud, id: String, who: String) -> Control:
 	return row
 
 
-# ---------------------------------------------------------------- TEAM CODE keypad
+# ---------------------------------------------------------------- GROUP CODE keypad
 
-## TEAM CODE: a keypad (TeamCodePad) for a friend's Cloud.CODE_LEN-digit group code: keys
-## TeamKey_<0-9>, TeamKeyBack (yellow), TeamKeyPaste, TeamKeyGo (yellow tick: Cloud.join_group_code);
+## GROUP CODE: a keypad (CodePad) for a friend's Cloud.CODE_LEN-digit group code: keys
+## CodeKey_<0-9>, CodeKeyBack (yellow), CodeKeyPaste, CodeKeyGo (yellow tick: Cloud.join_group_code);
 ## the line under it follows Cloud.code_state and the pad closes once this player is in the group.
 func open_pad() -> void:
-	var v := lobby.dialogs.open_modal("TEAM CODE", 520.0, true)
-	v.name = "TeamCodePad"
+	var v := lobby.dialogs.open_modal("GROUP CODE", 520.0, true)
+	v.name = "CodePad"
 	_pad_digits = ""
 	_pad_asked = false
 	_pad_shown = UI.label("", 34, UI.TEXT, "heavy")
-	_pad_shown.name = "TeamCodeShown"
+	_pad_shown.name = "CodePadShown"
 	_pad_shown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_pad_shown.custom_minimum_size = Vector2(440, 56)
 	_pad_shown.add_theme_stylebox_override("normal", UI.box(Color(0, 0, 0, 0.5), 0, 0, Color.TRANSPARENT, 8.0))
@@ -272,19 +272,19 @@ func open_pad() -> void:
 	v.add_child(grid)
 	for k: String in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "PASTE", "0", "<"]:
 		var b := UI.button(k, 22 if k.length() == 1 else 15, "primary" if k == "<" else "dark", Vector2(140, 56))
-		b.name = "TeamKeyBack" if k == "<" else ("TeamKeyPaste" if k == "PASTE" else "TeamKey_" + k)
+		b.name = "CodeKeyBack" if k == "<" else ("CodeKeyPaste" if k == "PASTE" else "CodeKey_" + k)
 		b.pressed.connect(_pad_key.bind(k))
 		grid.add_child(b)
 	var go := UI.button("JOIN", 22, "primary", Vector2(436, 56))
-	go.name = "TeamKeyGo"
+	go.name = "CodeKeyGo"
 	go.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	go.pressed.connect(func() -> void:
 		var why := Game.cloud_service().join_group_code(_pad_digits)
 		_pad_asked = why == ""
 		_pad_state.text = why if why != "" else LobbyTeam.code_state_text(Game.cloud_service().code_state))
 	v.add_child(go)
-	_pad_state = UI.label("Enter a friend's %d-digit TEAM CODE (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN, 16, UI.TEXT_DIM, "semi")
-	_pad_state.name = "TeamCodeState"
+	_pad_state = UI.label("Enter a friend's %d-digit GROUP CODE (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN, 16, UI.TEXT_DIM, "semi")
+	_pad_state.name = "CodePadState"
 	_pad_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_pad_state.custom_minimum_size = Vector2(440, 0)
 	v.add_child(_pad_state)

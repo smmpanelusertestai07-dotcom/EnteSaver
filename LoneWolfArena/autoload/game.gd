@@ -74,7 +74,7 @@ const DEFAULT_SETTINGS := {
 	"show_career": true,          # SHOW MY CAREER: the player card carries a career summary (Cloud card v3)
 	"voice_chat": false,          # push-to-talk in an online match (NetVoice; asks for the microphone)
 	"challenges_from": 0,         # DUEL CHALLENGES FROM: CHALLENGES_EVERYONE, _FRIENDS, _NOBODY (Cloud.challenge_allowed)
-	"team_status": 1,             # the social panel's status (LobbySocial): 0 READY TO TEAM, 1 ONLINE, 2 DO NOT DISTURB
+	"team_status": 1,             # the social panel's status (LobbySocial): 0 JOIN ME ANYTIME, 1 ONLINE, 2 BUSY
 	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
 	"direct_connect": true,       # DIRECT CONNECTION: the match state straight to the other phone (NetDirect)
 }

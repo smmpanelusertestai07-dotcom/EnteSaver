@@ -67,7 +67,7 @@ func run(at: Node) -> int:
 	cloud.close_room()
 	lobby.dialogs.close_modal()
 	await at.wait(0.4)
-	# The right-hand social panel: FRIENDS with the invite "+", the status choice, TEAM CODE's keypad.
+	# The right-hand social panel: FRIENDS with the invite "+", the status choice, GROUP CODE's keypad.
 	var arrow := lobby.find_child("SocialArrow", true, false) as Button
 	_check(arrow != null and arrow.visible, "the lobby shows the social panel's arrow at the right edge")
 	await _tap(at, arrow)
@@ -79,13 +79,13 @@ func run(at: Node) -> int:
 	await at.shot("r06_social_panel")
 	await _tap(at, modal.find_child("SocialStatus", true, false) as Control)
 	_check(LobbySocial.status() == 2 and LobbySocial.invite_answer(2) == "decline" and LobbySocial.invite_answer(0) == "accept",
-		"the status steps ONLINE -> DO NOT DISTURB (invites declined at once); READY TO TEAM accepts")
+		"the status steps ONLINE -> BUSY (invites declined at once); JOIN ME ANYTIME accepts")
 	Game.settings.team_status = 1
-	await _tap(at, lobby.dialogs.modal.find_child("SocialTeamCode", true, false) as Control)
+	await _tap(at, lobby.dialogs.modal.find_child("SocialGroupCode", true, false) as Control)
 	for k in ["4", "2", "1", "3"]:
-		await _tap(at, lobby.dialogs.modal.find_child("TeamKey_" + k, true, false) as Control)
-	_check((lobby.dialogs.modal.find_child("TeamCodeShown", true, false) as Label).text.replace(" ", "") == "4213", "TEAM CODE's keypad shows the digits as a code")
-	await at.shot("r07_team_code_pad")
+		await _tap(at, lobby.dialogs.modal.find_child("CodeKey_" + k, true, false) as Control)
+	_check((lobby.dialogs.modal.find_child("CodePadShown", true, false) as Label).text.replace(" ", "") == "4213", "GROUP CODE's keypad shows the digits as a code")
+	await at.shot("r07_group_code_pad")
 	lobby.dialogs.close_modal()
 	Game.profile = saved_profile
 	return _fails
