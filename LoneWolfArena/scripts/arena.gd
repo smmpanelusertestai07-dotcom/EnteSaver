@@ -1627,7 +1627,9 @@ func session_up() -> bool:
 
 ## Seconds from the match's end (phase END) to its results.
 func results_delay() -> float:
-	return RESULTS_DELAY_VOID_S if _invalid else RESULTS_DELAY_S
+	if _invalid:
+		return RESULTS_DELAY_VOID_S
+	return RoundRules.results_at(hud != null and hud.result_won())
 
 
 func _on_tampered(reason: String) -> void:

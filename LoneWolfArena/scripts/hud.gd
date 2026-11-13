@@ -2214,11 +2214,64 @@ func _draw_break(vs: Vector2, u: float) -> void:
 				age - RoundRules.BREAK_BAND_AT, RoundRules.BREAK_S - age + 0.3)
 
 
-## The match's end on the result band (show_result), until the results cover it.
+## Whether the match's end shows a win (VICTORY!: its longer sequence, RoundRules.match_end_step).
+func result_won() -> bool:
+	return not _result.is_empty() and String(_result.title).begins_with("VICTORY")
+
+
+## The match's end (round 8): the result band (show_result); a win then turns into a big glowing
+## gold VICTORY! across the middle with sparks, and the band moves to the top with the split score
+## band under it until the results cover it (RoundRules.match_end_step).
 func _draw_match_result(vs: Vector2, u: float) -> void:
 	if result_title() == "":
 		return
-	_draw_result_band(vs, u, String(_result.title), String(_result.sub).to_upper(), float(_result.age), 99.0)
+	var age := float(_result.age)
+	var title := String(_result.title)
+	var sub := String(_result.sub).to_upper()
+	var t := age + RoundRules.MATCH_BAND_AT
+	match RoundRules.match_end_step(t, result_won()):
+		"band", "results":
+			if not result_won():
+				_draw_result_band(vs, u, title, sub, age, 99.0)
+			else:
+				_draw_result_band(vs, u, title, sub, age, RoundRules.VICTORY_WORD_AT - t)
+		"word":
+			_draw_victory_word(vs, u, t - RoundRules.VICTORY_WORD_AT)
+		"top":
+			_draw_victory_top(vs, u, t - RoundRules.VICTORY_TOP_AT)
+
+
+## The big gold VICTORY! across the middle, `t` s into its RoundRules.VICTORY_WORD_S: it pops in,
+## glows and throws sparks, then fades as the band takes the top.
+func _draw_victory_word(vs: Vector2, u: float, t: float) -> void:
+	var a := clampf(t / 0.15, 0.0, 1.0) * clampf((RoundRules.VICTORY_WORD_S - t) / 0.25, 0.0, 1.0)
+	var c := Vector2(vs.x * 0.5, vs.y * 0.5)
+	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.35 * a))
+	var pop := 1.0 + 0.25 * (1.0 - clampf(t / 0.25, 0.0, 1.0))
+	var fs := int(0.2 * u * pop)
+	var gold := Color(1.0, 0.8, 0.22)
+	for i in 3:
+		var g := 1.0 - i * 0.3
+		HudDraw.text(self, "VICTORY!", c, fs, Color(1.0, 0.65, 0.1, 0.12 * a * g), 1, int(0.03 * u * (i + 1)), "heavy", Color(1.0, 0.6, 0.1, 1.0))
+	HudDraw.text(self, "VICTORY!", c, fs, Color(gold, a), 1, 5, "heavy", Color(0.35, 0.18, 0.0, 0.9 * a))
+	var shine := clampf((t - 0.2) / 0.6, 0.0, 1.0)
+	if shine > 0.0 and shine < 1.0:
+		var w := HudDraw.text_width("VICTORY!", fs, "heavy")
+		var x := c.x - w * 0.5 + w * shine
+		draw_line(Vector2(x - fs * 0.25, c.y + fs * 0.4), Vector2(x + fs * 0.25, c.y - fs * 0.4), Color(1, 1, 0.9, 0.55 * a), fs * 0.08, true)
+	_draw_sparks(c + Vector2(-0.3 * u, 0), t, 0.3 * u, gold, a)
+	_draw_sparks(c + Vector2(0.3 * u, 0), t - 0.15, 0.3 * u, gold, a)
+	_draw_sparks(c, t - 0.4, 0.45 * u, Color(1, 0.95, 0.7), a)
+
+
+## After the big word: the VICTORY! band slid up to the top with the split score band under it.
+func _draw_victory_top(vs: Vector2, u: float, t: float) -> void:
+	var k := clampf(t / 0.35, 0.0, 1.0)
+	var a := clampf(t / 0.2, 0.0, 1.0)
+	var cy := lerpf(vs.y * 0.5, vs.y * 0.12, 1.0 - pow(1.0 - k, 3.0))
+	HudDraw.text(self, "VICTORY!", Vector2(vs.x * 0.5, cy), int(0.09 * u), Color(1.0, 0.8, 0.22, a), 1, 4, "heavy", Color(0.35, 0.18, 0.0, 0.9 * a))
+	var sc: Dictionary = arena.get("score") if arena != null else {}
+	_draw_split_score(vs, u, cy + 0.14 * u, a, int(sc.get("player", 0)), int(sc.get("bot", 0)), 0, -1.0)
 
 
 ## VICTORY (yellow) / DEFEAT (grey) / DRAW, TIME UP (white) on a dark band at y 0.15 that fades at
@@ -2247,37 +2300,82 @@ func _draw_result_band(vs: Vector2, u: float, title: String, sub: String, age: f
 			Color(1, 1, 1, 0.8 * a), 1, 2, "bold")
 
 
-## The dimmed screen with the two score plates mid-screen: yours (blue, left) VS theirs (orange,
-## right), the names under them; the winner's number goes up at the tick (a short tick, no flash).
+## The break's score step (round 8, like the reference): the screen dimmed near black, one wide
+## split band (x 0.12-0.93 of the width: yours blue on the left, theirs orange on the right) with
+## both numbers by our centre glyph, the names at its ends and the round's result over it; the
+## number that changed flashes with a burst of sparks at the tick (RoundRules.BREAK_TICK_AT).
 func _draw_break_score(vs: Vector2, u: float, age: float, left: float) -> void:
 	var a := clampf(age / 0.3, 0.0, 1.0) * clampf(left / 0.3, 0.0, 1.0)
-	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.6 * a))
-	var cx := vs.x * 0.5
-	var cy := vs.y * 0.5
-	var ph := 0.2 * u
-	var pw := 0.24 * u
-	var sl := 0.045 * u
-	var gap := 0.11 * u
+	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.92 * a))
 	var tick := float(_break.age) - RoundRules.BREAK_TICK_AT
+	var flash := 0 if tick < 0.0 else int(_break.won)
+	_draw_split_score(vs, u, vs.y * 0.5, a, break_score(true), break_score(false), flash, tick)
+	var title := String(_break.title)
+	HudDraw.text(self, title, Vector2(vs.x * 0.5, vs.y * 0.5 - 0.15 * u), int(0.05 * u),
+		Color(HudDraw.YELLOW if title.begins_with("VICTORY") else Color(0.86, 0.88, 0.9), a), 1, 3, "heavy")
+
+
+## The split score band centred at height `cy`: blue (yours) | orange (theirs), the numbers by the
+## centre glyph, the names at the ends. `flash` 1: your number flashes and sparks (-1 theirs, 0
+## none), `tick` s after the change.
+func split_band_rect(vs: Vector2, u: float, cy: float) -> Rect2:
+	var h := 0.14 * u
+	return Rect2(vs.x * 0.12, cy - h * 0.5, vs.x * 0.81, h)
+
+
+func _draw_split_score(vs: Vector2, u: float, cy: float, a: float, mine: int, theirs: int, flash: int, tick: float) -> void:
+	var r := split_band_rect(vs, u, cy)
+	var cx := vs.x * 0.5
+	var fade := r.size.x * 0.12
+	var blue := Color(HudDraw.BLUE, 0.92 * a)
+	var orange := Color(HudDraw.ORANGE, 0.92 * a)
+	draw_polygon(PackedVector2Array([r.position, Vector2(r.position.x + fade, r.position.y), Vector2(r.position.x + fade, r.end.y), Vector2(r.position.x, r.end.y)]),
+		PackedColorArray([Color(blue, 0.0), blue, blue, Color(blue, 0.0)]))
+	draw_rect(Rect2(r.position.x + fade, r.position.y, cx - r.position.x - fade, r.size.y), blue)
+	draw_rect(Rect2(cx, r.position.y, r.end.x - fade - cx, r.size.y), orange)
+	draw_polygon(PackedVector2Array([Vector2(r.end.x - fade, r.position.y), Vector2(r.end.x, r.position.y), Vector2(r.end.x, r.end.y), Vector2(r.end.x - fade, r.end.y)]),
+		PackedColorArray([orange, Color(orange, 0.0), Color(orange, 0.0), orange]))
+	draw_rect(Rect2(r.position.x + fade, r.position.y, r.size.x - fade * 2.0, r.size.y * 0.4), Color(1, 1, 1, 0.1 * a))
+	# Our centre glyph: a dark diamond with a white rim and three claw marks.
+	var g := r.size.y * 0.62
+	var dia := PackedVector2Array([Vector2(cx, cy - g), Vector2(cx + g * 0.8, cy), Vector2(cx, cy + g), Vector2(cx - g * 0.8, cy)])
+	draw_colored_polygon(dia, Color(0.06, 0.07, 0.09, 0.95 * a))
+	dia.append(dia[0])
+	draw_polyline(dia, Color(1, 1, 1, 0.85 * a), maxf(2.0, 0.004 * u), true)
+	for k in 3:
+		var dx := (k - 1) * g * 0.22
+		draw_line(Vector2(cx + dx + g * 0.1, cy - g * 0.38), Vector2(cx + dx - g * 0.1, cy + g * 0.38), Color(1, 1, 1, 0.9 * a), maxf(2.0, 0.005 * u), true)
 	var names := ["YOUR TEAM", "THE OTHER TEAM"] if team != null else [player.display_name if player != null else "YOU", _their_name()]
 	for side in 2:
-		var mine := side == 0
-		var x0 := cx - gap - pw if mine else cx + gap
-		var col: Color = HudDraw.BLUE if mine else HudDraw.ORANGE
-		HudDraw.slanted(self, x0, x0 + pw, cy - ph * 0.5, ph, sl if mine else -sl, Color(col, 0.95 * a))
-		HudDraw.slanted(self, x0, x0 + pw, cy - ph * 0.5, ph * 0.42, (sl if mine else -sl) * 0.42, Color(1, 1, 1, 0.12 * a))
-		var gained := int(_break.won) == (1 if mine else -1)
-		var pop := 1.0
-		if gained and tick >= 0.0:
-			pop = 1.0 + 0.12 * (1.0 - clampf(tick / 0.2, 0.0, 1.0))      # (a short tick, no flash)
-		var nc := Vector2(x0 + pw * 0.5 + (sl if mine else -sl) * 0.5, cy)
-		HudDraw.text(self, str(break_score(mine)), nc, int(0.15 * u * pop), Color(1, 1, 1, a), 1, 4, "number")
+		var mine_side := side == 0
+		var sgn := -1.0 if mine_side else 1.0
+		var nc := Vector2(cx + sgn * (g * 0.8 + 0.07 * u), cy)
+		var lit := flash == (1 if mine_side else -1) and tick >= 0.0
+		var pop := 1.0 + (0.35 * (1.0 - clampf(tick / 0.35, 0.0, 1.0)) if lit else 0.0)
+		var col := Color.WHITE
+		if lit and tick < 0.6:
+			col = Color.WHITE.lerp(HudDraw.YELLOW, 0.5 + 0.5 * sin(tick * 30.0))
+		HudDraw.text(self, str(mine if mine_side else theirs), nc, int(0.11 * u * pop), Color(col, a), 1, 4, "number")
+		if lit:
+			_draw_sparks(nc, tick, 0.12 * u, HudDraw.YELLOW, a)
 		var nm := String(names[side]).to_upper()
-		HudDraw.text(self, nm, Vector2(nc.x, cy + ph * 0.5 + 0.04 * u), _fit_fs(nm, int(0.03 * u), pw * 1.3),
-			Color(HudTeam.BLUE_TEXT if mine else HudTeam.ORANGE_TEXT, a), 1, 3, "bold")
-	HudDraw.text(self, "VS", Vector2(cx, cy), int(0.06 * u), Color(1, 1, 1, 0.9 * a), 1, 4, "title")
-	HudDraw.text(self, String(_break.title), Vector2(cx, cy - ph * 0.5 - 0.06 * u), int(0.04 * u),
-		Color(HudDraw.YELLOW if String(_break.title) == "VICTORY" else Color(0.86, 0.88, 0.9), a), 1, 3, "bold")
+		var nx := r.position.x + fade + 0.02 * u if mine_side else r.end.x - fade - 0.02 * u
+		HudDraw.text(self, nm, Vector2(nx, cy), _fit_fs(nm, int(0.028 * u), r.size.x * 0.22), Color(1, 1, 1, 0.95 * a),
+			0 if mine_side else 2, 3, "bold")
+
+
+## A burst of sparks from `c`, `t` s after it began (0.7 s): streaks flying out and fading.
+func _draw_sparks(c: Vector2, t: float, reach: float, col: Color, a: float) -> void:
+	if t < 0.0 or t > 0.7:
+		return
+	var k := t / 0.7
+	for i in 16:
+		var ang := TAU * i / 16.0 + 0.37 * float(i % 3)
+		var d := Vector2.from_angle(ang)
+		var far := reach * (0.4 + 0.6 * (float((i * 7) % 5) / 4.0))
+		var p0 := c + d * far * pow(k, 0.6)
+		var p1 := p0 + d * reach * 0.18 * (1.0 - k)
+		draw_line(p0, p1, Color(col, (1.0 - k) * a), maxf(2.0, reach * 0.03), true)
 
 
 ## The 1 vs 1 opponent's name (the score plates).

@@ -25,6 +25,7 @@ static func run(runner: Node) -> void:
 	me._stage_clock()
 	me._zone_over_time()
 	me._zone_start()
+	me._match_end()
 	me._break_steps()
 	me._cooldown()
 	me._pick_panel()
@@ -217,3 +218,23 @@ func _zone_start() -> void:
 			break
 	_check(enter >= 5.0 and enter <= 40.0, "the circle reaches the minimap's sides %.0f s into stage 2" % enter)
 	_check(RoundRules.zone_start_for(Rect2(), 47.0) == 47.0, "a map without a rect keeps its own start")
+
+
+## Round 8: the match's end in steps; a win's VICTORY! sequence before the results, a loss's
+## results 1-2 s after its band.
+func _match_end() -> void:
+	var seq := []
+	for i in 80:
+		var st := RoundRules.match_end_step(i * 0.1, true)
+		if seq.is_empty() or seq[-1] != st:
+			seq.append(st)
+	_check(seq == ["beat", "band", "word", "top", "results"], "a win: beat, band, VICTORY!, band at the top, results (%s)" % [seq])
+	_check(is_equal_approx(RoundRules.VICTORY_WORD_S, 1.5) and RoundRules.RESULTS_WIN_AT > RoundRules.VICTORY_TOP_AT, "the big word stays 1.5 s, then the band at the top")
+	var lost := []
+	for i in 80:
+		var st := RoundRules.match_end_step(i * 0.1, false)
+		if lost.is_empty() or lost[-1] != st:
+			lost.append(st)
+	_check(lost == ["beat", "band", "results"], "a loss: beat, the DEFEAT band, results (%s)" % [lost])
+	var after := RoundRules.results_at(false) - RoundRules.MATCH_BAND_AT
+	_check(after >= 1.0 and after <= 2.0, "a loss's results come 1-2 s after its band")

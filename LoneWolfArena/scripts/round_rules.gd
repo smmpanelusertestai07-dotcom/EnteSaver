@@ -81,6 +81,37 @@ static func zone_next(elapsed: float, stage2: float) -> float:
 	return maxf(STAGE1_S + stage2 - elapsed, 0.0)
 
 
+## THE MATCH'S END (round 8), `t` s after the deciding round: the beat (the kill), the result band
+## at y 0.15 from MATCH_BAND_AT; a win then turns it into a big glowing gold VICTORY! across the
+## middle (VICTORY_WORD_AT, VICTORY_WORD_S long) and moves the band to the top with the score band
+## under it (VICTORY_TOP_AT) until the results open (RESULTS_WIN_AT); a loss or a draw keeps the
+## band and opens the results RESULTS_LOSS_AFTER s after it came.
+const MATCH_BAND_AT := 2.5
+const VICTORY_WORD_AT := 3.3
+const VICTORY_WORD_S := 1.5
+const VICTORY_TOP_AT := VICTORY_WORD_AT + VICTORY_WORD_S
+const RESULTS_WIN_AT := 6.0
+const RESULTS_LOSS_AFTER := 1.6
+
+
+## When the results open after the match's last round (s): a win after its VICTORY! sequence, a
+## loss or a draw 1-2 s after its band.
+static func results_at(won: bool) -> float:
+	return RESULTS_WIN_AT if won else MATCH_BAND_AT + RESULTS_LOSS_AFTER
+
+
+## The match end's step `t` s after the deciding round: "beat", "band", (a win:) "word", "top",
+## then "results".
+static func match_end_step(t: float, won: bool) -> String:
+	if t >= results_at(won):
+		return "results"
+	if t < MATCH_BAND_AT:
+		return "beat"
+	if not won or t < VICTORY_WORD_AT:
+		return "band"
+	return "word" if t < VICTORY_TOP_AT else "top"
+
+
 ## The step of the break `t` s after the round was decided: "beat", "result", "score", "band",
 ## then "done" (the next prep).
 static func break_step(t: float) -> String:

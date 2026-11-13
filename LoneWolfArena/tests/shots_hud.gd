@@ -489,6 +489,20 @@ func run(at: Node) -> int:
 	await at.wait(0.3)
 	_check(float(hud._round_banner.t) <= 0.0, "nothing covers the fight when round 2 starts (its band closed the break)", at)
 	await at.shot("hud_16j_round2_go")
+	# The match's end (staged on the HUD, round 8): a win's band, the big VICTORY!, the band at the
+	# top with the score under it; a loss's DEFEAT band.
+	hud.process_mode = Node.PROCESS_MODE_DISABLED
+	for st: Array in [["VICTORY!", 0.4, "band", "hud_16k_victory_band"], ["VICTORY!", 1.4, "word", "hud_16l_victory_word"],
+			["VICTORY!", 2.9, "top", "hud_16m_victory_top"], ["DEFEAT", 0.5, "band", "hud_16n_defeat_band"]]:
+		hud._result = {"age": float(st[1]), "title": String(st[0]), "sub": "2  -  1"}
+		var step := RoundRules.match_end_step(float(st[1]) + RoundRules.MATCH_BAND_AT, hud.result_won())
+		_check(step == String(st[2]), "%s %.1f s after its band: %s (got %s)" % [st[0], st[1], st[2], step], at)
+		hud.queue_redraw()
+		await at.get_tree().process_frame
+		hud.queue_redraw()
+		await at.shot(String(st[3]))
+	hud._result = {}
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
 	# HUD editor.
 	Game.goto_hud_editor()
 	await at.wait(1.2)
