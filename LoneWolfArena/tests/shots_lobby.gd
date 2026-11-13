@@ -215,18 +215,14 @@ func run(at: Node) -> int:
 	_check_mode_page(lobby)
 	# a real tap on the X's centre closes the page (the body reaches up beside it)
 	var mclose := lobby.dialogs.modal.find_child("Close", true, false) as Control if lobby.dialogs.modal else null
-	if mclose:
-		var at_x := mclose.get_global_rect().get_center()
-		for down: bool in [true, false]:
-			var ev := InputEventMouseButton.new()
-			ev.button_index = MOUSE_BUTTON_LEFT
-			ev.pressed = down
-			ev.position = at_x
-			ev.global_position = at_x
-			lobby.get_viewport().push_input(ev, true)
-			await at.wait(0.05)
+	var has_x := mclose != null
+	if has_x:
+		var at_x: Vector2 = lobby.get_tree().root.get_final_transform() * mclose.get_global_rect().get_center()
+		at.touch(0, at_x, true)
+		await at.wait(0.08)
+		at.touch(0, at_x, false)
 		await at.wait(0.3)
-	_check(mclose != null and lobby.dialogs.modal == null, "a tap on the mode page's X closes it")
+	_check(has_x and lobby.dialogs.modal == null, "a tap on the mode page's X closes it")
 	# With a left camera cutout the page keeps its cards and buttons clear of it.
 	UI.margins_for_test = Vector2(90, 40)
 	lobby.dialogs.close_modal()
