@@ -456,6 +456,25 @@ func _voice_units(frame: PackedByteArray) -> void:
 	for i in 12:
 		v.on_voice(frame, "x".repeat(32), false)
 	_check(((v._talkers["x".repeat(32)] as Dictionary).queue as Array).size() <= NetVoice.MAX_QUEUE, "a talker far behind catches up")
+	# The app goes to the background: the microphone stops at once, TALK is let go; back, it starts afresh.
+	var tone_was := NetVoice.tone_source
+	NetVoice.tone_source = false
+	v.test_loop = true
+	v._process(0.0)
+	var ran := v.capturing and v._mic.playing
+	v.ptt_held = true
+	v._notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+	var stopped := not v.capturing and not v._mic.playing and not v.ptt_held
+	v._process(0.0)
+	var still := not v.capturing and not v._mic.playing
+	v._notification(Node.NOTIFICATION_APPLICATION_RESUMED)
+	var back := not v.capturing
+	v._process(0.0)
+	_check(ran and stopped and still and back and v.capturing and v._mic.playing,
+		"the microphone stops when the app is paused (TALK let go) and starts again on the way back: %s" % str([ran, stopped, still, back, v.capturing]))
+	v.test_loop = false
+	v._process(0.0)
+	NetVoice.tone_source = tone_was
 	NetVoice._hub = hub_was
 	v.free()
 	# VOICE CHAT (1.8) into the new keys.

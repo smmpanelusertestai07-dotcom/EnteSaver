@@ -382,11 +382,17 @@ func _exit_tree() -> void:
 	capturing = false
 
 
+## No microphone in the background: it stops here at once (the main loop stops right after the
+## pause on a phone, no _process would stop it), TALK is let go (its release never comes), and on
+## the way back the next _process starts the input afresh (a call may have taken it meanwhile).
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED:
-		_paused = true                   # no microphone in the background
+		_paused = true
+		ptt_held = false
+		if capturing:
+			_set_capture(false)
 	elif what == NOTIFICATION_APPLICATION_RESUMED:
-		_paused = false                  # (the input starts afresh)
+		_paused = false
 
 
 func _new_player() -> AudioStreamPlayer:
