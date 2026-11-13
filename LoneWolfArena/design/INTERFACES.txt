@@ -1122,8 +1122,8 @@ ROUND 8 - OUT OF THE MATCH
 - Profile keys (Game.DEFAULT_PROFILE, sanitised in _sanitize_profile): "lobby_pose" (Game.LOBBY_POSES:
   "" random, lobby_hip, lobby_shift, lobby_look), "victory_pose" (Game.VICTORY_POSES: "", victory,
   victory_pose); unknown values read "". CharacterModel.pose_choice (the lobby sets it from
-  lobby_pose) makes the lobby gesture pick that clip. INTEGRATOR: results_screen.gd still plays
-  "victory_pose"; to honour the choice it should play `Game.profile.victory_pose` when not "".
+  lobby_pose) makes the lobby gesture pick that clip; the results page 1 plays
+  `Game.profile.victory_pose` for a win ("" = the clip victory_pose).
 - HISTORY entry: "left_by_them": true on a win because the opponent left (record_match keeps it from
   the arena's result "opponent_left" when won; old entries have none: false). The row shows VICTORY
   over a grey OPPONENT LEFT (node OpponentLeft) instead of the rounds.
