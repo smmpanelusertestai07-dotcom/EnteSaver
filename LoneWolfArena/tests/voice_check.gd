@@ -91,6 +91,8 @@ func run(autotest: Node) -> int:
 			_fail("the open mic sent only %d frames to the room" % sent)
 		# PUSH TO TALK in the room: nothing until the lobby's TALK (beside the pill) is held.
 		hub.set_push_to_talk(true)
+		await at.wait(0.3)
+		sent = hub.frames_sent           # (the open mic's last words went as it stopped)
 		var talk := at.get_tree().root.find_child("LobbyTalk", true, false) as Button
 		await at.wait(2.0)
 		if talk == null or not talk.is_visible_in_tree():
