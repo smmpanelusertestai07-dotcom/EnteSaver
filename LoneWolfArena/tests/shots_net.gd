@@ -118,7 +118,9 @@ func run(at: Node) -> int:
 	net.add_line("NIGHTFOX21", "NICE SHOT! YOU GOT LUCKY THERE", false)
 	net.add_line("YOU", "GG", true)
 	await at.wait(0.5)
-	_check(net.button_centers().size() == 5, "SPEAKER, MIC, TALK (push to talk), CHAT and MUTE show in an online match")
+	# (round 8: the quick-chat bubble shows in every online match; MARKER only with human teammates)
+	_check(net.button_centers().size() == 6 and net.button_centers().has("quickchat") and not net.button_centers().has("marker"),
+		"SPEAKER, MIC, TALK (push to talk), CHAT, MUTE and the quick-chat bubble show in an online 1 vs 1 (no MARKER)")
 	_check(net.link_tag() == "DIRECT" and net.ping_ms() == 38, "the ping chip shows the direct round trip, tagged DIRECT")
 	await at.shot("n05_match_hud")
 	net.open_panel()
