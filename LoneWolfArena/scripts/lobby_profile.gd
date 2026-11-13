@@ -329,8 +329,12 @@ func open(start_tab := "career") -> void:
 	layer.mouse_filter = Control.MOUSE_FILTER_STOP
 	lobby.ui.add_child(layer)
 	lobby._main_ui.visible = false
-	var shade := UI.gradient_rect([[0.0, Color(0.035, 0.035, 0.045, 0.97)], [0.55, Color(0.045, 0.042, 0.045, 0.96)],
-		[1.0, Color(0.075, 0.058, 0.045, 0.95)]], true)
+	# the lobby blurred behind the page (plain at LOW graphics), then the page's dark ramp over it
+	var blur := UI.blur_shade(0.8)
+	UI.full_rect(blur)
+	layer.add_child(blur)
+	var shade := UI.gradient_rect([[0.0, Color(0.035, 0.035, 0.045, 0.9)], [0.55, Color(0.045, 0.042, 0.045, 0.78)],
+		[1.0, Color(0.075, 0.058, 0.045, 0.72)]], true)
 	UI.full_rect(shade)
 	layer.add_child(shade)
 	# the page frame's corner as on FRIENDS: the X box in the corner, PROFILE right-aligned beside it

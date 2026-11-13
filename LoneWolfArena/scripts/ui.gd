@@ -712,6 +712,48 @@ static func close_button(size := 52.0) -> Button:
 	return b
 
 
+## The shade behind a popup or a page over the lobby: the screen under it blurred and darkened to
+## about half (a canvas shader reading the screen at a lower mip level, 9 taps), or at LOW graphics
+## the plain black shade (`dim` its alpha). Node name "BlurShade" / "Shade". The chat panel keeps
+## the lobby sharp beside it (it does not use this).
+static var _blur_shader: Shader
+static func blur_shade(dim := 0.72) -> ColorRect:
+	var r := ColorRect.new()
+	r.mouse_filter = Control.MOUSE_FILTER_STOP
+	if int(Game.settings.get("graphics", 1)) <= 0:
+		r.name = "Shade"
+		r.color = Color(0, 0, 0, dim)
+		return r
+	if _blur_shader == null:
+		_blur_shader = Shader.new()
+		_blur_shader.code = """shader_type canvas_item;
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+uniform float lod = 2.5;
+uniform float spread = 7.0;
+uniform float keep = 0.5;
+void fragment() {
+	vec2 px = SCREEN_PIXEL_SIZE * spread;
+	vec3 c = vec3(0.0);
+	float w = 0.0;
+	for (int x = -1; x <= 1; x++) {
+		for (int y = -1; y <= 1; y++) {
+			float k = (x == 0 && y == 0) ? 2.0 : ((x == 0 || y == 0) ? 1.0 : 0.6);
+			c += textureLod(screen_tex, SCREEN_UV + vec2(float(x), float(y)) * px, lod).rgb * k;
+			w += k;
+		}
+	}
+	COLOR = vec4(c / w * keep, 1.0);
+}
+"""
+	var m := ShaderMaterial.new()
+	m.shader = _blur_shader
+	m.set_shader_parameter("keep", clampf(1.0 - dim * 0.7, 0.2, 0.8))
+	r.name = "BlurShade"
+	r.material = m
+	r.color = Color.WHITE
+	return r
+
+
 ## The page frame's corner (FRIENDS, PROFILE, WARDROBE, the mode pages): the X box in the top-right
 ## corner (node "Close", 60 px, `on_close` on a tap) and the page's title in caps right-aligned
 ## beside it (node "PageTitle"), both added to `parent` (a full-rect control). Returns [X, title].
