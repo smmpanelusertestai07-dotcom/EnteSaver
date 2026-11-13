@@ -67,6 +67,11 @@ const DEFAULTS := {
 	"settings": {"x": 0.148, "y": 0.04, "s": 0.06, "o": 0.9, "a": "l"},
 	"weapons": {"x": 0.9184, "y": 0.1535, "s": 0.108, "o": 0.95, "a": "r"},
 	"minimap": {"x": 0.0625, "y": 0.137, "s": 0.27, "o": 0.95, "a": "l"},
+	# Voice (HudNet draws them in an online match only; not in ORDER: the HUD's own touches and the
+	# editor leave them to HudNet): the reference's speaker and mic in the column beside the minimap,
+	# under the gear.
+	"speaker": {"x": 0.148, "y": 0.105, "s": 0.066, "o": 0.9, "a": "l"},
+	"mic": {"x": 0.148, "y": 0.19, "s": 0.066, "o": 0.9, "a": "l"},
 }
 ## The default sizes until the defaults followed the reference's 16:9 layout: a saved layout made
 ## with them keeps its sizes (the size range a saved widget is held to covers both, size_range).
@@ -76,7 +81,7 @@ const OLD_SIZES := {"joystick": 0.23, "fire_r": 0.26, "fire_l": 0.15, "scope": 0
 const LABELS := {
 	"joystick": "MOVE", "fire_r": "FIRE", "fire_l": "LEFT FIRE", "scope": "SCOPE", "jump": "JUMP", "crouch": "CROUCH", "prone": "PRONE",
 	"sprint": "SPRINT", "medkit": "MEDKIT", "wall": "WALL", "grenade": "GRENADE", "settings": "SETTINGS", "freelook": "FREE LOOK",
-	"weapons": "WEAPONS", "minimap": "MAP", "reload": "RELOAD", "swap": "SWITCH",
+	"weapons": "WEAPONS", "minimap": "MAP", "reload": "RELOAD", "swap": "SWITCH", "speaker": "SPEAKER", "mic": "MIC",
 }
 
 

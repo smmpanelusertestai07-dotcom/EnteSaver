@@ -26,8 +26,9 @@ extends Control
 ##    tiles of our arena at each level under it (node "GraphicsTiles"), frame rate (30 and 60; 90
 ##    and 120 where the screen refreshes that fast), visual effects; MINIMAP as two picture tiles
 ##    (TURNS WITH VIEW, the default, or NORTH UP: setting minimap_turns, HudMinimap).
-##  - SOUND: music, effects, then the other player's voice, all heard at once.
-##  - ONLINE: chat, friends chat, SHOW MY CAREER, voice chat, who may challenge you, friend
+##  - SOUND: music, effects, then VOICE CHAT: PUSH TO TALK, the other players' voice and MIC TEST
+##    (VoiceButtons.mic_test), all heard at once.
+##  - ONLINE: chat, friends chat, SHOW MY CAREER, who may challenge you, friend
 ##    requests, the lobby's vibration, direct connection (scripts/settings_online.gd);
 ##  - ACCOUNT: the guest profile's player ID, CLEAR CACHE (CacheCleaner: asks first, then says how
 ##    much it freed) and along the bottom DELETE MY DATA, the Terms of Use and the Privacy Notice
@@ -55,8 +56,8 @@ const TAB_KEYS := [
 	["sens_general", "sens_reddot", "sens_2x", "sens_sniper", "sens_freelook"],
 	["aim_precision", "left_fire", "hold_fire_scope", "switch_button", "reload_button", "reload_on_crosshair",
 		"freelook_button", "dynamic_joystick", "run_mode"],
-	["vol_sfx", "vol_music", "vol_voice"],
-	["chat", "friend_chat", "show_career", "voice_chat", "challenges_from", "friend_requests", "vibration", "direct_connect"],
+	["vol_sfx", "vol_music", "vol_voice", "push_to_talk"],
+	["chat", "friend_chat", "show_career", "challenges_from", "friend_requests", "vibration", "direct_connect"],
 	[],
 	[],
 	["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"],
@@ -66,9 +67,10 @@ const PREVIEW_TABS := [1, 2]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
 const SCENE_KEYS := ["visual_effects"]
 ## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
-## the pick) or the game's own bookkeeping.
-## (team_status is the lobby social panel's status choice, LobbySocial: set there, not in SETTINGS.)
-const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size", "team_status"]
+## the pick, MIC and SPEAKER under the character and in a match: VoiceButtons, the status on the
+## lobby's social panel: LobbySocial) or the game's own bookkeeping.
+const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size", "team_status",
+	"mic_mode", "speaker_mode"]
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
 ## The minimap (setting minimap_turns: TURNS WITH VIEW true, NORTH UP false) and what each does.
 const MINIMAP_NAMES := ["TURNS WITH VIEW", "NORTH UP"]
@@ -1252,9 +1254,12 @@ func _build_sound() -> void:
 	_body.add_child(_plate("Sound effects", sfx))
 	_body.add_child(UI.spacer(2))
 	_body.add_child(UI.section("VOICE CHAT"))
+	_body.add_child(_plate("Push to talk", _toggle("push_to_talk"),
+		"On: your mic sends only while you hold TALK. Off: it sends while you speak (MIC under your character, or in a match)"))
 	var voice := UI.stepper(Game.settings.vol_voice, 0, 100, func(v: float) -> void: _apply("vol_voice", int(v)), 5.0)
 	voice.name = "Stepper_vol_voice"
-	_body.add_child(_plate("Voice", voice, "Your opponent's voice in an online match (push to talk: ONLINE)"))
+	_body.add_child(_plate("Voice", voice, "The other players' voice (SPEAKER under your character, or in a match)"))
+	_body.add_child(_plate("Mic test", VoiceButtons.mic_test(), "Speak and hear yourself: only on this phone, nothing is sent"))
 	_hint.text = "0 mutes a channel. Changes are heard at once."
 
 

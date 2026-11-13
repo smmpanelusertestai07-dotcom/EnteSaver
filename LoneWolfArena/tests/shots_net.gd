@@ -36,6 +36,17 @@ func run(at: Node) -> int:
 	await at.wait(1.0)
 	_check(lobby.find_child("PingChip", true, false) != null, "the lobby shows the ping chip")
 	await at.shot("n01_lobby_ping")
+	# Voice: the [mic | speaker] pill under the character, and its MIC MODE popup.
+	var pill := lobby.find_child("VoicePill", true, false) as VoiceButtons
+	_check(pill != null and pill.visible, "the lobby shows the voice pill under the character")
+	if pill:
+		pill.popup = VoiceButtons.open_popup(pill.get_parent() as Control, "mic", pill.global_position + Vector2(VoiceButtons.PILL.x * 0.5, -10.0), false)
+		await at.wait(0.3)
+		_check(lobby.find_child("MicModeBox", true, false) != null and lobby.find_child("PushToTalk", true, false) != null
+			and lobby.find_child("Mic_GROUP", true, false) != null, "MIC MODE: OFF / ALL / GROUP and PUSH TO TALK")
+		await at.shot("n01b_lobby_mic_mode")
+		pill.popup.queue_free()
+		await at.wait(0.2)
 	for m: Array in [[now - 600, false, "GG! THAT LAST ROUND WAS CLOSE"], [now - 560, true, "REMATCH TONIGHT?"],
 			[now - 90, false, "SURE, AFTER 9. BRING THE SNIPER"], [now - 30, true, "DEAL. SEE YOU THEN!"]]:
 		NetChat.add(id, int(m[0]), bool(m[1]), String(m[2]))
@@ -86,7 +97,8 @@ func run(at: Node) -> int:
 		await at.shot("n04c_settings_sound")
 		panel._close()
 	# A match with the online layer (a training match stands in: the layer is added by hand).
-	Game.settings.voice_chat = true
+	Game.settings.push_to_talk = true      # (TALK shows with PUSH TO TALK and the mic on)
+	Game.settings.mic_mode = NetVoice.ALL
 	Game.goto_arena()
 	await at.wait(1.0)
 	var arena: Node = get_tree().current_scene
@@ -106,13 +118,19 @@ func run(at: Node) -> int:
 	net.add_line("NIGHTFOX21", "NICE SHOT! YOU GOT LUCKY THERE", false)
 	net.add_line("YOU", "GG", true)
 	await at.wait(0.5)
-	_check(net.button_centers().size() == 4, "CHAT, MUTE, TALK and SOUND show with chat and voice on")
+	_check(net.button_centers().size() == 5, "SPEAKER, MIC, TALK (push to talk), CHAT and MUTE show in an online match")
 	_check(net.link_tag() == "DIRECT" and net.ping_ms() == 38, "the ping chip shows the direct round trip, tagged DIRECT")
 	await at.shot("n05_match_hud")
 	net.open_panel()
 	await at.wait(0.4)
 	await at.shot("n06_match_chat_panel")
 	net.close_panel()
+	net.open_voice_popup()
+	await at.wait(0.4)
+	_check(net.voice_popup != null and net.find_child("Mic_GROUP", true, false) == null, "the match's MIC MODE: no GROUP without teammates")
+	await at.shot("n07_match_mic_mode")
+	net.voice_popup.queue_free()
+	await at.wait(0.2)
 	cloud.direct = null
 	Game.session = null
 	Game.profile = saved_profile

@@ -1,12 +1,10 @@
 class_name SettingsOnline
 extends RefCounted
-## SettingsPanel's ONLINE tab (its TAB_KEYS row: chat, friend_chat, show_career, voice_chat,
+## SettingsPanel's ONLINE tab (its TAB_KEYS row: chat, friend_chat, show_career,
 ## challenges_from, friend_requests, vibration, direct_connect):
 ##  - CHAT IN MATCHES ON / OFF (NetChat: quick messages and text with the opponent);
 ##  - FRIENDS CHAT FRIENDS ONLY / OFF (NetChat: messages from friends; blocked players never);
 ##  - SHOW MY CAREER ON / OFF (the player card's career summary, Cloud card v3);
-##  - VOICE CHAT OFF / ON (NetVoice, experimental, push to talk). Turning it on asks Android for the
-##    microphone (RECORD_AUDIO) at that moment; refused, it stays off and says so;
 ##  - DUEL CHALLENGES FROM EVERYONE / FRIENDS ONLY / NOBODY (Cloud.challenge_allowed: the others are
 ##    declined at once and never shown) and FRIEND REQUESTS ON / OFF (Cloud.requests_allowed: off,
 ##    they are ignored and never shown), and OUT OF A MATCH vibration ON / OFF (the reference's
@@ -39,38 +37,8 @@ static func build(panel: SettingsPanel) -> void:
 		"Off: new friend requests are ignored and never shown"))
 	body.add_child(panel._plate("Vibration out of a match", panel._toggle("vibration"),
 		"A buzz when a duel challenge or a friend request comes in while you are in the lobby"))
-	body.add_child(UI.section("VOICE (EXPERIMENTAL)"))
-	var note := UI.label("", 16, UI.ACCENT, "semi")
-	note.name = "VoiceNote"
-	var vc := UI.segmented(["OFF", "ON"], 1 if bool(Game.settings.voice_chat) else 0,
-		func(v: int) -> void: _set_voice(panel, v == 1, note), 17, 104.0)
-	vc.name = "Toggle_voice_chat"
-	body.add_child(panel._plate("Voice chat", vc,
-		"Push to talk in online matches: sent only while you hold the button, encrypted, never stored"))
-	body.add_child(note)
 	panel._hint.text = "No account: chat and voice are encrypted on your phone; the relay only passes them on."
 	_build_direct(panel)
-
-
-## VOICE CHAT: on Android the microphone permission is asked for first; refused, it stays OFF.
-static func _set_voice(panel: SettingsPanel, on: bool, note: Label) -> void:
-	if not on or OS.get_name() != "Android":
-		panel._apply("voice_chat", on)
-		return
-	if OS.request_permission(NetVoice.MIC_PERMISSION):
-		panel._apply("voice_chat", true)            # already allowed
-		return
-	note.text = "ALLOW THE MICROPHONE TO TALK"
-	var tree := panel.get_tree()
-	var answer := func(perm: String, granted: bool) -> void:
-		if perm != NetVoice.MIC_PERMISSION or not is_instance_valid(panel):
-			return
-		panel._apply("voice_chat", granted)
-		if is_instance_valid(note):
-			note.text = "" if granted else "MICROPHONE NOT ALLOWED: VOICE CHAT STAYS OFF"
-		if not granted and panel.is_inside_tree():
-			panel._show_tab(panel._current)
-	tree.on_request_permissions_result.connect(answer, CONNECT_ONE_SHOT)
 
 
 ## DIRECT CONNECTION (NetDirect): the last row of the tab.

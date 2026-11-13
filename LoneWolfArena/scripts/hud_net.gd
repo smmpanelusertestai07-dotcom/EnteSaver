@@ -8,9 +8,14 @@ extends Control
 ##    phone (NetPing: Cloud.match_ping: the direct round trip while the direct path is up, else
 ##    Cloud.peer_rtt, the relay's Cloud.relay_rtt until the other phone answered), with a small
 ##    DIRECT / RELAY tag under it (how the state travels, NetDirect);
-##  - right of the minimap: CHAT (opens the chat panel: quick messages NetChat.QUICK and free text,
-##    NetChat.MATCH_MAX characters) and MUTE (the feed hides the opponent's lines), with CHAT on;
-##    TALK (hold to talk) and SOUND (the speaker), with VOICE CHAT on (NetVoice);
+##  - beside the minimap, at the reference's places (HudLayout keys "speaker" and "mic"): round
+##    SPEAKER (a tap turns it OFF / back ON at once, a slash when off) and MIC (a tap opens MIC
+##    MODE: OFF / ALL, GROUP with teammates, PUSH TO TALK; VoiceButtons.open_popup) buttons, the
+##    voice (NetVoice.hub(): it runs whatever the HUD shows); with PUSH TO TALK and the mic on, TALK
+##    under the mic (hold to talk); right of them CHAT (opens the chat panel: quick messages
+##    NetChat.QUICK and free text, NetChat.MATCH_MAX characters) and MUTE (the feed hides the
+##    opponent's lines), with CHAT on; under them the players speaking now (a sound mark and the
+##    name);
 ##  - under the score bar: the chat feed, the last FEED_LINES lines for FEED_S seconds.
 ## Its buttons take their touches before the HUD does (a child's _input runs first) and mark them
 ## handled; while the chat panel is open the HUD's own input is off (its touches released first),
@@ -20,14 +25,16 @@ const R := 26.0                  # button radius (touch radius x 1.15: 60 px)
 const GAP := 12.0
 const FEED_S := 9.0
 const FEED_LINES := 3
-const IDS := ["chat", "mute", "talk", "speaker"]
+const IDS := ["speaker", "mic", "talk", "chat", "mute"]
+const SPEAK_ROW := 22.0          # the speaking list's line height
 const PING_AT := Vector2(0.278, 0.031)   # the ping's centre, fractions of the screen (the reference's place)
 
 var hud: HUD
 var feed: Array = []             # [{"who", "text", "mine", "t"}], newest last
 var feed_muted := false
-var voice: NetVoice
+var voice: NetVoice              # NetVoice.hub() in an online match
 var panel: PanelContainer        # the chat panel while it is open
+var voice_popup: Control         # MIC MODE while it is open (VoiceButtons.open_popup's catcher)
 var _touch := {}                 # touch index -> button id
 var _note := ""
 var _note_t := 0.0
@@ -54,14 +61,8 @@ func _ready() -> void:
 	if cloud == null or not net:
 		return
 	cloud.chat_received.connect(_on_chat)
-	if bool(Game.settings.voice_chat):
-		voice = NetVoice.new()
-		voice.name = "Voice"
-		add_child(voice)
-		voice.frame_ready.connect(func(frame: PackedByteArray) -> void:
-			if Game.session:
-				Game.session.send_voice(frame))
-		cloud.voice_received.connect(voice.play_frame)
+	voice = NetVoice.hub()
+	voice.mic_refused.connect(_on_mic_refused)
 
 
 func _exit_tree() -> void:
@@ -69,11 +70,11 @@ func _exit_tree() -> void:
 	if cloud and net:
 		if cloud.chat_received.is_connected(_on_chat):
 			cloud.chat_received.disconnect(_on_chat)
-		if voice and cloud.voice_received.is_connected(voice.play_frame):
-			cloud.voice_received.disconnect(voice.play_frame)
-	if voice:
-		voice.set_talking(false)
-	if panel and hud:
+	if voice and is_instance_valid(voice):
+		voice.ptt_held = false
+		if voice.mic_refused.is_connected(_on_mic_refused):
+			voice.mic_refused.disconnect(_on_mic_refused)
+	if (panel or voice_popup) and hud:
 		hud.set_process_input(true)
 
 
@@ -83,31 +84,47 @@ func shown(id: String) -> bool:
 	match id:
 		"chat", "mute":
 			return bool(Game.settings.chat)
-		"talk", "speaker":
+		"speaker", "mic":
 			return voice != null
+		"talk":
+			return voice != null and NetVoice.push_to_talk() and NetVoice.mic_mode() != NetVoice.OFF
 	return false
 
 
-## The buttons' centres, two by two right of the minimap (left of it when the minimap was moved to
-## the right half).
+## The buttons' centres: SPEAKER and MIC at their layout places (HudLayout "speaker", "mic": the
+## reference's column beside the minimap), TALK under MIC, then CHAT and MUTE in the column right
+## of them (left of the minimap when it was moved to the right half).
 func button_centers() -> Dictionary:
 	var mr := Rect2(hud.minimap.position, hud.minimap.size) if hud and hud.minimap else Rect2(16, 12, 190, 190)
+	var vs := size if size.x > 0.0 else Vector2(1560, 720)
+	var lay: Dictionary = hud.layout if hud else {}
 	var pitch := Vector2(R * 2.3 + 6.0, R * 2.0 + 26.0)
-	var x0 := mr.end.x + GAP + R * 1.15
-	if x0 + pitch.x + R > size.x * 0.5 - 10.0 and mr.position.x > size.x * 0.5:
-		x0 = mr.position.x - GAP - R * 1.15 - pitch.x
-	var y0 := mr.position.y + R + 2.0
-	if hud and not hud.layout.is_empty():
-		# The gear in this column (the reference's place, right of the minimap): the buttons below it.
-		var gear: Dictionary = hud.layout.settings
-		var gc := HudLayout.center(gear, size)
-		if absf(gc.x - x0) < R * 2.0 + pitch.x:
-			y0 = maxf(y0, gc.y + HudLayout.touch_radius(gear, size) * 1.15 + R * 1.15 + 6.0)
 	var out := {}
+	var col_x := mr.end.x + GAP + R * 1.15
+	var y0 := mr.position.y + R + 2.0
+	if shown("speaker"):
+		var sp: Vector2 = HudLayout.center(lay.speaker, vs) if lay.has("speaker") else Vector2(col_x, y0)
+		var mc: Vector2 = HudLayout.center(lay.mic, vs) if lay.has("mic") else Vector2(col_x, y0 + pitch.y)
+		out.speaker = sp
+		out.mic = mc
+		if shown("talk"):
+			out.talk = mc + Vector2(0, mc.y - sp.y if mc.y > sp.y else pitch.y)
+		col_x = maxf(sp.x, mc.x) + pitch.x
+		y0 = sp.y
+	elif lay.has("settings"):
+		# No voice buttons, and the gear in this column (the reference's place, right of the
+		# minimap): CHAT and MUTE go below it.
+		var gear: Dictionary = lay.settings
+		var gc := HudLayout.center(gear, vs)
+		if absf(gc.x - col_x) < R * 2.0 + pitch.x:
+			y0 = maxf(y0, gc.y + HudLayout.touch_radius(gear, vs) * 1.15 + R * 1.15 + 6.0)
+	var x0 := col_x
+	if x0 + R > size.x * 0.5 - 10.0 and mr.position.x > size.x * 0.5:
+		x0 = mr.position.x - GAP - R * 1.15
 	var i := 0
-	for id: String in IDS:
+	for id: String in ["chat", "mute"]:
 		if shown(id):
-			out[id] = Vector2(x0 + (i % 2) * pitch.x, y0 + (i / 2) * pitch.y)
+			out[id] = Vector2(x0, y0 + i * pitch.y)
 			i += 1
 	return out
 
@@ -164,20 +181,43 @@ func press(id: String) -> void:
 			set_talk(true)
 		"speaker":
 			if voice:
-				voice.muted = not voice.muted
-				_say("VOICE MUTED" if voice.muted else "VOICE ON")
+				voice.toggle_speaker()
+				_say("SPEAKER OFF" if NetVoice.speaker_mode() == NetVoice.OFF else "SPEAKER ON")
+		"mic":
+			open_voice_popup()
 
 
-## HOLD TO TALK: the microphone runs only while it is held (Android asks for it if it was taken
-## back since VOICE CHAT was turned on).
+## PUSH TO TALK's TALK: the microphone runs only while it is held (Android asks for it if it was
+## taken back since the mic was turned on).
 func set_talk(on: bool) -> void:
 	if voice == null:
 		return
-	if on and OS.get_name() == "Android" and not NetVoice.MIC_PERMISSION in OS.get_granted_permissions():
-		OS.request_permission(NetVoice.MIC_PERMISSION)
+	if on and not voice.ask_mic():
 		_say("ALLOW THE MICROPHONE TO TALK")
 		return
-	voice.set_talking(on)
+	voice.ptt_held = on
+
+
+## MIC MODE beside the column; the HUD's own touches are off while it is open (a tap outside
+## closes it).
+func open_voice_popup() -> void:
+	if voice_popup != null or voice == null:
+		return
+	if panel:
+		close_panel()
+	hud.release_all()
+	hud.set_process_input(false)
+	var c := button_centers()
+	var at: Vector2 = c.get("mic", Vector2(260, 120))
+	voice_popup = VoiceButtons.open_popup(self, "mic", at + Vector2(R + 12.0, -R), true)
+	voice_popup.tree_exited.connect(func() -> void:
+		voice_popup = null
+		if hud and is_instance_valid(hud) and panel == null:
+			hud.set_process_input(true))
+
+
+func _on_mic_refused() -> void:
+	_say("MICROPHONE NOT ALLOWED: SEE YOUR PHONE'S SETTINGS")
 
 
 func _say(text: String) -> void:
@@ -282,8 +322,8 @@ func close_panel() -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_note_t = maxf(_note_t - delta, 0.0)
-	if voice and voice.talking and not is_visible_in_tree():
-		voice.set_talking(false)         # the pause menu or the results came over the HUD: no hidden talking
+	if voice and voice.ptt_held and not is_visible_in_tree():
+		voice.ptt_held = false           # the pause menu or the results came over the HUD: no hidden talking
 	queue_redraw()
 
 
@@ -310,6 +350,7 @@ func _draw() -> void:
 	var c := button_centers()
 	for id: String in c:
 		_draw_button(id, c[id])
+	_draw_speaking(c)
 	_draw_feed()
 	if _note_t > 0.0 and c.size() > 0:
 		var first: Vector2 = c.values()[0]
@@ -372,11 +413,10 @@ func _draw_button(id: String, c: Vector2) -> void:
 			crossed = feed_muted
 			label = "MUTED" if feed_muted else "MUTE"
 		"talk":
-			on = voice != null and voice.talking
+			on = voice != null and voice.ptt_held
 			label = "TALK"
-		"speaker":
-			crossed = voice != null and voice.muted
-			label = "SOUND"
+		"speaker", "mic":
+			on = id == "mic" and (voice_popup != null or NetVoice.speaking(NetVoice.ME))
 	HudDraw.disk(self, c, R, Color(0.06, 0.06, 0.07, 0.6 if not on else 0.8))
 	HudDraw.ring(self, c, R - 0.75, Color(UI.ACCENT, 0.95) if on else Color(1, 1, 1, 0.35), 2.0 if on else 1.5)
 	var ink := UI.ACCENT if on else Color(1, 1, 1, 0.95)
@@ -388,11 +428,14 @@ func _draw_button(id: String, c: Vector2) -> void:
 		"talk":
 			_mic(c, ink)
 		"speaker":
-			_speaker(c, ink)
+			VoiceButtons.draw_speaker(self, c, R * 0.95, ink, NetVoice.speaker_mode() == NetVoice.OFF, NetVoice.speaker_mode() == NetVoice.GROUP)
+		"mic":
+			VoiceButtons.draw_mic(self, c, R * 0.95, ink, NetVoice.mic_mode() == NetVoice.OFF, NetVoice.mic_mode() == NetVoice.GROUP)
 	if crossed:
 		draw_line(c + Vector2(-R * 0.55, -R * 0.55), c + Vector2(R * 0.55, R * 0.55), Color(0, 0, 0, 0.7), 5.0, true)
 		draw_line(c + Vector2(-R * 0.55, -R * 0.55), c + Vector2(R * 0.55, R * 0.55), UI.BAD, 3.0, true)
-	HudDraw.text(self, label, c + Vector2(0, R + 9.0), 11, Color(UI.TEXT, 0.9), 1, 3)
+	if label != "":
+		HudDraw.text(self, label, c + Vector2(0, R + 9.0), 11, Color(UI.TEXT, 0.9), 1, 3)
 
 
 ## A speech bubble (filled with three dots, or an outline).
@@ -421,13 +464,27 @@ func _mic(c: Vector2, ink: Color) -> void:
 	draw_line(Vector2(c.x - R * 0.2, c.y + R * 0.5), Vector2(c.x + R * 0.2, c.y + R * 0.5), ink, 2.0)
 
 
-func _speaker(c: Vector2, ink: Color) -> void:
-	var x := c.x - R * 0.42
-	draw_colored_polygon(PackedVector2Array([Vector2(x, c.y - R * 0.14), Vector2(x + R * 0.2, c.y - R * 0.14),
-		Vector2(x + R * 0.46, c.y - R * 0.38), Vector2(x + R * 0.46, c.y + R * 0.38), Vector2(x + R * 0.2, c.y + R * 0.14),
-		Vector2(x, c.y + R * 0.14)]), ink)
-	for i in 2:
-		draw_arc(Vector2(x + R * 0.46, c.y), R * (0.22 + 0.17 * i), -0.9, 0.9, 12, ink, 2.0, true)
+## The players speaking now (NetVoice.speaking), under the voice buttons: a sound mark and the name
+## (the reference's speaking mark; ours also says who).
+func _draw_speaking(c: Dictionary) -> void:
+	if voice == null or not c.has("mic"):
+		return
+	var names := []
+	for p: Dictionary in VoiceButtons.channel_players():
+		if NetVoice.speaking(String(p.id)):
+			names.append(String(p.name))
+	if NetVoice.speaking(NetVoice.ME):
+		names.push_front("YOU")
+	var low: Vector2 = c.get("talk", c.mic)
+	var y := low.y + R + 26.0
+	for n: String in names:
+		var w := HudDraw.text_width(n, 14) + 34.0
+		draw_rect(Rect2(low.x - R, y - SPEAK_ROW * 0.5, w, SPEAK_ROW), Color(0, 0, 0, 0.45))
+		for i in 3:
+			var h := 6.0 + 4.0 * float((i + int(_time * 8.0)) % 3)
+			draw_rect(Rect2(low.x - R + 6.0 + i * 5.0, y - h * 0.5, 3.0, h), UI.ACCENT)
+		HudDraw.text(self, n, Vector2(low.x - R + 26.0, y), 14, UI.TEXT, 0, 2)
+		y += SPEAK_ROW + 4.0
 
 
 ## The feed under the score bar: who (orange: the opponent, blue: you) and the line, wrapped to the

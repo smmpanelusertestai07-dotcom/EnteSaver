@@ -107,7 +107,8 @@ static func create_profile(player_name: String, avatar: String, banner: String) 
 
 ## The Privacy Notice as [title, text] sections, true to scripts/cloud.gd and autoload/game.gd:
 ## the relays are Cloud.BROKERS, the ages Cloud.CARD_MAX_AGE_S and REQUEST_MAX_AGE_S, the chat's
-## limits NetChat.HISTORY_MAX, the voice NetVoice (only while TALK is held).
+## limits NetChat.HISTORY_MAX, the voice NetVoice (the microphone only with MIC on, and only in a
+## match, group or room; sent only while the player speaks or holds TALK).
 static func privacy_sections() -> Array:
 	var hosts := PackedStringArray()
 	for url: String in Cloud.BROKERS:
@@ -157,9 +158,11 @@ static func privacy_sections() -> Array:
 			+ "inside the match. So your opponent's game learns your phone's IP address (and yours learns theirs); "
 			+ "the game never shows or keeps it. What goes directly is end-to-end encrypted too. Both players need "
 			+ "it on. Turned off, your phone never sends its address and the match goes only through the relay.") % ", ".join(stun)],
-		["Voice chat", "Off unless you turn VOICE CHAT on (Settings, ONLINE), which asks for the microphone. The "
-			+ "microphone is used only while you hold TALK in an online match: the sound goes straight to the other "
-			+ "phone, end-to-end encrypted, and is never stored or recorded, here or anywhere else."],
+		["Voice chat", "Your microphone is off unless you turn MIC on (under your character, or in a match), which "
+			+ "asks for the microphone the first time. It is used only with MIC on while you are in an online match, "
+			+ "group or room, and your voice is sent only while you speak (or while you hold TALK with PUSH TO TALK): "
+			+ "to the players you chose (ALL or GROUP), end-to-end encrypted, and never stored or recorded, here or "
+			+ "anywhere else. MIC TEST (Settings, SOUND) plays your voice back on this phone only."],
 		["Play without internet", "PLAY WITHOUT INTERNET connects two phones on the same Wi-Fi, or on one phone's "
 			+ "hotspot, straight to each other: no relay, no internet, and these games never leave the local network. "
 			+ "While you HOST, phones on that network can see your name, outfit, player ID and public key so they can "
@@ -167,7 +170,7 @@ static func privacy_sections() -> Array:
 			+ "is end-to-end encrypted with keys only the two phones hold. The game uses the Wi-Fi permissions only to "
 			+ "find the other phone, never to know where you are."],
 		["What the game never does", "No account, no e-mail address or phone number, no ads, no analytics or "
-			+ "tracking, no location, no contacts or camera, no microphone except while you hold TALK, and nothing "
+			+ "tracking, no location, no contacts or camera, no microphone unless you turn MIC on, and nothing "
 			+ "to buy. Apart from the relay and the direct connection above, and the phone you play with on your "
 			+ "own network, nothing leaves your phone."],
 		["Remove everything", ("DELETE MY DATA (Settings, ACCOUNT) deletes everything the game keeps on this phone, "
