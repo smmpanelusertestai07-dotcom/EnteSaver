@@ -97,6 +97,9 @@ var _preview_bundle: String:
 var _main_ui: Control
 var _drag_index := -1
 var _idle_t := 0.0
+## The hero's turn by a drag, kept while the game runs (the reference keeps the view's angle when
+## you come back from a match); it does not swing back by itself.
+static var hero_yaw := MODEL_YAW
 var _name_label: Label
 var _avatar_view: Control
 var _time := 0.0
@@ -293,9 +296,9 @@ func _build_stage() -> void:
 	model = CharacterModel.new()
 	add_child(model)
 	model.position = Vector3(0, PODIUM_TOP, 0)
-	model.rotation.y = MODEL_YAW
+	model.rotation.y = hero_yaw
 	model.setup(String(Game.profile.bundle), false)
-	model.play_lobby()
+	model.play_lobby(true)          # the hero also cheers now and then
 	group_view = Node3D.new()
 	group_view.name = "GroupMembers"
 	add_child(group_view)
@@ -1486,7 +1489,9 @@ func _input(event: InputEvent) -> void:
 		var d := event as InputEventScreenDrag
 		if d.index == _drag_index:
 			var vs := get_viewport().get_visible_rect().size
-			model.rotation.y += d.relative.x / maxf(vs.x, 1.0) * 6.0
+			# a full turn in about one screen width of drag, any way round (360 degrees)
+			model.rotation.y = wrapf(model.rotation.y + d.relative.x / maxf(vs.x, 1.0) * 6.0, -PI, PI)
+			hero_yaw = model.rotation.y
 			_idle_t = 0.0
 
 
@@ -1509,9 +1514,6 @@ func _process(delta: float) -> void:
 		var k := 1.0 - pow(1.0 - _cam_t, 3.0)
 		camera.position = _cam_from_pos.lerp(_cam_to_pos, k)
 		camera.look_at(_cam_from_look.lerp(_cam_to_look, k))
-	# back to the hero angle a while after a drag
-	if _drag_index == -1 and _idle_t > 4.0:
-		model.rotation.y = lerp_angle(model.rotation.y, MODEL_YAW, minf(1.0, delta * 2.0))
 	if start_btn and not start_btn.disabled:
 		var s := 1.0 + sin(_time * 3.2) * 0.012
 		start_btn.pivot_offset = start_btn.size * 0.5
