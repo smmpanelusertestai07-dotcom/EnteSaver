@@ -8,8 +8,8 @@ extends Node
 ## card (every page; arrow, swipe, dot; X and back), the DUMMY chip, LONE WOLF's START opens
 ## the QUICK MATCH search, CANCEL; the size chips and the mode card's team-size box), name edit (pencil tap, long name ends in "..."), the player card (opens
 ## PROFILE), the wardrobe (card tap, every outfit listed), ONLINE 1 VS 1 and FRIENDS, every
-## settings tab (tab taps, HIGH graphics, EXTREME's question, the FAST / STANDARD sensitivity
-## presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
+## settings tab (tab and sub-tab taps, HIGH graphics, EXTREME's question, the HUD page's CUSTOM, a
+## CONTROLS row's picture, the HIGH / DEFAULT sensitivity presets, RESET's question, ACCOUNT with the Privacy Notice and DELETE MY DATA's question), HOW TO
 ## PLAY from the settings (MODES on top), the quit dialog, the match card of an online match, START ->
 ## match loading overlay (TRAINING GROUND) -> arena, the in-match settings (opened by Android
 ## back and by the HUD gear: QUIT MATCH in them, EDIT CUSTOM HUD opens the editor over the
@@ -202,6 +202,11 @@ func run(at: Node) -> int:
 	var sp := _settings(lobby)
 	_check(sp != null, "settings opens from the gear")
 	if sp:
+		await at.shot("m07a_settings_hud")
+		_check(sp.find_child("EditHud", true, false) != null and (sp.find_child("SubTabs", true, false) as Control).visible,
+			"the settings open on IN-MATCH > HUD: lobby settings offer CUSTOM")
+		await _tap(_find_text(sp, "DISPLAY"))
+		await _settle(0.4)
 		await at.shot("m07_settings_display")
 		var g_before := int(Game.settings.graphics)
 		var high_q := _find_text(sp, "HIGH")
@@ -218,27 +223,35 @@ func run(at: Node) -> int:
 		_check(_settings(lobby) != null and sp.find_child("Confirm", true, false) == null and int(Game.settings.graphics) == 2,
 			"back closes the question and keeps the settings open")
 		Game.settings.graphics = g_before
+		await _tap(_find_text(sp, "IN-MATCH"))
+		await _settle(0.3)
 		await _tap(_find_text(sp, "CONTROLS"))
 		await _settle(0.4)
 		await at.shot("m08_settings_controls")
-		_check(sp.find_child("EditHud", true, false) != null, "lobby settings offer EDIT CUSTOM HUD")
+		_check(sp.find_child("Preview", true, false) != null and (sp.find_child("Preview", true, false) as Control).visible
+			and String(sp.get("_sel")) == "aim", "CONTROLS: the picture of the first row (aim precision)")
 		(sp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
 		await _settle(0.4)
+		var fl := sp.find_child("Row_freelook_button", true, false) as Control
+		if fl:
+			await _tap(fl)
+		await _settle(0.4)
 		await at.shot("m09_settings_controls_more")
+		_check(String(sp.get("_sel")) == "freelook_button", "a tap on a row selects it (its picture shows)")
 		await _tap(_find_text(sp, "SENSITIVITY"))
 		await _settle(0.3)
-		var fast := _find_text(sp, "FAST")
+		var fast := _find_text(sp, "HIGH")
 		if fast:
 			await _tap(fast)
 		await _settle(0.3)
 		await at.shot("m10_settings_sensitivity")
-		var fp: Dictionary = SettingsPanel.SENS_PRESETS.FAST
+		var fp: Dictionary = SettingsPanel.SENS_PRESETS.HIGH
 		_check(int(Game.settings.sens_general) == int(fp.sens_general) and int(Game.settings.sens_sniper) == int(fp.sens_sniper)
-			and int(Game.settings.sens_2x) == int(fp.sens_2x), "FAST preset sets its values")
-		var standard := _find_text(sp, "STANDARD")
+			and int(Game.settings.sens_2x) == int(fp.sens_2x), "HIGH preset sets its values")
+		var standard := _find_text(sp, "DEFAULT")
 		if standard:
 			await _tap(standard)
-		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "STANDARD preset sets 100 / 71")
+		_check(int(Game.settings.sens_general) == 100 and int(Game.settings.sens_sniper) == 71, "DEFAULT preset sets 100 / 71")
 		# RESET asks first; CANCEL keeps everything.
 		await _tap(sp.find_child("Reset", true, false) as Control)
 		await _settle(0.4)
@@ -340,9 +353,7 @@ func run(at: Node) -> int:
 		await at.shot("m14_pause")
 		# (TRAINING GROUND quits at one tap; the online question is in the HUD tour, tests/shots_hud.gd)
 		if psp:
-			await _tap(_find_text(psp, "CONTROLS"))
-			await _settle(0.4)
-			(psp.get("_scroll") as ScrollContainer).scroll_vertical = 100000
+			await _tap(_find_text(psp, "HUD"))
 			await _settle(0.4)
 			await at.shot("m15_pause_settings")
 			var edit := psp.find_child("EditHud", true, false) as Control
