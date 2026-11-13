@@ -226,7 +226,10 @@ func open(kind := "online", back := false) -> void:
 		_build_friends_tab(v)
 	else:
 		# the section title and its "?" (the guide behind it, no paragraph on the page)
-		var head := UI.section(String(PAGE_HEADS.get(kind, "")), 21)
+		var title := String(PAGE_HEADS.get(kind, ""))
+		if kind == "room" and (cloud.room_code != "" or cloud.join_state != ""):
+			title = "YOUR ROOM"           # (a room open or being joined: not the create form)
+		var head := UI.section(title, 21)
 		head.add_child(UI.help_button(LobbyLan.GUIDE if kind == "local" else String(PAGE_HELP.get(kind, ""))))
 		head.mouse_filter = Control.MOUSE_FILTER_PASS
 		v.add_child(head)
