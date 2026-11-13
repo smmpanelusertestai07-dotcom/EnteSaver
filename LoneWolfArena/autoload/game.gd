@@ -144,6 +144,8 @@ const DEFAULT_PROFILE := {
 	"avatar": "emblem",          # profile picture: the emblem or an outfit's portrait (avatar_ids)
 	"banner": "default",         # name card background (BANNERS)
 	"signature": "",             # a line under the name: clean_name characters, SIGNATURE_MAX at most
+	"lobby_pose": "",            # WARDROBE > LOBBY POSE: a LOBBY_POSES clip, "" = a random gesture now and then
+	"victory_pose": "",          # WARDROBE > VICTORY POSE: a VICTORY_POSES clip, "" = the game's own choice
 	# Lifetime numbers of counted matches, like Fighter.stats: shots and hits per trigger pull,
 	# headshots = hits with a head pellet, damage dealt in HP, time_played in seconds.
 	"deaths": 0, "headshots": 0, "damage": 0, "shots": 0, "hits": 0, "rounds_won": 0, "rounds_lost": 0,
@@ -168,6 +170,9 @@ const DEFAULT_PROFILE := {
 	# "with" (the friend on this player's team, "" when none).
 	"history": [],
 }
+## The poses WARDROBE offers (CharacterModel clips; "" = random / the game's own choice).
+const LOBBY_POSES := ["", "lobby_hip", "lobby_shift", "lobby_look"]
+const VICTORY_POSES := ["", "victory", "victory_pose"]
 ## Lifetime counters (whole numbers, 0..COUNTER_MAX) and the ones kept per mode (in "modes").
 const PROFILE_COUNTERS := ["matches", "wins", "kills", "xp", "deaths", "headshots", "damage", "shots", "hits",
 	"rounds_won", "rounds_lost", "time_played"]
@@ -548,6 +553,9 @@ func _sanitize_profile() -> void:
 	if not String(profile.get("banner", "")) in BANNERS:
 		profile.banner = DEFAULT_PROFILE.banner
 	profile.signature = clean_text(String(profile.get("signature", "")), SIGNATURE_MAX)
+	for k: Array in [["lobby_pose", LOBBY_POSES], ["victory_pose", VICTORY_POSES]]:
+		var v: Variant = profile.get(k[0])
+		profile[k[0]] = String(v) if typeof(v) == TYPE_STRING and (k[1] as Array).has(v) else ""
 	var modes := {}
 	var saved_modes: Variant = profile.get("modes")
 	for m: String in RECORD_MODES:

@@ -198,11 +198,40 @@ func run(at: Node) -> int:
 			listed += 1
 	_check(listed == CharacterModel.BUNDLE_INFO.size() and lobby.find_child("Tab_epic", true, false) == null,
 		"the wardrobe lists all %d outfits, with no rarity tabs" % CharacterModel.BUNDLE_INFO.size())
+	var equip_b := lobby.find_child("EquipButton", true, false) as Button
+	var tag := lobby.find_child("WardrobeTag", true, false) as Label
+	_check(lobby.model.bundle == "royal" and equip_b != null and not equip_b.disabled and tag != null and tag.text != "",
+		"a tapped outfit is worn at once, its name on the tag, EQUIP yellow")
 	await _settle(0.5)
 	await at.shot("m05_wardrobe")
+	# LOBBY POSE: a tile plays its pose on the character
+	await _tap(lobby.find_child("WardTab_lobby", true, false) as Control)
+	await _settle(0.3)
+	var hip := lobby.find_child("Pose_lobby_hip", true, false) as Control
+	_check(hip != null and lobby.find_child("Pose_random", true, false) != null, "LOBBY POSE lists RANDOM and the poses")
+	if hip:
+		await _tap(hip)
+		await _settle(0.6)
+	await at.shot("m05b_wardrobe_pose")
+	await _tap(lobby.find_child("WardrobeClose", true, false) as Control)
+	await _settle(0.8)
+	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle and lobby.model.bundle == saved_bundle
+		and String(Game.profile.lobby_pose) == "", "the X closes the wardrobe: nothing equipped, the outfit back")
+	# EQUIP saves the shown outfit and turns grey EQUIPPED
+	await _tap(ward_row)
+	await at.wait(1.0)
+	await _tap(lobby.find_child("Bundle_royal", true, false) as Control)
+	await _settle(0.3)
+	equip_b = lobby.find_child("EquipButton", true, false) as Button
+	await _tap(equip_b)
+	await _settle(0.3)
+	_check(String(Game.profile.bundle) == "royal" and equip_b.disabled and lobby.get("wardrobe") != null, "EQUIP saves the outfit, EQUIPPED greyed")
+	await at.shot("m05c_wardrobe_equipped")
+	Game.profile.bundle = saved_bundle
+	Game.save_profile()
 	_back()
 	await _settle(0.8)
-	_check(lobby.get("wardrobe") == null and String(Game.profile.bundle) == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
+	_check(lobby.get("wardrobe") == null and lobby.model.bundle == saved_bundle, "back closes the wardrobe and keeps the equipped outfit")
 	# Settings: open from the gear, walk the tabs with taps, tap a few options.
 	await _tap(lobby.find_child("SettingsButton", true, false) as Control)
 	await _settle(0.6)

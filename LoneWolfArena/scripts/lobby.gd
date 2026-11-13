@@ -313,6 +313,7 @@ func _build_stage() -> void:
 	model.position = Vector3(0, PODIUM_TOP, 0)
 	model.rotation.y = hero_yaw
 	model.setup(String(Game.profile.bundle), false)
+	model.pose_choice = String(Game.profile.lobby_pose)    # WARDROBE > LOBBY POSE ("" = random)
 	model.play_lobby(true)          # the hero also cheers now and then
 	group_view = Node3D.new()
 	group_view.name = "GroupMembers"
@@ -1354,8 +1355,7 @@ func close_layers() -> void:
 	if profile_ui.layer:
 		profile_ui.close()
 	if wardrobe:
-		model.apply_bundle(String(Game.profile.bundle))
-		_close_wardrobe()
+		_close_wardrobe()            # (what was not equipped goes back: LobbyWardrobe.close)
 
 
 ## The group changed (Cloud.group_changed): a member's mode card follows the leader's choice, the
@@ -1536,6 +1536,35 @@ static func _plate(text: String) -> Label3D:
 	return l
 
 
+## The name plates' places this frame: each under its character's feet (LobbyPlate.place), then,
+## nearest the camera first (lowest on screen), a plate that would overlap one already placed or
+## the mode card moves up just clear of it.
+func _place_plates() -> void:
+	var shown: Array = []
+	for p2: Variant in [_hero_plate] + _member_plates.values():
+		if p2 is LobbyPlate and is_instance_valid(p2) and (p2 as LobbyPlate).place():
+			shown.append(p2)
+	shown.sort_custom(func(a: LobbyPlate, b: LobbyPlate) -> bool: return a.global_position.y > b.global_position.y)
+	var taken: Array = []
+	if mode_card and mode_card.is_visible_in_tree():
+		taken.append(mode_card.get_global_rect().grow(4.0))
+	var pill := _main_ui.get_node_or_null(^"VoicePill") as Control
+	if pill and pill.visible:
+		taken.append(pill.get_global_rect())
+	for p2: LobbyPlate in shown:
+		var r := Rect2(p2.global_position, p2.size)
+		for _i in 4:
+			var hit := false
+			for t: Rect2 in taken:
+				if t.intersects(r):
+					r.position.y = t.position.y - r.size.y - 4.0
+					hit = true
+			if not hit:
+				break
+		p2.global_position = r.position
+		taken.append(r)
+
+
 ## This player's own plate: the name, the level, the flag when leading a group, the leave glyph in
 ## a group (polled with START's gate and on every group change).
 func _refresh_hero_plate() -> void:
@@ -1677,6 +1706,7 @@ func _process(delta: float) -> void:
 	_follow_search(delta)
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
+	_place_plates()
 	_gate_t -= delta
 	if _gate_t <= 0.0:
 		_gate_t = 0.25
@@ -1702,7 +1732,6 @@ func _notification(what: int) -> void:
 	elif profile_ui.layer:
 		profile_ui.close()
 	elif wardrobe:
-		model.apply_bundle(String(Game.profile.bundle))
 		_close_wardrobe()
 	elif search_kind() != "" and search_tab.on_cancel.is_valid():
 		cancel_search()             # with no window open, back cancels the search (not a member's)

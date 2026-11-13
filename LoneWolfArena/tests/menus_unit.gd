@@ -2,6 +2,7 @@ extends RefCounted
 ## Unit tests of the screens out of the match (round 8, run from tests/run_tests.gd):
 ## - HISTORY: a win because the opponent left keeps "left_by_them" through a save and a load; old
 ##   entries read as false; a loss never carries it.
+## - WARDROBE's poses: profile lobby_pose / victory_pose are kept when known, else "" (random).
 
 var t: Node
 
@@ -10,6 +11,7 @@ static func run(runner: Node) -> void:
 	var me := new()
 	me.t = runner
 	me._history_left_by_them()
+	me._poses()
 
 
 func _check(ok: bool, what: String) -> void:
@@ -49,3 +51,23 @@ func _history_left_by_them() -> void:
 	Game.profile = saved_profile
 	Game.last_result = saved_result
 	Game.autotest = at
+
+
+func _poses() -> void:
+	var saved_profile := Game.profile.duplicate(true)
+	_check(Game.DEFAULT_PROFILE.lobby_pose == "" and Game.DEFAULT_PROFILE.victory_pose == "", "no pose chosen by default (random)")
+	Game.profile.lobby_pose = "lobby_hip"
+	Game.profile.victory_pose = "victory"
+	Game._sanitize_profile()
+	_check(Game.profile.lobby_pose == "lobby_hip" and Game.profile.victory_pose == "victory", "known poses are kept")
+	for bad: Variant in ["dance", 42, null, ["lobby_hip"], "victory_pose "]:
+		Game.profile.lobby_pose = bad
+		Game.profile.victory_pose = bad
+		Game._sanitize_profile()
+		_check(Game.profile.lobby_pose == "" and Game.profile.victory_pose == "", "an unknown pose reads as random (%s)" % str(bad))
+	Game.profile.lobby_pose = "victory"         # a victory clip is not a lobby pose
+	Game._sanitize_profile()
+	_check(Game.profile.lobby_pose == "", "a victory clip is no lobby pose")
+	for clip: String in Game.LOBBY_POSES:
+		_check(clip == "" or CharacterModel.LOBBY_GESTURES.has(clip), "lobby pose %s is a lobby gesture" % clip)
+	Game.profile = saved_profile
