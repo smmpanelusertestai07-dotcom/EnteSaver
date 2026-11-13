@@ -258,6 +258,12 @@ var _chat_in := [2.0, 0]       # the opponent's chat lines: [tokens, ms] (NetCha
 var _chat_out_ms := 0          # when this phone last sent one
 var _voice_in := [10.0, 0]     # the opponent's voice frames: [tokens, ms]
 var _gv_topic := ""            # the group's voice topic listened to now ("" none: _sync_group_voice)
+## GROUP voice (`_vk_*`): each phone seals its GROUP frames under a key of its own, which it gives
+## only to its teammates (RSA, to each one's public key), so the other team, which holds the
+## match's or the room's keys too, cannot hear them. A new key when a teammate stops being one.
+var _vk := {}                  # this phone's: {"aes", "mac", "raw", "ch", "mates": {id}, "given": {id}}
+var _vkeys := {}               # sender id -> {"aes", "mac", "ch"}: the GROUP keys teammates gave this phone
+var _vpks := {}                # id -> public key (PEM) announced in the voice channel ("vp")
 var _fchat_ms := 0             # when this phone last sent a friend a chat message
 ## The match's direct UDP path (NetDirect, DIRECT CONNECTION): null while off or outside a match.
 ## The state goes over it while it works both ways; everything else stays on the relay.
@@ -2669,12 +2675,17 @@ func _on_room(msg: PackedByteArray) -> void:
 			var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 			if tokens >= 1.0 and line != "":
 				chat_received.emit(line)
+		"vp", "vk":
+			if in_session:
+				_vk_on(d as Dictionary, String(opponent.get("id", "")))
 		"vo", "vg":
-			# Voice (NetVoice, "vo": to everyone; "vg" to teammates only: a co-op DUO's other phone,
-			# never a 1 vs 1's opponent): with the SPEAKER on here, never from a blocked player, at
-			# most NetVoice.MAX_FRAMES_S frames a second, each a frame NetVoice can play.
-			var a: Variant = (d as Dictionary).get("a")
+			# Voice (NetVoice, "vo": to everyone; "vg" to teammates only, under the sender's GROUP
+			# key: a co-op DUO's other phone, never a 1 vs 1's opponent): with the SPEAKER on here,
+			# never from a blocked player, at most NetVoice.MAX_FRAMES_S frames a second, each a
+			# frame NetVoice can play.
 			var mate := voice_mate(String(opponent.get("id", "")))
+			var a: Variant = (d as Dictionary).get("a") if kind == "vo" \
+				else _vk_b64((d as Dictionary).get("s"), String(opponent.get("id", "")), mate)
 			if not in_session or typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or (kind == "vg" and not mate) \
 					or NetVoice.speaker_mode() == NetVoice.OFF or Game.is_blocked(String(opponent.get("id", ""))):
 				return
@@ -2917,8 +2928,156 @@ func send_chat(text: String) -> String:
 ## One voice frame (NetVoice, only while the player speaks) to the match: everyone ("vo", what
 ## every build plays), or the own team only ("vg": older builds ignore it, the other team's drop it).
 func send_voice(frame: PackedByteArray, group_only := false) -> void:
-	if in_session and NetVoice.frame_ok(frame):
-		_room_send({"k": "vg" if group_only else "vo", "a": Marshalls.raw_to_base64(frame)})
+	if not in_session or not NetVoice.frame_ok(frame):
+		return
+	if group_only:
+		_vk_sync()
+		_room_send({"k": "vg", "s": Marshalls.raw_to_base64(_vk_seal(frame))})
+	else:
+		_room_send({"k": "vo", "a": Marshalls.raw_to_base64(frame)})
+
+
+## The voice channel the GROUP keys belong to: the match room, or the group / room.
+func _vk_channel() -> String:
+	if in_session:
+		return "m:" + _room
+	return "g:" + String(_grp.gid) if not _grp.is_empty() else ""
+
+
+## A GROUP-key message ("vp", "vk") to the voice channel (the match room, or the group's voice topic).
+func _vk_out(d: Dictionary) -> void:
+	if in_session:
+		_room_send(d)
+	elif voice_group_ready():
+		_grp.seq = int(_grp.seq) + 1
+		_publish(ROOT + "/g/" + String(_grp.gid) + "/v", _seal(d, my_id, int(_grp.seq), _grp.aes, _grp.mac))
+
+
+## The teammates (voice_mate) of the channel now.
+func _vk_mate_ids() -> Array:
+	var ids := []
+	if in_session and not session_multi:
+		ids = [String(opponent.get("id", ""))]
+	elif in_session:
+		for e: Dictionary in session_roster:
+			ids.append(String(e.get("id", "")))
+	elif not group.is_empty():
+		for m: Dictionary in group.members:
+			ids.append(String(m.id))
+	return ids.filter(func(id: String) -> bool: return id != "" and voice_mate(id))
+
+
+## This phone's GROUP key for the channel now (a new one in a new channel, or when a teammate is
+## one no more), given to every teammate whose public key is known.
+func _vk_sync() -> void:
+	var ch := _vk_channel()
+	var mates := {}
+	for id: String in _vk_mate_ids():
+		mates[id] = true
+	var fresh := String(_vk.get("ch", "")) != ch
+	for id: String in (_vk.get("mates", {}) as Dictionary):
+		if not mates.has(id):
+			fresh = true
+	if fresh:
+		var raw := _crypto.generate_random_bytes(64)
+		_vk = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "raw": raw, "ch": ch, "mates": {}, "given": {}}
+		if not String(_vpks.get("ch", "")) == ch:
+			_vpks = {"ch": ch}
+		_vk_out({"k": "vp", "pk": _pk_pem})         # (the teammates answer with theirs)
+	_vk.mates = mates
+	var now := Time.get_ticks_msec()
+	for id: String in mates:
+		if (_vk.given as Dictionary).has(id):
+			continue
+		var pem := String(_vpks.get(id, ""))
+		if pem == "":
+			pem = String((peers.get(id, directory.get(id, {})) as Dictionary).get("pk", ""))
+		if pem == "" or pem.sha256_text().left(32) != id:
+			if now - int(_vk.get("asked", -100000)) > 3000:
+				_vk.asked = now                      # (a teammate who came later: it answers with its key)
+				_vk_out({"k": "vp", "pk": _pk_pem})
+			continue
+		var pub := CryptoKey.new()
+		if pub.load_from_string(pem, true) != OK:
+			continue
+		_vk_out({"k": "vk", "to": id, "s": Marshalls.raw_to_base64(_crypto.encrypt(pub, _vk.raw))})
+		_vk.given[id] = true
+
+
+## A voice frame sealed under this phone's GROUP key: IV, AES-256-CBC, HMAC-SHA256 (over the sender too).
+func _vk_seal(frame: PackedByteArray) -> PackedByteArray:
+	var plain := frame.duplicate()
+	var pad := 16 - plain.size() % 16
+	for i in pad:
+		plain.append(pad)
+	var iv := _crypto.generate_random_bytes(16)
+	var ctx := AESContext.new()
+	ctx.start(AESContext.MODE_CBC_ENCRYPT, _vk.aes, iv)
+	var body := iv.duplicate()
+	body.append_array(ctx.update(plain))
+	ctx.finish()
+	var signed := my_id.to_utf8_buffer()
+	signed.append_array(body)
+	body.append_array(_crypto.hmac_digest(HashingContext.HASH_SHA256, _vk.mac, signed))
+	return body
+
+
+## A teammate's GROUP frame opened with the key it gave this phone; empty when there is none or it
+## does not fit.
+func _vk_open(a: Variant, from: String) -> PackedByteArray:
+	var key: Dictionary = _vkeys.get(from, {})
+	if typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 + 120 or key.is_empty() or String(key.ch) != _vk_channel():
+		return PackedByteArray()
+	var raw := Marshalls.base64_to_raw(String(a))
+	if raw.size() < 16 + 16 + 32 or (raw.size() - 48) % 16 != 0:
+		return PackedByteArray()
+	var body := raw.slice(0, raw.size() - 32)
+	var signed := from.to_utf8_buffer()
+	signed.append_array(body)
+	if not _crypto.constant_time_compare(_crypto.hmac_digest(HashingContext.HASH_SHA256, key.mac, signed), raw.slice(raw.size() - 32)):
+		return PackedByteArray()
+	var ctx := AESContext.new()
+	ctx.start(AESContext.MODE_CBC_DECRYPT, key.aes, body.slice(0, 16))
+	var plain := ctx.update(body.slice(16))
+	ctx.finish()
+	var pad := plain[plain.size() - 1] if plain.size() > 0 else 0
+	if pad < 1 or pad > 16:
+		return PackedByteArray()
+	return plain.slice(0, plain.size() - pad)
+
+
+## A teammate's GROUP frame ("vg", or a room's "gv" with "g") as the base64 of a plain frame; null
+## from anyone else (only a teammate's key is held here anyway).
+func _vk_b64(a: Variant, from: String, mate: bool) -> Variant:
+	if not mate:
+		return null
+	return Marshalls.raw_to_base64(_vk_open(a, from))
+
+
+## "vp" (a player's public key in the voice channel: a teammate gets this phone's GROUP key, and a
+## newcomer hears this phone's own) and "vk" (a teammate's GROUP key, RSA to this phone's key).
+func _vk_on(d: Dictionary, from: String) -> void:
+	var ch := _vk_channel()
+	if ch == "" or from == my_id:
+		return
+	if String(d.get("k", "")) == "vp":
+		var pem: Variant = d.get("pk")
+		if typeof(pem) != TYPE_STRING or String(pem).length() > 1200 or String(pem).sha256_text().left(32) != from:
+			return
+		if String(_vpks.get("ch", "")) != ch:
+			_vpks = {"ch": ch}
+		var known := _vpks.has(from)
+		_vpks[from] = String(pem)
+		if not known:
+			_vk_out({"k": "vp", "pk": _pk_pem})
+		if String(_vk.get("ch", "")) == ch:
+			(_vk.given as Dictionary).erase(from)  # (it may have come back without the key)
+			_vk_sync()
+	elif String(d.get("k", "")) == "vk" and String(d.get("to", "")) == my_id and typeof(d.get("s")) == TYPE_STRING \
+			and String(d.s).length() < 1000 and _key != null and voice_mate(from):
+		var raw := _crypto.decrypt(_key, Marshalls.base64_to_raw(String(d.s)))
+		if raw.size() == 64:
+			_vkeys[from] = {"aes": raw.slice(0, 32), "mac": raw.slice(32, 64), "ch": ch}
 
 
 ## Whether that match or group player counts as GROUP for voice: the same team in a DUO / SQUAD
@@ -2970,10 +3129,11 @@ func voice_group_ready() -> bool:
 func send_group_voice(frame: PackedByteArray, group_only := false) -> bool:
 	if not voice_group_ready() or not NetVoice.frame_ok(frame):
 		return false
-	_grp.seq = int(_grp.seq) + 1
 	var d := {"k": "gv", "a": Marshalls.raw_to_base64(frame)}
 	if group_only:
-		d.g = true
+		_vk_sync()
+		d = {"k": "gv", "g": true, "s": Marshalls.raw_to_base64(_vk_seal(frame))}
+	_grp.seq = int(_grp.seq) + 1
 	_publish(ROOT + "/g/" + String(_grp.gid) + "/v", _seal(d, my_id, int(_grp.seq), _grp.aes, _grp.mac))
 	return true
 
@@ -2982,7 +3142,7 @@ func send_group_voice(frame: PackedByteArray, group_only := false) -> bool:
 ## left at once when it goes OFF: the relay then sends nothing).
 func _sync_group_voice() -> void:
 	var want := ""
-	if _connected and not _grp.is_empty() and NetVoice.speaker_mode() != NetVoice.OFF and not in_session:
+	if _connected and not _grp.is_empty() and (NetVoice.speaker_mode() != NetVoice.OFF or NetVoice.mic_mode() == NetVoice.GROUP) and not in_session:
 		want = ROOT + "/g/" + String(_grp.gid) + "/v"
 	if not _connected:
 		_gv_topic = ""
@@ -3001,7 +3161,7 @@ func _on_group_voice(payload: PackedByteArray) -> void:
 	if _grp.is_empty():
 		return
 	var d := _unseal(payload, _grp.aes, _grp.mac)
-	if d.is_empty() or String(d.get("k", "")) != "gv":
+	if d.is_empty() or not String(d.get("k", "")) in ["gv", "vp", "vk"]:
 		return
 	var f := String(d.f)
 	if f == my_id or Game.is_blocked(f) or not _group_has(f):
@@ -3011,11 +3171,15 @@ func _on_group_voice(payload: PackedByteArray) -> void:
 		return
 	seen[f] = int(d.n)
 	_grp.vtheir = seen
-	var a: Variant = d.get("a")
-	if typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or not _bucket("gv" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
+	if String(d.k) != "gv":
+		if _bucket("gk" + f, 2.0, 6.0):
+			_vk_on(d, f)
 		return
+	var a: Variant = d.get("a")
 	var mate := voice_mate(f)
-	if d.get("g") == true and not mate:
+	if d.get("g") == true:
+		a = _vk_b64(d.get("s"), f, mate)    # (the own side's key only)
+	if typeof(a) != TYPE_STRING or String(a).length() > NetVoice.MAX_B64 or not _bucket("gv" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
 		return
 	var frame := Marshalls.base64_to_raw(String(a))
 	if NetVoice.frame_ok(frame):
@@ -4298,10 +4462,13 @@ func _on_multi(d: Dictionary) -> void:
 				var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 				if line != "":
 					chat_received.emit(line)
+		"vp", "vk":
+			if in_session:
+				_vk_on(d, f)
 		"vo", "vg":
-			# Voice: "vo" to everyone, "vg" to the sender's team only (dropped here unless a teammate).
-			var a: Variant = d.get("a")
+			# Voice: "vo" to everyone, "vg" to the sender's team only (under its GROUP key, _vk_open).
 			var mate := voice_mate(f)
+			var a: Variant = d.get("a") if kind == "vo" else _vk_b64(d.get("s"), f, mate)
 			if in_session and typeof(a) == TYPE_STRING and String(a).length() <= NetVoice.MAX_B64 and NetVoice.speaker_mode() != NetVoice.OFF \
 					and (kind == "vo" or mate) and not Game.is_blocked(f) and _bucket("v" + f, NetVoice.MAX_FRAMES_S, NetVoice.MAX_FRAMES_S):
 				var frame := Marshalls.base64_to_raw(String(a))

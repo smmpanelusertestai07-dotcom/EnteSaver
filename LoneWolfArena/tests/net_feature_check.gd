@@ -386,7 +386,58 @@ func _voice() -> void:
 		"voice frames arrive whole, with their sender, at most %d at once (the SPEAKER's default ALL)" % int(NetVoice.MAX_FRAMES_S))
 	a.free()
 	b.free()
+	_voice_group_key(frame)
 	_voice_units(frame)
+
+
+## GROUP voice under the sender's own key, given only to its teammates: the other team holds the
+## match room's keys too, and still cannot open it.
+func _voice_group_key(frame: PackedByteArray) -> void:
+	var p := _pair()
+	var a: Cloud = p[0]
+	var b: Cloud = p[1]
+	var e := Cloud.new()                     # an enemy in the same match room (its keys)
+	for c: Cloud in [a, b, e]:
+		c._use_key(Crypto.new().generate_rsa(2048))
+		c.my_id = c._pk_pem.sha256_text().left(32)
+		c._room = "r".repeat(16)
+	a.opponent = {"id": b.my_id, "name": "BEE"}
+	b.opponent = {"id": a.my_id, "name": "ACE"}
+	e._aes = a._aes
+	e._mac = a._mac
+	e.in_session = true
+	e.opponent = {"id": a.my_id, "name": "ACE"}
+	for c: Cloud in [a, b]:
+		c.session_team = {"coop": true}
+	Game.settings.speaker_mode = NetVoice.ALL
+	var got := {"b": 0, "e": 0}
+	b.voice_from.connect(func(f: PackedByteArray, _id: String, mate: bool) -> void:
+		if f == frame and mate:
+			got.b += 1)
+	e.voice_from.connect(func(_f: PackedByteArray, _id: String, _mate: bool) -> void: got.e += 1)
+	a._vk_sync()
+	# a learns b's public key ("vp") and gives it its GROUP key; the enemy hears both messages too
+	a._vk_on({"k": "vp", "pk": b._pk_pem}, b.my_id)
+	_check((a._vk.given as Dictionary).has(b.my_id) and not (a._vk.given as Dictionary).has(e.my_id), "the GROUP key goes to the teammate only")
+	var pub := CryptoKey.new()
+	pub.load_from_string(b._pk_pem, true)
+	var vk := {"k": "vk", "to": b.my_id, "s": Marshalls.raw_to_base64(Crypto.new().encrypt(pub, a._vk.raw))}
+	b._on_room(a._room_packet(vk.duplicate()))
+	e._on_room(a._room_packet(vk.duplicate()))
+	_check(b._vkeys.has(a.my_id) and e._vkeys.is_empty(), "the teammate opens the GROUP key; the enemy, not its addressee, cannot")
+	for i in 3:
+		var pkt := a._room_packet({"k": "vg", "s": Marshalls.raw_to_base64(a._vk_seal(frame))})
+		b._on_room(pkt)
+		e._on_room(pkt)
+	_check(got.b == 3 and got.e == 0, "GROUP frames reach the teammate, never the other team (%s)" % str(got))
+	# a teammate no more (a custom room's side changed): a new key, the old one opens nothing
+	var old := a._vk.raw as PackedByteArray
+	a.session_team = {"coop": false}
+	a._vk_sync()
+	b._on_room(a._room_packet({"k": "vg", "s": Marshalls.raw_to_base64(a._vk_seal(frame))}))
+	_check(a._vk.raw != old and got.b == 3, "a player who stops being a teammate keeps no key to the new GROUP frames")
+	for c: Cloud in [a, b, e]:
+		c.free()
 
 
 ## The open mic's gate, the MIC / SPEAKER modes, the channels' teammates, mutes, the playback per
