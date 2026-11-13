@@ -107,6 +107,13 @@ const RUN_MODE_NOTES := [
 	"Push the stick past its ring to sprint (no sprint button)",
 	"The sprint button, or the stick pushed past its ring",
 ]
+## The free look button (setting freelook_button: OFF, ON) and what each does. Free look itself
+## needs no button: a drag while standing already turns the camera round the fighter; the eye
+## button only matters while running (the run keeps its direction while the view turns).
+const FREELOOK_NOTES := [
+	"No eye button. Standing still, a drag on the right side already turns the camera round you; while you run, a drag turns the run with it",
+	"Hold the eye button and drag to look around while you run: the run keeps its direction. Standing still, a drag already turns the camera round",
+]
 ## The left fire choices left to right as values of the setting (0 always, 1 while aiming, 2 off:
 ## the values of version 5 keep their meaning).
 const LEFT_FIRE_VALUES := [2, 0, 1]
@@ -579,9 +586,30 @@ func _prow(id: String, title: String, control: Control, info: Callable) -> Panel
 	row.add_theme_stylebox_override("panel", _row_style(false))
 	_dark_segments(control)
 	_prows[id] = [row, info]
+	# A tap on the row selects it when the finger lifts, and only if it moved less than the
+	# list's scroll dead zone: a drag that scrolls the page leaves the selection (and the picture)
+	# alone. The row's own controls select it through their signals below.
+	var down := {}       # where the finger (or the mouse, which the engine doubles as touches) went down
 	row.gui_input.connect(func(e: InputEvent) -> void:
-		if (e is InputEventMouseButton and (e as InputEventMouseButton).pressed) or (e is InputEventScreenTouch and (e as InputEventScreenTouch).pressed):
-			_select(id))
+		var kind := ""
+		var at := Vector2.ZERO
+		var pressed := false
+		if e is InputEventMouseButton and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+			kind = "mouse"
+			at = (e as InputEventMouseButton).global_position
+			pressed = (e as InputEventMouseButton).pressed
+		elif e is InputEventScreenTouch:
+			kind = "touch"
+			at = row.get_global_transform_with_canvas() * (e as InputEventScreenTouch).position
+			pressed = (e as InputEventScreenTouch).pressed
+		if kind == "":
+			return
+		if pressed:
+			down[kind] = at
+		elif down.has(kind):
+			if at.distance_to(down[kind]) < float(UI.SCROLL_DEADZONE):
+				_select(id)
+			down.erase(kind))
 	for b in control.find_children("*", "Button", true, false):
 		(b as Button).pressed.connect(func() -> void: _select(id))
 	for s in control.find_children("*", "Slider", true, false):
@@ -1009,7 +1037,7 @@ static func sens_value(key: String, shown: int) -> int:
 
 func _sens_row(title: String, key: String, note: String) -> void:
 	var st := UI.stepper(sens_shown(key, int(Game.settings[key])), 0, 100, func(v: float) -> void:
-		_apply(key, sens_value(key, int(v)))
+		_apply(key, sens_stored(key, int(v)))
 		_refresh_preset())
 	st.name = "Sens_" + key
 	(st.get_meta("slider") as Control).custom_minimum_size.x = 150.0
@@ -1028,12 +1056,24 @@ func _sens_row(title: String, key: String, note: String) -> void:
 		return {"pic": pic, "spot": spot, "callout": callout, "value": "", "text": note})
 
 
+## What a sensitivity row stores for the number `shown` it was set to: a preset's own value where
+## that preset reads `shown` (so stepping back to a preset's number is that preset exactly, though
+## the 0-100 steps do not land on every stored value), else sens_value.
+static func sens_stored(key: String, shown: int) -> int:
+	for n: String in PRESET_NAMES:
+		var p: Dictionary = SENS_PRESETS[n]
+		if p.has(key) and sens_shown(key, int(p[key])) == shown:
+			return int(p[key])
+	return sens_value(key, shown)
+
+
+## The preset the sensitivities match as the rows show them (0-100), or -1.
 func _preset_index() -> int:
 	for i in PRESET_NAMES.size():
 		var p: Dictionary = SENS_PRESETS[PRESET_NAMES[i]]
 		var same := true
 		for k: String in p:
-			if int(Game.settings[k]) != int(p[k]):
+			if sens_shown(k, int(Game.settings[k])) != sens_shown(k, int(p[k])):
 				same = false
 		if same:
 			return i
@@ -1093,9 +1133,9 @@ func _build_controls() -> void:
 	_prow("freelook_button", "Free look button", _toggle("freelook_button"), func() -> Dictionary:
 		if bool(Game.settings.freelook_button):
 			return {"pic": "hud_eye.png", "spot": "freelook", "callout": "Hold and drag to look around", "value": "ON",
-				"text": "The eye button: hold it and drag to look around while you keep running the same way"}
+				"text": FREELOOK_NOTES[1]}
 		return {"pic": "hud.png", "spot": "swipe", "callout": "Drag the right side to look around", "value": "OFF",
-			"text": "No eye button: drag the right side of the screen to turn the camera"})
+			"text": FREELOOK_NOTES[0]})
 	_body.add_child(UI.spacer(2))
 	_body.add_child(UI.section("MOVEMENT"))
 	var dynamic := bool(Game.settings.dynamic_joystick)

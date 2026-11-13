@@ -354,7 +354,7 @@ listed here. If a part needs something new from the core, add it in its own file
   `PauseMenu.asks_before_quit` / `PauseMenu.quit_question`, in the panel's own
   question `Confirm` (`SettingsPanel.ask`) with ConfirmCancel / ConfirmOk "QUIT": a counted match
   is a defeat, LEFT in HISTORY; back closes the question first) at the foot of
-  their tab column, and `edit_hud` set: EDIT CUSTOM HUD opens `HudEditor` (scripts/
+  their tab column, and `edit_hud` set: the HUD page's CUSTOM (`EditHud`) opens `HudEditor` (scripts/
   hud_editor_overlay.gd: the lobby's editor, BACK or back closes it to the settings; SAVE reloads
   the match HUD's layout) over the match. The settings' X or back closes the menu (saved; also
   when the arena closes it). Hides `arena.hud` while open (restored on close and exit; a hidden HUD
