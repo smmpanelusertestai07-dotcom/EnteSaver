@@ -1569,14 +1569,16 @@ func _place_plates() -> void:
 
 
 ## This player's own plate: the name, the level, the flag when leading a group, the leave glyph in
-## a group (polled with START's gate and on every group change).
+## a group (polled with START's gate and on every group change). A CUSTOM ROOM is a group too,
+## but it is left on its own page (LEAVE / CLOSE ROOM): no leave glyph there.
 func _refresh_hero_plate() -> void:
 	if _hero_plate == null:
 		return
 	if _hero_plate.anchor == null and model != null:
 		_hero_plate.anchor = model
 	var grouped := LobbyTeam.in_group()
-	_hero_plate.show_member(String(Game.profile.name), Game.level(), grouped and LobbyTeam.is_leader(), grouped)
+	_hero_plate.show_member(String(Game.profile.name), Game.level(), grouped and LobbyTeam.is_leader(),
+		grouped and not Game.cloud_service().in_room())
 
 
 ## What START does for a mode and a team size: "training" (the 1 vs 1 against the bot or the

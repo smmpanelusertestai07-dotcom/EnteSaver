@@ -511,9 +511,10 @@ func _action_button(text: String, node_name: String, style: String, action: Call
 
 
 ## The leave glyph on this player's name plate (LobbyPlate): EXIT GROUP for a member, DISBAND GROUP
-## for the leader, each asked first.
+## for the leader, each asked first. Never for a CUSTOM ROOM (its page has LEAVE / CLOSE ROOM, which
+## also end the room itself; Cloud.leave_group alone would leave the room half open).
 func ask_leave() -> void:
-	if not in_group():
+	if not in_group() or Game.cloud_service().in_room():
 		return
 	if is_leader():
 		_ask_disband()

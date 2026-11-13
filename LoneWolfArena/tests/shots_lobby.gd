@@ -178,6 +178,9 @@ func run(at: Node) -> int:
 		and rstart.get_global_rect().end.x <= vs_r.x, "a running room's places and START fit the page (START ends at %.0f of %.0f)" % [
 		rstart.get_global_rect().end.y if rstart else -1.0, vs_r.y])
 	await at.shot("l06b_room_running")
+	lobby._refresh_hero_plate()
+	var room_plate := lobby.find_child("HeroPlate", true, false) as LobbyPlate
+	_check(room_plate != null and not room_plate.can_leave, "in a CUSTOM ROOM the hero's plate has no leave glyph (the room page has LEAVE)")
 	cloud.group = {}
 	cloud._grp = {}
 	cloud.room_code = ""
