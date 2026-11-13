@@ -1529,15 +1529,15 @@ func _draw_damage_numbers(u: float) -> void:
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## The big red X on an eliminated enemy.
+## The red X on an eliminated enemy (a kill marker, short and small).
 func _draw_kill_x(u: float) -> void:
 	if _kill_x_t <= 0.0 or player.camera == null or player.camera.is_position_behind(_kill_x_pos):
 		return
 	var p := player.camera.unproject_position(_kill_x_pos)
 	var age := KILL_X_TIME - _kill_x_t
 	var a := clampf(_kill_x_t / 0.25, 0.0, 1.0)
-	var k := (0.075 * u) * (1.0 + 0.5 * clampf(1.0 - age / 0.12, 0.0, 1.0))
-	var wd := 0.016 * u
+	var k := (0.055 * u) * (1.0 + 0.2 * clampf(1.0 - age / 0.1, 0.0, 1.0))
+	var wd := 0.012 * u
 	for d in [Vector2(1, 1), Vector2(1, -1)]:
 		var v: Vector2 = d.normalized() * k
 		draw_line(p - v, p + v, Color(0, 0, 0, 0.55 * a), wd + 4.0, true)

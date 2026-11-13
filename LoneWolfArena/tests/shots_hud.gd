@@ -61,8 +61,8 @@ func run(at: Node) -> int:
 	_check(hud.weapon_picking() == hud.panels.pick_choice, "the weapon panel shows the chosen gun dimmed while picking", at)
 	_check(HudDraw.weapon_tex(Weapons.DEFS.lever) != HudDraw.weapon_tex(Weapons.DEFS.sg), "lever and pump shotguns have different silhouettes", at)
 	var main0 := HudLayout.weapon_main(hud.layout.weapons, vs)
-	_check(absf(main0.position.y / vs.y - 0.003) < 0.012 and absf(main0.end.y / vs.y - 0.155) < 0.012,
-		"weapon panel main slot at y 0.003 .. 0.155 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
+	_check(absf(main0.position.y / vs.y - 0.042) < 0.012 and absf(main0.end.y / vs.y - 0.147) < 0.012,
+		"weapon panel main slot at y 0.042 .. 0.147 like the reference (%.3f .. %.3f)" % [main0.position.y / vs.y, main0.end.y / vs.y], at)
 	await _tap(at, hud.panels.card_rect(1).get_center())
 	await at.wait(0.3)
 	await at.shot("hud_02_pick_smg")

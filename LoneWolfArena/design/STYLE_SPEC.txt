@@ -76,7 +76,7 @@ reference:
 | Sprint | 0.136, 0.49, anchor l | 0.115 | running-figure glyph |
 | Medkit | bottom left 0.1832, 0.897, anchor l | 0.104 | kit glyph + count badge |
 | Shield wall | up and left of FIRE 0.7904, 0.757, anchor r (the reference's wall place) | 0.098 | wall glyph + count badge |
-| Left fire | left edge 0.044, 0.60, anchor l | 0.13 | bullet glyph; hold to fire (it does not aim); setting: off, always or only while aiming |
+| Left fire | left edge 0.044, 0.64, anchor l | 0.13 | bullet glyph; hold to fire (it does not aim); setting: off, always or only while aiming |
 | Fire | 0.8624, 0.687, anchor r | 0.17 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
 | Scope / ADS | right edge 0.964, 0.53, anchor r | 0.104 | reticle glyph |
 | Free look | right edge 0.964, 0.40, anchor r | 0.09 | eye glyph (off by default: a drag standing still already turns the camera round); hold and drag to look round while running, the run keeps its direction |

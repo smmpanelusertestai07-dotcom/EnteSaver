@@ -141,7 +141,7 @@ const PIC_DIR := "res://assets/ui/settings/"
 ## Where the HUD's widgets are in hud.png / hud_eye.png (fractions of the picture; r: radius in
 ## picture heights), as tests/shots_settings_pics.gd measured them. "center" is the crosshair.
 const SPOTS := {
-	"fire_r": {"x": 0.828, "y": 0.687, "r": 0.085}, "fire_l": {"x": 0.055, "y": 0.6, "r": 0.065},
+	"fire_r": {"x": 0.828, "y": 0.687, "r": 0.085}, "fire_l": {"x": 0.055, "y": 0.64, "r": 0.065},
 	"scope": {"x": 0.955, "y": 0.53, "r": 0.052}, "freelook": {"x": 0.955, "y": 0.4, "r": 0.045},
 	"reload": {"x": 0.875, "y": 0.47, "r": 0.045}, "swap": {"x": 0.81, "y": 0.47, "r": 0.045},
 	"sprint": {"x": 0.17, "y": 0.49, "r": 0.058}, "joystick": {"x": 0.169, "y": 0.75, "r": 0.115},
