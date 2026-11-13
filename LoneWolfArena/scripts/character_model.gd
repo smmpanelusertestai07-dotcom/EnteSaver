@@ -386,7 +386,7 @@ render_mode unshaded, cull_front, shadows_disabled, depth_draw_opaque, fog_disab
 uniform vec4 color : source_color = vec4(0.95, 0.12, 0.1, 1.0);
 uniform float grow_m = 0.0025;
 uniform float min_px = 1.0;
-uniform float depth_back_m = 0.035;
+uniform float depth_back_m = 0.12;
 void vertex() {
 	VERTEX += NORMAL * grow_m;
 	vec4 view = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
