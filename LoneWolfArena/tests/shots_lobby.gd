@@ -88,6 +88,18 @@ func run(at: Node) -> int:
 	_check(page != null and page.find_child("Tab_requests", true, false) != null and page.find_child("RequestsLink", true, false) != null
 		and page.find_child("Duel_" + Cloud.friend_code(ids.NIGHTFOX21), true, false) != null, "FRIENDS lists the friends and links the requests")
 	await at.shot("l03_friends")
+	# the guide is behind the "?" beside the title (no paragraph on the page)
+	var help_b := page.find_child("Help", true, false) as Button if page else null
+	_check(help_b != null and page.find_child("Help", true, false).get_parent() != null, "FRIENDS has the '?' beside its title")
+	if help_b:
+		help_b.pressed.emit()
+		await at.wait(0.3)
+		var tip := get_tree().root.find_child("HelpTip", false, false)
+		_check(tip != null and tip.find_child("HelpTipText", true, false) != null, "the '?' opens its tooltip")
+		await at.shot("l03b_help_tip")
+		if tip:
+			tip.queue_free()
+		await at.wait(0.1)
 	lobby.friends.open("requests")
 	await at.wait(0.6)
 	_check(lobby.dialogs.modal.find_child("FriendAccept", true, false) != null, "REQUESTS has ACCEPT")
