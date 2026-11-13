@@ -79,6 +79,85 @@ func open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
 	return v
 
 
+## A full page in the reference look (FRIENDS): the lobby hidden under the page's dark ramp, the
+## title in caps at the top right beside the X box in the corner ("Close": back()), a column of
+## boxed side tabs on the left (the returned "tabs" VBox, PAGE_TAB_W wide), a foot strip under it
+## ("foot": light buttons such as BLOCKED) and the content column on the right ("body", node
+## "PageBody"). One page or popup at a time, in `modal` like a popup.
+const PAGE_TAB_W := 0.16
+func open_page(title: String) -> Dictionary:
+	close_modal()
+	modal = Control.new()
+	modal.name = "Modal"
+	modal.set_meta("page", true)
+	UI.full_rect(modal)
+	modal.mouse_filter = Control.MOUSE_FILTER_STOP
+	lobby.ui.add_child(modal)
+	var bg := Control.new()
+	bg.name = "PageBg"
+	UI.full_rect(bg)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.draw.connect(func() -> void: UI.draw_page_bg(bg, bg.size))
+	modal.add_child(bg)
+	var inner := Control.new()
+	UI.full_rect(inner)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	modal.add_child(inner)
+	UI.keep_clear_of_cutout(inner)
+	var close := UI.close_button(60.0)
+	close.name = "Close"
+	close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	close.offset_left = -64
+	close.offset_right = -4
+	close.offset_top = 4
+	close.offset_bottom = 64
+	close.pressed.connect(back)
+	inner.add_child(close)
+	var t := UI.label(title.to_upper(), 30, UI.TEXT, "heavy")
+	t.name = "PageTitle"
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	t.offset_left = -420
+	t.offset_right = -84
+	t.offset_top = 4
+	t.offset_bottom = 64
+	inner.add_child(t)
+	var tabs := VBoxContainer.new()
+	tabs.name = "PageTabs"
+	tabs.add_theme_constant_override("separation", 6)
+	tabs.anchor_right = PAGE_TAB_W
+	tabs.offset_left = 8
+	tabs.offset_top = 92
+	tabs.offset_right = -6
+	inner.add_child(tabs)
+	var foot := VBoxContainer.new()
+	foot.name = "PageFoot"
+	foot.add_theme_constant_override("separation", 8)
+	foot.anchor_top = 1.0
+	foot.anchor_bottom = 1.0
+	foot.anchor_right = PAGE_TAB_W
+	foot.offset_left = 8
+	foot.offset_right = -6
+	foot.offset_bottom = -14
+	foot.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	inner.add_child(foot)
+	var body := VBoxContainer.new()
+	body.name = "PageBody"
+	body.add_theme_constant_override("separation", 10)
+	body.anchor_left = PAGE_TAB_W
+	body.anchor_right = 1.0
+	body.anchor_bottom = 1.0
+	body.offset_left = 18
+	body.offset_right = -22
+	body.offset_top = 76
+	body.offset_bottom = -14
+	inner.add_child(body)
+	modal.modulate.a = 0.0
+	modal.create_tween().tween_property(modal, "modulate:a", 1.0, 0.12)
+	return {"tabs": tabs, "foot": foot, "body": body, "title": t}
+
+
 func close_modal() -> void:
 	if modal:
 		modal.queue_free()

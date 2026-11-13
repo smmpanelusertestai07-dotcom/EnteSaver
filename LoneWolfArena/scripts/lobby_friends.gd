@@ -161,6 +161,14 @@ func process(delta: float) -> void:
 ## too: Cloud.start_directory(by)).
 ## back: it opens again under a player's card that closed (X, back, BLOCK, DUEL 1 VS 1): the list
 ## scrolls back to where that card was opened from, so a long ALL PLAYERS keeps the player's place.
+## The page's tabs: [kind, caption]. REQUESTS shows the count of requests waiting.
+const PAGE_TABS := [["friends", "FRIENDS"], ["requests", "REQUESTS"], ["online", "PLAYERS"], ["room", "CUSTOM ROOM"],
+	["local", "PLAY WITHOUT INTERNET"]]
+## Each tab's heading (the yellow-barred section title) and its short guide line.
+const PAGE_HEADS := {"friends": "MY FRIENDS", "requests": "FRIEND REQUESTS", "online": "PLAYERS", "room": "CUSTOM ROOM",
+	"local": "PLAY WITHOUT INTERNET"}
+
+
 func open(kind := "online", back := false) -> void:
 	_net_kind = kind
 	_scroll_back = int(_place.scroll) if back and String(_place.get("kind", "")) == kind else -1
@@ -169,85 +177,104 @@ func open(kind := "online", back := false) -> void:
 	cloud.start_lobby()
 	cloud.start_directory("window")  # every registered player, online or not
 	_dir_on = true
-	var v := lobby.dialogs.open_modal("ONLINE 1 VS 1", 980.0)
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 10)
-	for t: Array in [["online", "ONLINE", 175], ["friends", "FRIENDS", 175], ["room", "CUSTOM ROOM", 205],
-			["local", "PLAY WITHOUT INTERNET", 300]]:
-		var b := UI.button(String(t[1]), 19 if t[0] != "local" else 16, "primary" if t[0] == kind else "dark", Vector2(int(t[2]), 56))
-		b.name = "Tab_" + String(t[0])
+	var page := lobby.dialogs.open_page("FRIENDS")
+	var tabs: VBoxContainer = page.tabs
+	for t: Array in PAGE_TABS:
 		var tk := String(t[0])
+		var cap := String(t[1])
+		if tk == "requests" and not cloud.friend_requests.is_empty():
+			cap += "  %d" % cloud.friend_requests.size()
+		var b := UI.side_tab(cap, tk == kind, 19 if tk != "local" else 16, Vector2(0, 64))
+		b.name = "Tab_" + tk
 		b.pressed.connect(func() -> void:
 			if tk != _net_kind:
 				open(tk))
 		tabs.add_child(b)
-	v.add_child(tabs)
+	# BLOCKED (bottom left, as the reference's list of blocked players): PROFILE's BLOCKED tab.
+	var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 52))
+	blk.name = "FriendsBlocked"
+	blk.icon = UI.icon_texture("v_guest")
+	blk.add_theme_constant_override("icon_max_width", 24)
+	blk.pressed.connect(func() -> void: lobby.profile_ui.open("blocked"))
+	(page.foot as VBoxContainer).add_child(blk)
+	var v: VBoxContainer = page.body
 	var notes := {
 		"online": "Players online now can be challenged: DUEL 1 VS 1. ADD FRIEND works for every player, online or not (an offline player gets the request when they come back).",
 		"friends": "Search any player by ID or name. Friend requests reach players who are offline too. Friends who are online can be challenged to a 1 vs 1 duel.",
+		"requests": "Players who asked to be your friend. ACCEPT adds them to your friends on both phones.",
 		"room": "A private room: share its ID and password. The host picks SOLO, DUO or SQUAD; players take the places they tap. Only the host starts, empty places stay empty.",
 		"local": LobbyLan.GUIDE,
 	}
-	var info := UI.label(String(notes[kind]), 17, UI.TEXT_DIM, "semi")
+	if kind == "friends":
+		_build_friends_tab(v)
+	else:
+		v.add_child(UI.section(String(PAGE_HEADS.get(kind, "")), 21))
+	var info := UI.label(String(notes[kind]), 16, UI.TEXT_DIM, "semi")
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
 	_net_status = UI.label("", 20, UI.ACCENT, "bold")
 	v.add_child(_net_status)
-	if kind == "friends":
-		_build_friends_tab(v)
-	elif kind == "room":
+	if kind == "room":
 		_build_room_tab(v)
 	elif kind == "local":
 		lan.build(v)
 	_net_scroll = ScrollContainer.new()
 	_net_scroll.name = "NetScroll"
 	_net_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_net_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI.style_scroll(_net_scroll)
 	v.add_child(_net_scroll)
 	_net_list = VBoxContainer.new()
 	_net_list.name = "NetList"
 	_net_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_net_list.add_theme_constant_override("separation", 8)
-	_net_list.custom_minimum_size = Vector2(0, 170 if kind == "online" else 0)
+	_net_list.add_theme_constant_override("separation", 6)
 	_net_scroll.add_child(_net_list)
-	_net_list.minimum_size_changed.connect(_fit_list, CONNECT_DEFERRED)
 	_net_sig = "-"
 	_net_note = ""
 	_refresh_friends()
 
 
-## FRIENDS tab head: this phone's ID and a search box (an ID or a name among the players online).
+## FRIENDS tab head (one row, as the reference's list head): the MY FRIENDS title, this phone's
+## ID with COPY, and the search box (an ID or a name) with its magnifier button.
 func _build_friends_tab(v: VBoxContainer) -> void:
 	var cloud := Game.cloud_service()
 	var me := HBoxContainer.new()
-	me.add_theme_constant_override("separation", 12)
+	me.add_theme_constant_override("separation", 10)
+	me.add_child(UI.section(String(PAGE_HEADS.friends), 21))
 	var code := Cloud.friend_code(cloud.my_id) if cloud.my_id != "" else "--------"
-	var my_id := UI.label("YOUR ID:  %s" % code, 24, UI.TEXT, "heavy")
+	var my_id := UI.label("YOUR ID:  %s" % code, 20, UI.TEXT, "heavy")
 	my_id.name = "MyId"
-	my_id.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	my_id.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	my_id.size_flags_vertical = Control.SIZE_FILL
+	me.add_child(UI.spacer(0))
 	me.add_child(my_id)
-	var copy := UI.button("COPY", 18, "light", Vector2(120, 56))
+	var copy := UI.button("COPY", 16, "light", Vector2(96, 52))
 	copy.pressed.connect(func() -> void:
 		DisplayServer.clipboard_set(Cloud.friend_code(Game.cloud_service().my_id))
 		_net_note = "ID COPIED"
 		_net_sig = "-")
 	me.add_child(copy)
-	v.add_child(me)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	me.add_child(gap)
 	var le := _text_field("FRIEND'S ID OR NAME", 14, false)
 	le.name = "FriendSearch"
 	le.text = _friend_query
-	row.add_child(le)
-	var go := UI.button("SEARCH", 19, "primary", Vector2(160, 56))
+	le.size_flags_horizontal = Control.SIZE_FILL
+	le.custom_minimum_size = Vector2(250, 52)
+	me.add_child(le)
+	var go := UI.glyph_button("v_scope", 52.0, "GO")
+	go.name = "FriendSearchGo"
+	go.tooltip_text = "SEARCH"
 	var search := func() -> void:
 		_friend_query = Game.clean_name(le.text)
 		_net_sig = "-"
 		_refresh_friends()
 	go.pressed.connect(search)
 	le.text_submitted.connect(func(_t: String) -> void: search.call())
-	row.add_child(go)
-	v.add_child(row)
+	me.add_child(go)
+	v.add_child(me)
 
 
 ## CUSTOM ROOM tab: create one (password, the mode: SOLO 1 VS 1 with its rules, DUO 2 VS 2, SQUAD
@@ -555,9 +582,8 @@ func _refresh_friends() -> void:
 		_net_status.text = "WAITING FOR %s TO ACCEPT..." % waiting
 	elif _net_note != "":
 		_net_status.text = _net_note
-	elif _net_kind == "friends":
-		_net_status.text = "%d FRIEND REQUEST%s" % [cloud.friend_requests.size(), "" if cloud.friend_requests.size() == 1 else "S"] \
-			if not cloud.friend_requests.is_empty() else "FRIENDS"
+	elif _net_kind in ["friends", "requests"]:
+		_net_status.text = ""
 	elif _net_kind == "room":
 		_net_status.text = "ROOM OPEN: SHARE ITS ID AND PASSWORD" if cloud.room_code != "" else ""
 	elif listed.is_empty():
@@ -567,7 +593,7 @@ func _refresh_friends() -> void:
 	# ONLINE: the players-online heading is the list's first row, so it scrolls away with its
 	# section (ALL PLAYERS below has its own); the line above the list keeps the passing states.
 	var heading := _net_kind == "online" and _net_status.text in ["PLAYERS ONLINE", "LOOKING FOR PLAYERS ONLINE..."]
-	_net_status.visible = not heading
+	_net_status.visible = not heading and _net_status.text != ""
 	if _net_kind == "room":
 		return
 	if _net_kind == "friends" and lobby.dialogs.modal and cloud.my_id != "":
@@ -591,6 +617,8 @@ func _refresh_friends() -> void:
 		c.queue_free()
 	if _net_kind == "friends":
 		_fill_friends(cloud, waiting)
+	elif _net_kind == "requests":
+		_fill_requests(cloud)
 	else:
 		if heading:
 			var online_head := UI.label(_net_status.text, 20, UI.ACCENT, "bold")
@@ -614,6 +642,8 @@ func _refresh_friends() -> void:
 func _fit_list() -> void:
 	if _net_scroll == null or not is_instance_valid(_net_scroll) or not _net_scroll.is_inside_tree():
 		return
+	if _net_scroll.size_flags_vertical & Control.SIZE_EXPAND:
+		return                    # a page's list fills its column
 	var frame := _net_scroll.get_parent().get_parent().get_parent() as Control     # the popup's column (open_modal)
 	if frame == null:
 		return
@@ -661,20 +691,20 @@ static func _ago(ts: int) -> String:
 ## A player whose lobby announce says it plays a match (Cloud.peer_in_match) reads IN A MATCH, its
 ## DUEL 1 VS 1 greyed until it is back in the lobby.
 func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_tag := "") -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
+	var row := plain_row(id, cloud)
 	var playing := cloud.peer_in_match(id)
-	row.add_child(_who_button(id, "%s  #%s%s" % [who, Cloud.friend_code(id), presence_tag(online_tag, playing)]))
+	row.add_child(_who_button(id, "%s  #%s" % [who, Cloud.friend_code(id)]))
+	row.add_child(status_label(cloud, id, presence_tag(online_tag, playing)))
 	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
-		var add := UI.button("ASKED" if asked else "ADD FRIEND", 17, "dark" if asked else "light", Vector2(170, 56))
+		var add := UI.button("ASKED" if asked else "ADD FRIEND", 16, "dark" if asked else "light", Vector2(150, 52))
 		add.disabled = asked
 		add.pressed.connect(add_friend.bind(id))
 		row.add_child(add)
 	if cloud.peers.has(id):
 		# (while a challenge waits, the room it set up names its player: Cloud.opponent)
 		var theirs := waiting != "" and String(cloud.opponent.get("id", "")) == id
-		var b := UI.button("CANCEL" if theirs else "DUEL 1 VS 1", 19, "light" if theirs else "primary", Vector2(210, 56))
+		var b := UI.button("CANCEL" if theirs else "DUEL 1 VS 1", 17, "light" if theirs else "primary", Vector2(170, 52))
 		b.name = "Cancel_" + Cloud.friend_code(id) if theirs else "Duel_" + Cloud.friend_code(id)
 		b.disabled = playing and not theirs
 		b.pressed.connect(func() -> void:
@@ -684,6 +714,48 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 			challenge(id))
 		row.add_child(b)
 	return row
+
+
+## A list row in the reference look: a dark translucent plate with a cut corner, the player's
+## profile picture (from their card) in a white-edged square at its left; the caller adds the rest.
+static func plain_row(id: String, cloud: Cloud) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.custom_minimum_size = Vector2(0, 64)
+	row.draw.connect(func() -> void:
+		var s := row.size
+		row.draw_colored_polygon(UI.chamfer_points(Rect2(Vector2.ZERO, s), 10.0, ["br"]), UI.ROW)
+		row.draw_rect(Rect2(0, s.y - 1, s.x - 10, 1), Color(1, 1, 1, 0.06)))
+	var card: Dictionary = cloud.directory.get(id, {}) if cloud else {}
+	var avatar := String(card.get("avatar", Game.DEFAULT_PROFILE.avatar))
+	var av := Control.new()
+	av.name = "RowAvatar"
+	av.custom_minimum_size = Vector2(60, 64)
+	av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	av.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	av.draw.connect(func() -> void:
+		var r := Rect2(6, 5, 54, 54)
+		av.draw_rect(r, Color(0.1, 0.09, 0.11))
+		LobbyProfile.draw_avatar(av, avatar, r.grow(-2))
+		av.draw_rect(r, Color(1, 1, 1, 0.85), false, 2.0))
+	row.add_child(av)
+	return row
+
+
+## A row's status column: the level from the card ("LV 12") over ONLINE / IN A MATCH (yellow) or
+## when the player was last seen (grey). `tag` is the row's presence tag ("  ·  ONLINE"...).
+static func status_label(cloud: Cloud, id: String, tag: String) -> Label:
+	var card: Dictionary = cloud.directory.get(id, {}) if cloud else {}
+	var text := tag.trim_prefix("  ·  ")
+	var on := text in ["ONLINE", "IN A MATCH"]
+	var lv := int(card.get("level", 0))
+	var l := UI.label(("LV %d\n" % lv if lv > 0 else "") + text, 16, UI.STATUS_ON if on else UI.TEXT_DIM, "bold")
+	l.name = "RowStatus"
+	l.custom_minimum_size = Vector2(170, 0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.size_flags_vertical = Control.SIZE_FILL
+	return l
 
 
 ## A list row's tag after the name: "  ·  ONLINE" reads "  ·  IN A MATCH" while the player plays.
@@ -731,16 +803,23 @@ func add_friend(id: String) -> void:
 
 
 ## FRIENDS tab body: requests to answer, the search's matches among players online, the friends.
-func _fill_friends(cloud: Cloud, waiting: String) -> void:
+func _fill_requests(cloud: Cloud) -> void:
+	if cloud.friend_requests.is_empty():
+		_net_list.add_child(UI.empty_state("NO FRIEND REQUESTS RIGHT NOW"))
 	for id: String in cloud.friend_requests:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
-		var t := UI.label("%s  #%s  wants to be friends" % [String(cloud.friend_requests[id].name), Cloud.friend_code(id)], 22, UI.ACCENT, "bold")
+		var row := plain_row(id, cloud)
+		var t := UI.ellipsis(UI.label("%s  #%s" % [String(cloud.friend_requests[id].name), Cloud.friend_code(id)], 22, UI.TEXT, "heavy"))
 		t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		t.size_flags_vertical = Control.SIZE_FILL
 		row.add_child(t)
+		var ask := UI.label("WANTS TO BE FRIENDS", 16, UI.STATUS_ON, "bold")
+		ask.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		ask.size_flags_vertical = Control.SIZE_FILL
+		row.add_child(ask)
 		for a: Array in [["DECLINE", false, "light"], ["ACCEPT", true, "primary"]]:
 			var yes := bool(a[1])
-			var b := UI.button(String(a[0]), 18, String(a[2]), Vector2(150, 56))
+			var b := UI.button(String(a[0]), 17, String(a[2]), Vector2(140, 52))
 			b.name = "Friend" + String(a[0]).capitalize()
 			b.disabled = cloud.status != "online"     # an answer goes through the relay (offline it would come back)
 			b.pressed.connect(func() -> void:
@@ -749,6 +828,17 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 				_refresh_friends())
 			row.add_child(b)
 		_net_list.add_child(row)
+
+
+## FRIENDS tab body: a link to the requests waiting, the search's matches, the friends.
+func _fill_friends(cloud: Cloud, waiting: String) -> void:
+	if not cloud.friend_requests.is_empty():
+		var n := cloud.friend_requests.size()
+		var link := UI.link_button("%d FRIEND REQUEST%s WAITING" % [n, "" if n == 1 else "S"], 19)
+		link.name = "RequestsLink"
+		link.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		link.pressed.connect(open.bind("requests"))
+		_net_list.add_child(link)
 	if _friend_query != "":
 		var found := 0
 		for id: String in cloud.peers:
@@ -763,7 +853,9 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 			_net_list.add_child(UI.label("NO PLAYER MATCHES \"%s\"" % _friend_query, 18, UI.TEXT_DIM, "semi"))
 	var friends: Dictionary = Game.profile.friends
 	if friends.is_empty():
-		_net_list.add_child(UI.label("NO FRIENDS YET: SEARCH A PLAYER'S ID OR NAME, OR TAP ADD FRIEND IN THE ONLINE TAB.", 18, UI.TEXT_DIM, "semi"))
+		var empty := UI.empty_state("YOU HAVE NO FRIENDS YET", "FIND PLAYERS")
+		(empty.get_meta("link") as Button).pressed.connect(open.bind("online"))
+		_net_list.add_child(empty)
 	for id: String in friends:
 		if Game.is_blocked(id):
 			continue
@@ -772,7 +864,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen)
 		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends"))       # (scripts/lobby_net.gd)
-		var rm := UI.button("REMOVE", 16, "dark", Vector2(130, 56))
+		var rm := UI.button("REMOVE", 15, "dark", Vector2(112, 52))
 		rm.name = "FriendRemove"
 		rm.pressed.connect(func() -> void:
 			# Asked first, as on the player card (it sits right beside DUEL 1 VS 1).
@@ -1035,10 +1127,10 @@ func _on_friends_changed() -> void:
 			Input.vibrate_handheld(120)
 		var who := String(cloud.friend_requests[id].name)
 		if lobby.dialogs.modal and is_instance_valid(lobby.dialogs.modal):
-			var listed := _net_kind == "friends" and _net_list != null and is_instance_valid(_net_list)
-			if not lobby.start_btn.disabled and not listed:     # another popup: a notice, its tap opens FRIENDS
+			var listed := _net_kind in ["friends", "requests"] and _net_list != null and is_instance_valid(_net_list)
+			if not lobby.start_btn.disabled and not listed:     # another popup: a notice, its tap opens REQUESTS
 				LobbyNet.toast(lobby, "FRIEND REQUEST: %s  #%s" % [who, Cloud.friend_code(id)], "TAP TO SEE",
-					func() -> void: open("friends"), "v_friend_add")
+					func() -> void: open("requests"), "v_friend_add")
 			return
 		_net_list = null
 		var v := lobby.dialogs.open_modal("FRIEND REQUEST", 640.0)
