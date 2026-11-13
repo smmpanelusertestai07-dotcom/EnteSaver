@@ -419,7 +419,7 @@ static func gradient_text_material(top: Color, bottom: Color, height: float) -> 
 func _start_boot_loads() -> void:
 	var paths: Array[String] = []
 	var weights: Array[float] = []
-	for p in ["res://assets/character/character.glb", "res://assets/character/anims_extra.glb"]:
+	for p in ["res://assets/character/character.glb"] + CharacterModel.EXTRA_GLBS:
 		paths.append(p)
 		weights.append(8.0 if p.ends_with("character.glb") else 2.0)
 	for n in PROPS:
@@ -482,7 +482,7 @@ func _finish_boot() -> void:
 				keep.append(r)
 				if p.begins_with("res://assets/audio/"):
 					Audio.stream(p.get_file().get_basename())
-	if not pending.has("res://assets/character/anims_extra.glb"):
+	if not CharacterModel.EXTRA_GLBS.any(func(q: String) -> bool: return pending.has(q)):
 		CharacterModel.extra_animations()
 	var root := get_tree().root
 	var holder := root.get_node_or_null("LoadingCache")

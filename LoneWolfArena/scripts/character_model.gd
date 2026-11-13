@@ -1,12 +1,14 @@
 class_name CharacterModel
 extends Node3D
-## Visual character: loads the rigged GLB (Blender/MPFB), merges the extra animation GLB
-## (reload, pump, heal, throw, prone), drives an AnimationTree (locomotion scaled to the real
-## speed, crouch and prone layers, jump, upper-body actions), outfit bundles, upper-body aim
-## and the held weapon. Falls back to a simple procedural mannequin if the GLB is missing.
+## Visual character: loads the rigged GLB (Blender/MPFB), merges the extra animation GLBs
+## (anims_extra: reload, pump, heal, throw, prone, fists, long-stride run; anims_extra2, made by
+## tools/anim/anim_extra2.py: the gun carried low at the hip, the sprint), drives an AnimationTree
+## (locomotion scaled to the real speed, the carry and sprint layers, crouch and prone layers,
+## jump, upper-body actions), outfit bundles, upper-body aim and the held weapon. Falls back to a
+## simple procedural mannequin if the GLB is missing.
 
 const GLB := "res://assets/character/character.glb"
-const EXTRA_GLB := "res://assets/character/anims_extra.glb"
+const EXTRA_GLBS := ["res://assets/character/anims_extra.glb", "res://assets/character/anims_extra2.glb"]
 const MANIFEST := "res://assets/character/manifest.json"
 
 const BUNDLE_INFO := [
@@ -17,13 +19,21 @@ const BUNDLE_INFO := [
 	{"id": "royal", "name": "ROYAL GOLD", "rarity": "legendary", "desc": "White and gold. Pure flex."},
 ]
 const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "crouch_idle", "crouch_fwd", "lobby_idle",
-	"victory", "heal", "prone_idle", "prone_fwd", "runx_fwd", "runx_back", "runx_left", "runx_right"]
+	"victory", "heal", "prone_idle", "prone_fwd", "runx_fwd", "runx_back", "runx_left", "runx_right", "carry_idle",
+	"sprint_fwd"]
 ## Speeds (m/s) at which the in-place cycles were authored; playback is scaled to the real speed.
 ## The long-stride runx_* cycles (anims_extra) replace the base run_* jog when present.
 const RUN_AUTHORED := 2.0
 const RUNX_AUTHORED := 5.0
 const CROUCH_AUTHORED := 1.0
 const PRONE_AUTHORED := 0.30
+## sprint_fwd (anims_extra2): long strides, a strong forward lean, the arms pumping with the gun low.
+const SPRINT_AUTHORED := 5.5
+## The reference's hip carry: standing (idle, walk, run) the gun hangs low in the right hand
+## (carry_idle at rest, carry_run_a/b on the arms while moving) until the fighter fires or aims
+## (raise_gun / aiming); it goes back down READY_HOLD s after the last shot.
+const READY_HOLD := 2.0
+const CARRY_BONES := ["clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
 ## The moving cycle has the full blend weight from this share of the stance's base speed; below it
 ## it is mixed with the idle, which shortens the stride by the same factor.
 const FULL_BLEND := 0.6
@@ -141,6 +151,14 @@ var _lean := 0.0
 var _sprint_lean := 0.0
 var _last_yaw := INF
 var _next_flinch := 0.0
+## Set by the fighter each tick (Fighter.ads): scoped in, the gun stays up.
+var aiming := false
+var _ready_until := 0.0      # the gun is up (aim pose) until then
+var _carry := 0.0            # 0 = aim pose, 1 = the gun carried low (arms layer and idle)
+var _carry_gun := 0.0        # how far the gun follows the hand instead of the aim (carry, sprint)
+var _sprint_amt := 0.0
+var _aim_muzzle := Vector3.ZERO     # the muzzle in model space at the last moment of the aim pose
+var _aim_muzzle_ok := false
 
 
 static func manifest() -> Dictionary:
@@ -160,25 +178,31 @@ static func bundle_info(id: String) -> Dictionary:
 	return BUNDLE_INFO[0]
 
 
-## Animations from anims_extra.glb (loaded once, shared by every character).
+## Animations from the EXTRA_GLBS (loaded once, shared by every character).
 static func extra_animations() -> Dictionary:
 	if not _extra_loaded:
 		_extra_loaded = true
-		if ResourceLoader.exists(EXTRA_GLB):
-			var ps: PackedScene = load(EXTRA_GLB)
-			if ps:
-				var inst := ps.instantiate()
-				for ap: AnimationPlayer in inst.find_children("*", "AnimationPlayer", true, false):
-					for a_name in ap.get_animation_list():
-						var a := ap.get_animation(a_name)
+		for path: String in EXTRA_GLBS:
+			if not ResourceLoader.exists(path):
+				continue
+			var ps: PackedScene = load(path)
+			if ps == null:
+				continue
+			var inst := ps.instantiate()
+			for ap: AnimationPlayer in inst.find_children("*", "AnimationPlayer", true, false):
+				for a_name in ap.get_animation_list():
+					var a := ap.get_animation(a_name)
+					# (the long-stride runs were made with the base clips' toe slip: fixed like them)
+					if not String(a_name).begins_with("runx_"):
 						a.set_meta("toes_fixed", true)
-						_extra_anims[String(a_name)] = a
-				inst.free()
+					_extra_anims[String(a_name)] = a
+			inst.free()
 	return _extra_anims
 
 
 func setup(bundle_id: String, with_weapon := true) -> void:
 	show_weapon = with_weapon
+	_ready_until = Time.get_ticks_msec() / 1000.0 + 0.5     # (the first frames learn the aim pose's grip)
 	if ResourceLoader.exists(GLB):
 		_load_glb()
 	if skeleton == null:
@@ -257,7 +281,8 @@ func _detect_track_prefix() -> void:
 ## The base clips in character.glb bend the toes the wrong way in heel-up frames (a sign slip in
 ## tools/character/animate.py legs(); the toe tips went up to 12 cm into the floor while running).
 ## Flips each ball bone's rotation about its own X axis, once per clip (the clips are shared by
-## every character). Clips from anims_extra.glb are authored right and carry the same mark.
+## every character). Clips from the extra GLBs are authored right and carry the same mark, except
+## anims_extra's runx_* cycles, made with the same slip (their toe tips went 6 cm into the floor).
 func _fix_base_toes() -> void:
 	var balls := {}
 	for b in ["ball_l", "ball_r"]:
@@ -336,6 +361,21 @@ func _anim_node(a_name: String) -> AnimationNodeAnimation:
 	return n
 
 
+## The locomotion's rest point: the rifle-ready idle, or (carry, see READY_HOLD) the relaxed
+## carry_idle with the gun low; parameters/loco/idle/carry/blend_amount.
+func _idle_mix() -> AnimationRootNode:
+	if not anim.has_animation("carry_idle"):
+		return _anim_node("idle")
+	var bt := AnimationNodeBlendTree.new()
+	bt.add_node("ready", _anim_node("idle"), Vector2(0, 0))
+	bt.add_node("relaxed", _anim_node("carry_idle"), Vector2(0, 150))
+	bt.add_node("carry", AnimationNodeBlend2.new(), Vector2(200, 50))
+	bt.connect_node("carry", 0, "ready")
+	bt.connect_node("carry", 1, "relaxed")
+	bt.connect_node("output", 0, "carry")
+	return bt
+
+
 func _filter(node: AnimationNode, bones: Array) -> void:
 	node.filter_enabled = true
 	for b: String in bones:
@@ -361,7 +401,7 @@ func _build_tree() -> void:
 	var loco := AnimationNodeBlendSpace2D.new()
 	var run := "runx" if anim.has_animation("runx_fwd") else "run"
 	_run_authored = RUNX_AUTHORED if run == "runx" else RUN_AUTHORED
-	loco.add_blend_point(_anim_node("idle"), Vector2.ZERO, -1, &"idle")
+	loco.add_blend_point(_idle_mix(), Vector2.ZERO, -1, &"idle")
 	loco.add_blend_point(_anim_node(run + "_fwd"), Vector2(0, 1), -1, &"fwd")
 	loco.add_blend_point(_anim_node(run + "_back"), Vector2(0, -1), -1, &"back")
 	loco.add_blend_point(_anim_node(run + "_left"), Vector2(-1, 0), -1, &"left")
@@ -384,6 +424,16 @@ func _build_tree() -> void:
 	root.add_node("crouch", crouch, Vector2(0, 200))
 	root.add_node("crouch_ts", AnimationNodeTimeScale.new(), Vector2(150, 200))
 	root.add_node("crouch_blend", AnimationNodeBlend2.new(), Vector2(300, 100))
+	# The sprint: its own full-body cycle over the run, time-scaled to the speed like the run.
+	var stand := "loco_ts"
+	if anim.has_animation("sprint_fwd"):
+		root.add_node("sprint", _anim_node("sprint_fwd"), Vector2(0, -200))
+		root.add_node("sprint_ts", AnimationNodeTimeScale.new(), Vector2(150, -200))
+		root.add_node("sprint_blend", AnimationNodeBlend2.new(), Vector2(250, -100))
+		root.connect_node("sprint_ts", 0, "sprint")
+		root.connect_node("sprint_blend", 0, "loco_ts")
+		root.connect_node("sprint_blend", 1, "sprint_ts")
+		stand = "sprint_blend"
 	root.add_node("prone", prone, Vector2(0, 400))
 	root.add_node("prone_ts", AnimationNodeTimeScale.new(), Vector2(150, 400))
 	root.add_node("prone_blend", AnimationNodeBlend2.new(), Vector2(450, 200))
@@ -393,7 +443,7 @@ func _build_tree() -> void:
 	root.connect_node("loco_ts", 0, "loco")
 	root.connect_node("crouch_ts", 0, "crouch")
 	root.connect_node("prone_ts", 0, "prone")
-	root.connect_node("crouch_blend", 0, "loco_ts")
+	root.connect_node("crouch_blend", 0, stand)
 	root.connect_node("crouch_blend", 1, "crouch_ts")
 	root.connect_node("prone_blend", 0, "crouch_blend")
 	root.connect_node("prone_blend", 1, "prone_ts")
@@ -401,6 +451,19 @@ func _build_tree() -> void:
 	root.connect_node("air_blend", 0, "prone_blend")
 	root.connect_node("air_blend", 1, "jump_seek")
 	var last := "air_blend"
+	# The gun carried low while moving: carry_run_a <-> b on the arms with the stride (like the fists).
+	if anim.has_animation("carry_run_a"):
+		var cb := AnimationNodeBlend2.new()
+		_filter(cb, CARRY_BONES)
+		root.add_node("carry_a", _anim_node("carry_run_a"), Vector2(450, 1000))
+		root.add_node("carry_b", _anim_node("carry_run_b"), Vector2(450, 1100))
+		root.add_node("carry_swing", AnimationNodeBlend2.new(), Vector2(600, 1050))
+		root.add_node("carry_blend", cb, Vector2(700, 300))
+		root.connect_node("carry_swing", 0, "carry_a")
+		root.connect_node("carry_swing", 1, "carry_b")
+		root.connect_node("carry_blend", 0, last)
+		root.connect_node("carry_blend", 1, "carry_swing")
+		last = "carry_blend"
 	# Fists out: the arms move like a runner's, swinging against the legs (fists_run_a <-> b with the
 	# stride, see _stride_phase), or hang relaxed at rest; the gun rides on the back.
 	if anim.has_animation("fists_run_a"):
@@ -449,8 +512,8 @@ func _build_tree() -> void:
 	root.connect_node("output", 0, last)
 	tree.tree_root = root
 	tree.active = true
-	for ts in ["loco_ts", "crouch_ts", "prone_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "punch_r_ts", "punch_l_ts", "hit_react_ts"]:
-		if anim.has_animation(ts.trim_suffix("_ts")) or ts in ["loco_ts", "crouch_ts", "prone_ts"]:
+	for ts in ["loco_ts", "crouch_ts", "prone_ts", "sprint_ts", "reload_ts", "throw_ts", "pump_ts", "swap_ts", "punch_r_ts", "punch_l_ts", "hit_react_ts"]:
+		if anim.has_animation(ts.trim_suffix("_ts")) or ts in ["loco_ts", "crouch_ts", "prone_ts"] or (ts == "sprint_ts" and anim.has_animation("sprint_fwd")):
 			tree.set("parameters/%s/scale" % ts, 1.0)
 
 
@@ -500,6 +563,7 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	_prone_amt = move_toward(_prone_amt, 1.0 if stance == Fighter.Stance.PRONE else 0.0, delta * 2.6)
 	_air = move_toward(_air, 0.0 if on_floor else 1.0, delta * 6.0)
 	_heal_amt = move_toward(_heal_amt, 1.0 if _healing else 0.0, delta * 4.0)
+	_update_carry(stance, on_floor, delta)
 	if tree and tree.active:
 		tree.set("parameters/loco/blend_position", _loco)
 		# (standing, the crouch space only shows through a landing dip: its idle, bent knees)
@@ -512,6 +576,14 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 		tree.set("parameters/loco_ts/scale", gait_scale(_speed, Fighter.Stance.STAND, _run_authored))
 		tree.set("parameters/crouch_ts/scale", gait_scale(_speed, Fighter.Stance.CROUCH, _run_authored) * _fwd_sign)
 		tree.set("parameters/prone_ts/scale", gait_scale(_speed, Fighter.Stance.PRONE, _run_authored) * _fwd_sign)
+		if anim.has_animation("carry_idle"):
+			tree.set("parameters/loco/idle/carry/blend_amount", _carry)
+		if anim.has_animation("sprint_fwd"):
+			tree.set("parameters/sprint_blend/blend_amount", _sprint_amt)
+			tree.set("parameters/sprint_ts/scale", clampf(_speed / SPRINT_AUTHORED, 0.5, 1.6))
+		if anim.has_animation("carry_run_a"):
+			tree.set("parameters/carry_blend/blend_amount", _carry * gait_weight(_speed, Fighter.Stance.STAND, _run_authored) * (1.0 - _sprint_amt))
+			tree.set("parameters/carry_swing/blend_amount", _stride_phase())
 		if anim.has_animation("heal"):
 			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
 		if anim.has_animation("fists_run_a"):
@@ -526,12 +598,37 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	_update_lean(delta, on_floor)
 	if aim_mod:
 		aim_mod.kick = _kick - _sprint_lean
-		aim_mod.pitch_scale = 1.0 - 0.7 * _prone_amt
+		# (the gun low or pumping in a sprint: the chest hardly follows the camera's pitch)
+		aim_mod.pitch_scale = (1.0 - 0.7 * _prone_amt) * (1.0 - 0.8 * maxf(_carry, _sprint_amt))
 	var now := Time.get_ticks_msec() / 1000.0
 	var want_follow := 1.0 if (now < _follow_until or _healing) else 0.0
 	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
 	if weapon_node and weapon_id != "":
 		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
+
+
+## The hip carry and the sprint layer (READY_HOLD, sprint_fwd): the arms ease down to the carry
+## (about 0.35 s) and snap up to the aim (about 0.1 s); the gun follows the hand while carried.
+func _update_carry(stance: int, on_floor: bool, delta: float) -> void:
+	var up := gun_up()
+	var standing := stance == Fighter.Stance.STAND and weapon_id != "" and not _healing
+	var want := 0.0 if up or not standing else 1.0
+	_carry = move_toward(_carry, want, delta * (3.0 if want > _carry else 10.0))
+	var sprint_on := sprint and standing and on_floor and _speed > Fighter.RUN_SPEED * 0.8 and anim != null and anim.has_animation("sprint_fwd")
+	_sprint_amt = move_toward(_sprint_amt, 1.0 if sprint_on else 0.0, delta * (4.0 if sprint_on else 6.0))
+	_carry_gun = 0.0 if up else maxf(_carry, _sprint_amt)
+
+
+## The gun is up in the aim pose (a shot within READY_HOLD s, scoped in), not carried low.
+func gun_up() -> bool:
+	return aiming or Time.get_ticks_msec() / 1000.0 < _ready_until
+
+
+## Up with the gun now (a shot, FIRE): the gun points along the aim at once and the arms follow it
+## up in about 0.1 s; it stays up READY_HOLD s.
+func raise_gun() -> void:
+	_ready_until = Time.get_ticks_msec() / 1000.0 + READY_HOLD
+	_carry_gun = 0.0
 
 
 ## The lean into turns and the sprint's forward bend (see LEAN_PER_TURN).
@@ -644,6 +741,7 @@ func set_aim(pitch: float, aim_dir: Vector3) -> void:
 
 
 func on_fire() -> void:
+	raise_gun()
 	_kick = minf(_kick + 0.035, 0.09)
 	if weapon_id == "weapon_sg" and tree and anim.has_animation("pump"):
 		tree.set("parameters/pump_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
@@ -651,6 +749,7 @@ func on_fire() -> void:
 
 ## A jab, the right and left hand in turn (from a guard before the chin).
 func on_punch() -> void:
+	raise_gun()
 	_kick = minf(_kick + 0.08, 0.14)
 	_punch_left = not _punch_left
 	var clip := "punch_l" if _punch_left else "punch_r"
@@ -765,6 +864,7 @@ func revive() -> void:
 	_end_lobby()
 	_dead = false
 	show_weapon = true
+	_ready_until = Time.get_ticks_msec() / 1000.0 + 0.5
 	if anim:
 		anim.stop()
 	if tree:
@@ -938,7 +1038,11 @@ func _fallback_gun(model_name: String) -> Node3D:
 	return g
 
 
+## Where shots leave from. While the gun is carried low (or pumping in a sprint) a shot leaves
+## from where the muzzle is in the aim pose (the model raises the gun with it), not from the hip.
 func muzzle_position() -> Vector3:
+	if _carry_gun > 0.01 and _aim_muzzle_ok and is_inside_tree():
+		return global_transform * _aim_muzzle
 	if weapon_node and weapon_node.is_inside_tree():
 		return weapon_node.global_transform * muzzle_local
 	if bone_idx.has("hand_r"):
@@ -953,6 +1057,7 @@ func _hand_xf() -> Transform3D:
 ## Puts the gun at the hand along the aim now (not at the next skeleton update), e.g. after the
 ## body turned to the crosshair in this frame.
 func place_gun() -> void:
+	raise_gun()
 	_on_skeleton_updated()
 
 
@@ -970,14 +1075,18 @@ func _on_skeleton_updated() -> void:
 	var up := Vector3.UP if absf(dir.y) < 0.97 else global_basis.z
 	var aimed := Transform3D(Basis.looking_at(dir, up), grip)
 	var hand_xf := _hand_xf()
-	if _hand_follow < 0.001:
-		# Remember how the gun sits in the hand while aiming, for reload/heal hand-following.
+	var follow := maxf(_hand_follow, _carry_gun)
+	if follow < 0.001:
+		# Remember how the gun sits in the hand while aiming, for reload/heal/carry hand-following,
+		# and where its muzzle is (muzzle_position while the gun is carried low).
 		_hand_to_gun = hand_xf.affine_inverse() * aimed
 		_hand_to_gun_ready = true
 		weapon_node.global_transform = aimed
+		_aim_muzzle = global_transform.affine_inverse() * (aimed * muzzle_local)
+		_aim_muzzle_ok = true
 		return
 	var followed := hand_xf * _hand_to_gun if _hand_to_gun_ready else aimed
-	weapon_node.global_transform = aimed.interpolate_with(followed, clampf(_hand_follow, 0.0, 1.0))
+	weapon_node.global_transform = aimed.interpolate_with(followed, clampf(follow, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------- anchors (hitboxes, camera)
