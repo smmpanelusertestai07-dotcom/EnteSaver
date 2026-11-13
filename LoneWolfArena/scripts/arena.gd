@@ -876,6 +876,7 @@ func apply_graphics() -> void:
 	var g := int(Game.settings.graphics)
 	if hud:
 		hud.reload_layout()
+	apply_outlines()
 	var wanted := [g, bool(Game.settings.visual_effects)]
 	if wanted == _graphics_on:
 		return
@@ -893,6 +894,19 @@ func apply_graphics() -> void:
 	Effects.configure(g, bool(Game.settings.visual_effects))
 	if map:
 		map.apply_quality(g)
+
+
+## ENEMY OUTLINE (setting enemy_outline): the red outline on every fighter of the other side.
+func apply_outlines() -> void:
+	var on := bool(Game.settings.get("enemy_outline", true))
+	for f: Fighter in fighters:
+		if is_instance_valid(f) and f.model != null:
+			f.model.set_outline(on and is_enemy(f))
+
+
+## Whether `f` is on the other side from the player (the 1 vs 1: the other fighter).
+func is_enemy(f: Fighter) -> bool:
+	return f != player
 
 
 # ---------------------------------------------------------------- match flow

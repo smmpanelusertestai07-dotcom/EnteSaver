@@ -1052,3 +1052,8 @@ func net_wall_by(_f: Fighter, _pos: Vector3, _fwd: Vector3) -> void:
 ## lands on a fighter the other phone runs: the other phone applies it.
 func net_hit_by(_target: Fighter, _attacker: Fighter, _amount: float, _zone: String, _from_pos: Vector3) -> void:
 	pass
+
+
+## DUO / SQUAD: the other team's fighters get the enemy outline (never a teammate).
+func is_enemy(f: Fighter) -> bool:
+	return player != null and f != null and f.team != player.team

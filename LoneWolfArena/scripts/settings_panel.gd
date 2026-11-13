@@ -66,7 +66,7 @@ const TAB_KEYS := [
 ## The pages with the preview picture on the left (CONTROLS, SENSITIVITY).
 const PREVIEW_TABS := [1, 2, 8]
 ## Settings the scene applies when they change (Game.settings_changed); the rest are read live.
-const SCENE_KEYS := ["visual_effects"]
+const SCENE_KEYS := ["visual_effects", "enemy_outline"]
 ## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
 ## the pick, MIC and SPEAKER under the character and in a match: VoiceButtons, the status on the
 ## lobby's social panel: LobbySocial, FILL EMPTY PLACES on the mode card's TEAM panel: LobbyDialogs)
