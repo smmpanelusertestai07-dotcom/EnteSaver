@@ -54,6 +54,15 @@ const ASSIST := {
 	"drag_free": 0.0,           # s after a drag before firing holds the height again
 	"on_target_spread": 0.35,   # spread multiplier while the crosshair is on the target (full strength)
 }
+## Free look with no button (the default camera): standing still, a look drag turns the camera and
+## the aim around the character while its body keeps facing where it stood, so the camera can go
+## all the way round to its face (body_turn holds the drawn body's yaw off the aim). Anything that
+## acts along the aim turns the body back: moving (in BODY_TURN_RATE: it turns, then runs away from
+## the camera), aiming, an item in hand or firing (at once: the shots leave where the crosshair is,
+## the camera stays put). Running, a drag turns the run with the camera. The eye button (setting
+## Free look button) still turns only the camera, also while running.
+const BODY_TURN_RATE := 16.0
+const BODY_HOLD_SPEED := 1.0     # m/s: slower than this the body counts as standing still
 const DRAG_SHOT_WINDOW := 0.15   # s the first shot may wait for a drag that starts with the press
 const DRAG_SHOT_START := 0.04    # no drag by then (or the drag paused): it fires
 const DRAG_SHOT_SETTLE := 0.15   # more s it waits while a drag that ended high on the head or just over it is pulled in
@@ -88,6 +97,8 @@ var _anchor := ""                     # what firing holds since the last drag: "
 var victory_cam := false
 var free_look := false                # eye button held: the camera turns around you, the aim stays
 var _free := Vector2.ZERO             # the free look's camera yaw / pitch offset (radians)
+var body_turn := 0.0                  # drawn body's yaw off the aim (radians; free look standing still)
+var _turn_aim := INF                  # aim_yaw when body_turn was last updated
 var spectating: Fighter               # eliminated: whose view the camera follows (the killer)
 var _spectate_wait := 0.0             # s left on the own fall before the camera goes to them
 ## What this player still carried when eliminated ({"walls", "frags", "medkits"}; {} while alive):
@@ -198,6 +209,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	_victory_yaw = INF
 	free_look = false
 	_free = Vector2.ZERO
+	face_aim()
 	_track_target = null
 	spectating = null
 	put_away_item()
@@ -258,6 +270,47 @@ func add_free_look(rel: Vector2) -> void:
 	var deg_per_px := 130.0 / maxf(get_viewport().get_visible_rect().size.y, 1.0) * maxf(float(Game.settings.sens_freelook), 1.0) / 100.0
 	_free.x -= deg_to_rad(rel.x * deg_per_px)
 	_free.y = clampf(_free.y - deg_to_rad(rel.y * deg_per_px), deg_to_rad(-55.0), deg_to_rad(35.0))
+
+
+## Whether the body keeps its facing while the camera and the aim turn (the free look standing
+## still): alive, on its feet or crouched / prone, not moving, aiming, firing or holding an item.
+func body_holds() -> bool:
+	return alive and not knocked and not victory_cam and not firing and not ads and not sprinting \
+		and ready_item == "" and not _item_held and not _throwing and move_dir.length() <= 0.12 \
+		and Vector2(velocity.x, velocity.z).length() < BODY_HOLD_SPEED
+
+
+## The body faces the aim again at once (firing, aiming, an item in hand, a new round).
+func face_aim() -> void:
+	body_turn = 0.0
+	_turn_aim = aim_yaw
+	if model != null:
+		model.rotation.y = 0.0
+
+
+## Each frame: while the body holds, the aim's turn since the last frame goes into body_turn (the
+## body stays, the camera goes round); otherwise the body turns back to the aim.
+func _update_body_turn(delta: float) -> void:
+	if _turn_aim == INF:
+		_turn_aim = aim_yaw
+	var d := wrapf(aim_yaw - _turn_aim, -PI, PI)
+	_turn_aim = aim_yaw
+	if not alive:
+		body_turn = 0.0
+	elif body_holds():
+		body_turn = wrapf(body_turn - d, -PI, PI)
+	else:
+		body_turn = lerpf(body_turn, 0.0, 1.0 - exp(-BODY_TURN_RATE * delta))
+		if absf(body_turn) < 0.003:
+			body_turn = 0.0
+	if model != null:
+		model.rotation.y = body_turn
+
+
+## The drawn body's yaw (locomotion is played relative to it, so a body still turning back to the
+## aim runs sideways for that moment instead of sliding).
+func drawn_yaw() -> float:
+	return aim_yaw + body_turn
 
 
 ## Letting go eases the camera back behind the shoulder.
@@ -407,6 +460,7 @@ func set_firing(on: bool) -> void:
 		sprinting = false
 		free_look = false        # shots go where you aim: the camera snaps back first
 		_free = Vector2.ZERO
+		face_aim()               # (and a body turned by the free look faces the crosshair at once)
 	# Snipers: holding FIRE scopes in, releasing shoots (setting "hold fire to scope").
 	if scope_type() == "sniper" and Game.settings.hold_fire_scope:
 		if firing and not was and not ads:
@@ -430,6 +484,7 @@ func toggle_ads() -> void:
 	ads = not ads
 	sprinting = false
 	_scope_hold = false
+	face_aim()
 	Audio.play("ui_select", -10.0)
 
 
@@ -491,6 +546,7 @@ func _take_item(item: String) -> void:
 	if healing:
 		cancel_heal()
 	ready_item = item
+	face_aim()
 	_item_held = false
 	firing = false
 	_shot_wait = -1.0
@@ -868,6 +924,10 @@ func _physics_process(delta: float) -> void:
 	_tick_from = global_position
 	super(delta)
 	_tick_to = global_position
+	if alive and model != null and absf(body_turn) > 0.01:
+		# A body turned away from the aim does not bend its chest after it (it would bend backwards
+		# with the camera in front): the bend fades out with the turn.
+		model.set_aim(aim_pitch * maxf(cos(body_turn), 0.0), aim_forward())
 
 
 ## Where the body is drawn this frame: at more frames than ticks a second, between the last tick's
@@ -884,6 +944,7 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if rig == null:
 		return
+	_update_body_turn(delta)
 	_update_item_preview()
 	var w := weapon()
 	var rec := 1.0 - exp(-(9.0 if w.since_shot > 0.08 else 3.5) * delta)

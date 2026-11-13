@@ -1065,9 +1065,15 @@ func _physics_process(delta: float) -> void:
 		_peak_y = global_position.y
 	_was_air = not now_floor
 	_footsteps(delta, now_floor)
-	var local_v := flat.inverse() * velocity
+	var local_v := Basis(Vector3.UP, drawn_yaw()).inverse() * velocity
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, now_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
+
+
+## The yaw the model is drawn at (locomotion plays relative to it): the aim's, except while the
+## player's free look holds the body still (Player.drawn_yaw).
+func drawn_yaw() -> float:
+	return aim_yaw
 
 
 func _land() -> void:
