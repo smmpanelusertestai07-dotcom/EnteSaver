@@ -112,6 +112,11 @@ listed here. If a part needs something new from the core, add it in its own file
   that does not end the match; the HUD plays RoundRules' break steps on its own clock from this call
   (`break_step()`: "beat", "result", "score", "band"; `break_score(mine)` the plates' numbers) while
   the arena is in Phase.BREAK (BREAK_TIME = RoundRules.BREAK_S, the same on both phones)
+- `show_result(title, sub := "", delay := RoundRules.BREAK_RESULT_AT)`: the match's end (VICTORY! /
+  DEFEAT / DRAW with the rounds) or a deciding TIME UP (delay 0) on the break's result band near the
+  top until the results (`result_title()`: the title while it shows, else ""). No game speed change
+  anywhere in a kill (Engine.time_scale stays 1; only the checks speed matches up) and no camera
+  orbit at a win (`Player.victory_cam` keeps the view where it was)
 - `open_weapon_pick(options: Array[String] weapon ids, preselect: String, seconds: float, on_pick: Callable(id),
   cooldown := {} (gun -> rounds left: greyed, not pickable), strip := [] (per round of the match:
   true when this player picks; the ROUNDS strip))`
@@ -128,7 +133,9 @@ listed here. If a part needs something new from the core, add it in its own file
   its PICKING... state.
 - `add_kill_feed(killer: String, victim: String, weapon_name: String, weapon_icon: String, headshot: bool, mine: bool, verb := "")`
   (verb replaces ELIMINATED / HEADSHOT: "LEFT" with killer = the player who left, victim "")
-- `kill_banner(victim_name: String, headshot: bool)` (big elimination feedback when the player kills),
+- `kill_banner(victim_name: String, headshot: bool)` (a small still elimination badge with ELIMINATED /
+  HEADSHOT and the name at y 0.17 for KILL_BANNER_TIME (2.3 s) when the player kills, gone once a
+  result band shows),
   `out_banner(victim_name, cause)` (the opponent went down by itself: cause "zone", "fall" or "self"
   in `HUD.OUT_LINES`; no badge, no red X, a line in its place), `banner_kind()` ("", "kill" or the cause),
   `confirm_kill(pos: Vector3)` (the kill's red X, sound and buzz; the arena calls it for an online
@@ -427,9 +434,9 @@ listed here. If a part needs something new from the core, add it in its own file
   measured the frames and called `Game.finish_auto_graphics(level)`), `Game.stop_auto_graphics()`.
   Frame rates offered: `Game.fps_choices()`. Effects: `Effects.configure(level, visual_effects)`;
   the bullet holes are one MultiMesh per scene (`Effects.MAX_HOLES`, `hole_count()`).
-  `Effects.eliminated(ctx, pos)` (Fighter.die, on every phone for every fighter): an "ELIMINATED"
-  Label3D (`EliminatedTag`) floats up over the body for `Effects.ELIMINATED_S` (2 s) over a small
-  yellow / orange shard burst (particle_share applies). The arena
+  `Effects.eliminated(ctx, pos)` (Fighter.die, on every phone for every fighter): a small
+  "ELIMINATED" Label3D (`EliminatedTag`, no pop, no rise) over the body for `Effects.ELIMINATED_S`
+  (1.6 s) over one short white burst (particle_share applies). The arena
   sets the graphics up again only when the graphics level or visual effects change (another save,
   such as the gun pick's, keeps the governor's state).
 - Aim settings on `Player`: `sight_of(def)` ("sniper", "2x", "reddot", "none"), `sens_key(def,

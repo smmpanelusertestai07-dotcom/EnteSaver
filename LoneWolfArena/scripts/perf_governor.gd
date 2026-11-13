@@ -114,7 +114,7 @@ func _exit_tree() -> void:
 
 
 func _process(_delta: float) -> void:
-	# The real time between frames: Engine.time_scale (the kill slow motion) does not change it.
+	# The real time between frames: Engine.time_scale (the checks speed matches up with it) does not change it.
 	var now := Time.get_ticks_usec()
 	var frame := float(now - _last_us) / 1000000.0 if _last_us > 0 else 0.0
 	_last_us = now

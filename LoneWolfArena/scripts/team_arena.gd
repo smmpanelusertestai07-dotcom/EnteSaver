@@ -665,12 +665,11 @@ func _end_team_round(win_team: int, timed_out: bool) -> void:
 		hud.show_break("DRAW" if win_team < 0 else ("VICTORY" if win_team == my_team else "DEFEAT"), mine, theirs,
 			0 if win_team < 0 else (1 if win_team == my_team else -1), round_index + 1, map_name, round_sub(round_index + 1))
 	elif timed_out:
-		hud.show_center("TIME UP", 2.0, Color.WHITE, 96, ("DRAW" if win_team < 0 else ("YOUR TEAM HAS MORE HP" if win_team == my_team
-			else "THE OTHER TEAM HAS MORE HP")) + "    %d  -  %d" % [mine, theirs])
+		hud.show_result("TIME UP", ("DRAW" if win_team < 0 else ("YOUR TEAM HAS MORE HP" if win_team == my_team
+			else "THE OTHER TEAM HAS MORE HP")) + "    %d  -  %d" % [mine, theirs], 0.0)
 	else:
 		_show_match_end()
-	if not timed_out:
-		Engine.time_scale = 0.35
+	# (normal speed: no slow motion on the round's last elimination, as the reference)
 	if win_team == my_team:
 		Audio.play("victory_sting", 0.0)
 	elif win_team >= 0:

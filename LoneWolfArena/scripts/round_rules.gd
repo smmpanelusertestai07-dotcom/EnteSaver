@@ -9,7 +9,8 @@ extends RefCounted
 ##    of stage 2 it closes continuously and evenly to ZONE_FINAL_R exactly when stage 2 ends, its
 ##    centre sliding from the map's centre to the round's final centre;
 ##  - the BREAK between two rounds: one timer (s since the round was decided) that both phones run,
-##    BREAK_S long, in steps: a beat (the elimination in slow motion), the result band near the
+##    BREAK_S long, in steps: a beat (the elimination at normal speed: the kill feed line, a small
+##    badge, the tag over the body; no slow motion, as the reference), the result band near the
 ##    top, a dimmed screen with the two score plates (the winner's number counts up from the old
 ##    score at BREAK_TICK_AT), then the next round's band; the prep follows (5 s, or the 15 s pick),
 ##    so a round without a pick starts about 15.5 s after the kill;
