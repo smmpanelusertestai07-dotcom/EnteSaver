@@ -2328,10 +2328,11 @@ func _draw_victory_word(vs: Vector2, u: float, t: float) -> void:
 func _draw_victory_top(vs: Vector2, u: float, t: float) -> void:
 	var k := clampf(t / 0.35, 0.0, 1.0)
 	var a := clampf(t / 0.2, 0.0, 1.0)
-	var cy := lerpf(vs.y * 0.5, vs.y * 0.12, 1.0 - pow(1.0 - k, 3.0))
+	# (under the score bar, clear of the minimap and the weapon panel in the corners)
+	var cy := lerpf(vs.y * 0.5, vs.y * 0.2, 1.0 - pow(1.0 - k, 3.0))
 	HudDraw.text(self, "VICTORY!", Vector2(vs.x * 0.5, cy), int(0.09 * u), Color(1.0, 0.8, 0.22, a), 1, 4, "heavy", Color(0.35, 0.18, 0.0, 0.9 * a))
 	var sc: Dictionary = arena.get("score") if arena != null else {}
-	_draw_split_score(vs, u, cy + 0.14 * u, a, int(sc.get("player", 0)), int(sc.get("bot", 0)), 0, -1.0)
+	_draw_split_score(vs, u, cy + 0.17 * u, a, int(sc.get("player", 0)), int(sc.get("bot", 0)), 0, -1.0)
 
 
 ## VICTORY (yellow) / DEFEAT (grey) / DRAW, TIME UP (white) on a dark band at y 0.15 that fades at
