@@ -142,6 +142,11 @@ var last_attacker: Fighter       # the last enemy whose damage landed (bots in t
 ## The damage each other fighter dealt this one this round (attacker -> HP), for the ELIMINATED BY
 ## card; cleared by reset_for_round.
 var round_taken := {}
+## A custom room's rules (RoomRules, set by the arena; 1.0 / MAX_HP otherwise): the health a round
+## starts with and heals stop at, and factors on the movement speed and the jump's take-off speed.
+var hp_max := MAX_HP
+var rule_speed := 1.0
+var rule_jump := 1.0
 
 # HP and item counts are kept masked in memory (see SecureNum / Guard).
 var _hp := SecureNum.new(MAX_HP)
@@ -481,7 +486,7 @@ func stand_up(with_hp: float, by: Fighter) -> void:
 	knock_hp = 0.0
 	knocked_by = null
 	revived_by = null
-	hp = clampf(with_hp, 1.0, MAX_HP)
+	hp = clampf(with_hp, 1.0, hp_max)
 	last_hit_cause = ""
 	if _capsule != null and not set_stance(Stance.STAND, true):
 		set_stance(Stance.CROUCH, true)
@@ -561,7 +566,7 @@ func reset_for_round(pos: Vector3, yaw: float) -> void:
 	healing = false
 	_throwing = false
 	_throw_target = Vector3.INF
-	hp = MAX_HP
+	hp = hp_max
 	medkits = START_MEDKITS
 	shields = START_SHIELDS
 	grenades = START_GRENADES
@@ -804,7 +809,7 @@ func switch_weapon(index: int) -> void:
 # ---------------------------------------------------------------- items
 
 func start_heal() -> bool:
-	if healing or medkits <= 0 or hp >= MAX_HP or not alive or knocked or reviving != null:
+	if healing or medkits <= 0 or hp >= hp_max or not alive or knocked or reviving != null:
 		return false
 	healing = true
 	sprinting = false
@@ -841,11 +846,11 @@ func _update_heal(delta: float) -> void:
 		if not _heal_used:
 			_heal_used = true
 			medkits -= 1
-		var add := minf(HEAL_RATE * delta, MAX_HP - hp)
+		var add := minf(HEAL_RATE * delta, hp_max - hp)
 		if add > 0.0:
 			hp += add
 			stats.healed += add
-	if _heal_t >= HEAL_TIME or hp >= MAX_HP - 0.001:
+	if _heal_t >= HEAL_TIME or hp >= hp_max - 0.001:
 		healing = false
 		model.play_heal(false)
 		_stop_heal_sound()
@@ -1005,7 +1010,7 @@ func move_speed() -> float:
 		speed *= HEAL_MULT
 	if reviving != null:
 		speed = 0.0                      # a revive is done standing still (moving cancels it)
-	return speed
+	return speed * rule_speed
 
 
 func _physics_process(delta: float) -> void:
@@ -1049,7 +1054,7 @@ func _physics_process(delta: float) -> void:
 			if stance != Stance.STAND:
 				set_stance(Stance.STAND)
 			else:
-				velocity.y = JUMP_V
+				velocity.y = JUMP_V * rule_jump
 				_peak_y = global_position.y
 				Audio.play_at("jump", global_position, -9.0)
 				model.on_jump()

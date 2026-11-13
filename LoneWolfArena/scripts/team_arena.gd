@@ -296,7 +296,7 @@ func _spawn_fighters() -> void:
 	practice = false
 	mode = String(Game.team_match.get("mode_id", "training"))
 	mode_name = ("TRAINING GROUND" if mode == "training" else "LONE WOLF") + " · " + ("SQUAD" if team_size >= 4 else "DUO")
-	rounds_to_win = team_rounds_to_win()
+	rounds_to_win = rules.get_rounds() if rules.custom else team_rounds_to_win()     # (a custom room's own)
 	roster = Game.team_match.get("roster", [])
 	my_slot = int(Game.team_match.get("my_slot", 0))
 	var pick := String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK))
@@ -390,6 +390,7 @@ func _start_prep() -> void:
 	_settle_t = -1.0
 	_net_spawns.clear()
 	_my_spawns.clear()
+	_apply_room_rules()
 	phase = Phase.PREP
 	prep_left = TEAM_PREP_S
 	map.set_barriers(true)
@@ -403,7 +404,15 @@ func _start_prep() -> void:
 		f.frozen = f != player
 		if f is Bot and runs_here(f) and not (f is RemoteFighter):
 			_pick_at[f.slot] = _rng.randf_range(1.5, 3.5)
-	hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
+	# A custom room's ONE GUN / RANDOM rule: every fighter gets it, alike on every phone, no panel.
+	var forced := forced_pick()
+	if forced != "":
+		_pick_at.clear()
+		for f in fighters:
+			_set_pick(f, forced)
+		pick_note = "WEAPON: " + String(Weapons.DEFS[forced].name)
+	else:
+		hud.open_weapon_pick(Weapons.PICKABLE, String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK)), prep_left - 1.0, _on_weapon_picked)
 	if round_index == 1 and int(Game.profile.matches) < 3:
 		hud.tips_time = 9.0
 	Game.mark("prep started")
@@ -462,6 +471,7 @@ func _start_fight() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_apply_room_rules()
 	_net_tick(delta)
 	match phase:
 		Phase.PREP when online and not _net_begun:

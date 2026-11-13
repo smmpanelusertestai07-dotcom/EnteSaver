@@ -9,6 +9,7 @@ const LanUnitCheck := preload("res://tests/lan_unit_check.gd")
 const DirectCheck := preload("res://tests/direct_check.gd")
 const MatchUnitCheck := preload("res://tests/match_unit_check.gd")
 const RoundRulesUnit := preload("res://tests/round_rules_unit.gd")
+const RoomRulesUnit := preload("res://tests/room_rules_unit.gd")
 const TeamLobbyUnit := preload("res://tests/team_lobby_unit.gd")   # DUO / SQUAD: WP-B1 fills it
 const TeamHudUnit := preload("res://tests/team_hud_unit.gd")       # DUO / SQUAD: WP-B2 fills it
 const TeamRulesUnit := preload("res://tests/team_rules_unit.gd")   # DUO / SQUAD: WP-C fills it
@@ -100,6 +101,7 @@ func _ready() -> void:
 	_test_lobby_ui_rules()
 	MatchUnitCheck.run(self)      # round cap, end-of-match numbers, out banner, challenge rows (tests/match_unit_check.gd)
 	RoundRulesUnit.run(self)      # two-stage clock, zone over time, weapon cooldown, kit (tests/round_rules_unit.gd)
+	RoomRulesUnit.run(self)       # a custom room's rules: defaults, cleaning, text, each option (tests/room_rules_unit.gd)
 	TeamLobbyUnit.run(self)       # DUO / SQUAD lobby, START, TEAM invites, records (tests/team_lobby_unit.gd)
 	TeamHudUnit.run(self)         # DUO / SQUAD match HUD and results (tests/team_hud_unit.gd)
 	TeamRulesUnit.run(self)       # DUO / SQUAD rules: knocks, revives, rounds (tests/team_rules_unit.gd)
@@ -2368,6 +2370,7 @@ func _test_net_limits() -> void:
 	a._net_buckets.clear()
 	a.online = true
 	Game.room_rules = {"walls": true, "frags": true}
+	a.rules = RoomRules.new(Game.room_rules)     # (the arena reads its RoomRules once, in _ready)
 	var burst := 0
 	for i in 50:
 		burst += 1 if a._remote_spawn_allowed("wall", spot) else 0

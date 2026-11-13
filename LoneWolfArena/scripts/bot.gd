@@ -244,9 +244,9 @@ func _think(delta: float) -> void:
 			if see_target:
 				_face_point(target.chest_position(), delta, 0.8)
 			if not healing:
-				if hp < MAX_HP and medkits > 0 and not start_heal():
+				if hp < hp_max and medkits > 0 and not start_heal():
 					state = S.ENGAGE
-				elif hp >= MAX_HP or medkits <= 0:
+				elif hp >= hp_max or medkits <= 0:
 					state = S.ENGAGE
 		_:
 			_search(delta)
@@ -259,7 +259,7 @@ func _think(delta: float) -> void:
 
 func _decide(delta: float) -> void:
 	_decision_timer -= delta
-	var low := hp < MAX_HP * 0.42
+	var low := hp < hp_max * 0.42
 	if state == S.HEAL:
 		if see_target and _now() - last_attacked_time < 0.5:
 			cancel_heal()

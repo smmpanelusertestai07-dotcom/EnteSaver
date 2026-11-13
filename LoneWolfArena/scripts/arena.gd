@@ -53,6 +53,8 @@ var elapsed := 0.0
 var match_time := 0.0
 var round_index := 1
 var rounds_to_win := Game.ROUNDS_TO_WIN       # Game.rounds_to_win(): a custom room's own number online
+## The rules this match plays by (scripts/room_rules.gd): a custom room's online, today's otherwise.
+var rules := RoomRules.new()
 ## The mode this match is played in (a key of Game.MODE_NAMES): "lonewolf" online, "training"
 ## against the bot or the target dummy; mode_name is what the HUD, pause menu and results show.
 var mode := Game.DEFAULT_MODE
@@ -169,6 +171,7 @@ func _ready() -> void:
 	mode = "lonewolf" if online else "training"
 	mode_name = Game.mode_name(mode) + (" · LOCAL" if online and Game.local_match() else "")   # PLAY WITHOUT INTERNET
 	rounds_to_win = Game.rounds_to_win(online)
+	rules = RoomRules.active()
 	if Game.online and not online:
 		# The session ended while this phone was loading: back to the lobby, which says why (never
 		# a match against the bot instead).
@@ -182,6 +185,7 @@ func _ready() -> void:
 		return
 	_build_zone()
 	_spawn_fighters()
+	_rules_to_fighters()
 	ui_layer = CanvasLayer.new()
 	ui_layer.layer = 5
 	add_child(ui_layer)
@@ -301,7 +305,7 @@ func _on_net_event(kind: String, data: Array) -> void:
 			# Its pick for this round (late ones still count: both must hold the same gun).
 			# A gun on cooldown is replaced by the first free one, as the picker's phone does.
 			if data.size() == 2 and Weapons.PICKABLE.has(String(data[0])) and int(data[1]) == round_index \
-					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT):
+					and not _i_pick() and (phase == Phase.PREP or phase == Phase.FIGHT) and not rules.gun_forced():
 				_apply_pick(legal_pick(String(data[0])))
 		"shot":
 			# Its shots: muzzle flash, tracer, impact and sound here, while the round is fought and
@@ -662,9 +666,28 @@ func _remote_spawn_allowed(kind: String, pos: Vector3) -> bool:
 ## items, or a custom room's unlimited ones up to ROOM_SPAWN_CAP (this phone's player keeps to the
 ## same number, see _apply_room_rules, so both phones show the same walls).
 func spawn_cap(kind: String) -> int:
-	if online and bool(Game.room_rules.get("walls" if kind == "wall" else "frags", false)):
-		return ROOM_SPAWN_CAP
-	return Fighter.START_SHIELDS if kind == "wall" else Fighter.START_GRENADES
+	return rules.throw_cap(kind, Fighter.START_SHIELDS if kind == "wall" else Fighter.START_GRENADES, ROOM_SPAWN_CAP)
+
+
+## A custom room's health, speed, jump and aim-assist rules on every fighter (RoomRules; today's
+## values in any other match).
+func _rules_to_fighters() -> void:
+	for f in fighters:
+		f.hp_max = rules.hp()
+		f.rule_speed = rules.speed_mult()
+		f.rule_jump = rules.jump_mult()
+		f.hp = minf(f.hp, f.hp_max)
+	if player is Player:
+		(player as Player).room_assist = rules.aim_assist()
+
+
+## A custom room's gun rule at a pick round: the gun every fighter gets without the pick panel
+## (RoomRules.forced_gun: ONE GUN, or RANDOM drawn alike on every phone), "" for the pick panel.
+func forced_pick() -> String:
+	if not rules.custom:
+		return ""
+	var what := "gun%d" % RoundRules.pick_round_of(round_index)
+	return rules.forced_gun(Game.session.match_seed(what) if online and Game.session != null else _rng.randi())
 
 
 ## Token bucket per kind of message from the other phone: `burst` at once, then `rate` a second;
@@ -879,9 +902,14 @@ func apply_graphics() -> void:
 ## A custom room's rules: unlimited ammo, walls or frags top this phone's player up (each phone
 ## runs its own player; both got the same rules with the invite).
 func _apply_room_rules() -> void:
-	if not online or Game.room_rules.is_empty() or player == null:
+	if not rules.custom or player == null:
 		return
-	var r: Dictionary = Game.room_rules
+	if not rules.throwables():
+		if player.shields > 0:
+			player.shields = 0
+		if player.grenades > 0:
+			player.grenades = 0
+	var r: Dictionary = rules.rules
 	var walls := mini(9, spawn_cap("wall") - int(_my_spawns.get("wall", 0)))
 	if bool(r.get("walls", false)) and player.shields < walls:
 		player.shields = walls
@@ -925,7 +953,11 @@ func _start_prep() -> void:
 	bot.frozen = true
 	pick_note = ""
 	_bot_pick_t = -1.0
-	if pick_round:
+	var forced := forced_pick() if pick_round and not practice else ""
+	if forced != "":
+		_apply_pick(forced)
+		pick_note = "WEAPON: " + String(Weapons.DEFS[forced].name)
+	elif pick_round:
 		picked_weapon = ""
 		for f in fighters:
 			f.await_pick()               # (fists only until the pick: never the last pair's gun)
@@ -1204,6 +1236,9 @@ func quiet_stage_change() -> bool:
 
 
 func _update_zone(delta: float) -> void:
+	if not rules.zone():
+		zone_warning = ""                # a custom room without the zone: it never closes
+		return
 	var to_start := RoundRules.STAGE1_S - elapsed
 	var quiet := quiet_stage_change()
 	zone_warning = "SAFE ZONE SHRINKS IN %ds" % ceili(to_start) if to_start > 0.0 and to_start < 10.0 and not quiet else ""
