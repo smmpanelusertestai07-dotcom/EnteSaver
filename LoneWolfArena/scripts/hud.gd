@@ -1067,6 +1067,7 @@ func _draw() -> void:
 	if hp_subject() != null:
 		_draw_hp_block(vs, u)          # (out of the round: no HP 0/200; spectating: the watched fighter's)
 	_draw_kill_feed(vs, u)
+	_draw_noise_cue(vs, u)
 	_draw_score_bar(vs, u)
 	if team != null:
 		_draw_zone_strip(vs)       # (DUO / SQUAD only: the 1 vs 1's minimap has no zone strip)
@@ -2542,6 +2543,24 @@ func _draw_center_text(vs: Vector2, u: float) -> void:
 		sub = ""
 	if sub != "":
 		HudDraw.text(self, sub, Vector2(vs.x * 0.5, y + fsize * 0.62), int(0.04 * u), Color(1, 1, 1, a), 1, 4, "bold")
+
+
+## The firing noise cue (round 8): a small yellow warning triangle at the bottom centre for
+## NOISE_CUE_S after each of the player's shots (others can hear where you are).
+const NOISE_CUE_S := 0.6
+func _draw_noise_cue(vs: Vector2, u: float) -> void:
+	if player == null or not player.alive or editor_mode:
+		return
+	var since := Time.get_ticks_msec() / 1000.0 - player.last_shot_time
+	if since < 0.0 or since > NOISE_CUE_S or Weapons.is_melee(player.weapon().def):
+		return
+	var a := clampf((NOISE_CUE_S - since) / 0.2, 0.0, 1.0)
+	var c := Vector2(vs.x * 0.5, vs.y * 0.965)
+	var h := 0.022 * u
+	var tri := PackedVector2Array([c + Vector2(0, -h * 0.6), c + Vector2(h * 0.6, h * 0.45), c + Vector2(-h * 0.6, h * 0.45)])
+	draw_colored_polygon(tri, Color(HudDraw.YELLOW, 0.9 * a))
+	draw_line(c + Vector2(0, -h * 0.25), c + Vector2(0, h * 0.12), Color(0.1, 0.08, 0.02, a), maxf(1.5, h * 0.12))
+	HudDraw.disk(self, c + Vector2(0, h * 0.28), maxf(1.0, h * 0.06), Color(0.1, 0.08, 0.02, a))
 
 
 func _draw_tips(vs: Vector2, u: float) -> void:
