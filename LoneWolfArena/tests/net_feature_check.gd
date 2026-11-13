@@ -371,35 +371,125 @@ func _voice() -> void:
 	var a: Cloud = p[0]
 	var b: Cloud = p[1]
 	var got := []
+	var from := []
 	b.voice_received.connect(func(f: PackedByteArray) -> void: got.append(f))
-	Game.settings.voice_chat = false
+	b.voice_from.connect(func(_f: PackedByteArray, id: String, mate: bool) -> void: from.append([id, mate]))
+	Game.settings.speaker_mode = NetVoice.OFF
 	b._on_room(a._room_packet({"k": "vo", "a": Marshalls.raw_to_base64(frame)}))
-	_check(got.is_empty(), "with VOICE CHAT off no voice is played")
-	Game.settings.voice_chat = true
+	_check(got.is_empty() and from.is_empty(), "with the SPEAKER OFF no voice is taken")
+	Game.settings.speaker_mode = NetVoice.ALL
+	b._on_room(a._room_packet({"k": "vg", "a": Marshalls.raw_to_base64(frame)}))
+	_check(from.is_empty(), "a 1 vs 1 has no teammates: a GROUP frame is never played there")
 	for i in 20:
 		b._on_room(a._room_packet({"k": "vo", "a": Marshalls.raw_to_base64(frame)}))
-	_check(got.size() == int(NetVoice.MAX_FRAMES_S) and got[0] == frame, "voice frames arrive whole, at most %d at once" % int(NetVoice.MAX_FRAMES_S))
-	Game.settings.voice_chat = false
+	_check(got.size() == int(NetVoice.MAX_FRAMES_S) and got[0] == frame and from.size() == got.size() and from[0] == [a.my_id, false],
+		"voice frames arrive whole, with their sender, at most %d at once (the SPEAKER's default ALL)" % int(NetVoice.MAX_FRAMES_S))
 	a.free()
 	b.free()
+	_voice_units(frame)
+
+
+## The open mic's gate, the MIC / SPEAKER modes, the channels' teammates, mutes, the playback per
+## talker and the settings' migration from VOICE CHAT.
+func _voice_units(frame: PackedByteArray) -> void:
+	var st := {"open": false, "hang": 0}
+	var seq := []
+	for r: float in [0.001, 0.05, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.03]:
+		seq.append(NetVoice.gate_next(st, r))
+	_check(seq == [false, true, true, true, true, true, true, false, false, true],
+		"the open mic opens on speech, stays open %d quiet frames (the ends of words), then closes: %s" % [NetVoice.GATE_HANG - 1, str(seq)])
+	var quiet := PackedFloat32Array()
+	quiet.resize(NetVoice.FRAME_SAMPLES)
+	_check(NetVoice.rms_of(quiet) == 0.0 and NetVoice.rms_of(NetVoice.decode(frame)) > NetVoice.GATE_OPEN, "silence keeps it shut, a voice opens it")
+	_check(NetVoice.sends(NetVoice.OFF, "match", 3) == "" and NetVoice.sends(NetVoice.ALL, "", 3) == ""
+		and NetVoice.sends(NetVoice.ALL, "match", 0) == "all" and NetVoice.sends(NetVoice.GROUP, "match", 0) == ""
+		and NetVoice.sends(NetVoice.GROUP, "group", 2) == "group" and NetVoice.sends(NetVoice.ALL, "group", 1) == "all",
+		"MIC: OFF sends nothing, ALL to everyone (the 1 vs 1's opponent too), GROUP only with teammates, nothing without a channel")
+	_check(NetVoice.hears(false, NetVoice.ALL, false) and not NetVoice.hears(false, NetVoice.GROUP, false) and NetVoice.hears(true, NetVoice.GROUP, false)
+		and not NetVoice.hears(true, NetVoice.OFF, false) and not NetVoice.hears(true, NetVoice.ALL, true),
+		"SPEAKER: ALL plays everyone, GROUP teammates only, OFF nobody, a muted player never")
+	var d := Game.DEFAULT_SETTINGS
+	_check(d.mic_mode == NetVoice.OFF and d.speaker_mode == NetVoice.ALL and d.push_to_talk == false and not d.has("voice_chat"),
+		"the reference's defaults: the mic OFF, the speaker ALL (others are heard), PUSH TO TALK unticked")
+	# Teammates: a DUO / SQUAD match's own team, a custom room's own side, anyone in a lobby group.
+	var c := Cloud.new()
+	c.my_id = "m".repeat(32)
+	c.in_session = true
+	c.session_multi = true
+	c.session_roster = [{"slot": 0, "id": c.my_id, "team": 0}, {"slot": 1, "id": "t".repeat(32), "team": 0},
+		{"slot": 2, "id": "e".repeat(32), "team": 1}, {"slot": 3, "id": "f".repeat(32), "team": 1}]
+	_check(c.voice_mate("t".repeat(32)) and not c.voice_mate("e".repeat(32)) and not c.voice_mate(c.my_id) and c.voice_mates() == 1,
+		"in a DUO match the teammate is GROUP, the other team is not")
+	c.in_session = false
+	c.session_multi = false
+	c._grp = {"gid": "0".repeat(32), "aes": PackedByteArray(), "mac": PackedByteArray()}
+	c.group = {"gid": "0".repeat(32), "leader": c.my_id, "members": [{"id": c.my_id, "name": "ME", "team": -1}, {"id": "t".repeat(32), "name": "T", "team": -1}]}
+	_check(c.voice_mate("t".repeat(32)) and c.voice_mates() == 1, "in a lobby group every member is GROUP")
+	c.group.room = "123456"
+	c.group.members = [{"id": c.my_id, "name": "ME", "team": 0}, {"id": "t".repeat(32), "name": "T", "team": 0}, {"id": "e".repeat(32), "name": "E", "team": 1}]
+	_check(c.voice_mate("t".repeat(32)) and not c.voice_mate("e".repeat(32)) and c.voice_mates() == 1, "in a custom room only the own side is GROUP")
+	c.free()
+	# The hub plays each talker on a player of its own; the speaker modes and mutes decide.
+	var v := NetVoice.new()
+	t.add_child(v)
+	var hub_was := NetVoice._hub
+	NetVoice._hub = v
+	Game.settings.speaker_mode = NetVoice.ALL
+	v.on_voice(frame, "x".repeat(32), false)
+	v.on_voice(frame, "y".repeat(32), true)
+	_check(v._talkers.has("x".repeat(32)) and v._talkers.has("y".repeat(32)) and NetVoice.speaking("x".repeat(32)),
+		"two talkers get a player each (they mix), and show as speaking")
+	Game.settings.speaker_mode = NetVoice.GROUP
+	v.on_voice(frame, "z".repeat(32), false)
+	_check(not v._talkers.has("z".repeat(32)), "SPEAKER GROUP: an enemy's voice is not played")
+	Game.settings.speaker_mode = NetVoice.ALL
+	NetVoice.set_muted("y".repeat(32), true)
+	var before := ((v._talkers.get("y".repeat(32), {"queue": []}) as Dictionary).queue as Array).size()
+	v.on_voice(frame, "y".repeat(32), true)
+	_check(NetVoice.is_muted("y".repeat(32)) and not v._talkers.has("y".repeat(32)) and before == 0,
+		"a muted player is dropped at once and never played (this session)")
+	NetVoice.set_muted("y".repeat(32), false)
+	Game.profile.blocked = [{"id": "w".repeat(32), "name": "W", "t": 0}]
+	v.on_voice(frame, "w".repeat(32), true)
+	_check(NetVoice.is_muted("w".repeat(32)) and not v._talkers.has("w".repeat(32)), "a blocked player is always muted")
+	Game.profile.blocked = []
+	for i in 12:
+		v.on_voice(frame, "x".repeat(32), false)
+	_check(((v._talkers["x".repeat(32)] as Dictionary).queue as Array).size() <= NetVoice.MAX_QUEUE, "a talker far behind catches up")
+	NetVoice._hub = hub_was
+	v.free()
+	# VOICE CHAT (1.8) into the new keys.
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game._apply_saved_settings({"voice_chat": true, "settings_version": 7})
+	_check(Game.settings.mic_mode == NetVoice.ALL and Game.settings.push_to_talk == true and Game.settings.speaker_mode == NetVoice.ALL
+		and not Game.settings.has("voice_chat"), "VOICE CHAT on (1.8) keeps talking as before: the mic ALL with PUSH TO TALK")
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
+	Game._apply_saved_settings({"voice_chat": false, "settings_version": 7})
+	_check(Game.settings.mic_mode == NetVoice.OFF and Game.settings.push_to_talk == false and Game.settings.speaker_mode == NetVoice.ALL,
+		"VOICE CHAT off (1.8's default): the mic stays OFF, the speaker now plays the others")
+	Game._apply_saved_settings({"mic_mode": 9, "speaker_mode": -2, "push_to_talk": "yes"})
+	_check(Game.settings.mic_mode == NetVoice.GROUP and Game.settings.speaker_mode == NetVoice.OFF and Game.settings.push_to_talk == false,
+		"modes past their range are clamped, PUSH TO TALK not true or false is off")
+	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
 
 
 func _settings() -> void:
-	_check(SettingsPanel.TABS[4] == "ONLINE" and SettingsPanel.TAB_KEYS[4] == ["chat", "friend_chat", "show_career", "voice_chat",
+	_check(SettingsPanel.TABS[4] == "ONLINE" and SettingsPanel.TAB_KEYS[4] == ["chat", "friend_chat", "show_career",
 		"challenges_from", "friend_requests", "vibration", "direct_connect"],
-		"the ONLINE tab: chat, friends chat, SHOW MY CAREER, voice chat, challenges, requests, vibration out of a match, direct connection")
+		"the ONLINE tab: chat, friends chat, SHOW MY CAREER, challenges, requests, vibration out of a match, direct connection (voice: SOUND)")
 	_check(Game.DEFAULT_SETTINGS.chat == true and Game.DEFAULT_SETTINGS.friend_chat == true and Game.DEFAULT_SETTINGS.show_career == true
-		and Game.DEFAULT_SETTINGS.voice_chat == false, "chat and the public career on by default, voice off until asked for")
+		and Game.DEFAULT_SETTINGS.mic_mode == NetVoice.OFF, "chat and the public career on by default, the mic off until asked for")
 	Game.settings = Game.DEFAULT_SETTINGS.duplicate(true)
-	Game._apply_saved_settings({"voice_chat": "yes", "chat": 0, "show_career": false})
-	_check(Game.settings.voice_chat == false and Game.settings.chat == true and Game.settings.show_career == false,
+	Game._apply_saved_settings({"push_to_talk": "yes", "chat": 0, "show_career": false})
+	_check(Game.settings.push_to_talk == false and Game.settings.chat == true and Game.settings.show_career == false,
 		"an ONLINE setting that is not true or false falls back to its default")
 	var panel := SettingsPanel.new()
 	t.add_child(panel)
 	panel._show_tab(4)
-	_check(["Toggle_chat", "Toggle_friend_chat", "Toggle_show_career", "Toggle_voice_chat", "Toggle_challenges_from",
+	_check(["Toggle_chat", "Toggle_friend_chat", "Toggle_show_career", "Toggle_challenges_from",
 		"Toggle_friend_requests", "Toggle_vibration", "Toggle_direct_connect"].all(func(n: String) -> bool:
-		return panel.find_child(n, true, false) != null), "the ONLINE tab shows its eight settings")
+		return panel.find_child(n, true, false) != null) and panel.find_child("Toggle_voice_chat", true, false) == null,
+		"the ONLINE tab shows its seven settings (no VOICE CHAT: the voice is under the character, in a match and in SOUND)")
 	var duel := panel.find_child("Toggle_challenges_from", true, false)
 	(duel.get_child(2) as Button).pressed.emit()
 	_check(Game.settings.challenges_from == Game.CHALLENGES_NOBODY, "DUEL CHALLENGES FROM's third choice is NOBODY")
@@ -549,8 +639,10 @@ func _volumes() -> void:
 	t.add_child(panel)
 	panel._show_tab(3)
 	var sliders := panel.find_children("*", "HSlider", true, false)
-	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and sliders.size() == 3
-		and panel.find_child("Stepper_vol_voice", true, false) != null, "the SOUND tab: effects, music and voice chat")
+	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice", "push_to_talk"] and sliders.size() == 3
+		and panel.find_child("Stepper_vol_voice", true, false) != null and panel.find_child("Toggle_push_to_talk", true, false) != null
+		and panel.find_child("MicTest", true, false) != null,
+		"the SOUND tab: effects, music, then VOICE CHAT: PUSH TO TALK, the voice's volume and MIC TEST")
 	if sliders.size() == 3:
 		(sliders[0] as HSlider).value = 20         # GAME AUDIO: music first, as the reference
 		(sliders[1] as HSlider).value = 30

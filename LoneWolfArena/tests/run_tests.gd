@@ -990,9 +990,9 @@ func _test_settings_panel() -> void:
 		"DISPLAY: graphics (AUTO), frame rate, visual effects, the minimap's turning")
 	_check(["dynamic_joystick", "aim_precision", "left_fire", "freelook_button"].all(
 		func(k: String) -> bool: return k in SettingsPanel.TAB_KEYS[2]), "CONTROLS: joystick, aim precision, left fire, free look")
-	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice"] and "vibration" in SettingsPanel.TAB_KEYS[4]
+	_check(SettingsPanel.TAB_KEYS[3] == ["vol_sfx", "vol_music", "vol_voice", "push_to_talk"] and "vibration" in SettingsPanel.TAB_KEYS[4]
 		and (SettingsPanel.TAB_KEYS[5] as Array).is_empty() and (SettingsPanel.TAB_KEYS[6] as Array).is_empty(),
-		"SOUND: effects, music, voice; ONLINE: the lobby's vibration; ACCOUNT and HUD: no setting")
+		"SOUND: effects, music, voice, push to talk; ONLINE: the lobby's vibration; ACCOUNT and HUD: no setting")
 	_check(SettingsPanel.VIBRATION_ROWS.map(func(r: Array) -> String: return String(r[1])) == ["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"]
 		and SettingsPanel.TAB_KEYS[7] == ["vibrate_footsteps", "vibrate_damage", "vibrate_shooting"], "VIBRATION: enemy footsteps, taking damage, shooting")
 	var sens: Array = SettingsPanel.TAB_KEYS[1]

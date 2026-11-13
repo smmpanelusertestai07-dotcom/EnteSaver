@@ -86,7 +86,8 @@ func run(at: Node) -> int:
 		await at.shot("n04c_settings_sound")
 		panel._close()
 	# A match with the online layer (a training match stands in: the layer is added by hand).
-	Game.settings.voice_chat = true
+	Game.settings.push_to_talk = true      # (TALK shows with PUSH TO TALK and the mic on)
+	Game.settings.mic_mode = NetVoice.ALL
 	Game.goto_arena()
 	await at.wait(1.0)
 	var arena: Node = get_tree().current_scene
