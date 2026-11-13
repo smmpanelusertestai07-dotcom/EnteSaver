@@ -215,6 +215,20 @@ listed here. If a part needs something new from the core, add it in its own file
   of walls; the own model is hidden with the camera within `HEAD_CLEAR` of the head (and in the
   scope) and see-through within `FADE_DIST` or while `covers_crosshair()` (a hit zone or the gun
   within `COVER_GAP` of the crosshair's ray: it would hide what the crosshair is on)
+- free look with no button (the default camera, as the reference's): the look drag always turns
+  the camera and the aim together; while `body_holds()` (alive, standing still under
+  `BODY_HOLD_SPEED`, not firing, aiming, sprinting, throwing or holding an item) the drawn body keeps
+  its facing and `body_turn` (= drawn yaw - aim yaw, also `model.rotation.y`) takes the turn, so
+  the camera goes round to the character's face; the head looks toward the aim up to
+  `HEAD_FOLLOW` (`AimSpineModifier.twist`); the held body's gun (`model.set_aim` direction) points
+  the way the drawn body faces, not along the camera. `face_aim()` zeroes it at once and puts the
+  gun on the crosshair (`model.place_gun()`) (FIRE, SCOPE, an item in hand, a new round: the shots
+  leave along the crosshair from that muzzle, the camera stays); moving eases it to 0
+  at `BODY_TURN_RATE`. The hit zones follow the drawn bones. `Fighter.drawn_yaw()` (the player's:
+  aim + body_turn) is what locomotion plays against. Online the other phone sees the body face
+  the aim (body_turn is not sent). The eye button (`freelook_button`, off by default:
+  `start_free_look` / `add_free_look` / `end_free_look`) still turns only the camera (`_free`),
+  also while running, and FIRE snaps it back.
 - signals: `hit_landed(target, amount, headshot, pos, killed)`, `damaged(amount, from_pos, headshot, attacker)`;
   a shot reports `hit_landed` once for its head part (headshot true) and once for its body part,
   each the HP the target really lost, `killed` with the last (`Fighter.land_hits(hits)` lands
@@ -240,6 +254,12 @@ listed here. If a part needs something new from the core, add it in its own file
   PICKABLE, the same whatever the gun). `Fighter.sidearm()`, `next_weapon()` (SWITCH's order
   `Weapons.CYCLE` = [GUN, SIDE, FISTS], skipping what `can_draw(i)` refuses: before a pick only the
   fists), `CharacterModel.back_model` (the gun on the back while the sidearm or the fists are out).
+- Procedural animation on top of the clips (CharacterModel): `sprint` (set by the fighter each
+  tick) bends the chest forward `SPRINT_LEAN`; a running turn rolls `root_scene` about the feet
+  (`LEAN_PER_TURN`, at most `LEAN_MAX`); `play_lobby(cheer := false)`: lobby_idle at a varying pace
+  with a look round (twist) every 5-9 s, and with cheer the victory clip now and then; it ends on
+  `play_victory` / `play_death` / `revive`. `AimSpineModifier`: `pitch` + `kick` about
+  `axis_world` on the spine, then `twist` about world up on chest, neck and head.
 - Online hit checks (a hit does not say which weapon made it): `Fighter.net_arms()` = the gun and
   the fists, + the sidearm while `held_recently(Weapons.SIDE)` (a RemoteFighter: its states had
   index 2 now or within `RemoteFighter.HELD_GRACE_MS`); `Weapons.hit_cap(defs, zone)`,

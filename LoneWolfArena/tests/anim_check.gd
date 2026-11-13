@@ -3,10 +3,15 @@ extends Node
 ##   godot --headless --path . -- --autotest=script:res://tests/anim_check.gd
 ## - every extra clip is merged into the character's player
 ## - the base-clip toe fix holds and is applied once (clips are shared by all characters)
+## - procedural layers: the lean into a running turn, the sprint's forward bend, the lobby's look
+##   round (and none of it after the lobby)
 ## - weapon swap changes the model at the lowest point of the clip, not at once
 ## - hit flinches are rate limited
 ## - a thrown grenade leaves the hand at the release frame, not on the input
 ## - at more frames than physics ticks the camera and the own model move between ticks
+## - free look with no button: standing still a drag takes the camera round to the character's
+##   face and the body stays; firing turns the body to the crosshair at once; moving turns it back
+##   and a drag while running turns the run; the eye button (when on) still turns only the camera
 ## - a gun pick keeps the frame-rate governor's resolution; bullet holes share one MultiMesh;
 ##   a frag kill reads FRAG; the target dummy's CHANGE GUN slot reopens the weapon pick
 ## Prints "ANIM CHECK DONE bad=N" and exits with N.
@@ -20,6 +25,7 @@ func run(autotest: Node) -> int:
 	await at.wait(0.5)
 	_check_clips_and_toes()
 	_check_gait_playback()
+	_check_procedural_layers()
 	await _check_swap_and_flinch()
 	await _check_throw()
 	at.log_line("ANIM CHECK DONE bad=%d" % bad)
@@ -135,6 +141,45 @@ func _check_gait_playback() -> void:
 	m.queue_free()
 
 
+## On top of the clips: a running body leans into its turn (a roll about the feet toward the inside,
+## none standing or crouched), a sprint bends the chest forward, the lobby's idle looks round
+## with the head and leaves no twist behind once the model leaves the lobby.
+func _check_procedural_layers() -> void:
+	var m := _model()
+	var dt := 1.0 / 60.0
+	for _i in 40:
+		m.rotation.y += 2.0 * dt                    # turning left at 2 rad/s
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	var lean_left := m.root_scene.rotation.z
+	for _i in 60:
+		m.rotation.y -= 2.0 * dt
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	var lean_right := m.root_scene.rotation.z
+	for _i in 60:
+		m.rotation.y += 2.0 * dt
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	var still := m.root_scene.rotation.z
+	_expect(lean_left < -0.05 and lean_right > 0.05 and absf(still) < 0.01,
+		"a running turn leans into it (left %.2f, right %.2f), turning on the spot does not (%.2f)" % [lean_left, lean_right, still])
+	m.sprint = true
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.SPRINT_SPEED), Fighter.Stance.STAND, true, dt)
+	var bend := m.aim_mod.kick
+	m.sprint = false
+	for _i in 60:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	_expect(bend < -0.1 and absf(m.aim_mod.kick) < 0.01, "a sprint bends the chest forward (%.2f), a run does not (%.2f)" % [bend, m.aim_mod.kick])
+	m.play_lobby(true)
+	m._gesture_in = 0.0
+	m._lobby_cheer = false
+	for _i in 90:
+		m._process(dt)
+	_expect(absf(m.aim_mod.twist) > 0.3, "the lobby idle looks round (%.2f rad)" % m.aim_mod.twist)
+	m.revive()
+	_expect(m.aim_mod.twist == 0.0 and m.anim.speed_scale == 1.0, "no look round or pace change after the lobby")
+	m.queue_free()
+
+
 func _check_swap_and_flinch() -> void:
 	var m := _model()
 	m.equip_weapon("weapon_ar")
@@ -172,6 +217,7 @@ func _check_throw() -> void:
 	_expect(_grenades() == before + 1, "grenade released after %.2f s" % Fighter.THROW_RELEASE)
 	await _check_items_in_hand(p as Player)
 	await _check_smooth_camera(arena, p as Player)
+	await _check_free_look(arena, p as Player)
 	_check_pick_keeps_governor(arena)
 	_check_bullet_holes(arena, p)
 	_check_frag_feed(arena, p)
@@ -249,6 +295,111 @@ func _check_smooth_camera(arena: Node, p: Player) -> void:
 	Engine.max_fps = fps
 	_expect(no_tick > 0 and moved >= no_tick * 0.8 and off_model < 0.01,
 		"the camera moves on frames between physics ticks (%d of %d) and the model with it (%.3f m)" % [moved, no_tick, off_model])
+
+
+## The reference's default camera (no eye button): standing still a look drag turns the camera
+## and the aim round the character, which keeps its facing (its face can be seen) and does not turn
+## back; FIRE turns the body to the crosshair at once and the shots leave along it; the stick turns
+## it back and runs away from the camera; a drag while running turns the run, not only the camera.
+## The eye button (setting Free look button) still turns only the camera and snaps back on FIRE.
+func _check_free_look(arena: Node, p: Player) -> void:
+	var hud: Node = arena.get("hud")
+	hud.process_mode = Node.PROCESS_MODE_DISABLED      # (its stick would reset move_dir)
+	var others: Array = []
+	for f: Fighter in arena.get("fighters"):
+		if f != p:
+			others.append([f, f.frozen])
+			f.frozen = true
+	p.assist_on = false
+	p.move_dir = Vector2.ZERO
+	p.global_position = arena.call("closest_nav_point", arena.get("zone_center"))
+	await at.wait(0.5)
+	var vh := get_viewport().get_visible_rect().size.y
+	var px_per_deg := vh / 130.0 / (maxf(float(Game.settings.sens_general), 1.0) / 100.0)
+	var body0 := _model_fwd(p)
+	var aim0 := p.aim_yaw
+	for i in 12:                                    # 180 degrees in a dozen drag events
+		p.add_look(Vector2(-15.0 * px_per_deg, 0.0))
+		await get_tree().process_frame
+	await get_tree().process_frame
+	var cam_fwd := -p.camera.global_basis.z
+	_expect(absf(wrapf(p.aim_yaw - aim0 - PI, -PI, PI)) < 0.05, "standing: the drag turned the camera and aim 180 degrees")
+	_expect(_model_fwd(p).dot(body0) > 0.99, "standing: the body kept its facing (%.2f)" % _model_fwd(p).dot(body0))
+	_expect(_flat(cam_fwd).dot(_model_fwd(p)) < -0.95, "standing: the camera looks at the character's face")
+	var gun: Node3D = p.model.weapon_node
+	var has_gun := gun != null and gun.top_level
+	_expect(not has_gun or _flat(-gun.global_basis.z).dot(_model_fwd(p)) > 0.95,
+		"standing: the held body's gun points where the body faces, not along the camera")
+	await at.wait(1.5)
+	_expect(_model_fwd(p).dot(body0) > 0.99, "standing: the body does not turn back by itself")
+	var ammo := p.weapon().ammo
+	p.set_firing(true)
+	_expect(absf(p.body_turn) < 0.001 and _model_fwd(p).dot(_flat(p.aim_forward())) > 0.99, "FIRE turns the body to the crosshair at once")
+	_expect(not has_gun or (-gun.global_basis.z).dot(p.aim_forward()) > 0.99, "and its gun along the crosshair at once")
+	_expect(_flat(-p.camera.global_basis.z).dot(_flat(cam_fwd)) > 0.99, "FIRE keeps the camera where it was")
+	await at.wait(0.3)
+	p.set_firing(false)
+	_expect(p.weapon().ammo < ammo and (-p.camera.global_basis.z).dot(p.aim_forward()) > 0.97, "the shots leave along the crosshair")
+	await at.wait(0.4)
+	for i in 6:                                     # 90 degrees round again, then the stick
+		p.add_look(Vector2(-15.0 * px_per_deg, 0.0))
+		await get_tree().process_frame
+	_expect(absf(p.body_turn) > 1.4, "standing: turned away again (%.2f rad)" % p.body_turn)
+	var start := p.global_position
+	for i in 30:
+		p.move_dir = Vector2(0, 1)
+		await get_tree().physics_frame
+	await get_tree().process_frame
+	var ran := _flat(p.global_position - start)
+	_expect(absf(p.body_turn) < 0.05, "the stick turns the body back to the aim (%.2f rad)" % p.body_turn)
+	_expect(ran.length() > 0.5 and ran.normalized().dot(_flat(-p.camera.global_basis.z)) > 0.9, "and it runs away from the camera")
+	var run_yaw := p.aim_yaw
+	for i in 4:                                     # 60 degrees while running
+		p.move_dir = Vector2(0, 1)
+		p.add_look(Vector2(-15.0 * px_per_deg, 0.0))
+		await get_tree().physics_frame
+	for i in 20:
+		p.move_dir = Vector2(0, 1)
+		await get_tree().physics_frame
+	await get_tree().process_frame
+	var v := _flat(p.velocity)
+	_expect(absf(wrapf(p.aim_yaw - run_yaw - deg_to_rad(60.0), -PI, PI)) < 0.05 and absf(p.body_turn) < 0.05,
+		"running: a drag turns the run with the camera (the back stays to it)")
+	_expect(v.length() > 0.3 and v.normalized().dot(_flat(p.aim_forward())) > 0.9, "running: the run follows the new direction (%.1f m/s, %.2f)" % [v.length(), v.normalized().dot(_flat(p.aim_forward()))])
+	# The eye button (an option): only the camera turns, the run and the aim stay; FIRE snaps it back.
+	var was_btn: Variant = Game.settings.get("freelook_button", false)
+	Game.settings["freelook_button"] = true
+	_expect(hud.call("_button_visible", "freelook"), "the eye button shows when the setting is on")
+	var keep := p.aim_yaw
+	p.start_free_look()
+	for i in 6:
+		p.move_dir = Vector2(0, 1)
+		p.add_free_look(Vector2(-20.0 * px_per_deg, 0.0))
+		await get_tree().physics_frame
+	await get_tree().process_frame
+	_expect(p.aim_yaw == keep and p.is_free_looking() and absf(wrapf(p.yaw_node.rotation.y - keep, -PI, PI)) > 0.5,
+		"eye button: the camera turns, the aim and the run stay")
+	p.set_firing(true)
+	await get_tree().process_frame
+	_expect(not p.is_free_looking() and absf(wrapf(p.yaw_node.rotation.y - p.aim_yaw, -PI, PI)) < 0.05, "eye button: FIRE snaps the camera back")
+	p.set_firing(false)
+	p.end_free_look()
+	Game.settings["freelook_button"] = was_btn
+	_expect(not hud.call("_button_visible", "freelook") or bool(was_btn), "the eye button is off again by default")
+	p.move_dir = Vector2.ZERO
+	p.assist_on = true
+	for pair in others:
+		(pair[0] as Fighter).frozen = bool(pair[1])
+	hud.process_mode = Node.PROCESS_MODE_INHERIT
+
+
+## Where the drawn character faces (flat, world).
+func _model_fwd(p: Player) -> Vector3:
+	return _flat(-p.model.global_basis.z)
+
+
+func _flat(v: Vector3) -> Vector3:
+	return Vector3(v.x, 0.0, v.z).normalized()
 
 
 ## The player's own gun pick saves the settings (last_pick): it must not set the graphics up again,

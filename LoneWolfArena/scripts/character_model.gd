@@ -122,6 +122,24 @@ var _hand_to_gun_ready := false
 var _pending_equip: Array = []    # [model, tint]: swapped in at the lowest point of the swap clip
 var _kit: Node3D                  # medkit in the left hand while healing (built on first heal)
 var _equip_at := 0.0
+## The lobby's idle (play_lobby): lobby_idle at a pace that varies a little, and every few seconds
+## a gesture: the head looks round to one side and back, or (cheer) the arms go up once.
+var _lobby := false
+var _lobby_cheer := false
+var _gesture_in := 0.0
+var _cheer_left := 0.0
+var _look := 0.0
+var _look_to := 0.0
+var _look_hold := 0.0
+## In a match, on top of the clips: the body leans into a turn while it runs (a roll about the feet,
+## from the change of facing) and forward while it sprints (sprint: set by the fighter each tick).
+const LEAN_PER_TURN := 0.045     # rad of roll per rad/s of turn at a full run
+const LEAN_MAX := 0.12
+const SPRINT_LEAN := 0.14        # rad the chest bends forward at a sprint
+var sprint := false
+var _lean := 0.0
+var _sprint_lean := 0.0
+var _last_yaw := INF
 var _next_flinch := 0.0
 
 
@@ -207,6 +225,7 @@ func _load_glb() -> void:
 		_build_tree()
 	aim_mod = AimSpineModifier.new()
 	aim_mod.name = "AimSpine"
+	set_process(false)                  # (only the lobby's idle has per-frame work of its own)
 	var chain: PackedInt32Array = []
 	var w: PackedFloat32Array = []
 	for role in ["spine1", "spine2", "spine3"]:
@@ -217,6 +236,11 @@ func _load_glb() -> void:
 		w.append(share)
 	aim_mod.bones = chain
 	aim_mod.weights = w
+	# The look round: a little in the chest, most in the neck and the head.
+	for pair in [["spine2", 0.15], ["spine3", 0.15], ["neck", 0.3], ["head", 0.4]]:
+		if bone_idx.has(pair[0]):
+			aim_mod.twist_bones.append(bone_idx[pair[0]])
+			aim_mod.twist_weights.append(float(pair[1]))
 	skeleton.add_child(aim_mod)
 	skeleton.skeleton_updated.connect(_on_skeleton_updated)
 
@@ -499,14 +523,28 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	elif fallback:
 		_animate_fallback(delta)
 	_kick = move_toward(_kick, 0.0, delta * 0.6)
+	_update_lean(delta, on_floor)
 	if aim_mod:
-		aim_mod.kick = _kick
+		aim_mod.kick = _kick - _sprint_lean
 		aim_mod.pitch_scale = 1.0 - 0.7 * _prone_amt
 	var now := Time.get_ticks_msec() / 1000.0
 	var want_follow := 1.0 if (now < _follow_until or _healing) else 0.0
 	_hand_follow = move_toward(_hand_follow, want_follow, delta * 6.0)
 	if weapon_node and weapon_id != "":
 		weapon_node.visible = show_weapon and not _dead and now >= _hide_gun_until
+
+
+## The lean into turns and the sprint's forward bend (see LEAN_PER_TURN).
+func _update_lean(delta: float, on_floor: bool) -> void:
+	var yaw := global_rotation.y
+	var rate := 0.0 if _last_yaw == INF or delta <= 0.0 else wrapf(yaw - _last_yaw, -PI, PI) / delta
+	_last_yaw = yaw
+	var run := clampf((_speed - 2.0) / 2.6, 0.0, 1.0) * (1.0 - _crouch_amt) * (1.0 - _prone_amt) * (1.0 if on_floor else 0.4)
+	var want := clampf(-rate * LEAN_PER_TURN * run, -LEAN_MAX, LEAN_MAX)
+	_lean = lerpf(_lean, want, 1.0 - exp(-8.0 * delta))
+	_sprint_lean = move_toward(_sprint_lean, SPRINT_LEAN * run if sprint else 0.0, delta * 0.8)
+	if root_scene:
+		root_scene.rotation.z = _lean
 
 
 ## Speed (m/s) at which a stance's moving cycle was authored (x), and the speed from which it has
@@ -703,6 +741,7 @@ func play_throw() -> void:
 
 
 func play_death() -> void:
+	_end_lobby()
 	_dead = true
 	if weapon_node:
 		weapon_node.visible = false
@@ -723,6 +762,7 @@ func play_death() -> void:
 
 ## On its feet again for the next round (undoes play_death and play_victory).
 func revive() -> void:
+	_end_lobby()
 	_dead = false
 	show_weapon = true
 	if anim:
@@ -734,6 +774,7 @@ func revive() -> void:
 
 
 func play_victory() -> void:
+	_end_lobby()
 	if weapon_node:
 		weapon_node.visible = false
 	show_weapon = false
@@ -745,7 +786,13 @@ func play_victory() -> void:
 		anim.play("victory", 0.25)
 
 
-func play_lobby() -> void:
+func play_lobby(cheer := false) -> void:
+	_lobby = true
+	_lobby_cheer = cheer
+	_gesture_in = randf_range(3.0, 5.5)
+	_cheer_left = 0.0
+	_look_to = 0.0
+	set_process(true)
 	show_weapon = false
 	if weapon_node:
 		weapon_node.visible = false
@@ -754,6 +801,46 @@ func play_lobby() -> void:
 			tree.active = false
 		var a := "lobby_idle" if anim.has_animation("lobby_idle") else "idle"
 		anim.play(a, 0.2)
+
+
+func _end_lobby() -> void:
+	if not _lobby:
+		return
+	_lobby = false
+	set_process(false)
+	_look = 0.0
+	if aim_mod:
+		aim_mod.twist = 0.0
+	if anim:
+		anim.speed_scale = 1.0
+
+
+func _process(delta: float) -> void:
+	if not _lobby or anim == null:
+		set_process(false)
+		return
+	var base := "lobby_idle" if anim.has_animation("lobby_idle") else "idle"
+	if _cheer_left > 0.0:
+		_cheer_left -= delta
+		if _cheer_left <= 0.0:
+			anim.play(base, 0.5)
+	_gesture_in -= delta
+	if _gesture_in <= 0.0 and _cheer_left <= 0.0 and absf(_look) < 0.02:
+		_gesture_in = randf_range(5.0, 9.0)
+		anim.speed_scale = randf_range(0.88, 1.1)     # the weight shifts at a pace of their own
+		if _lobby_cheer and anim.has_animation("victory") and randf() < 0.3:
+			anim.play("victory", 0.4)
+			_cheer_left = anim.get_animation("victory").length / anim.speed_scale - 0.2
+		else:
+			_look_to = randf_range(0.45, 0.75) * (1.0 if randf() < 0.5 else -1.0)
+			_look_hold = randf_range(1.2, 2.0)
+	if _look_to != 0.0 and absf(_look - _look_to) < 0.02:
+		_look_hold -= delta
+		if _look_hold <= 0.0:
+			_look_to = 0.0
+	_look = lerpf(_look, _look_to, 1.0 - exp(-3.0 * delta))
+	if aim_mod:
+		aim_mod.twist = _look
 
 
 ## Direction the top of the head points (used to place the head hitbox; matters when prone).
@@ -861,6 +948,12 @@ func muzzle_position() -> Vector3:
 
 func _hand_xf() -> Transform3D:
 	return skeleton.global_transform * skeleton.get_bone_global_pose(bone_idx["hand_r"])
+
+
+## Puts the gun at the hand along the aim now (not at the next skeleton update), e.g. after the
+## body turned to the crosshair in this frame.
+func place_gun() -> void:
+	_on_skeleton_updated()
 
 
 func _on_skeleton_updated() -> void:

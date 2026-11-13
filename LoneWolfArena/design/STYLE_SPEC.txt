@@ -48,6 +48,10 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   score bar, centre-anchored) is under the right-anchored panel on screens below about 18:9;
 - a LEFT FIRE button (hold to fire with the left thumb) and a FREE LOOK eye are added (the eye
   starts off, as the reference's free camera button; SETTINGS > CONTROLS turns it on);
+- free look needs no button (as the reference): standing still, a drag on the free area takes the
+  camera round the character, 360 degrees, its face too, and the body keeps its facing (the head
+  turns a little toward the look); FIRE turns the body to the crosshair at once, the stick or the
+  sprint lock turns it back and it runs away from the camera; a drag while running turns the run;
 - the reference's quick RELOAD and quick weapon SWITCH buttons start on (the owner's wish; the
   reference ships them off); each can be turned off in SETTINGS > CONTROLS, as LEFT FIRE;
 - a camera cutout on a short side moves the edge-anchored widgets in by its width.
@@ -67,7 +71,7 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
 | Left fire | 0.09, 0.39, anchor l | 0.15 | bullet glyph; hold to fire (it does not aim); setting: off, always or only while aiming |
 | Fire | 0.798, 0.68, anchor r | 0.26 | big circle, bullet glyph (fist with the fists out), dotted outer ring, warm while firing; follows the thumb like a knob |
 | Scope / ADS | 0.835, 0.40, anchor r | 0.104 | reticle glyph |
-| Free look | 0.945, 0.375, anchor r | 0.09 | eye glyph; hold and drag to turn the camera around the character |
+| Free look | 0.945, 0.375, anchor r | 0.09 | eye glyph (off by default: a drag standing still already turns the camera round); hold and drag to look round while running, the run keeps its direction |
 | Jump | right of the fire button 0.906, 0.519, anchor r | 0.166 | leaping-figure silhouette |
 | Crouch | right, below 0.922, 0.834, anchor r | 0.166 | crouching-figure silhouette |
 | Prone | under the weapon panel, left of SCOPE 0.762, 0.385, anchor r | 0.104 | lying-figure silhouette |
@@ -113,6 +117,9 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   card (TRAINING GROUND or LONE WOLF / CARGO CAGE) with chips: FIRST TO 5, 1 VS BOT, BOT: <level>
   (or TARGET DUMMY); online FIRST TO n, 1 VS 1 ONLINE and the opponent's name, never a bot; big
   map wordmark, the bar.
+- Lobby hero: a drag turns it 360 degrees (a full turn in about one screen width), no swing back,
+  the angle kept for the session (after a match too); idle: lobby_idle with a look round every
+  5-9 s and now and then a cheer.
 - Lobby (the reference lobby's layout): character large on a lit podium in the middle of a 3D
   container yard; player card top-left (emblem avatar, level, name with EDIT, XP line) and nothing
   store-like (no currency, no featured or "new" cards); top-right the logo, the ping chip, FRIENDS

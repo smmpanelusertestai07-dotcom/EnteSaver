@@ -171,6 +171,7 @@ func _physics_process(delta: float) -> void:
 	var w := weapon()
 	w.tick(delta)
 	var local_v := Basis(Vector3.UP, aim_yaw).inverse() * velocity
+	model.sprint = sprinting
 	model.update_locomotion(Vector2(local_v.x, -local_v.z), stance, _net_floor, delta)
 	model.set_aim(aim_pitch, aim_forward())
 	# Its steps as loud as a bot's (a run carries, a walk or a crouch only close by) and its
