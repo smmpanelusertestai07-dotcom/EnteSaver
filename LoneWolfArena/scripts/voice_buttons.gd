@@ -19,6 +19,7 @@ const PILL := Vector2(112, 44)
 const LIFT := 0.12                 # the pill's height over the character's feet (model units)
 const ITEM := Vector2(78, 70)
 const TALK := Vector2(84, 44)      # the lobby's TALK beside the pill (PUSH TO TALK)
+const TONE_HOLD_MS := 3000        # MIC TEST's START held this long: the hidden test tone switch
 
 var lobby: Node                    # the Lobby (camera, model, wardrobe, profile_ui, team)
 var popup: Control                 # the open popup's full-screen catcher
@@ -355,7 +356,22 @@ static func mic_test() -> HBoxContainer:
 	meter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var b := UI.button("START", 16, "dark", Vector2(104, 44))
 	b.name = "MicTestButton"
+	# The hidden test switch: START held for TONE_HOLD_MS swaps the microphone for the test tone for
+	# this session (phones with no microphone, such as the cloud test phones; the tone is what the
+	# others hear, and the voice log lines go to the system log) and back.
+	var held := {"t": 0}
+	b.button_down.connect(func() -> void: held.t = Time.get_ticks_msec())
+	b.button_up.connect(func() -> void:
+		if int(held.t) > 0 and Time.get_ticks_msec() - int(held.t) >= TONE_HOLD_MS:
+			NetVoice.tone_source = not NetVoice.tone_source
+			meter.note = "TEST TONE ON" if NetVoice.tone_source else "TEST TONE OFF"
+			held.t = -1
+		else:
+			held.t = 0)
 	b.pressed.connect(func() -> void:
+		if int(held.t) < 0:              # the long press switched the tone: no MIC TEST
+			held.t = 0
+			return
 		var hub := NetVoice.hub()
 		hub.test_loop = not hub.test_loop and hub.ask_mic()
 		if not hub.test_loop and not NetVoice.mic_allowed():
