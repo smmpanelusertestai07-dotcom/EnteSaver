@@ -597,21 +597,19 @@ static func section(title: String, size := 20) -> HBoxContainer:
 static func help_button(text: String, size := 36.0) -> Button:
 	var b := Button.new()
 	b.name = "Help"
-	b.text = "?"
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(size, size)
+	b.custom_minimum_size = Vector2(TOUCH_MIN, TOUCH_MIN)    # the touch area; the square drawn is `size`
 	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	b.add_theme_font_override("font", font("heavy"))
-	b.add_theme_font_size_override("font_size", int(size * 0.6))
-	var st := box(Color(0.16, 0.15, 0.17, 0.95), 0, 1, Color(1, 1, 1, 0.25), 0.0)
-	var hv := box(Color(0.22, 0.21, 0.23, 0.95), 0, 1, Color(1, 1, 1, 0.4), 0.0)
-	var pr := box(Color(ACCENT, 0.35), 0, 1, ACCENT, 0.0)
-	b.add_theme_stylebox_override("normal", st)
-	b.add_theme_stylebox_override("hover", hv)
-	b.add_theme_stylebox_override("pressed", pr)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	for c: String in ["font_color", "font_hover_color", "font_pressed_color"]:
-		b.add_theme_color_override(c, TEXT)
+	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var r := Rect2((b.size - Vector2(size, size)) * 0.5, Vector2(size, size))
+		var on := b.is_pressed()
+		b.draw_rect(r, Color(ACCENT, 0.35) if on else (Color(0.22, 0.21, 0.23, 0.95) if b.is_hovered() else Color(0.16, 0.15, 0.17, 0.95)))
+		b.draw_rect(r, ACCENT if on else Color(1, 1, 1, 0.3), false, 1.0)
+		HudDraw.text(b, "?", r.get_center(), int(size * 0.6), TEXT, 1, 0, "heavy"))
+	b.mouse_entered.connect(b.queue_redraw)
+	b.mouse_exited.connect(b.queue_redraw)
 	b.set_meta("help", text)
 	b.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
