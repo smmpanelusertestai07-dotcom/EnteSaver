@@ -96,6 +96,7 @@ var _hurt_sound_t := 0.0
 var _center := {"text": "", "sub": "", "t": 0.0, "dur": 1.0, "col": Color.WHITE, "size": 96}
 var _round_banner := {"t": 0.0, "round": 1, "area": ""}
 var _break := {}                   # the break between rounds on screen (show_break), "age" in s
+var _streak := {"round": -1, "n": 0}  # the player's kills this round (kill_banner's DOUBLE / TRIPLE)
 var _result := {}                  # the match's end on the result band (show_result), "age" in s
 var _kill_banner := {"t": 0.0, "name": "", "head": false}
 var _reveal := {}
@@ -311,13 +312,30 @@ func knock_banner(victim_name: String) -> void:
 
 
 ## Big elimination feedback when the player takes someone out: a red X on them and the badge.
+## The badge's plate names the player (the one who made the kill, as the reference); in DUO / SQUAD
+## a 2nd and 3rd kill inside one round read DOUBLE and TRIPLE (streak_word). Setting kill_badges
+## off: no badge (the red X stays).
 func kill_banner(victim_name: String, headshot: bool) -> void:
-	_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot, "cause": ""}
+	var r := int(arena.get("round_index")) if arena != null and arena.get("round_index") != null else 0
+	_streak = {"round": r, "n": int(_streak.n) + 1 if int(_streak.round) == r else 1}
+	if bool(Game.settings.get("kill_badges", true)):
+		_kill_banner = {"t": KILL_BANNER_TIME, "name": victim_name, "head": headshot, "cause": "",
+			"by": player.display_name if player != null else "", "word": streak_word(int(_streak.n), team != null, headshot)}
 	if arena != null:
 		for f: Fighter in arena.get("fighters"):
 			if f.display_name == victim_name:
 				_kill_x_pos = f.chest_position()
 				_kill_x_t = KILL_X_TIME
+
+
+## The badge's word for the player's `n`th kill this round: DOUBLE / TRIPLE (our words) for a 2nd /
+## 3rd in DUO / SQUAD, else HEADSHOT or ELIMINATED.
+static func streak_word(n: int, teams: bool, headshot: bool) -> String:
+	if teams and n >= 3:
+		return "TRIPLE"
+	if teams and n == 2:
+		return "DOUBLE"
+	return "HEADSHOT" if headshot else "ELIMINATED"
 
 
 ## The opponent went down by itself (the zone, a fall, their own frag: a cause in OUT_LINES). It is
@@ -2282,9 +2300,9 @@ func _draw_kill_banner(vs: Vector2, u: float) -> void:
 		HudDraw.icon(self, HudDraw.tex("v_headshot"), c, Vector2(bs, bs) * 0.27, Color(1.0, 0.86, 0.8, a))
 	# One dark plate under the badge holds both lines (HEADSHOT / ELIMINATED, then the name),
 	# so they stay readable over a bright hall or the character's raised arms.
-	var label := "HEADSHOT" if head else "ELIMINATED"
+	var label := String(_kill_banner.get("word", "HEADSHOT" if head else "ELIMINATED"))
 	var lfs := int(0.03 * u)
-	var nm := String(_kill_banner.name).to_upper()
+	var nm := String(_kill_banner.get("by", _kill_banner.name)).to_upper()
 	var fs := int(0.026 * u)
 	var ty := c.y + bs * 0.5 + 0.022 * u
 	var pw := maxf(HudDraw.text_width(label, lfs, "bold"), HudDraw.text_width(nm, fs, "bold")) + 0.2 * u

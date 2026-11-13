@@ -16,6 +16,7 @@ static func run(runner: Node) -> void:
 	me._test_minimap_whole()
 	me._test_break_controls()
 	me._test_solo_feed()
+	me._test_kill_badge()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -177,3 +178,18 @@ func _test_solo_feed() -> void:
 	_check(is_equal_approx(float(hud._kill_feed[0].t), HUD.FEED_LIFE_SOLO) and HUD.FEED_LIFE_SOLO <= 4.0, "1 vs 1 lines stay about 3 s")
 	_check(String(hud._kill_feed[1].victim) == "" and String(hud._kill_feed[1].verb) == "ELIMINATED", "a zone death names no killer")
 	hud.free()
+
+
+## The kill badge names the player; DOUBLE / TRIPLE only in DUO / SQUAD.
+func _test_kill_badge() -> void:
+	_check(HUD.streak_word(1, true, false) == "ELIMINATED" and HUD.streak_word(2, true, false) == "DOUBLE"
+		and HUD.streak_word(3, true, true) == "TRIPLE" and HUD.streak_word(4, true, false) == "TRIPLE", "DUO / SQUAD streak words")
+	_check(HUD.streak_word(2, false, true) == "HEADSHOT" and HUD.streak_word(2, false, false) == "ELIMINATED", "no streak words in the 1 vs 1")
+	var hud := _hud()
+	var me := Player.new()
+	me.display_name = "WOLF"
+	hud.player = me
+	hud.kill_banner("BOT X", false)
+	_check(String(hud._kill_banner.by) == "WOLF", "the badge's plate names the player")
+	hud.free()
+	me.free()
