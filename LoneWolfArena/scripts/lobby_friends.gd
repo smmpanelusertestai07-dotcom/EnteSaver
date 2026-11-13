@@ -54,7 +54,6 @@ var _kb_seen := false                  # the on-screen keyboard was up for it (_
 const ADD_W := 150.0                   # the list rows' fixed columns (_player_row)
 const DUEL_W := 170.0
 const CHAT_W := 130.0
-const REMOVE_W := 112.0
 const MAX_ALL_PLAYERS := 60            # offline players listed under ALL PLAYERS
 
 
@@ -713,8 +712,8 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 	row.add_child(status_label(cloud, id, presence_tag(online_tag, playing)))
 	# Fixed-width columns (the phone test: a row with DUEL 1 VS 1 had a shorter name and its status
 	# moved left): every row keeps its ADD FRIEND and DUEL places, empty ones held by a spacer. On
-	# MY FRIENDS a friend's row ends in CHAT and REMOVE (_fill_friends); a found player who is not a
-	# friend has ADD FRIEND across those two places instead.
+	# MY FRIENDS a friend's row ends in CHAT (_fill_friends; REMOVE FRIEND is on the player card); a
+	# found player who is not a friend has ADD FRIEND in that place instead.
 	var add: Control = null
 	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
@@ -738,20 +737,18 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 	if friends_tab:
 		row.add_child(column(duel, DUEL_W))
 		if not Game.is_friend(id):
-			row.add_child(column(add, CHAT_W + REMOVE_W + 12.0))
+			row.add_child(column(add, CHAT_W))
 	else:
 		row.add_child(column(add, ADD_W))
 		row.add_child(column(duel, DUEL_W))
 	return row
 
 
-## A player found by the search on MY FRIENDS: the friends' columns (a friend's CHAT, the REMOVE
-## place kept empty).
+## A player found by the search on MY FRIENDS: the friends' columns (a friend's CHAT).
 func _search_row(cloud: Cloud, id: String, who: String, waiting: String, tag: String) -> HBoxContainer:
 	var row := _player_row(cloud, id, who, waiting, tag, true)
 	if Game.is_friend(id):
 		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends", CHAT_W))
-		row.add_child(column(null, REMOVE_W))
 	return row
 
 
@@ -792,14 +789,12 @@ static func plain_row(id: String, cloud: Cloud) -> HBoxContainer:
 	return row
 
 
-## A row's status column: the level from the card ("LV 12") over ONLINE / IN A MATCH (yellow) or
-## when the player was last seen (grey). `tag` is the row's presence tag ("  ·  ONLINE"...).
-static func status_label(cloud: Cloud, id: String, tag: String) -> Label:
-	var card: Dictionary = cloud.directory.get(id, {}) if cloud else {}
+## A row's status column: ONLINE / IN A MATCH (yellow) or when the player was last seen (grey); the
+## level is on the name's banner (banner_cell). `tag` is the row's presence tag ("  ·  ONLINE"...).
+static func status_label(_cloud: Cloud, _id: String, tag: String) -> Label:
 	var text := tag.trim_prefix("  ·  ")
 	var on := text in ["ONLINE", "IN A MATCH"]
-	var lv := int(card.get("level", 0))
-	var l := UI.label(("LV %d\n" % lv if lv > 0 else "") + text, 16, UI.STATUS_ON if on else UI.TEXT_DIM, "bold")
+	var l := UI.label(text, 16, UI.STATUS_ON if on else UI.TEXT_DIM, "bold")
 	l.name = "RowStatus"
 	l.custom_minimum_size = Vector2(170, 0)
 	l.clip_text = true                       # (a fixed column: a long "last seen" never widens it)
@@ -808,6 +803,32 @@ static func status_label(cloud: Cloud, id: String, tag: String) -> Label:
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.size_flags_vertical = Control.SIZE_FILL
 	return l
+
+
+## A list row's name cell in the reference look: the player's banner from their card (the first of
+## our banners when they have none) behind the name, darkened for the text, and "LV n" in its
+## bottom-right corner, as on the NAME CARD. `b` is the row's name button (LobbyProfile.player_button).
+static func banner_cell(b: Button, card: Dictionary) -> void:
+	var art := LobbyProfile.banner_texture(String(card.get("banner", "")))
+	if art:
+		var crop := Rect2(0.0, art.get_height() * 0.25, art.get_width(), art.get_height() * 0.5)   # the band of a 3:1 banner
+		for st: Array in [["normal", 0.55], ["hover", 0.7], ["pressed", 0.4], ["hover_pressed", 0.4]]:
+			var sb := StyleBoxTexture.new()
+			sb.texture = art
+			sb.region_rect = crop
+			sb.modulate_color = Color(st[1], st[1], st[1])
+			sb.content_margin_left = 14
+			sb.content_margin_right = 40
+			b.add_theme_stylebox_override(String(st[0]), sb)
+	var lv := int(card.get("level", 0))
+	if lv <= 0:
+		return
+	b.draw.connect(func() -> void:
+		var t := "LV %d" % lv
+		var w := HudDraw.text_width(t, 14, "heavy")
+		var r := Rect2(b.size.x - 40.0 - w - 10.0, b.size.y - 20.0, w + 10.0, 18.0)
+		b.draw_rect(r, Color(0, 0, 0, 0.6))
+		HudDraw.text(b, t, r.get_center(), 14, UI.ACCENT, 1, 0, "heavy"))
 
 
 ## A list row's tag after the name: "  ·  ONLINE" reads "  ·  IN A MATCH" while the player plays.
@@ -819,6 +840,8 @@ static func presence_tag(online_tag: String, playing: bool) -> String:
 ## to this tab when it closes.
 func _who_button(id: String, text: String) -> Button:
 	var b := LobbyProfile.player_button(id, text)
+	var cloud := Game.cloud_service()
+	banner_cell(b, cloud.directory.get(id, {}) if cloud else {})
 	b.pressed.connect(func() -> void:
 		_place = {"kind": _net_kind, "scroll": _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0}
 		lobby.profile_ui.open_player(id, _net_kind))
@@ -916,17 +939,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen, true)
 		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends", CHAT_W))       # (scripts/lobby_net.gd)
-		var rm := UI.button("REMOVE", 15, "dark", Vector2(REMOVE_W, 56))
-		rm.name = "FriendRemove"
-		rm.pressed.connect(func() -> void:
-			# Asked first, as on the player card (it sits right beside DUEL 1 VS 1).
-			var back := open.bind("friends", true)
-			_place = {"kind": "friends", "scroll": _net_scroll.scroll_vertical if _net_scroll and is_instance_valid(_net_scroll) else 0}
-			lobby.dialogs.confirm("REMOVE FRIEND", "Remove %s from your friends? You can send a new friend request later." % who, "REMOVE",
-				func() -> void:
-					Game.remove_friend(id)
-					back.call(), back, true))
-		row.add_child(rm)
+		# (no REMOVE here: the player card has REMOVE FRIEND, asked first)
 		_net_list.add_child(row)
 
 
