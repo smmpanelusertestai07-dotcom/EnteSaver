@@ -626,9 +626,7 @@ static func show_tooltip(at: Control, text: String) -> CanvasLayer:
 	layer.name = "HelpTip"
 	layer.layer = 90
 	at.get_tree().root.add_child(layer)
-	at.tree_exiting.connect(func() -> void:          # (its page closed or the scene changed: gone too)
-		if is_instance_valid(layer):
-			layer.queue_free(), CONNECT_ONE_SHOT)
+	at.tree_exiting.connect(layer.queue_free, CONNECT_ONE_SHOT)     # (its page closed or the scene changed: gone too)
 	var catcher := Control.new()
 	full_rect(catcher)
 	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
