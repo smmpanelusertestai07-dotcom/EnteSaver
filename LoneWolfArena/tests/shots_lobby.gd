@@ -45,6 +45,18 @@ func run(at: Node) -> int:
 	Game.settings.graphics = g_was
 	Game.settings_changed.emit()
 	await at.wait(0.2)
+	# the ping chip: the wifi mark alone, the number on a tap
+	var chip := lobby.find_child("PingChip", true, false) as Control
+	if chip:
+		var tap := InputEventMouseButton.new()
+		tap.button_index = MOUSE_BUTTON_LEFT
+		tap.pressed = true
+		chip._gui_input(tap)
+		await at.wait(0.6)
+		_check(float(chip.get("number_t")) > 0.0, "a tap on the ping chip shows the number")
+		await at.shot("l01c_ping_number")
+		chip.set("number_t", 0.0)
+		chip.queue_redraw()
 	# FRIENDS with nobody yet: the empty state and its link.
 	lobby._open_friends("friends")
 	await at.wait(0.6)
