@@ -35,6 +35,16 @@ func run(at: Node) -> int:
 	cloud.relay_rtt = 64
 	var now := int(Time.get_unix_time_from_system())
 	await at.shot("l01_lobby")
+	# What most phones see: AUTO picks MEDIUM there (the hero's outline must stay smooth: 2x MSAA).
+	var g_was := int(Game.settings.graphics)
+	Game.settings.graphics = 1
+	Game.settings_changed.emit()
+	await at.wait(0.4)
+	_check(get_viewport().msaa_3d == Viewport.MSAA_2X, "MEDIUM graphics keep 2x MSAA on the lobby stage")
+	await at.shot("l01b_lobby_medium")
+	Game.settings.graphics = g_was
+	Game.settings_changed.emit()
+	await at.wait(0.2)
 	# FRIENDS with nobody yet: the empty state and its link.
 	lobby._open_friends("friends")
 	await at.wait(0.6)

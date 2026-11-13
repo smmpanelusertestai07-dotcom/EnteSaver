@@ -113,12 +113,15 @@ var _cam_from_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_from_look := Vector3(0, CAM_LOOK_Y, 0)
 var _cam_to_pos := Vector3(0, CAM_Y, CAM_DIST)
 var _cam_to_look := Vector3(0, CAM_LOOK_Y, 0)
-## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME.
-const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X],
+## [3D scale, MSAA] for LOW, MEDIUM, HIGH, EXTREME. MEDIUM (what AUTO picks on most phones) keeps
+## 2x MSAA: the stage is static and light (~150 draw calls) and without it the hero's outline
+## shows jagged steps on a phone; LOW has no MSAA but gets FXAA (_apply_quality).
+const STAGE_QUALITY := [[0.85, Viewport.MSAA_DISABLED], [1.0, Viewport.MSAA_2X], [1.0, Viewport.MSAA_2X],
 	[1.0, Viewport.MSAA_4X]]
 
 var _vp_msaa := Viewport.MSAA_DISABLED
 var _vp_scale := 1.0
+var _vp_ssaa := Viewport.SCREEN_SPACE_AA_DISABLED
 ## The group's other members on the podium: the node GroupMembers, id -> CharacterModel, id -> spot.
 var group_view: Node3D
 var _member_models := {}
@@ -169,6 +172,7 @@ func _apply_quality() -> void:
 	var vp := get_viewport()
 	vp.scaling_3d_scale = float(q[0])
 	vp.msaa_3d = int(q[1]) as Viewport.MSAA
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if g == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
 	var stage_env := get_node_or_null(^"StageEnv") as WorldEnvironment
 	if stage_env:
 		stage_env.environment.glow_enabled = g >= 1
@@ -194,6 +198,7 @@ func _exit_tree() -> void:
 	if vp:
 		vp.msaa_3d = _vp_msaa
 		vp.scaling_3d_scale = _vp_scale
+		vp.screen_space_aa = _vp_ssaa
 
 
 ## Camera x that puts the character (at x = 0) at `frac` of the screen width on this aspect
@@ -235,6 +240,7 @@ func _on_viewport_resized() -> void:
 func _build_stage() -> void:
 	var vp := get_viewport()
 	_vp_msaa = vp.msaa_3d
+	_vp_ssaa = vp.screen_space_aa
 	_vp_scale = vp.scaling_3d_scale
 	var env := WorldEnvironment.new()
 	env.name = "StageEnv"
