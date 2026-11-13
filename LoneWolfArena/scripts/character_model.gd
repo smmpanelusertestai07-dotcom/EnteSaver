@@ -166,7 +166,9 @@ var _ready_until := 0.0      # the gun is up (aim pose) until then
 var _carry := 0.0            # 0 = aim pose, 1 = the gun carried low (arms layer and idle)
 var _carry_gun := 0.0        # how far the gun follows the hand instead of the aim (carry, sprint)
 var _sprint_amt := 0.0
-var _aim_muzzle := Vector3.ZERO     # the muzzle in model space at the last moment of the aim pose
+## The aim pose's muzzle, from spine_03 in the aim's frame (looking along _aim_dir), learnt standing
+## with the arms really up: muzzle_position while the arms are not, so it follows stance and pitch.
+var _aim_muzzle := Vector3.ZERO
 var _aim_muzzle_ok := false
 var _jumped := false              # on_jump since the last time on the floor
 var _was_floor := true
@@ -1112,13 +1114,26 @@ func _fallback_gun(model_name: String) -> Node3D:
 ## Where shots leave from. While the gun is carried low (or pumping in a sprint) a shot leaves
 ## from where the muzzle is in the aim pose (the model raises the gun with it), not from the hip.
 func muzzle_position() -> Vector3:
-	if _carry_gun > 0.01 and _aim_muzzle_ok and is_inside_tree():
-		return global_transform * _aim_muzzle
+	if not arms_up() and _aim_muzzle_ok and is_inside_tree():
+		return bone_position("spine3") + _aim_basis() * _aim_muzzle
 	if weapon_node and weapon_node.is_inside_tree():
 		return weapon_node.global_transform * muzzle_local
 	if bone_idx.has("hand_r"):
 		return bone_position("hand_r") + _aim_dir * 0.3
 	return global_position + Vector3.UP * 1.4
+
+
+## The arms are in the aim pose (not carried, not pumping in a sprint, not on the way up).
+func arms_up() -> bool:
+	return _carry < 0.01 and _sprint_amt < 0.01 and _carry_gun < 0.001
+
+
+## The aim's frame: looking along _aim_dir (forward if it has none yet).
+func _aim_basis() -> Basis:
+	var dir := _aim_dir.normalized()
+	if dir.length() < 0.5:
+		dir = -global_basis.z
+	return Basis.looking_at(dir, Vector3.UP if absf(dir.y) < 0.97 else global_basis.z)
 
 
 func _hand_xf() -> Transform3D:
@@ -1140,21 +1155,19 @@ func _on_skeleton_updated() -> void:
 	var hand := bone_position("hand_r")
 	var fore := bone_position("lowerarm_r")
 	var grip := hand + (hand - fore).normalized() * 0.055
-	var dir := _aim_dir.normalized()
-	if dir.length() < 0.5:
-		dir = -global_basis.z
-	var up := Vector3.UP if absf(dir.y) < 0.97 else global_basis.z
-	var aimed := Transform3D(Basis.looking_at(dir, up), grip)
+	var aimed := Transform3D(_aim_basis(), grip)
 	var hand_xf := _hand_xf()
 	var follow := maxf(_hand_follow, _carry_gun)
 	if follow < 0.001:
-		# Remember how the gun sits in the hand while aiming, for reload/heal/carry hand-following,
-		# and where its muzzle is (muzzle_position while the gun is carried low).
-		_hand_to_gun = hand_xf.affine_inverse() * aimed
-		_hand_to_gun_ready = true
 		weapon_node.global_transform = aimed
-		_aim_muzzle = global_transform.affine_inverse() * (aimed * muzzle_local)
-		_aim_muzzle_ok = true
+		if arms_up():
+			# Remember how the gun sits in the hand while aiming, for reload/heal/carry hand-following,
+			# and (standing) where its muzzle is (muzzle_position while the arms are not up).
+			_hand_to_gun = hand_xf.affine_inverse() * aimed
+			_hand_to_gun_ready = true
+			if bone_idx.has("spine3") and ((_crouch_amt < 0.01 and _prone_amt < 0.01) or not _aim_muzzle_ok):
+				_aim_muzzle = aimed.basis.inverse() * (aimed * muzzle_local - bone_position("spine3"))
+				_aim_muzzle_ok = true
 		return
 	var followed := hand_xf * _hand_to_gun if _hand_to_gun_ready else aimed
 	weapon_node.global_transform = aimed.interpolate_with(followed, clampf(follow, 0.0, 1.0))

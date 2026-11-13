@@ -4,8 +4,10 @@ extends Node
 ## - every extra clip is merged into the character's player
 ## - the hip carry: standing without a shot for Character.READY_HOLD s the gun hangs low in the
 ##   right hand (carry_idle, carry_run_a/b on the arms while moving), a shot or the aim puts it on
-##   the crosshair at once and shots leave from the aim pose's muzzle; the sprint plays sprint_fwd
+##   the crosshair at once and shots leave from the aim pose's muzzle (also the first one on the
+##   way up, after a crouch or prone, at any pitch); the sprint plays sprint_fwd
 ##   at the speed it was made for (no foot sliding) and stops with the sprint
+## - an online opponent's jump plays the take-off, a step off a ledge the fall
 ## - the base-clip toe fix holds and is applied once (clips are shared by all characters)
 ## - procedural layers: the lean into a running turn, the sprint's forward bend, the lobby's look
 ##   round (and none of it after the lobby)
@@ -31,6 +33,8 @@ func run(autotest: Node) -> int:
 	_check_gait_playback()
 	_check_procedural_layers()
 	await _check_carry_and_sprint()
+	await _check_carry_muzzle()
+	_check_remote_jump()
 	_check_stance_clips()
 	await _check_swap_and_flinch()
 	await _check_throw()
@@ -271,6 +275,8 @@ func _check_carry_and_sprint() -> void:
 	m.set_aim(0.0, -m.global_basis.z)
 	m.place_gun()
 	_expect((-gun.global_basis.z).dot(-m.global_basis.z) > 0.99 and m.gun_up(), "FIRE: the gun points along the aim at once")
+	_expect(m.muzzle_position().distance_to(aimed_muzzle) < 0.05,
+		"and that first shot leaves from the aim pose's muzzle, not the hip (%.3f m off)" % m.muzzle_position().distance_to(aimed_muzzle))
 	for _i in 12:
 		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
 		await get_tree().process_frame
@@ -300,6 +306,69 @@ func _check_carry_and_sprint() -> void:
 		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
 	_expect(float(m.tree.get("parameters/sprint_blend/blend_amount")) < 0.01, "the sprint cycle stops with the sprint")
 	m.queue_free()
+
+
+## Carried after a crouch or prone, or at another pitch, a shot still leaves from where the aim
+## pose's muzzle is now (bots and online opponents read muzzle_position before raising the gun).
+func _check_carry_muzzle() -> void:
+	var m := _model()
+	m.equip_weapon("weapon_ar")
+	var dt := 1.0 / 60.0
+	var steps := func(n: int, v: Vector2, stance: int) -> void:
+		for _i in n:
+			m.update_locomotion(v, stance, true, dt)
+			await get_tree().process_frame
+	var fresh := func(pitch: float) -> Vector3:
+		m.aiming = true
+		m.set_aim(pitch, (-m.global_basis.z).rotated(m.global_basis.x, pitch))
+		await steps.call(40, Vector2.ZERO, Fighter.Stance.STAND)
+		m.aiming = false
+		return m.muzzle_position()
+	var level: Vector3 = await fresh.call(0.0)
+	var up: Vector3 = await fresh.call(0.5)
+	var cases := [["crouch", Fighter.Stance.CROUCH, Vector2.ZERO], ["prone", Fighter.Stance.PRONE, Vector2(0, Fighter.RUN_SPEED)]]
+	for c: Array in cases:
+		m.set_aim(0.0, -m.global_basis.z)
+		m._ready_until = Time.get_ticks_msec() / 1000.0 + 5.0
+		await steps.call(90, Vector2.ZERO, c[1])          # the gun up in that stance
+		m._ready_until = 0.0
+		await steps.call(90, c[2], Fighter.Stance.STAND)   # standing (running) and carried a while
+		var dy := absf(m.muzzle_position().y - level.y)
+		_expect(m._carry > 0.5 and dy < 0.15, "carried after %s: the shot's muzzle is at the standing aim's height (%.3f m off)" % [c[0], dy])
+		await steps.call(30, Vector2.ZERO, Fighter.Stance.STAND)
+		var off := m.muzzle_position().distance_to(level)
+		_expect(m._carry > 0.9 and off < 0.05, "and standing still carried, at the standing aim muzzle (%.3f m off)" % off)
+	m.set_aim(0.5, (-m.global_basis.z).rotated(m.global_basis.x, 0.5))
+	await steps.call(5, Vector2.ZERO, Fighter.Stance.STAND)
+	var off_up := m.muzzle_position().distance_to(up)
+	_expect(m._carry > 0.9 and off_up < 0.08, "carried, aiming up: the muzzle follows the pitch (%.3f m off)" % off_up)
+	m.queue_free()
+
+
+## An online opponent's jump plays the take-off (a rise off the floor), a step off a ledge the fall.
+func _check_remote_jump() -> void:
+	var r := RemoteFighter.new()
+	r.process_mode = Node.PROCESS_MODE_DISABLED
+	add_child(r)
+	r.setup_fighter("default", "ar")
+	var st := RemoteFighter.pack(r)
+	st[0] = 0.0
+	st[1] = 1.0
+	st[2] = 0.0
+	st[6] = 8.0
+	r.apply_state(st)
+	st[1] = 1.15
+	st[6] = 0.0
+	r.apply_state(st)
+	_expect(r.model._jumped, "an online opponent rising off the floor: its jump plays the take-off")
+	r.model._jumped = false
+	st[6] = 8.0
+	r.apply_state(st)
+	st[1] = 1.1
+	st[6] = 0.0
+	r.apply_state(st)
+	_expect(not r.model._jumped, "stepping off a ledge (no rise): the fall pose, no take-off")
+	r.free()
 
 
 func _check_swap_and_flinch() -> void:
