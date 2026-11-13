@@ -296,7 +296,9 @@ func _spawn_fighters() -> void:
 	practice = false
 	mode = String(Game.team_match.get("mode_id", "training"))
 	mode_name = ("TRAINING GROUND" if mode == "training" else "LONE WOLF") + " · " + ("SQUAD" if team_size >= 4 else "DUO")
-	rounds_to_win = rules.get_rounds() if rules.custom else team_rounds_to_win()     # (a custom room's own)
+	# A custom room's own number; its CLASSIC first to TEAM_ROUNDS_TO_WIN goes the default way (the
+	# same in a release; test runs shorten it with LW_ROUNDS_TO_WIN, as an older build's team room).
+	rounds_to_win = rules.get_rounds() if rules.custom and rules.get_rounds() != TEAM_ROUNDS_TO_WIN else team_rounds_to_win()
 	roster = Game.team_match.get("roster", [])
 	my_slot = int(Game.team_match.get("my_slot", 0))
 	var pick := String(Game.settings.get("last_pick", Weapons.DEFAULT_PICK))
