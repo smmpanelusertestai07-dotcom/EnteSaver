@@ -37,6 +37,7 @@ static func run(runner: Node) -> void:
 	me._privacy()
 	me._arena_net()
 	me._away_host()
+	me._pairs_unit()
 	Game.profile = saved_profile
 	Game.settings = saved_settings
 	Game.autotest = saved_at
@@ -538,3 +539,52 @@ func _human_duo(holder: Node3D, me: String) -> TeamArenaNet:
 	a.fighters = list.duplicate()
 	a.referee.setup(teams)
 	return a
+
+
+## An all-human match's direct paths (Cloud._pairs, NetDirect with a pair label): the label and the
+## direction are the same seen from both ends, each pair has keys of its own (and none is the 1 vs
+## 1's), a "dh" / "dc" for another member is ignored, and the HUD's tag counts the pairs that are up.
+func _pairs_unit() -> void:
+	_check(NetDirect.pair_label_for("b7", "a3") == "a3|b7" and NetDirect.pair_label_for("a3", "b7") == "a3|b7",
+		"a pair's label is the same from both ends (the lower id first)")
+	_check(NetDirect.dir_low_for("a3", "b7") and not NetDirect.dir_low_for("b7", "a3"),
+		"in a pair the lower id sends direction 0 and the other direction 1")
+	var mac := PackedByteArray()
+	mac.resize(32)
+	mac.fill(7)
+	var ab_low := NetDirect.new(true, mac, true, "a|b")
+	var ab_high := NetDirect.new(false, mac, true, "a|b")
+	var ac_high := NetDirect.new(false, mac, true, "a|c")
+	var duel_guest := NetDirect.new(false, mac, true)
+	var duel_host := NetDirect.new(true, mac, true)
+	var pkt := ab_low.seal('{"k":"st","s":[],"t":1}'.to_utf8_buffer())
+	_check(not ab_high.open_packet(pkt).is_empty(), "a pair's packet opens at the other end of that pair")
+	_check(ac_high.open_packet(pkt).is_empty() and duel_guest.open_packet(pkt).is_empty(),
+		"a pair's packet never opens in another pair or on a 1 vs 1's path")
+	_check(ab_low.key_id() != ac_high.key_id() and ab_low.key_id() != duel_host.key_id() and ab_low.key_id() == ab_high.key_id(),
+		"pair keys differ per pair and from the 1 vs 1's, and match at both ends")
+	var duel_pkt := duel_host.seal('{"k":"st"}'.to_utf8_buffer())
+	_check(not duel_guest.open_packet(duel_pkt).is_empty(), "the 1 vs 1's path keeps its own keys (no label)")
+	var cl := RecordingCloud.new()
+	cl.my_id = "a"
+	cl.in_session = true
+	cl.session_multi = true
+	cl._multi = {"ids": {"a": 0, "b": 1, "c": 2, "d": 3}, "left": {}}
+	cl._pairs = {"b": ab_low}
+	cl._pair_meta = {"b": {"peer": false, "sent": false, "hn": 0, "ht": 0.0}}
+	cl._pair_on({"k": "dc", "to": "c", "c": [["127.0.0.1", 40000]]}, "b")
+	_check(not bool(cl._pair_meta.b.peer) and ab_low.peer_candidates.is_empty(), "a \"dc\" addressed to another member is ignored")
+	cl._pair_on({"k": "dc", "to": "a", "c": [["127.0.0.1", 40000]]}, "c")
+	_check(ab_low.peer_candidates.is_empty(), "a \"dc\" from a member without a pair here is ignored")
+	cl._pair_on({"k": "dc", "to": "a", "c": [["127.0.0.1", 40000]]}, "b")
+	_check(bool(cl._pair_meta.b.peer) and ab_low.peer_candidates == [["127.0.0.1", 40000]], "a \"dc\" addressed to this phone sets that pair's candidates")
+	_check(cl.link_tag() == "RELAY", "no pair up: RELAY (%s)" % cl.link_tag())
+	_check(Cloud.link_tag_for(0, 3) == "RELAY" and Cloud.link_tag_for(2, 3) == "DIRECT 2/3" and Cloud.link_tag_for(3, 3) == "DIRECT"
+		and Cloud.link_tag_for(1, 1) == "DIRECT" and Cloud.link_tag_for(0, 0) == "RELAY", "the link tag: RELAY, DIRECT n/m, DIRECT")
+	cl._multi.left = {"c": true, "d": true}
+	_check(cl._live_members() == ["b"], "the live members leave out this phone and those who LEFT")
+	cl._pairs = {}
+	cl._pair_meta = {}
+	cl.in_session = false
+	cl.session_multi = false
+	cl.free()

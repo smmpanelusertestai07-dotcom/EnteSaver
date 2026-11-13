@@ -70,6 +70,9 @@ signal friends_changed                 # a friend request came in or was answere
 signal room_changed                    # the hosted custom room got a player / a join attempt ended
 signal directory_changed               # a player card came in (the ALL PLAYERS list)
 signal chat_received(text: String)     # the opponent's chat line in a match (cleaned, NetChat.MATCH_MAX)
+## Any match chat line with its sender: team_only for a TEAM line ("tc", sealed under the sender's
+## GROUP key: only its teammates read it), else ALL ("chat"). chat_received still comes for both.
+signal chat_from(text: String, from_id: String, team_only: bool)
 signal voice_received(frame: PackedByteArray)    # the opponent's audio (a NetVoice frame; 1 vs 1 only, as before)
 ## Any player's voice frame (NetVoice plays it): the sender and whether it is a teammate (voice_mate).
 signal voice_from(frame: PackedByteArray, from_id: String, mate: bool)
@@ -290,6 +293,7 @@ const PAIRS_MAX := 7
 var _pairs := {}
 var _pair_meta := {}
 var pair_states_in := 0        # states taken from the pairs this session (tests)
+var state_counts := {}         # member id -> [states taken from the relay, from its pair] this session (tests)
 var relay_voice_out := 0       # voice frames sent through the relay this session (tests)
 var seeking := false           # QUICK MATCH searching: listening to SEEK_TOPIC (NetMatch)
 var quick_seen := {}           # id -> ms: seekers this search saw (only their quick challenge is taken)
@@ -2743,12 +2747,14 @@ func _on_room(msg: PackedByteArray) -> void:
 			if (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, Time.get_ticks_msec() - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
-		"chat":
+		"chat", "tc":
 			# A chat line: only with CHAT on, never from a blocked player, at most one per
-			# NetChat.RATE_S (a short burst of two), cleaned and cut to NetChat.MATCH_MAX.
-			var x: Variant = (d as Dictionary).get("x")
+			# NetChat.RATE_S (a short burst of two), cleaned and cut to NetChat.MATCH_MAX. A TEAM
+			# line ("tc") only from a co-op teammate, opened with its GROUP key.
+			var opp_id := String(opponent.get("id", ""))
+			var x: Variant = (d as Dictionary).get("x") if kind == "chat" else team_line_open((d as Dictionary).get("s"), opp_id)
 			if not in_session or typeof(x) != TYPE_STRING or not bool(Game.settings.get("chat", true)) \
-					or Game.is_blocked(String(opponent.get("id", ""))):
+					or Game.is_blocked(opp_id):
 				return
 			var now := Time.get_ticks_msec()
 			var tokens := minf(2.0, float(_chat_in[0]) + float(now - int(_chat_in[1])) / 1000.0 / NetChat.RATE_S)
@@ -2756,6 +2762,7 @@ func _on_room(msg: PackedByteArray) -> void:
 			var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 			if tokens >= 1.0 and line != "":
 				chat_received.emit(line)
+				chat_from.emit(line, opp_id, kind == "tc")
 		"vp", "vk":
 			if in_session:
 				_vk_on(d as Dictionary, String(opponent.get("id", "")))
@@ -2997,6 +3004,7 @@ func _pairs_begin() -> void:
 	_pairs_end()
 	pair_states_in = 0
 	relay_voice_out = 0
+	state_counts = {}
 	var m := NetDirect.mode()
 	if m == "off" or not direct_allowed() or not session_multi or _mac.is_empty():
 		return
@@ -3150,8 +3158,11 @@ static func compact_state(s: PackedFloat32Array) -> Array:
 
 
 ## A chat line in the match (CHAT on, NetChat.clean, at most one per NetChat.RATE_S): "" when it
-## went out, else why not ("WAIT" too soon, "OFF", "EMPTY").
-func send_chat(text: String) -> String:
+## went out, else why not ("WAIT" too soon, "OFF", "EMPTY", "NO TEAM": team_only with no teammate).
+## team_only: to the own team only ("tc", sealed under this phone's GROUP key, which only the
+## teammates hold: the other team and builds before 1.10 drop it); in the two-phone co-op the
+## team is the other phone.
+func send_chat(text: String, team_only := false) -> String:
 	if not in_session:
 		return "OFF"
 	if not bool(Game.settings.get("chat", true)):
@@ -3162,9 +3173,27 @@ func send_chat(text: String) -> String:
 	var now := Time.get_ticks_msec()
 	if _chat_out_ms > 0 and now - _chat_out_ms < int(NetChat.RATE_S * 1000.0):
 		return "WAIT"
+	if team_only:
+		if voice_mates() == 0:
+			return "NO TEAM"
+		_chat_out_ms = now
+		_vk_sync()
+		_room_send({"k": "tc", "s": Marshalls.raw_to_base64(_vk_seal(line.to_utf8_buffer()))})
+		return ""
 	_chat_out_ms = now
 	_room_send({"k": "chat", "x": line})
 	return ""
+
+
+## A teammate's TEAM line ("tc" "s") as text; null from anyone else, under a key it did not give
+## this phone, or when it does not open.
+func team_line_open(a: Variant, from: String) -> Variant:
+	if not voice_mate(from) or typeof(a) != TYPE_STRING or String(a).length() > 600:
+		return null
+	var raw := _vk_open(a, from)
+	if raw.is_empty():
+		return null
+	return raw.get_string_from_utf8()
 
 
 ## One voice frame (NetVoice, only while the player speaks) to the match: everyone ("vo", what
@@ -4661,6 +4690,8 @@ func _multi_start() -> void:
 	_save_resume()                   # (a closed app can come back into it: the session file)
 	_decline_waiting()
 	_pairs_begin()
+	if voice_mates() > 0:
+		_vk_sync()                   # (the teammates get this phone's GROUP key now: TEAM lines open at once)
 	session_started.emit(is_host)
 	if is_host:
 		for id: String in (_multi.left as Dictionary).keys():
@@ -4738,12 +4769,14 @@ func _on_multi(d: Dictionary) -> void:
 			if (is_host or f == session_host_id) and typeof(to) == TYPE_STRING and String(to) == my_id and (i is float or i is int) and _peer_pings.has(int(i)):
 				peer_rtt = NetPing.smooth(peer_rtt, now - int(_peer_pings[int(i)]))
 				_peer_pings.erase(int(i))
-		"chat":
-			var x: Variant = d.get("x")
+		"chat", "tc":
+			# ALL, or a TEAM line ("tc": only a teammate's, opened with its GROUP key).
+			var x: Variant = d.get("x") if kind == "chat" else team_line_open(d.get("s"), f)
 			if in_session and typeof(x) == TYPE_STRING and bool(Game.settings.get("chat", true)) and _bucket("c" + f, 1.0 / NetChat.RATE_S, 2.0):
 				var line := NetChat.clean(String(x).left(NetChat.MATCH_MAX * 4), NetChat.MATCH_MAX)
 				if line != "":
 					chat_received.emit(line)
+					chat_from.emit(line, f, kind == "tc")
 		"vp", "vk":
 			if in_session:
 				_vk_on(d, f)
@@ -4803,6 +4836,9 @@ func _on_multi_state(d: Dictionary, f: String, via_pair := false) -> void:
 			return
 		_multi.state_t[f] = sent
 	last_state_sent_ms = sent
+	var c: Array = state_counts.get(f, [0, 0])
+	c[1 if via_pair else 0] = int(c[1 if via_pair else 0]) + 1
+	state_counts[f] = c
 	if via_pair:
 		pair_states_in += 1
 	else:
