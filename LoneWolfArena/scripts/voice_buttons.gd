@@ -7,6 +7,9 @@ extends Control
 ##    (unticked by default); a speaker tap opens OFF / ALL / GROUP. The chosen item is yellow, a tap
 ##    outside closes the popup. Under the modes: the players of the voice channel, each with a MUTE
 ##    switch (kept for this session; a blocked player is always muted) and a speaking mark.
+##    With PUSH TO TALK and the mic on in a lobby group or custom room (NetVoice.channel "group"), a
+##    TALK button beside the pill (`talk`): the mic sends only while it is held; let go when it
+##    hides (the pill hidden, the mode changed, the group gone) or the lobby goes.
 ##  - in a MATCH HudNet draws round speaker and mic buttons beside the minimap and opens the same
 ##    MIC MODE popup (`open_popup` with in_match: GROUP only when the player has teammates).
 ## The icons are drawn here (`draw_mic`, `draw_speaker`): ours, outline mic and speaker, a red
@@ -15,10 +18,13 @@ extends Control
 const PILL := Vector2(112, 44)
 const LIFT := 0.12                 # the pill's height over the character's feet (model units)
 const ITEM := Vector2(78, 70)
+const TALK := Vector2(84, 44)      # the lobby's TALK beside the pill (PUSH TO TALK)
 
 var lobby: Node                    # the Lobby (camera, model, wardrobe, profile_ui, team)
 var popup: Control                 # the open popup's full-screen catcher
 var note := ""                     # why the mic went OFF (Android refused it), shown under the pill
+var talk: Button                   # TALK (PUSH TO TALK in a group or room), held = the mic sends
+var _talking := false              # this pill's TALK holds NetVoice.ptt_held
 var _note_t := 0.0
 
 
@@ -33,7 +39,36 @@ static func lobby_pill(l: Node, root: Control) -> VoiceButtons:
 	var hub := NetVoice.hub()
 	hub.changed.connect(v.queue_redraw)
 	hub.mic_refused.connect(v._on_mic_refused)
+	v.talk = UI.button("TALK", 15, "dark", TALK)
+	v.talk.name = "LobbyTalk"
+	v.talk.focus_mode = Control.FOCUS_NONE
+	v.talk.position = Vector2(PILL.x + 6.0, 0.0)
+	v.talk.size = TALK
+	v.talk.visible = false
+	v.talk.button_down.connect(func() -> void: v._set_talk(true))
+	v.talk.button_up.connect(func() -> void: v._set_talk(false))
+	v.add_child(v.talk)
 	return v
+
+
+## Whether TALK shows: PUSH TO TALK with the mic on, in a lobby group or custom room.
+static func talk_wanted() -> bool:
+	return NetVoice.push_to_talk() and NetVoice.mic_mode() != NetVoice.OFF and NetVoice.channel() == "group"
+
+
+func _set_talk(on: bool) -> void:
+	var hub := NetVoice.hub()
+	if on and not hub.ask_mic():
+		return                       # (refused: mic_refused puts the note under the pill)
+	if on or _talking:
+		hub.ptt_held = on
+	_talking = on
+	queue_redraw()
+
+
+func _exit_tree() -> void:
+	if _talking:
+		_set_talk(false)
 
 
 func _on_mic_refused() -> void:
@@ -59,10 +94,16 @@ func _process(delta: float) -> void:
 		else:
 			var at := cam.unproject_position(p) - Vector2(PILL.x * 0.5, PILL.y * 0.5)
 			var vs := get_viewport_rect().size
-			at.x = clampf(at.x, 8.0, vs.x - PILL.x - 8.0)
+			at.x = clampf(at.x, 8.0, vs.x - PILL.x - TALK.x - 14.0)
 			at.y = clampf(at.y, 80.0, vs.y - 92.0 - PILL.y)       # over the bottom bar
 			global_position = at.round()
 	visible = on
+	if talk != null:
+		talk.visible = on and talk_wanted()
+		if _talking and not talk.visible:
+			_set_talk(false)         # hidden while held: no talking on behind it
+		var held := _talking and NetVoice.hub().ptt_held
+		talk.modulate = UI.ACCENT if held else Color.WHITE
 	queue_redraw()
 
 

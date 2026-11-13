@@ -9,7 +9,8 @@ extends Node
 ##     has no teammates) and the guest hears nothing more. The host leaves; both go to the lobby.
 ##  b. CUSTOM ROOM (DUO, waiting): the guest joins with the code and password (on the other side):
 ##     the room's group carries the voice (its own voice topic): ALL reaches the guest; GROUP does
-##     not (an enemy); once the guest takes a place on the host's side, GROUP reaches it.
+##     not (an enemy); once the guest takes a place on the host's side, GROUP reaches it. With PUSH
+##     TO TALK the host sends nothing until the lobby's TALK (beside the pill) is held, then sends.
 ##  c. the room's DUO match (the guest back on the other side, the host's START: an all-human match
 ##     over the match room): ALL reaches the guest, GROUP ("vg") does not reach the enemy.
 ## Prints "VOICE CHECK DONE bad=N".
@@ -88,6 +89,25 @@ func run(autotest: Node) -> int:
 		at.log_line("host: room ALL sent %d frames" % sent)
 		if sent < 20:
 			_fail("the open mic sent only %d frames to the room" % sent)
+		# PUSH TO TALK in the room: nothing until the lobby's TALK (beside the pill) is held.
+		hub.set_push_to_talk(true)
+		var talk := at.get_tree().root.find_child("LobbyTalk", true, false) as Button
+		await at.wait(2.0)
+		if talk == null or not talk.is_visible_in_tree():
+			_fail("no TALK beside the lobby's pill with PUSH TO TALK in a room")
+		if hub.frames_sent != sent or hub.capturing:
+			_fail("PUSH TO TALK sent %d frames to the room with TALK not held" % (hub.frames_sent - sent))
+		if talk != null:
+			talk.button_down.emit()
+			await at.wait(3.0)
+			talk.button_up.emit()
+			at.log_line("host: TALK held 3 s in the room sent %d frames" % (hub.frames_sent - sent))
+			if hub.frames_sent - sent < 15:
+				_fail("TALK held 3 s in the room sent only %d frames" % (hub.frames_sent - sent))
+			await at.wait(0.5)
+			if hub.ptt_held or hub.capturing:
+				_fail("the microphone still ran after TALK was let go")
+		hub.set_push_to_talk(false)
 		hub.set_mic_mode(NetVoice.GROUP)
 		await at.wait(2.0)
 		if hub.capturing:
@@ -113,7 +133,7 @@ func run(autotest: Node) -> int:
 		if not await _until(func() -> bool: return heard >= 10 and hub.frames_heard - played >= 10, 15.0):
 			_fail("the room's voice did not come through (taken %d, played %d)" % [heard, hub.frames_heard - played])
 		at.log_line("guest: room voice taken %d, played %d" % [heard, hub.frames_heard - played])
-		if not await _quiet(14.0):
+		if not await _quiet(22.0):           # (the host's ALL, then TALK held, then GROUP)
 			_fail("the host's MIC GROUP reached the other side of the room")
 		var host_side := -1
 		for m: Dictionary in cloud.group_members():
