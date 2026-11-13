@@ -400,18 +400,25 @@ listed here. If a part needs something new from the core, add it in its own file
   settings, PROFILE, wardrobe), then shows a quit dialog (`QuitDialog`, `QuitCancel`,
   `QuitConfirm`); it is ignored during the START overlay.
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, the bottom bar `BottomBar` with WARDROBE
-  `BundlesButton` and ONLINE 1 VS 1 `OnlineButton`, FRIENDS `FriendsButton` and the gear
+  `BundlesButton`, PROFILE `ProfileButton` and ONLINE 1 VS 1 `OnlineButton`, the chat strip above it
+  `ChatStrip` (its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
+  `AddFriendButton` on the right (FRIENDS on PLAYERS), FRIENDS `FriendsButton` and the gear
   `SettingsButton` top-right, mode card, START, settings, input; the reference's layout: no text
   menu, stats chips, name plate or version) makes four helpers that build under its `ui` and reach
   it through their `lobby`:
   `dialogs` (`LobbyDialogs`: `open_modal(title, width, top)` / `close_modal()` / `modal`, the one
-  open popup (its column `Frame`), signal `modal_closed`, `back()` (its X and Android back: the
+  open popup (its column `Frame`), `open_page(title)` (a full page in `modal` too, meta "page":
+  returns {tabs, foot, body, title}; nodes `PageTabs`, `PageFoot`, `PageBody`, `PageTitle`, X
+  `Close`), signal `modal_closed`, `back()` (its X and Android back: the
   popup's meta "on_back" Callable, else close),
   `confirm(title, text, ok_text, on_ok, on_cancel, danger)` (`ConfirmOk`, `ConfirmCancel`),
   `notice(title, text)` (one OK: `NoticeText`, `NoticeOk`); SELECT
   MODE `select_mode()` with TRAINING GROUND's opponent chips, the name editor, the quit dialog),
   `friends`
-  (`LobbyFriends`: the ONLINE 1 VS 1 window `open(kind, back)` with its list in `NetScroll`
+  (`LobbyFriends`: the FRIENDS page `open(kind, back)`, kind friends / requests / online (PLAYERS) /
+  room / local, boxed tabs `Tab_<kind>`, BLOCKED `FriendsBlocked` (PROFILE's BLOCKED), on FRIENDS
+  `RequestsLink` and the search `FriendSearch` + `FriendSearchGo`, rows `plain_row` (picture
+  `RowAvatar`, `RowStatus`), empty lists `EmptyState`; its list in `NetScroll`
   (back: reopened under a closing player card, the list scrolls back to where it was), custom
   rooms, the online service's signals; `challenge(id)`, `add_friend(id)`; DUEL CHALLENGE has
   BLOCK (`ChallengeBlock`, asked first), DECLINE (`DeclineButton`, also its X and back) and
@@ -559,8 +566,11 @@ listed here. If a part needs something new from the core, add it in its own file
   QUICK, the friends' messages kept in user://chat.json): in a match `Cloud.send_chat(text)` /
   signal `chat_received(text)`; friends `Cloud.send_friend_chat(id, text)` (RSA to the friend's key,
   signed, retained on ROOT/fm/<to>/<from> until read) / signal `friend_chat_changed(id)`; the
-  lobby's window and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`,
-  "ChatWindow", "ChatField", "ChatSend", "FriendChat", bubbles "ChatMine_<n>" / "ChatTheirs_<n>").
+  lobby's chat panel and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`:
+  the panel from the left in `dialogs.modal`, "ChatWindow", its "Frame", "ChatOutside" (a tap
+  beside it goes back), "ChatTab_friends", "Close", the friends column "ChatPeople" with
+  "ChatPerson_<code>", "ChatField", "ChatSend", quick phrases "Quick_<n>", "FriendChat", message
+  rows "ChatMine_<n>" / "ChatTheirs_<n>", `time_text(ts, now, tz_s)`).
   Lobby notices (lobby only, never in a match): `LobbyNet.toast(lobby, text, caption, on_tap,
   icon)` ("LobbyToast" in the lobby's CanvasLayer "NoticeLayer", layer 20, TOAST_S): a friend's
   message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while that

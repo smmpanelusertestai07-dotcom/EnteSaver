@@ -117,7 +117,11 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   container yard; player card top-left (emblem avatar, level, name with EDIT, XP line) and nothing
   store-like (no currency, no featured or "new" cards); top-right the logo, the ping chip, FRIENDS
   (two busts; the unread badge) and the gear; bottom-left a dark translucent bar of main buttons
-  (WARDROBE | ONLINE 1 VS 1, glyph and caption each); bottom-right the mode card (TRAINING GROUND /
+  (WARDROBE | PROFILE | ONLINE 1 VS 1, glyph and caption each) with the chat strip above it (a
+  speech-bubble square with the unread count and a one-line ticker of the newest friend message,
+  "[FRIEND] NAME: text"; a tap opens the chat panel); ADD (person with a plus over its caption) on
+  the right edge at mid height opens FRIENDS on PLAYERS; bottom-right the mode card (purple to blue
+  ramp, 2 px yellow frame, the mode name white) (TRAINING GROUND /
   CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
   ONLINE"; a tap opens SELECT MODE: the two mode cards, TRAINING GROUND's with the opponent chips
   EASY, NORMAL, HARD, DUMMY, each card with a small "?" at the art's top right opening a 4-page
@@ -133,6 +137,23 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   else the small line THE LEADER SHARES THE GROUP CODE). No text
   menu, stats chips, name plate, outfit or version text (CUSTOM HUD and HOW TO PLAY are in
   SETTINGS).
+- FRIENDS (FRIENDS top-right, ONLINE 1 VS 1, ADD): a full page over the lobby on the page ramp,
+  "FRIENDS" in caps top-right beside the X box in the corner; boxed tabs down the left (0.16 of the
+  width): FRIENDS, REQUESTS (with the count), PLAYERS (online now, then ALL PLAYERS), CUSTOM ROOM,
+  PLAY WITHOUT INTERNET; BLOCKED as a light button at the foot of the column (PROFILE's BLOCKED).
+  FRIENDS' head: the yellow-barred title, YOUR ID with COPY, the search box with a white square
+  magnifier button; a yellow "n FRIEND REQUESTS WAITING >>" link when some wait. Rows: a dark
+  translucent plate with a cut corner, the player's picture in a white-edged square, NAME #CODE (a
+  tap opens their card), a status column (LV n over ONLINE / IN A MATCH in yellow-orange, or LAST
+  SEEN ... in grey), then ADD FRIEND / DUEL 1 VS 1 / CHAT / REMOVE. Empty lists: a grey hatched block,
+  a grey caps line and a yellow link ("YOU HAVE NO FRIENDS YET" / "FIND PLAYERS >>").
+- Chat (the chat strip, a friend's CHAT): a panel from the left over the live lobby (0.53 of the
+  width, full height, #160E19); the FRIENDS tab top-left as a light tile with a hazard stripe, the X
+  box top-right of the panel; a column of friends (picture with a green dot when online, name, red
+  unread count; the open one lit with a yellow edge); the conversation: NAME #CODE and ONLINE NOW /
+  OFFLINE, message rows (picture, name (yours yellow), "TODAY 17:16", a dark bubble with a thin grey
+  border, everyone's on the left), the encryption line, our quick phrases as dark chips (a tap
+  sends one), the field and the yellow SEND; a tap on the lobby beside the panel goes back.
 - Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);
   3-column item cards with the rendered outfit portrait and the outfit's own colour bar, live
   preview on the podium, EQUIP and BACK.
@@ -162,3 +183,28 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   them in a match, with QUIT MATCH (red text on a dark plate, asks again) at the foot of the tab
   column above HOW TO PLAY and RESET, and EDIT CUSTOM HUD opening the editor over the match; X resumes. TRAINING
   GROUND pauses under it, online the match runs on.
+
+## 6. Theme tokens (scripts/ui.gd)
+| Token | Value | Use |
+|---|---|---|
+| ACCENT | #F9BF06 | main buttons, open tabs, selection frames, links, slider fill |
+| ACCENT_EDGE | #BC8200 | the lower edge of yellow buttons |
+| LIGHT | #D8D8D8 | secondary buttons (dark caps text) |
+| PANEL | #110F12 at 90 % | panels and popups |
+| ROW | #21181D at 62 % | list and setting rows |
+| TAB_DARK | #0F0810 | closed side tabs, page columns |
+| PAGE_TOP / PAGE_BOTTOM | #1F1820 / #33264A | full pages' backdrop ramp (with a soft warm glow up right) |
+| CHAT_BG / BUBBLE | #160E19 / #141215 | the chat panel / a message bubble (1 px grey border) |
+| STATUS_ON | #FFB521 | ONLINE / IN A MATCH in player lists |
+| TEXT / TEXT_DIM / BAD | #F7F7F5 / #A3A3A8 / #F24D3D | text, secondary text, risk and unread |
+- Buttons (`UI.button`): square, a 45-degree cut at the bottom-right; primary yellow with a 3 px
+  darker lower edge and black heavy caps; light grey the same; dark near-black with a thin border.
+  The big CTA (`UI.hero_button`: START, PLAY AGAIN): slanted left edge, yellow ramp, gloss, chevrons,
+  a light sweep every 3.2 s.
+- Side tabs (`UI.side_tab`): dark boxes with a light lower edge; the open one yellow with black
+  hazard stripes down its left edge and a cut corner. Top tabs (`UI.top_tab`): the open one a light
+  tile with a hazard stripe down its right edge.
+- Close (`UI.close_button`): a dark square with a thin white X and a yellow triangle across its
+  top-right corner. Popups: light header ramp (#F1F1F1 -> #D1D1D1) with dark caps title, a hazard
+  line under it, the X on a dark tile; a dark body with a yellow corner mark.
+- Links (`UI.link_button`): yellow, underlined, ending in ">>". Empty states (`UI.empty_state`).
