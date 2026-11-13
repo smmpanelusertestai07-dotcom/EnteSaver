@@ -151,8 +151,11 @@ listed here. If a part needs something new from the core, add it in its own file
   default; `HudMinimap.turns()`), north up otherwise; `ally_marks` / `enemy_marks` take that
   transform), `hud_panels.gd` (HudPanels)
 - online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
-  round trip to the other phone under the gear (NetPing), CHAT / MUTE (NetChat) and TALK / SOUND
-  (NetVoice) right of the minimap, the chat feed under the score bar (`feed`, `add_line`, `send`),
+  round trip to the other phone under the gear (NetPing), round SPEAKER / MIC buttons at HudLayout's
+  "speaker" / "mic" (keys in DEFAULTS, not in ORDER: HudNet owns their touches; SPEAKER toggles
+  OFF/back, MIC opens `VoiceButtons.open_popup(.., "mic", .., true)`, node "VoicePopup"), TALK under
+  MIC with PUSH TO TALK, the players speaking now under them, then CHAT / MUTE (NetChat) in the
+  next column, the chat feed under the score bar (`feed`, `add_line`, `send`),
   the chat panel `ChatPanel` (`open_panel`, `close_panel`; the HUD's input is off while it is open).
   Its buttons take their touches before the HUD (a child's _input runs first). Every other match
   (TRAINING GROUND) gets it too with `net` false (`HudNet.attach(hud, false)`): only the ping chip,
@@ -623,15 +626,34 @@ listed here. If a part needs something new from the core, add it in its own file
   message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while the
   chat panel is open (another friend's message only sounds there), a match loads, FRIENDS CHAT is off or they are blocked) and a friend request that
   comes while a popup is open (the tap opens FRIENDS); `LobbyNet.set_badge(row, n)` ("UnreadBadge")
-  puts `NetChat.unread_total()` on the lobby's FRIENDS button (`FriendsButton`). Voice `NetVoice` (IMA
-  ADPCM 8 kHz, `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"; played on the
-  bus "Voice", setting vol_voice). Settings tab ONLINE (scripts/settings_online.gd): chat,
-  friend_chat, show_career, voice_chat (asks for RECORD_AUDIO), direct_connect (NetDirect), vibration
+  puts `NetChat.unread_total()` on the lobby's FRIENDS button (`FriendsButton`). Voice: one
+  `NetVoice.hub()` (node "NetVoiceHub" under the root, made by Cloud._ready; IMA ADPCM 8 kHz frames
+  of 100 ms, bus "VoiceIn" for the microphone, one generator per talker on the bus "Voice", setting
+  vol_voice). Settings mic_mode / speaker_mode (`NetVoice.OFF` 0 / `ALL` 1 / `GROUP` 2; defaults OFF /
+  ALL) and push_to_talk (false); 1.8's voice_chat true becomes mic ALL + push to talk (migration by
+  key, no version bump). `NetVoice.channel()`: "match" (Game.session in session) / "group"
+  (`Cloud.voice_group_ready()`) / ""; `sends(mode, channel, mates)`, `hears(mate, mode, muted)`,
+  `gate_next(state, rms)` (GATE_OPEN, GATE_HANG), `speaking(id)` ("" = this phone),
+  `set_muted(id, on)` / `is_muted(id)` (session; blocked always), `hub().set_mic_mode(m)` (asks
+  RECORD_AUDIO; refused: OFF + `mic_refused`), `set_speaker_mode(m)`, `toggle_speaker()`,
+  `set_push_to_talk(on)`, `ptt_held`, `test_loop` (MIC TEST), `level`, `tone_source`
+  (LW_VOICE_TONE=1, debug builds: a tone instead of the microphone, and a "VOICE ..." log line every
+  3 s). Cloud: `send_voice(frame, group_only)` (match room "vo" everyone / "vg" own team; a 1.8 phone
+  plays "vo" with its VOICE CHAT on and ignores "vg"), `send_group_voice(frame, group_only)` (topic
+  ROOT/g/<gid>/v, sealed with the group keys, {"k": "gv", "a", "g"?}; listened to only while the
+  SPEAKER is on: `_sync_group_voice`; 1.8 phones never subscribe), `voice_from(frame, from_id, mate)`
+  (every voice frame, after the rate limit, blocks and the GROUP filter), `voice_mate(id)`,
+  `voice_mates()`; `voice_received(frame)` stays for the 1 vs 1. Lobby: `VoiceButtons.lobby_pill`
+  (node "VoicePill" [mic | speaker] under the character; popups "MicModeBox" / "SpeakerBox" with
+  Mic_OFF / Mic_ALL / Mic_GROUP (Speaker_...), "PushToTalk", and a "Voice_<id>" row with "Mute" per
+  player of the channel). Settings tab ONLINE (scripts/settings_online.gd): chat,
+  friend_chat, show_career, direct_connect (NetDirect), vibration
   (out of a match: the lobby's buzz for a challenge or a friend request), challenges_from
   (`Game.CHALLENGES_EVERYONE` / `_FRIENDS` / `_NOBODY`: `Cloud.challenge_allowed(from)`, the others
   declined at once, never shown) and friend_requests (off: `Cloud.requests_allowed()` false, new
   requests ignored and their waiting copies deleted, no popup). SOUND: vol_sfx, vol_music,
-  vol_voice, each applied at once (`Game.apply_settings`: buses SFX, Music, Voice; no master
+  then VOICE CHAT: push_to_talk ("Toggle_push_to_talk"), vol_voice and MIC TEST ("MicTest":
+  `VoiceButtons.mic_test()`, the own voice back through the codec, a level meter), each applied at once (`Game.apply_settings`: buses SFX, Music, Voice; no master
   setting, the Master bus stays at full volume).
 - Scene flow: `Game.goto_lobby()`, `Game.goto_arena()`, `Game.goto_hud_editor()`;
   `Game.goto_login()` opens scenes/login.tscn (`Login`) until `profile.guest_ok`, the lobby after

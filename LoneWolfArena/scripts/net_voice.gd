@@ -59,7 +59,7 @@ const MAX_TALKERS := 8                                   # players heard at once
 const QUIET_FREE_MS := 15000                             # a talker's player is freed after this long without a frame
 const TONE_HZ := 440.0
 const TONE_ON_S := 1.0
-const TONE_OFF_S := 0.6
+const TONE_OFF_S := 1.5                                 # (longer than the gate's hang: it closes between words)
 const ME := ""                                           # this phone in `speaking` and the MIC TEST's player
 const REFUSED_NOTE := "MICROPHONE NOT ALLOWED: ALLOW IT IN YOUR PHONE'S SETTINGS > APPS > WOLF ARENA > PERMISSIONS"
 

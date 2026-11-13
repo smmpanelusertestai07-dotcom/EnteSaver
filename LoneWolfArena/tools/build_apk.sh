@@ -114,8 +114,9 @@ BADGING="$("$BT/aapt" dump badging "$OUT")"
 grep -E "^package:|uses-permission|sdkVersion|native-code" <<< "$BADGING"
 # Permissions: vibration, and the online 1 vs 1 (Android needs INTERNET for any socket; public MQTT
 # relays only carry end-to-end encrypted match messages, scripts/cloud.gd) with the network state,
-# and the microphone (RECORD_AUDIO) for push-to-talk voice (scripts/net_voice.gd: asked for only when
-# VOICE CHAT is turned on, used only while TALK is held), and the Wi-Fi state and multicast for
+# and the microphone (RECORD_AUDIO) for voice chat (scripts/net_voice.gd: asked for only when the player
+# turns MIC on, run only with MIC on in a match, group or room, sent only while they speak or hold
+# TALK), and the Wi-Fi state and multicast for
 # PLAY WITHOUT INTERNET (scripts/lan.gd finds the other phone on the same Wi-Fi or hotspot).
 # The androidx receiver permission comes with the engine's manifest. Anything else (location, ...)
 # fails the build; CI checks the same list.

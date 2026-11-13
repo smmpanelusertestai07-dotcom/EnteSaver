@@ -217,8 +217,8 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   an indented row of picture tiles of our arena at each level (144x81, the level in use framed
   yellow, a tap picks it), 30/60 FPS plus 90/120 where the screen refreshes that fast, visual
   effects; MINIMAP as two picture tiles (118 px) TURNS WITH VIEW / NORTH UP. SOUND: GAME AUDIO
-  (music, sound effects), VOICE CHAT (voice). ONLINE (chat, friends, career, who can reach you,
-  vibration out of a match, voice, direct connection), ACCOUNT (the player ID with COPY, CLEAR
+  (music, sound effects), VOICE CHAT (push to talk, voice, MIC TEST with a level meter). ONLINE
+  (chat, friends, career, who can reach you, vibration out of a match, direct connection), ACCOUNT (the player ID with COPY, CLEAR
   CACHE; along the bottom DELETE MY DATA, Terms of Use, Privacy Notice as underlined links).
   Questions (RESET, EXTREME, ...) ask first. No FPS counter, crosshair colour or size,
   fire-button drag or master volume: everything else is fixed at its best value. The pictures are
@@ -252,3 +252,15 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   top-right corner. Popups: light header ramp (#F1F1F1 -> #D1D1D1) with dark caps title, a hazard
   line under it, the X on a dark tile; a dark body with a yellow corner mark.
 - Links (`UI.link_button`): yellow, underlined, ending in ">>". Empty states (`UI.empty_state`).
+
+VOICE (the reference's places and defaults, our icons)
+- Lobby: a small dark pill [mic | speaker] (112x44, radius 22, near-black 66 %) under the player's
+  character, also when alone. Mic: outline mic, a red slash when OFF, a small people mark for
+  GROUP, yellow while this phone's voice goes out. Speaker: speaker with waves, slash when OFF.
+- Popups: a dark translucent box with no border; MIC MODE title for the mic; items icon over word
+  (OFF / ALL / GROUP), the chosen one yellow; PUSH TO TALK tick box (unticked by default); then
+  PLAYERS: a sound mark (yellow while speaking), the name and MUTE / MUTED. A tap outside closes.
+- Match: round dark buttons at HudLayout "speaker" (0.16, 0.105) and "mic" (0.16, 0.19), left
+  anchored, beside the minimap; SPEAKER toggles at once (slash = OFF), MIC opens MIC MODE to its
+  right (GROUP only with teammates). TALK under MIC only with PUSH TO TALK. Who speaks: small rows
+  (sound mark + name) under the buttons.
