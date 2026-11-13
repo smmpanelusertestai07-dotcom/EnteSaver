@@ -154,8 +154,11 @@ places are roster slots t * NetGroup.per_team(size) .. + NetGroup.places(size, t
   inside the group room's encryption; Cloud.joined_rules on the players, Cloud.room_rules_now()),
   and the room's DUO / SQUAD match plays by them (_multi_enter: session_rules). The SOLO start's
   invite carries "rr" too with "rrt" = HMAC(password key, "rules" + rr + host). A joiner of this
-  build says "rv" in its "ask"; a room whose rules differ from today's beyond rounds / ammo / walls
-  / frags (RoomRules.needs_new) answers an "ask" without "rv" (an older build) "rno" {"full": true}.
+  build says "rv" in its "ask". An older build (an "ask" without "rv") plays a DUO / SQUAD room by
+  today's rules and a SOLO room by its rounds / ammo / walls / frags only, so it gets "rno"
+  {"full": true} from a SOLO room whose rules differ beyond those four (RoomRules.needs_new) and
+  from a DUO / SQUAD room whose rules are not CLASSIC (RoomRules.is_classic(rules, true): first to
+  4 and nothing else changed). open_room's {} = CLASSIC for the room's size.
 START is the host's only (Cloud.room_start): SOLO = the 1 vs 1 with the room's rules
 (start_room_match), DUO / SQUAD = _group_launch: the all-human match of the players in their places
 (uneven allowed, empty places stay empty, no bots). The room closes when its match starts. A player

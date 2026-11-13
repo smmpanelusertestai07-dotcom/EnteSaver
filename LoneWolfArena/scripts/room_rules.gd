@@ -18,8 +18,10 @@ extends RefCounted
 ##   gun_id  the gun of "fixed"                       zone  the safe zone closes (false: never)
 ##   aim     aim assist allowed (false: manual aim for everyone, whatever their setting)
 ##   name    the room's name (shown in the room's lobby)
-## Older builds (1.8.0) read only rounds / ammo / walls / frags (Cloud.rules_from); a room whose
-## other rules are not the defaults (`needs_new()`) does not let such a phone in (Cloud._on_room_ask).
+## Older builds (1.8.0) read only rounds / ammo / walls / frags (Cloud.rules_from) and play a DUO /
+## SQUAD room by today's rules whatever the room's: a SOLO room whose other rules are not the
+## defaults (`needs_new()`), and a team room whose rules are not CLASSIC (`is_classic(r, true)`), do
+## not let such a phone in (Cloud._on_room_ask).
 
 const DEFAULTS := {"rounds": 5, "ammo": false, "walls": false, "frags": false, "throw": true, "hp": 200, "speed": 100,
 	"jump": 100, "gun": "pick", "gun_id": "ar", "zone": true, "aim": true, "name": ""}

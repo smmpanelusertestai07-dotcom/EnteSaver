@@ -2332,7 +2332,7 @@ func open_room(pin: String, rules: Dictionary, code := "", size := 1) -> String:
 	room_code = code if code.length() == 6 and code.is_valid_int() and not OS.has_feature("template") \
 		else "%06d" % (r.decode_u32(0) % 1000000)
 	room_pin = pin
-	room_rules = rules_from(rules)
+	room_rules = rules_from(rules if not rules.is_empty() or size <= 1 else RoomRules.classic(size))   # ({}: today's)
 	room_guest = {}
 	_room_kicked = {}
 	if my_id != "" and not in_session and not session_multi:
@@ -2512,9 +2512,12 @@ func _on_room_ask(d: Dictionary) -> void:
 		return
 	if _room_kicked.has(from):
 		return                       # KICKed from this room: not let in again
-	if RoomRules.needs_new(room_rules) and not (d.get("rv") is float or d.get("rv") is int):
-		# An older build (no "rv") knows only rounds / ammo / walls / frags: it would play this
-		# room's other rules as today's, so it is not let in (it reads ROOM IS FULL).
+	var old_build := not (d.get("rv") is float or d.get("rv") is int)
+	var team_room := in_room() and int(group.size) > 1
+	if old_build and (not RoomRules.is_classic(room_rules, true) if team_room else RoomRules.needs_new(room_rules)):
+		# An older build (no "rv") plays a DUO / SQUAD room by today's rules whatever the room's,
+		# and a SOLO room by its rounds / ammo / walls / frags only: it would play this room's
+		# rules differently, so it is not let in (it reads ROOM IS FULL).
 		_publish_json(ROOT + "/u/" + from, {"t": "rno", "from": my_id, "code": room_code, "full": true})
 		return
 	var slots := in_room()

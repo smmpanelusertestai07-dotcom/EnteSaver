@@ -953,7 +953,7 @@ listed here. If a part needs something new from the core, add it in its own file
   choices in its header; DEFAULTS are today's rules. `RoomRules.active()` = Game.room_rules online
   (set from Cloud.session_rules when a room's session starts), else DEFAULTS (`custom` false).
   `sanitize`, `text` / `parse` (what the room's messages carry), `needs_new` (an older build would
-  play it differently), `is_classic` / `classic(size, name)`, `summary(rules, team)`.
+  play a SOLO room's rules differently; a team room lets it in only when `is_classic(r, true)`), `is_classic` / `classic(size, name)`, `summary(rules, team)`.
 - Arena (both arenas): `rules` (RoomRules, from _ready); `spawn_cap(kind)` = rules.throw_cap;
   `_rules_to_fighters()` sets Fighter.hp_max (start and heal cap), rule_speed, rule_jump and
   Player.room_assist; `forced_pick()` = ONE GUN / RANDOM's gun for a pick round (Cloud.match_seed

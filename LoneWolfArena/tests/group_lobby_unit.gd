@@ -245,6 +245,26 @@ func _room_cloud() -> void:
 	_check(host.group_members().size() == 1 and not (host._grp.invited as Dictionary).has(guest.my_id), "a KICKed player is not let in again")
 	host.close_room()
 	_check(not host.in_room() and host.group.is_empty(), "CLOSE ROOM ends the room's group")
+	# An older build (an "ask" without "rv") plays a DUO room by today's rules: a room set to
+	# FIRST TO 7 keeps it out; with "rv" (this build) it gets in.
+	host.open_room("4821", RoomRules.classic(2), "424242", 2)
+	_check(RoomRules.is_classic(host.room_rules, true), "a CLASSIC DUO room")
+	host._inbox_budget = 8.0
+	host._on_room_ask(ask)
+	_check((host._grp.invited as Dictionary).has(guest.my_id), "a CLASSIC DUO room lets an older build in")
+	var seven := RoomRules.classic(2)
+	seven.rounds = 7
+	host.open_room("4821", seven, "424242", 2)
+	host._inbox_budget = 8.0
+	host._on_room_ask(ask)
+	_check(not (host._grp.invited as Dictionary).has(guest.my_id), "a DUO room FIRST TO 7 keeps an older build (no \"rv\") out")
+	var ask_new := ask.duplicate()
+	ask_new.rv = 1
+	host._on_room_ask(ask_new)
+	_check((host._grp.invited as Dictionary).has(guest.my_id), "a DUO room FIRST TO 7 lets this build (\"rv\") in")
+	host.open_room("4821", {}, "424242", 2)
+	_check(RoomRules.is_classic(host.room_rules, true), "a DUO room opened with {} is CLASSIC (first to 4)")
+	host.close_room()
 	host.free()
 	guest.free()
 
