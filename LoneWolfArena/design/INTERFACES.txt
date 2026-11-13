@@ -1090,3 +1090,62 @@ listed here. If a part needs something new from the core, add it in its own file
   declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
 - FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,
   DUEL DUEL_W; on MY FRIENDS CHAT CHAT_W and REMOVE REMOVE_W), empty places held by ColumnGap.
+
+ROUND 8 - OUT OF THE MATCH
+- PUBLIC custom rooms (scripts/net_rooms.gd, class NetRooms; `NetRooms.hub()` is the one list):
+  topic Cloud.ROOT + "/rm/<host id>", a retained message, subscribed as "/rm/+" together with the
+  player cards ("/p/+": Cloud.start_directory / stop_directory and on CONNACK), dispatched in
+  Cloud._on_publish to `NetRooms.hub().take(topic id, payload, now, my_id)` (room_changed when
+  the list changed). Card (`NetRooms.card_json(fields, id, pk, ts, key)`): {"t": "room", "v": 1,
+  "id", "pk", "host", "name", "size" 1|2|4, "filled", "total" = 2 x size, "rules" (two summary
+  tags, <= 48), "pw" (bool: a password is needed; the password never leaves the host), "code" (6
+  digits), "ts", "sig"}; sig = RSA-SHA256 over `NetRooms.card_text(d)` =
+  "room|id|name|host|size|filled|total|rules|pw 1/0|code|ts" with the host's player key.
+  `NetRooms.check(payload, topic_id, now, me)`: types, lengths (name <= RoomRules.NAME_MAX, host and
+  rules <= FIELD_MAX 48, pk <= 1024), no "|" in the signed text fields, id = sha256(pk)[0:32] =
+  the topic's id, not this phone's own, ts within MAX_AGE_S 120 (and <= now + 60), not a blocked
+  host, the signature (Cloud.verify_signed). One card per host (the topic; a newer ts replaces it, an
+  empty message removes it), at most MAX_CARDS 200 (the oldest go). `list(now)` newest first,
+  `quick_pick(now)` the newest with a free place and no password, `by_code(code, now)`.
+  The host: `Cloud.publish_room_card(fields)` ({} clears the retained card); `NetRooms.hub().host(code)`
+  after Cloud.open_room for a PUBLIC room, `process(delta, cloud)` (from LobbyFriends.process) every
+  CARD_EVERY_S 30 s and at once when what it says changes (`NetRooms.my_fields(cloud)`), cleared
+  when the room closes / changes and in LobbyFriends.on_lobby_exit (`stop(cloud)`).
+- CUSTOM ROOM / PLAY WITHOUT INTERNET are pages of their own (LobbyFriends.open("rooms" | "room" |
+  "local"): open_page(title, false), no side tabs; FRIENDS keeps Tab_friends / Tab_requests /
+  Tab_online). "rooms": PublicRoom_<code> rows (a tap joins: `join_public(code, pin)`, a room with a
+  password asks first: RoomPinAsk / RoomPinJoin), RoomsBar (RoomsIdField, RoomsPinField shown only
+  when the typed ID's room needs one or is not listed, RoomsJoin, RoomsQuick, RoomsCreate -> "room").
+  "room": the create form (room_draft gains "public": false; RoomPublic_<yes|no>; a PUBLIC room may
+  have no password; RoomMap: the CARGO CAGE tile) or the room this phone is in, as before. SELECT
+  MODE's ModeWay_rooms opens "rooms".
+- Profile keys (Game.DEFAULT_PROFILE, sanitised in _sanitize_profile): "lobby_pose" (Game.LOBBY_POSES:
+  "" random, lobby_hip, lobby_shift, lobby_look), "victory_pose" (Game.VICTORY_POSES: "", victory,
+  victory_pose); unknown values read "". CharacterModel.pose_choice (the lobby sets it from
+  lobby_pose) makes the lobby gesture pick that clip. INTEGRATOR: results_screen.gd still plays
+  "victory_pose"; to honour the choice it should play `Game.profile.victory_pose` when not "".
+- HISTORY entry: "left_by_them": true on a win because the opponent left (record_match keeps it from
+  the arena's result "opponent_left" when won; old entries have none: false). The row shows VICTORY
+  over a grey OPPONENT LEFT (node OpponentLeft) instead of the rounds.
+- UI helpers: `UI.page_corner(parent, title, on_close) -> [X "Close", "PageTitle"]` (open_page,
+  PROFILE: ProfileClose, WARDROBE: WardrobeClose); `UI.help_button(text)` (node "Help": a "?" that
+  opens `UI.show_tooltip` -> layer "HelpTip" with HelpTipText, a tap anywhere closes);
+  `UI.blur_shade(dim)` (BlurShade: the screen blurred and darkened; "Shade" plain at LOW graphics):
+  behind open_modal popups, the quit popup and PROFILE; `LobbyDialogs.quit_popup(parent, on_cancel,
+  on_quit, text)` (QuitDialog, QuitCancel, QuitConfirm) for the lobby and the login.
+- Lobby: name plates (scripts/lobby_plate.gd, LobbyPlate): HeroPlate (always; leader flag and the
+  leave glyph in a group: `LobbyTeam.ask_leave()`), MemberPlate_<1..3>; Lobby._place_plates lifts
+  overlapping plates. The members' NamePlate / LeaderMark Label3D stay as data (render layers 0).
+  AddFriendButton hides while the size box is open. PingChip: the wifi mark only, `show_number()` /
+  a tap shows the number for 4 s. STAGE_QUALITY MEDIUM = [1.0, MSAA_2X], LOW gets FXAA.
+- WARDROBE (LobbyWardrobe): `kind` outfit / lobby / victory (WardTab_<kind>), Bundle_<id> or
+  Pose_<clip|random>, WardrobeTag, EquipButton (disabled grey EQUIPPED for the saved item; `equip()`
+  saves and stays open), BackButton / WardrobeClose / Android back -> `close()` puts the saved outfit
+  and lobby pose back.
+- FRIENDS rows: no REMOVE (the player card has REMOVE FRIEND); the name button carries the player's
+  banner (`LobbyFriends.banner_cell(button, card)`, LV in its corner); RowStatus is the presence
+  alone. `LobbyFriends.plain_row(id, cloud)` is unchanged (the social panel's rows).
+- Player card: the outfit as its wardrobe picture (`LobbyProfile.outfit_thumb(id)`, node
+  PlayerOutfit). Match loading: TeachHead (TeachTitle, TeachSub), MatchCard (MatchMode,
+  MatchChips, MatchDesc), MatchLogo, TeachCard (topic zone | wall | rounds; `Loading.topic_for_test`),
+  ProgressLine / ProgressPct / ProgressStatus ("LOADING <MODE> (CARGO CAGE)...") / ProgressTip.
