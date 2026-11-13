@@ -166,6 +166,8 @@ func open_page(title: String, side_tabs := true) -> Dictionary:
 		body.offset_left = 22
 		if title == "":
 			body.offset_top = 4
+	# the X last, so it is hit-tested before a body that reaches up beside it (no title)
+	inner.move_child(close, -1)
 	modal.modulate.a = 0.0
 	modal.create_tween().tween_property(modal, "modulate:a", 1.0, 0.12)
 	return {"tabs": tabs, "foot": foot, "body": body, "title": t}

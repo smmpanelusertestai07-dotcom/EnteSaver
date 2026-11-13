@@ -107,11 +107,15 @@ static func open(owner_lobby: Lobby, friend_id: String, friend_name: String, bac
 	v.add_theme_constant_override("separation", 0)
 	safe.add_child(v)
 	w.build(v)
-	frame.position.x = -40.0
+	# the slide: both horizontal offsets together (a position tween would bake a transient height,
+	# from a layout pass where the wrapped notes are still narrow, into offset_bottom)
+	frame.offset_left = -40.0
+	frame.offset_right = -40.0
 	modal.modulate.a = 0.0
 	var tw := modal.create_tween().set_parallel()
 	tw.tween_property(modal, "modulate:a", 1.0, 0.14)
-	tw.tween_property(frame, "position:x", 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	for side: String in ["offset_left", "offset_right"]:
+		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 
 
 func build(v: VBoxContainer) -> void:

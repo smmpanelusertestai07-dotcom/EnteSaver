@@ -163,13 +163,18 @@ func run(at: Node) -> int:
 	var cfield := chat.find_child("ChatField", true, false) as LineEdit if chat else null
 	var cout := chat.find_child("ChatOutside", true, false) as Control if chat else null
 	if cframe and cclose and cfield and cout:
+		# (the tour opened FRIENDS just before: the panel is exactly the screen's height, the field on it)
+		var vs0 := lobby.get_viewport().get_visible_rect().size
+		_check(absf(cframe.size.y - vs0.y) < 1.0 and Rect2(Vector2.ZERO, vs0).encloses(cfield.get_global_rect()),
+			"the chat panel is the screen's height with its field on screen (panel %.0f of %.0f, field %s)" % [
+			cframe.size.y, vs0.y, str(cfield.get_global_rect())])
 		var fy := cframe.global_position.y
 		var xy := cclose.global_position.y
 		var ly := cfield.global_position.y
 		lobby.friends._lift_for_keyboard(cfield, true)
 		await at.wait(0.3)
 		var vs := lobby.get_viewport().get_visible_rect().size
-		_check(is_equal_approx(cframe.global_position.y, fy) and is_equal_approx(cclose.global_position.y, xy) and cframe.size.y >= vs.y - 1.0
+		_check(is_equal_approx(cframe.global_position.y, fy) and is_equal_approx(cclose.global_position.y, xy) and absf(cframe.size.y - vs.y) < 1.0
 			and cfield.global_position.y < ly - 100.0 and cfield.get_global_rect().end.y <= vs.y * 0.6,
 			"typing in the chat lifts only the input row (field %.0f -> %.0f), the panel stays" % [ly, cfield.global_position.y])
 		_check(cout.get_global_rect().has_point(Vector2(5, vs.y - 5)) and cout.get_global_rect().has_point(Vector2(vs.x - 5, 5)),
@@ -190,7 +195,7 @@ func run(at: Node) -> int:
 	var tab := chat.find_child("ChatTab_friends", true, false) as Control if chat else null
 	var kite := chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) as Control if chat else null
 	_check(frame != null and tab != null and kite != null and is_zero_approx(frame.global_position.x)
-		and tab.global_position.x >= 90.0 and kite.global_position.x >= 90.0, "the chat panel's content keeps clear of a left cutout")
+		and absf(frame.size.y - lobby.get_viewport().get_visible_rect().size.y) < 1.0 and tab.global_position.x >= 90.0 and kite.global_position.x >= 90.0, "the chat panel's content keeps clear of a left cutout")
 	await at.shot("l08b_chat_cutout")
 	UI.margins_for_test = Vector2(-1, -1)
 	var outside := chat.find_child("ChatOutside", true, false) as Button if chat else null
@@ -208,6 +213,20 @@ func run(at: Node) -> int:
 	await at.wait(0.6)
 	await at.shot("l10_select_mode")
 	_check_mode_page(lobby)
+	# a real tap on the X's centre closes the page (the body reaches up beside it)
+	var mclose := lobby.dialogs.modal.find_child("Close", true, false) as Control if lobby.dialogs.modal else null
+	if mclose:
+		var at_x := mclose.get_global_rect().get_center()
+		for down: bool in [true, false]:
+			var ev := InputEventMouseButton.new()
+			ev.button_index = MOUSE_BUTTON_LEFT
+			ev.pressed = down
+			ev.position = at_x
+			ev.global_position = at_x
+			lobby.get_viewport().push_input(ev, true)
+			await at.wait(0.05)
+		await at.wait(0.3)
+	_check(mclose != null and lobby.dialogs.modal == null, "a tap on the mode page's X closes it")
 	# With a left camera cutout the page keeps its cards and buttons clear of it.
 	UI.margins_for_test = Vector2(90, 40)
 	lobby.dialogs.close_modal()
