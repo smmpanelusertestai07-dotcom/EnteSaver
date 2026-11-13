@@ -194,9 +194,12 @@ func _mode_lines(lobby: Lobby) -> void:
 	await _pick_size(lobby, "lonewolf", 4)
 	if _text(lobby, "ModeFormat") != "SQUAD  ·  4 VS 4 ONLINE":
 		_fail("the mode card in LONE WOLF SQUAD says %s" % _text(lobby, "ModeFormat"))
-	var group_bar := lobby.find_child("GroupBar", true, false) as Control
-	if group_bar == null or not group_bar.is_visible_in_tree() or lobby.find_child("TeamBar", true, false) != null:
-		_fail("LONE WOLF does not show the GROUP bar (the TEAM bar is gone)")
+	# (moved on purpose, round 7: no GROUP column; a solo's group lives in the mode card's TEAM panel
+	# and the social panel, and the TEAM bar shows only in a group)
+	var team_bar := lobby.find_child("TeamBar", true, false) as Control
+	if lobby.find_child("GroupBar", true, false) != null or team_bar == null or team_bar.is_visible_in_tree() \
+			or not (lobby.find_child("SocialArrow", true, false) as Control).is_visible_in_tree():
+		_fail("a solo in LONE WOLF shows the old GROUP column or the TEAM bar, or has no social panel arrow")
 	await at.shot("t04_lobby_squad")
 	await _pick_size(lobby, "training", 1)
 	if _text(lobby, "ModeFormat") != "BOT: NORMAL  ·  FIRST TO %d" % Game.rounds_to_win():
@@ -235,14 +238,11 @@ func _quick_clears(lobby: Lobby) -> void:
 	var nm := lobby.get_node_or_null("NetMatch") as NetMatch
 	if nm == null or not nm.searching or not Game.team_match.is_empty():
 		_fail("START in LONE WOLF SOLO did not start the 1 vs 1 search with no team match")
-	var plus := lobby.find_child("PodiumInvite", true, false) as Control
-	if plus == null or plus.is_visible_in_tree():
-		_fail("the podium's + plate shows during the 1 vs 1 search")
+	if lobby.find_child("PodiumInvite", true, false) != null:
+		_fail("the podium still has a + plate (none by the hero any more)")
 	if nm:
 		nm.cancel()
 	await at.wait(0.3)
-	if plus == null or not plus.is_visible_in_tree():
-		_fail("the podium's + plate does not come back after the search (a solo in LONE WOLF)")
 
 
 ## LONE WOLF x DUO: the search for real players (Cloud.group_start: a solo is a unit of one),
@@ -261,9 +261,6 @@ func _team_search(lobby: Lobby) -> void:
 	var plate := lobby.find_child("MatchingPlate", true, false) as Control
 	if plate == null or not plate.is_visible_in_tree() or lobby.start_btn.is_visible_in_tree():
 		_fail("START does not turn into the MATCHING... plate while searching")
-	var plus := lobby.find_child("PodiumInvite", true, false) as Control
-	if plus == null or plus.is_visible_in_tree():
-		_fail("the podium's + plate shows during the DUO search")
 	for l in tab.find_children("*", "Label", true, false):
 		if (l as Label).text.contains("BOT"):
 			_fail("the search mentions bots: %s" % (l as Label).text)

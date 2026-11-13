@@ -47,6 +47,7 @@ static func run(runner: Node) -> void:
 	me.t = runner
 	me._test_rows_and_revive()
 	me._test_geometry()
+	me._test_ping_and_leader()
 	me._test_feed()
 	me._test_results()
 	me._test_quit_warning()
@@ -137,6 +138,37 @@ func _test_rows_and_revive() -> void:
 	ht.free()
 	hud.free()
 	_free(a)
+
+
+## The ping chip beside the gear never runs into the score bar (16:9 with a camera cutout on the
+## left too), and stays off the gear; an all-human match draws no leader flag for a team without
+## the host, offline / co-op the first non-bot keeps it.
+func _test_ping_and_leader() -> void:
+	var gear: Dictionary = HudLayout.DEFAULTS.settings.duplicate()
+	var was := HudLayout.inset
+	for vs: Vector2 in [Vector2(1280, 720), Vector2(1560, 720)]:
+		for cut: float in [0.0, 90.0]:
+			HudLayout.inset = Vector2(cut, 0.0)
+			var u := HudLayout.unit(vs)
+			var score := Rect2(Vector2(vs.x * 0.5 - 0.33 * u, 0.0), Vector2(0.66 * u, 0.09 * u))   # (Hud.score_rect)
+			var box := HudLayout.ping_box(gear, vs, score)
+			var r: Rect2 = box.get("rect", Rect2())
+			var gc := HudLayout.center(gear, vs)
+			var gr := HudLayout.touch_radius(gear, vs)
+			_check(not box.is_empty() and not r.intersects(score) and r.position.x >= gc.x + gr,
+				"the ping chip sits right of the gear, clear of the score bar at %s, cutout %d (%s)" % [str(vs), int(cut), str(r)])
+	HudLayout.inset = was
+	var a := TeamArena.new()
+	a.team_size = 2
+	for i in 4:
+		a.slots.append(_fighter("P%d" % i, 0 if i < 2 else 1, i))
+	a.all_human = true
+	_check(a.team_leader(0) == null and a.team_leader(1) == null, "an all-human match without the host's place: no leader flag")
+	a.all_human = false
+	_check(a.team_leader(0) == a.slots[0] and a.team_leader(1) == a.slots[2], "offline / co-op: the first non-bot leads its team")
+	for f in a.slots:
+		f.free()
+	a.free()
 
 
 func _test_geometry() -> void:

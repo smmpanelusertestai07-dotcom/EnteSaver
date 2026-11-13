@@ -158,10 +158,10 @@ listed here. If a part needs something new from the core, add it in its own file
   default; `HudMinimap.turns()`), north up otherwise; `ally_marks` / `enemy_marks` take that
   transform), `hud_panels.gd` (HudPanels)
 - online matches: `bind` adds `HudNet` (scripts/hud_net.gd, node "HudNet", its own layer): the
-  round trip of the match's path beside the gear (a wifi mark and a plain number, NetPing;
-  `ping_center()`: right of a gear on the left via `HudLayout.ping_spot(gear, vs)`, about
-  `HudNet.PING_AT` (0.278, 0.031), the default; under the weapon panel when the player moved the gear
-  to the right; it steps right of a button there), round SPEAKER / MIC buttons at HudLayout's
+  round trip of the match's path beside the gear (a wifi mark and a plain number, NetPing; right of a
+  gear on the left, the default, at `HudLayout.ping_box(gear, vs, score)`, about `HudNet.PING_AT`
+  (0.278, 0.031) and kept clear of the score bar, compact when it must be; under the weapon panel when
+  the player moved the gear to the right), round SPEAKER / MIC buttons at HudLayout's
   "speaker" / "mic" (keys in DEFAULTS, not in ORDER: HudNet owns their touches; in the column beside
   the minimap under the gear; SPEAKER toggles OFF/back, MIC opens `VoiceButtons.open_popup(.., "mic", .., true)`,
   node "VoicePopup"), TALK under MIC with PUSH TO TALK, the players speaking now under them, then
@@ -476,7 +476,8 @@ listed here. If a part needs something new from the core, add it in its own file
   `QuitConfirm`); it is ignored during the START overlay.
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, the bottom bar `BottomBar` with WARDROBE
   `BundlesButton`, PROFILE `ProfileButton` and ONLINE 1 VS 1 `OnlineButton`, the chat strip above it
-  `ChatStrip` (UI.TOUCH_MIN tall, its icon and ticker centred; its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
+  `ChatStrip` (UI.TOUCH_MIN tall, its icon and ticker centred; `chat_strip_width()`: CHAT_W, shorter with
+  group members so the voice pill's place under the hero's feet stays free, also with a cutout; its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
   `AddFriendButton` on the right (FRIENDS on PLAYERS), FRIENDS `FriendsButton` and the gear
   `SettingsButton` top-right, mode card, START, settings, input; the reference's layout: no text
   menu, stats chips, name plate or version) makes four helpers that build under its `ui` and reach
@@ -547,9 +548,17 @@ listed here. If a part needs something new from the core, add it in its own file
   instead; each card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
   (scripts/mode_help.gd: `ModeHelp.PAGES`, `pages_of(m)`, `show_page(i)`, `turn(step)`, nodes
   HelpPicture, HelpTitle, HelpText, HelpDots / HelpDot_<i>, HelpPrev, HelpNext; X and back return to
-  SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the team-size box
-  (`LobbyDialogs.open_size_box()`, `size_box`, nodes SizeBox / SizeBoxPanel / SizeTile_<1|2|4>,
-  `size_tile_text(m, n, members)`, `size_box_allowed(member, searching)`): a tile and SELECT MODE's
+  SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the TEAM panel above
+  the card (`LobbyDialogs.open_size_box(fade)`, `size_box`, `refresh_size_box()` on group_changed,
+  nodes SizeBox / SizeBoxPanel / SizeTile_<1|2|4> (picture tiles), `size_tile_text(m, n, members)`,
+  `size_box_allowed(member, searching)`: not during a search; a member's is read-only); in LONE WOLF
+  with online teams and not in a room (`team_rows_shown(m, grouped, in_room)`) it also has the
+  GroupCodeRow (`LobbyTeam.code_row`) or GroupCodeNote (`LobbyTeam.code_note`), the tick
+  GroupCodeSwitch (JOIN BY CODE = `Cloud.set_code_join`) and, for the leader or a solo, the tick
+  TeamFillTick (FILL EMPTY PLACES = setting `team_fill`, default true; off, `Lobby.start_group`
+  refuses a DUO / SQUAD START that needs strangers in the group's own team: `Lobby.fill_needed(size,
+  group_n)`, true when group_n < `NetGroup.per_team(size)` (a solo, a SQUAD group of 2 or 3); a
+  whole team still searches for opponents; not in a room): a tile and SELECT MODE's
   size chips both go through `LobbyDialogs.pick_size(m, n)`); the
   opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) are on the TRAINING GROUND card:
   a tap picks TRAINING GROUND with that opponent and closes SELECT MODE; DUMMY sets
@@ -999,11 +1008,12 @@ listed here. If a part needs something new from the core, add it in its own file
 - GROUP CODE (`Cloud.group_code()`: `Cloud.CODE_LEN` = 10 digits, 2 bucket + 8 secret, shown by
   `Cloud.code_display` as "12 3456 7890", checked by `Cloud.is_group_code`; a solo's own `Cloud.my_code`, a member's the leader's
   from "groster"'s "code", the leader's switch in its "cj" = `Cloud.code_open()`; none in a CUSTOM
-  ROOM): the GROUP bar's `GroupCodeRow` (a member's only while `code_open()`, else the line
-  `GroupCodeNote` "THE LEADER SHARES THE GROUP CODE"; `GroupCode`,
-  `GroupCodeCopy`, and for the leader or a solo `GroupCodeSwitch` "JOIN BY CODE: ON / OFF" =
-  `Cloud.set_code_join`, `Cloud.code_join` OFF at the start of every run; `GroupCodeCopy` turns it on). A solo's bar has `GroupJoinCode`: the popup
-  `JoinCodePopup` (`JoinGroupCode`, `JoinGroupGo`, `JoinGroupState`) calls
+  ROOM): `GroupCodeRow` in the TEAM bar's panel and the mode card's TEAM panel (a member's only while
+  `code_open()`, else the line `GroupCodeNote` "THE LEADER SHARES THE GROUP CODE"; `GroupCode`,
+  `GroupCodeCopy`); the mode card's TEAM panel's tick `GroupCodeSwitch` "JOIN BY CODE" =
+  `Cloud.set_code_join` (the leader's or a solo's; a member sees the leader's greyed), `Cloud.code_join`
+  OFF at the start of every run; `GroupCodeCopy` turns it on. JOIN BY CODE: the social panel's
+  GROUP CODE keypad (`CodePad`, LobbySocial.open_pad) calls
   `Cloud.join_group_code(code)` (spaces allowed; "" = asking, else the notice: 10 digits, own code,
   EXIT YOUR GROUP FIRST, CANCEL THE SEARCH FIRST in QUICK MATCH or a DUO / SQUAD search, offline, TOO MANY TRIES: WAIT A MINUTE after `Cloud.CODE_TRIES_MAX` a minute) and follows
   `Cloud.code_state` ("asking", "in" JOINING THE GROUP... until the roster has it, then "", "full"
@@ -1055,8 +1065,26 @@ listed here. If a part needs something new from the core, add it in its own file
   unread lines count on the strip's badge. A match's chat stays the match room's (HudNet).
 - Social panel (LobbySocial, Lobby.social): SocialArrow at the right edge opens SocialPanel
   (SocialTab_<friends|recent>, SocialStatus, SocialRefresh, SocialSearch, SocialGroupCode,
-  SocialRow_<code> with SocialInvite_<code>, SocialEmpty / SocialAddFriends); GROUP CODE's keypad
-  CodePad (CodePadShown, CodeKey_<0-9>, CodeKeyBack, CodeKeyPaste, CodeKeyGo, CodePadState).
+  SocialRow_<code> with SocialInvite_<code> (a friend: `LobbyTeam.ask_friend`, a toast when it
+  cannot go out) or, for a RECENT player who is no friend, SocialAdd_<code> (ADD FRIEND /
+  ASKED: `Cloud.request_friend`), SocialEmpty / SocialAddFriends; every target 56 px); GROUP CODE's keypad
+  CodePad (CodePadShown, CodeKey_<0-9>, CodeKeyBack, CodeKeyPaste, CodeKeyGo, CodePadState; it
+  closes once the join it started let the player in; a player already in a group reads EXIT YOUR
+  GROUP FIRST and the pad stays).
+- TEAM bar (LobbyTeam, 1.9): no left GROUP column any more. In a group (not a room) `TeamBar`
+  under the player card opens `TeamPanel` from the left (`LobbyTeam.open_panel()`, x 0-0.36 W, at
+  least PANEL_MIN_W; TeamOutside / TeamPanelClose / back close it; drawn again on group_changed):
+  GroupHead "TEAM n/4", GroupCodeRow or GroupCodeNote, GroupMember_<n> (the level:
+  `LobbyTeam.member_level(m)` from Cloud.directory, the name, LEADER / YOU, LeaderTag (a flag) on
+  the leader, SpeakMark_<n>: an empty 24 px place for the voice's speaking mark, GroupRemove_<n>
+  for the leader), GroupInvite "+ INVITE" (opens the social panel; greyed for a member and in a
+  full group), GroupTeams (size > 1), GroupExit or GroupDisband (asked first). No "+" plate on
+  the podium: with members `Lobby.hero_x()` = HERO_X_GROUP (the camera moves, the hero stands
+  further left) and the members stand to its right (`Lobby.MEMBER_SPOTS`).
+- Match HUD: the ping chip beside the gear (`HudLayout.ping_box(gear, vs, avoid)`: moved left
+  before the score bar, compact (the number under the bars) beside the gear where even that does
+  not fit; its rect is in `HudTeam.blocked_rects()`). `TeamArena.team_leader(t)` is null (no flag)
+  for a team without the host in an all-human match (`TeamArena.all_human`).
   Setting team_status (0 JOIN ME ANYTIME: a GROUP INVITE is taken at once; 1 ONLINE; 2 BUSY:
   declined at once; LobbyFriends._on_group_invited). A settings file without it reads 1.
 - FRIENDS rows (LobbyFriends._player_row): fixed columns (RowStatus 170 px, ADD FRIEND ADD_W,

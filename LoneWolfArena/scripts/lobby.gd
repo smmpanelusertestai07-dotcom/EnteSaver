@@ -8,7 +8,8 @@ extends Node3D
 ## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
 ## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
 ## the opponent and the team size SOLO / DUO / SQUAD are picked too; the figure at its right end
-## opens the compact team-size box above it, LobbyDialogs.open_size_box) and the big START. START plays
+## opens the TEAM panel above it: the group code, JOIN BY CODE, FILL EMPTY PLACES and the size
+## tiles, LobbyDialogs.open_size_box) and the big START. START plays
 ## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
 ## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
 ## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
@@ -17,9 +18,10 @@ extends Node3D
 ## (SearchTab, scripts/lobby_search.gd) drops from the top centre with the time searched and a
 ## cancel X, START turns into the greyed MATCHING... plate, and the lobby stays usable (a tap on the
 ## mode card says CANCEL THE SEARCH FIRST; the match found closes whatever window is open). In
-## LONE WOLF the GROUP bar under the player card (LobbyTeam, scripts/lobby_team.gd) invites online
-## friends into a group of up to 4; the other members stand on the podium beside the hero, smaller,
-## with name plates and a LEADER mark (show_group_members); only the leader's START works (a member
+## LONE WOLF the right-hand social panel (LobbySocial) invites online friends into a group of up to
+## 4; in a group the TEAM bar under the player card (LobbyTeam, scripts/lobby_team.gd) opens the
+## TEAM panel; the hero steps left and the other members stand to its right, smaller, with name
+## plates and a LEADER mark (show_group_members); only the leader's START works (a member
 ## sees GroupWaitLeader "WAITING FOR <LEADER> TO START" in its place). WARDROBE opens the outfit picker
 ## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
 ## are in SETTINGS (the gear).
@@ -32,7 +34,6 @@ extends Node3D
 ## bar and its invites).
 ## Node names used by the screenshot walkthrough and the tests: StartButton, ModeCard (with
 ## SizeBoxButton), BottomBar,
-## PodiumInvite (the podium's "+": a place to add a teammate, _build_podium_invite),
 ## BundlesButton (WARDROBE), OnlineButton (ONLINE 1 VS 1), FriendsButton (FRIENDS: the unread
 ## badge), SettingsButton, Bundle_<id>, EquipButton, GroupWaitLeader, MatchingPlate, SearchLayer
 ## with SearchTab (SearchLine, SearchTimer, SearchPlayers, SearchCancel); 3D: GroupMembers with
@@ -51,12 +52,15 @@ const CAM_FOV := 38.0
 const HERO_X := 0.5
 const WARD_X := 0.78
 const MODEL_YAW := PI - 0.32
-## The group's other members on the podium (GROUPS.txt 1): smaller than the hero, left and right
-## behind it on the podium, the third behind on the right on the floor (clear of the GROUP bar on
-## the left and of the mode card); each turned a little toward the middle.
+## The group's other members (GROUPS.txt 1, the reference's team lobby): with members in the group
+## the hero stands further left on the screen (HERO_X_GROUP, the camera moves) and the members stand
+## to its right, a little smaller: the first on the podium's right edge, the next two behind on the
+## floor, further right (clear of the mode card); each turned a little toward the middle. Nothing
+## stands under the hero (the voice's pill goes there) and there is no "+" plate on the podium.
 const MEMBER_SCALE := 0.86
-const MEMBER_SPOTS := [Vector3(-0.62, PODIUM_TOP, -0.5), Vector3(0.62, PODIUM_TOP, -0.5), Vector3(1.45, 0.0, -1.55)]
-const MEMBER_YAWS := [PI - 0.02, PI - 0.5, PI - 0.62]
+const MEMBER_SPOTS := [Vector3(0.76, PODIUM_TOP, -0.38), Vector3(1.5, 0.0, -1.45), Vector3(2.2, 0.0, -2.1)]
+const MEMBER_YAWS := [PI - 0.42, PI - 0.55, PI - 0.66]
+const HERO_X_GROUP := 0.40
 ## Name plate and LEADER mark heights over a member's feet (the model's own units, before its scale).
 const PLATE_Y := 2.02
 const MARK_Y := 2.24
@@ -135,8 +139,6 @@ var _search_was := ""
 ## The member the leader's DUEL challenge went to (start_duel), "" when none waits: MATCHING...
 ## stands in START's place until the match loads, or a notice says why not.
 var _duel_with := ""
-## The "+" plate on the podium (PodiumInvite): a place to add a teammate, right of the hero.
-var _podium_invite: Button
 
 
 func _ready() -> void:
@@ -202,8 +204,13 @@ func _cam_x(frac: float, dist: float) -> float:
 	return -(frac - 0.5) * 2.0 * tan(deg_to_rad(CAM_FOV * 0.5)) * aspect * dist
 
 
+## Where the hero stands on the screen: HERO_X alone, HERO_X_GROUP with group members beside it.
+func hero_x() -> float:
+	return HERO_X_GROUP if not _member_models.is_empty() else HERO_X
+
+
 func _main_view() -> Array:
-	var x := _cam_x(HERO_X, CAM_DIST)
+	var x := _cam_x(hero_x(), CAM_DIST)
 	return [Vector3(x, CAM_Y, CAM_DIST), Vector3(x, CAM_LOOK_Y, 0.0)]
 
 
@@ -606,7 +613,6 @@ func _build_ui() -> void:
 	_build_add_button(root)
 	team.build(root)
 	social.build(root)
-	_build_podium_invite(root)
 	VoiceButtons.lobby_pill(self, root)        # [mic | speaker] under the character (scripts/voice_buttons.gd)
 	# The search tab hangs over everything the lobby opens (WARDROBE, PROFILE, SETTINGS, popups),
 	# so the search stays in sight and its X in reach while the player looks around.
@@ -805,17 +811,23 @@ func _build_bottom_bar(root: Control) -> void:
 		row.add_child(_bar_button(String(it[0]), String(it[1]), String(it[2]), it[3]))
 
 
+## The chat strip's full width, and the room it leaves for the voice's mic / speaker pill, which
+## is centred under the hero's feet (half the pill's width and a gap, VOICE_PLACE_LEFT).
+const CHAT_W := 470.0
+const VOICE_PLACE_LEFT := 66.0
+
+
 ## The chat strip above the bottom bar (the reference's chat icons and one-line ticker): a speech
 ## bubble button (ChatButton) and the newest friend message as "[FRIEND] NAME: text" (ChatTicker,
 ## "[FRIENDS] TAP TO CHAT WITH A FRIEND" when there is none); a tap opens the chat panel with that
-## friend, or FRIENDS when there is nobody to chat with yet.
+## friend, or FRIENDS when there is nobody to chat with yet. Its width: chat_strip_width().
 func _build_chat_strip(root: Control) -> void:
 	var strip := Button.new()
 	strip.name = "ChatStrip"
 	strip.focus_mode = Control.FOCUS_NONE
 	strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	strip.offset_left = 12
-	strip.offset_right = 12 + 470
+	strip.offset_right = 12 + CHAT_W
 	strip.offset_top = -12 - UI.TOUCH_MIN - 8 - UI.TOUCH_MIN      # a full 56 px touch target
 	strip.offset_bottom = -12 - UI.TOUCH_MIN - 8
 	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
@@ -824,7 +836,7 @@ func _build_chat_strip(root: Control) -> void:
 	ticker.name = "ChatTicker"
 	UI.outlined(ticker, 3, Color(0, 0, 0, 0.6))
 	ticker.position = Vector2(62, 0)
-	ticker.size = Vector2(404, UI.TOUCH_MIN)
+	ticker.size = Vector2(CHAT_W - 66.0, UI.TOUCH_MIN)
 	ticker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	strip.add_child(ticker)
 	strip.draw.connect(func() -> void:
@@ -879,11 +891,27 @@ var _chat_shown := ""
 var _chat_t := 0.0
 
 
-## The ticker follows the newest friend message (checked twice a second from _process).
+## The chat strip's width: CHAT_W, but with group members beside it the hero stands further left
+## (HERO_X_GROUP), so the strip ends short of the voice pill's place under the hero's feet (the
+## hero is 3D: a left camera cutout moves the strip right, not the hero).
+func chat_strip_width() -> float:
+	if _member_models.is_empty():
+		return CHAT_W
+	var vp := get_viewport()
+	var free := hero_x() * vp.get_visible_rect().size.x - VOICE_PLACE_LEFT - UI.safe_margins(vp).x - 12.0
+	return clampf(floorf(free), 180.0, CHAT_W)
+
+
+## The ticker follows the newest friend message (checked twice a second from _process), the
+## strip's width follows chat_strip_width().
 func _refresh_chat_strip() -> void:
 	var strip := _main_ui.get_node_or_null("ChatStrip") as Button if _main_ui else null
 	if strip == null:
 		return
+	var w := chat_strip_width()
+	if not is_equal_approx(strip.size.x, w):
+		strip.offset_right = 12 + w
+		(strip.get_node("ChatTicker") as Label).size.x = w - 66.0
 	var who := chat_ticker_friend()
 	var text := "[FRIENDS] TAP TO CHAT WITH A FRIEND"
 	if who != "":
@@ -1202,9 +1230,23 @@ func _start() -> void:
 func start_group(size: int) -> void:
 	Game.team_match = {}
 	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
+	var n := LobbyTeam.members().size() if LobbyTeam.in_group() else 1
+	if not bool(Game.settings.get("team_fill", true)) and fill_needed(size, n) and not Game.cloud_service().in_room():
+		dialogs.notice("LONE WOLF %s" % word, "FILL EMPTY PLACES is off: no other players join your team, so only a whole team starts (%d players in %s). Invite more players, or tick FILL EMPTY PLACES in the TEAM panel (the figure on the mode card)." % [NetGroup.per_team(size), word])
+		return
 	var why := Game.cloud_service().group_start(size)
 	if why != "":
 		dialogs.notice("LONE WOLF %s" % word, why)
+
+
+## Whether START in DUO / SQUAD (`size` a team) with a group of `group_n` players needs players
+## from outside the group IN ITS OWN TEAM: when the group is smaller than one team (a solo, a SQUAD
+## group of 2 or 3). A whole team (a DUO pair, a SQUAD of 4) only searches for opponents, a DUO
+## group of 4 plays 2 VS 2 among itself, and a group too big for its team gets Cloud.group_start's
+## own refusal (GROUPS.txt 1). With the TEAM panel's FILL EMPTY PLACES off (setting team_fill) a
+## START that needs places filled does not search and says why.
+static func fill_needed(size: int, group_n: int) -> bool:
+	return not (size == 2 and group_n == 4) and group_n < NetGroup.per_team(size)
 
 
 ## A group of exactly two with SOLO: the leader's START plays the plain 1 vs 1 between the two
@@ -1356,80 +1398,6 @@ func update_start_gate() -> void:
 		dialogs.close_size_box()
 
 
-## The "+" plate on the podium (PodiumInvite, GROUPS.txt 1): while the group has room and this
-## player may invite (the leader, or a solo in LONE WOLF), a small plate in the lobby's chamfered
-## style floats at chest height over the first free member spot right of the hero (INVITE_SPOTS);
-## a tap opens the same INVITE list as the GROUP bar's + INVITE. Hidden during a search and while
-## the leader's DUEL waits (both show MATCHING...), in a CUSTOM ROOM, with the wardrobe open, and when both right spots are taken.
-const INVITE_SPOTS := [1, 2]
-const INVITE_PLATE := Vector2(64, 64)
-const INVITE_LIFT := 1.05
-
-
-func _build_podium_invite(root: Control) -> void:
-	var b := Button.new()
-	b.name = "PodiumInvite"
-	b.text = "+"
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = INVITE_PLATE
-	b.size = INVITE_PLATE
-	b.add_theme_font_override("font", UI.font("heavy"))
-	b.add_theme_font_size_override("font_size", 40)
-	for st: String in ["font_color", "font_focus_color"]:
-		b.add_theme_color_override(st, UI.ACCENT)
-	for st: String in ["font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
-		b.add_theme_color_override(st, UI.INK)
-	var normal := UI.chamfer(Color(0.02, 0.02, 0.025, 0.62), 10, 2, Color(UI.ACCENT, 0.8), 0.0, ["tl", "br"])
-	var lit := UI.chamfer(UI.ACCENT, 10, 2, UI.ACCENT, 0.0, ["tl", "br"])
-	for st: String in ["normal", "focus"]:
-		b.add_theme_stylebox_override(st, normal)
-	for st: String in ["hover", "pressed", "hover_pressed"]:
-		b.add_theme_stylebox_override(st, lit)
-	b.visible = false
-	b.pressed.connect(func() -> void:
-		Audio.play("ui_click", -4.0)
-		team.open_list())
-	root.add_child(b)
-	_podium_invite = b
-
-
-## Whether the podium's "+" plate shows: the GROUP bar shows (`bar_shown`, not in a room), this
-## player may invite (the leader or a solo) into a group with room, and no search runs.
-static func podium_invite_shown(bar_on: bool, leader: bool, count: int, max_n: int, searching: bool) -> bool:
-	return bar_on and leader and count < max_n and not searching
-
-
-## The member spot the "+" plate stands over: the first of INVITE_SPOTS no member takes (`taken`:
-## id -> spot, as member_slots gives), -1 when both are taken.
-static func podium_invite_spot(taken: Dictionary) -> int:
-	for i: int in INVITE_SPOTS:
-		if not taken.values().has(i):
-			return i
-	return -1
-
-
-## Every frame: the "+" plate's place over its spot (the camera's projection) and whether it shows.
-func _follow_podium_invite() -> void:
-	if _podium_invite == null or camera == null:
-		return
-	var cloud := Game.cloud_service()
-	var grouped := LobbyTeam.in_group()
-	var spot := podium_invite_spot(_member_slot)
-	var on := wardrobe == null and _cam_t >= 1.0 and spot >= 0 and not start_btn.disabled and not cloud.in_room() \
-		and podium_invite_shown(LobbyTeam.bar_shown(Game.mode, grouped), LobbyTeam.is_leader(),
-			LobbyTeam.members().size() if grouped else 1, LobbyTeam.group_max(), search_kind() != "" or _duel_with != "")
-	if on:
-		var p: Vector3 = MEMBER_SPOTS[spot] + Vector3(0, INVITE_LIFT, 0)
-		on = not camera.is_position_behind(p)
-		var at := camera.unproject_position(p) - INVITE_PLATE * 0.5
-		# never over the mode card or START (they sit bottom-right)
-		if mode_card and mode_card.is_visible_in_tree():
-			at.y = minf(at.y, mode_card.get_global_rect().position.y - INVITE_PLATE.y - 8.0)
-		_podium_invite.global_position = at.round()
-	if _podium_invite.visible != on:
-		_podium_invite.visible = on
-
-
 ## Which of the 3 spots each other member takes: a member keeps theirs while in the group, a new one
 ## takes the first free spot; at most MEMBER_SPOTS.size(). `ids`: the other members, join order.
 static func member_slots(old: Dictionary, ids: Array) -> Dictionary:
@@ -1479,6 +1447,11 @@ func show_group_members(list: Array) -> void:
 		var mark := cm.get_node_or_null(^"LeaderMark") as Label3D
 		if mark:
 			mark.visible = bool(m.get("leader", false))
+	# the hero steps left while members stand beside it (back to the middle when alone again)
+	var view := _main_view()
+	if camera != null and wardrobe == null and not (view[0] as Vector3).is_equal_approx(_cam_to_pos):
+		_move_camera(view[0], view[1])
+	_refresh_chat_strip()            # (its width: the voice pill's place under the hero stays free)
 
 
 func _add_member(id: String, slot: int, bundle: String) -> CharacterModel:
@@ -1648,7 +1621,7 @@ func _in_drag_zone(p: Vector2) -> bool:
 	var y := p.y / vs.y
 	if wardrobe:
 		return x > 0.62 and y > 0.1 and y < 0.68
-	return x > HERO_X - 0.22 and x < HERO_X + 0.16 and y > 0.1 and y < 0.86
+	return x > hero_x() - 0.22 and x < hero_x() + 0.16 and y > 0.1 and y < 0.86
 
 
 func _process(delta: float) -> void:
@@ -1677,7 +1650,6 @@ func _process(delta: float) -> void:
 	_follow_search(delta)
 	if group_view:
 		group_view.visible = wardrobe == null      # the wardrobe's view is the hero's alone
-	_follow_podium_invite()
 	_gate_t -= delta
 	if _gate_t <= 0.0:
 		_gate_t = 0.25

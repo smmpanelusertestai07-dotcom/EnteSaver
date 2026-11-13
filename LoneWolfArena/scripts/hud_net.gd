@@ -364,35 +364,30 @@ func _draw() -> void:
 func _draw_ping() -> void:
 	var vs := size
 	var ms := ping_ms()
-	var h := clampf(vs.y * 0.025, 14.0, 24.0)
-	var fs := int(round(h * 0.9))
-	var c := ping_center()
-	NetPing.draw(self, Vector2(c.x - h * 1.5, c.y), h, ms, fs)
-	_draw_tag(Vector2(c.x, c.y + h * 0.5 + 10.0), 1)
-
-
-## The ping's centre: right of the gear (HudLayout.ping_spot) when the gear sits on the left, else
-## under the weapon panel's right end; moved just right of this layer's buttons where one of them
-## is there (a layout that keeps CHAT / MUTE beside the minimap's top).
-func ping_center() -> Vector2:
-	var vs := size
-	var h := clampf(vs.y * 0.025, 14.0, 24.0)
-	var half := h * 1.6
-	var c := Vector2(vs.x * PING_AT.x, vs.y * PING_AT.y)
-	if hud != null and not hud.layout.is_empty():
-		var spot: Variant = HudLayout.ping_spot(hud.layout.settings, vs)
-		if spot != null:
-			c = Vector2((spot as Vector2).x + h * 1.5, (spot as Vector2).y)
-		else:
-			var wp: Dictionary = hud.layout.weapons
-			var pr := HudLayout.weapon_main(wp, vs)
-			for r: Rect2 in HudLayout.weapon_slots(wp, vs):
-				pr = pr.merge(r)
-			c = Vector2(pr.end.x - half, pr.end.y + h)
-	for b: Vector2 in button_centers().values():
-		if absf(b.y - c.y) < R + 12.0 and absf(b.x - c.x) < R + half + 4.0:
-			c.x = maxf(c.x, b.x + R + half + 6.0)
-	return c
+	var col := NetPing.color(ms)
+	var chip := HudLayout.ping_box(hud.layout.settings, vs, hud.score_rect())
+	if not chip.is_empty():
+		# Beside the gear (the reference's place): the wifi mark and the number, the DIRECT / RELAY
+		# tag under; clear of the score bar (HudLayout.ping_box: compact, the number under the mark).
+		var spot: Vector2 = chip.pos
+		var h := float(chip.h)
+		if bool(chip.compact):
+			NetPing.draw(self, spot, h, ms, 12, 1.0, true)
+			HudDraw.text(self, NetPing.label(ms), Vector2(spot.x, spot.y + h * 0.5 + 10.0), 12, col, 0, 3, "bold")
+			_draw_tag(Vector2(spot.x, spot.y + h * 0.5 + 23.0), 0)
+			return
+		NetPing.draw(self, spot, h, ms, 15)
+		_draw_tag(Vector2(spot.x, spot.y + h * 0.5 + 9.0), 0)
+		return
+	# A gear the player moved to the right: under the weapon panel's right end.
+	var wp: Dictionary = hud.layout.weapons
+	var pr := HudLayout.weapon_main(wp, vs)
+	for r: Rect2 in HudLayout.weapon_slots(wp, vs):
+		pr = pr.merge(r)
+	var h2 := clampf(vs.y * 0.025, 14.0, 24.0)
+	var c := Vector2(pr.end.x - h2 * 1.6, pr.end.y + h2)
+	NetPing.draw(self, Vector2(c.x - h2 * 1.5, c.y), h2, ms, int(round(h2 * 0.9)))
+	_draw_tag(Vector2(c.x, c.y + h2 * 0.5 + 10.0), 1)
 
 
 ## The small DIRECT / RELAY tag under the ping (centre or right end at `at`).

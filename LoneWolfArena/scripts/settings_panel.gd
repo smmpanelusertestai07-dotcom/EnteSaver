@@ -68,9 +68,10 @@ const PREVIEW_TABS := [1, 2]
 const SCENE_KEYS := ["visual_effects"]
 ## Settings no tab shows: chosen elsewhere (the mode and the bot level in SELECT MODE, the gun at
 ## the pick, MIC and SPEAKER under the character and in a match: VoiceButtons, the status on the
-## lobby's social panel: LobbySocial) or the game's own bookkeeping.
+## lobby's social panel: LobbySocial, FILL EMPTY PLACES on the mode card's TEAM panel: LobbyDialogs)
+## or the game's own bookkeeping.
 const NOT_SHOWN := ["settings_version", "mode", "difficulty", "last_pick", "graphics_auto_done", "team_size", "team_status",
-	"mic_mode", "speaker_mode"]
+	"team_fill", "mic_mode", "speaker_mode"]
 const GRAPHICS_CHOICES := ["AUTO", "LOW", "MEDIUM", "HIGH", "EXTREME"]
 ## The minimap (setting minimap_turns: TURNS WITH VIEW true, NORTH UP false) and what each does.
 const MINIMAP_NAMES := ["TURNS WITH VIEW", "NORTH UP"]

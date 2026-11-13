@@ -135,7 +135,8 @@ reference:
   white when good, yellow, red; the match HUD shows the same at 0.278, 0.031); bottom-left a dark translucent bar of main buttons
   (WARDROBE | PROFILE | ONLINE 1 VS 1, glyph and caption each) with the chat strip above it (a
   speech-bubble square with the unread count and a one-line ticker of the newest friend message,
-  "[FRIEND] NAME: text"; a tap opens the chat panel); ADD (person with a plus over its caption) on
+  "[FRIEND] NAME: text"; a tap opens the chat panel; shorter while group members stand beside the
+  hero, so the place under the hero's feet stays free for the voice pill); ADD (person with a plus over its caption) on
   the right edge at mid height opens FRIENDS on PLAYERS; bottom-right the mode card (purple to blue
   ramp, 2 px yellow frame, the mode name white) (TRAINING GROUND /
   CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
@@ -150,15 +151,22 @@ reference:
   swipe; a bottom row at the right of dark rectangular buttons with an icon and a caps label:
   CUSTOM ROOM, PLAY WITHOUT INTERNET (FRIENDS on those tabs) and HOW TO PLAY (a page whose X comes
   back to the mode page); a figure in a dark disc at the card's right end
-  opens a compact box just above the card with the team-size tiles SOLO / DUO / SQUAD (DUEL in a
-  group of two), the current one framed yellow with the tick corner) and the big yellow START (LONE WOLF: searches for a match). Searching
+  opens the TEAM panel just above the card: in LONE WOLF the GROUP CODE row (a flag, the code,
+  COPY), yellow tick boxes JOIN BY CODE and FILL EMPTY PLACES, then the picture tiles SOLO / DUO /
+  SQUAD (one, two, four figures; DUEL in a group of two), the current one framed yellow with the
+  tick corner; a member's panel is the same, greyed, showing the leader's choice) and the big yellow START (LONE WOLF: searches for a match). Searching
   has no popup: a dark search tab with a yellow edge hangs from the top centre (about x 0.37-0.63,
   y 0-0.12): a small line "ESTIMATED 0:10" for the first 10 s, then "STILL SEARCHING...", a big m:ss
   count-up, "PLAYERS n/N" for DUO / SQUAD, a cancel X at its right end (none for a group member);
-  START becomes a greyed "MATCHING..." plate and the rest of the lobby stays usable. The GROUP bar
-  shows the 10-digit GROUP CODE ("12 3456 7890") with COPY (the leader: JOIN BY CODE ON / OFF, OFF at
-  start, COPY turns it on; a solo: JOIN BY CODE; a member only while the leader's switch is on,
-  else the small line THE LEADER SHARES THE GROUP CODE). No text
+  START becomes a greyed "MATCHING..." plate and the rest of the lobby stays usable. In a group an
+  amber TEAM bar ("TEAM n/4" and a flag) sits under the player card; it opens the TEAM panel from
+  the left (x 0-0.36, full height, near-black purple): the 10-digit GROUP CODE ("12 3456 7890") with
+  COPY (JOIN BY CODE OFF at start, COPY turns it on; a member sees it only while the leader's switch
+  is on, else the small line THE LEADER SHARES THE GROUP CODE), the member rows (level square, name,
+  the leader's yellow flag disc, REMOVE), + INVITE (the right-hand social panel), TEAMS and EXIT /
+  DISBAND. No "+" plates beside the hero: with members the hero stands at about 0.40 of the width and
+  the members to its right, a little smaller, the far ones on the floor clear of the mode card;
+  nothing under the hero (the voice pill's place). No text
   menu, stats chips, name plate, outfit or version text (CUSTOM HUD and HOW TO PLAY are in
   SETTINGS).
 - FRIENDS (FRIENDS top-right, ONLINE 1 VS 1, ADD): a full page over the lobby on the page ramp,

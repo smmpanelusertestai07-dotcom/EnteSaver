@@ -70,11 +70,14 @@ static func match_ms(peer_rtt: int, relay_rtt: int, connected: bool) -> int:
 
 
 ## Draws the wifi mark and the number from `pos` (left end, vertical centre), the mark `h` px
-## tall; returns the width.
-static func draw(ci: CanvasItem, pos: Vector2, h: float, ms: int, font_size: int, alpha := 1.0) -> float:
+## tall; returns the width. bars_only: the mark alone (the HUD's compact chip writes the number
+## under it).
+static func draw(ci: CanvasItem, pos: Vector2, h: float, ms: int, font_size: int, alpha := 1.0, bars_only := false) -> float:
 	var col := color(ms)
 	var w := wifi(ci, Vector2(pos.x + h * 0.6, pos.y + h * 0.42), h, bars(ms) - 1, col, alpha)
 	var x := pos.x + w + h * 0.22
+	if bars_only:
+		return x - pos.x
 	var tw := HudDraw.text(ci, label(ms), Vector2(x, pos.y + h * 0.04), font_size, Color(col, alpha), 0, 3, "bold")
 	return x - pos.x + tw
 

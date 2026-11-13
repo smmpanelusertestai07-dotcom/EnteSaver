@@ -614,24 +614,33 @@ func _pick(m: String) -> void:
 		Game.cloud_service().set_group_mode(Game.mode, Game.team_size)   # the members' cards follow
 
 
-# ---------------------------------------------------------------- the team-size box
+# ---------------------------------------------------------------- the TEAM panel (team-size box)
 
-## The mode card's team-size box (node SizeBox, open while not null): the figure on the card's
-## right end (Lobby: SizeBoxButton) opens it just above the card, compact, with a tile per team
-## size of the card's mode (SOLO / DUO / SQUAD; in LONE WOLF with a group of exactly two SOLO reads
-## DUEL with YOU VS <NAME> under it, as SELECT MODE's chip: size_tile_text). A tile picks that size
-## as SELECT MODE's chip does (pick_size) and closes the box; a tap anywhere outside it, or Android
-## back, closes it. Never for a group member (the leader picks) or during a search (the lobby
-## hides the figure then and closes an open box: size_box_allowed).
+## The mode card's TEAM panel (node SizeBox, open while not null; the panel SizeBoxPanel): the
+## figure on the card's right end (Lobby: SizeBoxButton) opens it just above the card, its right
+## edge on the card's. In LONE WOLF with online teams (the group's place, LobbyTeam.bar_shown) and
+## not in a room: the GROUP CODE row (LobbyTeam.code_row: the code and COPY; a member's only while
+## the leader's JOIN BY CODE is on, else THE LEADER SHARES THE GROUP CODE), the tick JOIN BY CODE
+## (GroupCodeSwitch: Cloud.set_code_join, the leader's or a solo's; a member sees the leader's
+## read-only) and the tick FILL EMPTY PLACES (TeamFillTick, the leader's or a solo's: the setting
+## team_fill, on by default; off, a DUO / SQUAD START never puts other players in the group's own
+## team, so only a whole team starts, still searching for opponents: Lobby.fill_needed). Then a picture tile per team
+## size of the card's mode (SizeTile_<1|2|4>: SOLO / DUO / SQUAD with one, two or four figures; in
+## LONE WOLF with a group of exactly two SOLO reads DUEL with YOU VS <NAME> under it, as SELECT
+## MODE's chip: size_tile_text); the current one has a yellow frame and the tick corner. A tile
+## picks that size as SELECT MODE's chip does (pick_size) and closes the panel; a group member's
+## tiles show the leader's choice and do nothing. A tap anywhere outside it, or Android back,
+## closes it. Not during a search (the lobby hides the figure then and closes an open panel:
+## size_box_allowed).
 var size_box: Control
 
 
-## Whether the team-size box may be used now: not by a group member, not while searching.
-static func size_box_allowed(member: bool, searching: bool) -> bool:
-	return not member and not searching
+## Whether the TEAM panel may open now: not while searching (a member sees it read-only).
+static func size_box_allowed(_member: bool, searching: bool) -> bool:
+	return not searching
 
 
-## A tile's words in the team-size box: [the big word, the small line under it]. SOLO in LONE WOLF
+## A tile's words in the TEAM panel: [the big word, the small line under it]. SOLO in LONE WOLF
 ## with a group of two is the DUEL between the two (Lobby.start_duel plays it).
 static func size_tile_text(m: String, n: int, members: Array) -> Array:
 	var chip := size_chip_text(m, n, members)
@@ -645,11 +654,19 @@ static func size_tile_text(m: String, n: int, members: Array) -> Array:
 	return ["SOLO", "1 VS 1"]
 
 
-func open_size_box() -> void:
+## Whether the TEAM panel shows the group's rows (code, JOIN BY CODE, FILL EMPTY PLACES): where the
+## group lives (LONE WOLF with online teams, or already in a group), never in a custom room.
+static func team_rows_shown(m: String, grouped: bool, in_room: bool, teams_online := Game.TEAMS_ONLINE) -> bool:
+	return LobbyTeam.bar_shown(m, grouped, teams_online) and not in_room
+
+
+func open_size_box(fade := true) -> void:
 	close_size_box()
 	if not size_box_allowed(LobbyTeam.is_member(), lobby.search_kind() != ""):
 		return
 	var card := lobby.mode_card
+	var member := LobbyTeam.is_member()
+	var cloud := Game.cloud_service()
 	size_box = Control.new()
 	size_box.name = "SizeBox"
 	UI.full_rect(size_box)
@@ -665,15 +682,32 @@ func open_size_box() -> void:
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	size_box.add_child(panel)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
+	v.add_theme_constant_override("separation", 6)
 	panel.add_child(v)
-	v.add_child(UI.label("TEAM SIZE  ·  %s" % Game.mode_name(), 16, UI.TEXT_DIM, "bold"))
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	v.add_child(row)
 	var m := Game.mode
+	if team_rows_shown(m, LobbyTeam.in_group(), cloud.in_room()):
+		var code := cloud.group_code()
+		if code != "" and (not member or cloud.code_open()):
+			v.add_child(lobby.team.code_row(code, not member))
+		elif member:
+			v.add_child(lobby.team.code_note())
+		var join := _tick_row("JOIN BY CODE", cloud.code_open(), not member, func() -> void:
+			cloud.set_code_join(not cloud.code_join))
+		join.name = "GroupCodeSwitch"
+		v.add_child(join)
+		if not member:
+			var fill := _tick_row("FILL EMPTY PLACES", bool(Game.settings.get("team_fill", true)), true, func() -> void:
+				Game.settings.team_fill = not bool(Game.settings.get("team_fill", true))
+				Game.save_settings())
+			fill.name = "TeamFillTick"
+			v.add_child(fill)
+	else:
+		v.add_child(UI.label("TEAM SIZE  ·  %s" % Game.mode_name(), 16, UI.TEXT_DIM, "bold"))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	v.add_child(row)
 	for n: int in Game.TEAM_SIZES:
-		row.add_child(_size_tile(m, n))
+		row.add_child(_size_tile(m, n, not member))
 	# Just above the mode card, its right edge on the card's.
 	var r := card.get_global_rect()
 	var w := r.size.x
@@ -682,8 +716,9 @@ func open_size_box() -> void:
 	panel.custom_minimum_size.x = w
 	var h := panel.get_combined_minimum_size().y
 	panel.position = Vector2(r.end.x - w, r.position.y - 8.0 - h)
-	panel.modulate.a = 0.0
-	panel.create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
+	if fade:
+		panel.modulate.a = 0.0
+		panel.create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
 
 
 func close_size_box() -> void:
@@ -692,27 +727,79 @@ func close_size_box() -> void:
 		size_box = null
 
 
-## One tile of the team-size box (SizeTile_<n>): the word big, the line small; the current size
-## framed yellow with the tick corner.
-func _size_tile(m: String, n: int) -> Button:
+## The open TEAM panel follows the group (a member sees the leader's choice; the code's switch).
+func refresh_size_box() -> void:
+	if size_box != null and is_instance_valid(size_box):
+		open_size_box(false)
+
+
+## A tick row of the TEAM panel: a yellow box with a tick when on, the words beside it; `on_tap`
+## then the panel redraws. Read-only (`may` false): greyed, a tap does nothing.
+func _tick_row(text: String, on: bool, may: bool, on_tap: Callable) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, UI.TOUCH_MIN)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.disabled = not may
+	b.set_meta("on", on)
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void:
+		var sz := b.size
+		var a := 1.0 if may else 0.5
+		if b.is_pressed():
+			b.draw_rect(Rect2(Vector2.ZERO, sz), Color(1, 1, 1, 0.08))
+		var bx := Rect2(Vector2(8, sz.y * 0.5 - 12.0), Vector2(24, 24))
+		if on:
+			b.draw_rect(bx, Color(UI.ACCENT, a))
+			b.draw_polyline(PackedVector2Array([bx.position + Vector2(5, 12), bx.position + Vector2(10, 18), bx.position + Vector2(19, 6)]),
+				Color(UI.INK, a), 3.0, true)
+		else:
+			b.draw_rect(bx, Color(0, 0, 0, 0.5))
+			b.draw_rect(bx, Color(1, 1, 1, 0.5 * a), false, 2.0)
+		HudDraw.text(b, text, Vector2(44, sz.y * 0.5), 17, Color(UI.TEXT, a), 0, 0, "bold"))
+	for sig in ["button_down", "button_up"]:
+		b.connect(sig, b.queue_redraw)
+	b.pressed.connect(func() -> void:
+		Audio.play("ui_click", -4.0)
+		on_tap.call()
+		refresh_size_box())
+	return b
+
+
+## One tile of the TEAM panel (SizeTile_<n>): one, two or four figures, the word and its line; the
+## current size framed yellow with the tick corner. `may` false (a group member): the leader's
+## choice, shown only.
+func _size_tile(m: String, n: int, may := true) -> Button:
 	var words := size_tile_text(m, n, LobbyTeam.members())
 	var b := Button.new()
 	b.name = "SizeTile_%d" % n
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(0, 76)
+	b.custom_minimum_size = Vector2(0, 104)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+	b.disabled = not may
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
 		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	var lit := n == Game.team_size
 	b.draw.connect(func() -> void:
 		var sz := b.size
 		b.draw_rect(Rect2(Vector2.ZERO, sz), Color(1, 1, 1, 0.1) if b.is_pressed() else Color(0, 0, 0, 0.5))
-		HudDraw.text(b, String(words[0]), Vector2(sz.x * 0.5, sz.y * 0.4), 22, UI.ACCENT if lit else UI.TEXT, 1, 0, "heavy")
+		# the figures: one for SOLO, two for DUO, four (two rows deep) for SQUAD
+		var fig := HudDraw.tex("v_player")
+		var ink := UI.ACCENT if lit else Color(1, 1, 1, 0.9)
+		var spots: Array = [[Vector2(0, 0), 1.0]]
+		if n == 2:
+			spots = [[Vector2(-11, 0), 1.0], [Vector2(11, 0), 1.0]]
+		elif n >= 4:
+			spots = [[Vector2(-17, -5), 0.8], [Vector2(17, -5), 0.8], [Vector2(-7, 2), 0.95], [Vector2(9, 2), 0.95]]
+		for sp: Array in spots:
+			HudDraw.icon(b, fig, Vector2(sz.x * 0.5, sz.y * 0.32) + (sp[0] as Vector2), Vector2(34, 34) * float(sp[1]), ink)
+		HudDraw.text(b, String(words[0]), Vector2(sz.x * 0.5, sz.y * 0.66), 19, UI.ACCENT if lit else UI.TEXT, 1, 0, "heavy")
 		var sub := String(words[1])
-		var fs := 13
+		var fs := 12
 		while fs > 9 and HudDraw.text_width(sub, fs, "bold") > sz.x - 10.0:
 			fs -= 1
-		HudDraw.text(b, sub, Vector2(sz.x * 0.5, sz.y * 0.74), fs, UI.TEXT_DIM, 1, 0, "bold")
+		HudDraw.text(b, sub, Vector2(sz.x * 0.5, sz.y * 0.86), fs, UI.TEXT_DIM, 1, 0, "bold")
 		if lit:
 			b.draw_rect(Rect2(Vector2(1.5, 1.5), sz - Vector2(3, 3)), UI.ACCENT, false, 3.0)
 			UI.draw_tick_corner(b, sz, 26.0)

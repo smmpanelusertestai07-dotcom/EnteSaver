@@ -78,6 +78,7 @@ const DEFAULT_SETTINGS := {
 	"show_career": true,          # SHOW MY CAREER: the player card carries a career summary (Cloud card v3)
 	"challenges_from": 0,         # DUEL CHALLENGES FROM: CHALLENGES_EVERYONE, _FRIENDS, _NOBODY (Cloud.challenge_allowed)
 	"team_status": 1,             # the social panel's status (LobbySocial): 0 JOIN ME ANYTIME, 1 ONLINE, 2 BUSY
+	"team_fill": true,            # the TEAM panel's FILL EMPTY PLACES: a DUO / SQUAD START finds players for the empty places
 	"friend_requests": true,      # FRIEND REQUESTS: off, Cloud ignores them (never shown, never answered)
 	"direct_connect": true,       # DIRECT CONNECTION: the match state straight to the other phone (NetDirect)
 }
@@ -112,7 +113,7 @@ const SETTING_RANGES := {
 ## On/off settings: anything but true or false falls back to the default.
 const BOOL_SETTINGS := ["graphics_auto", "graphics_auto_done", "dynamic_joystick", "vibrate_footsteps", "vibrate_damage",
 	"vibrate_shooting", "vibration", "visual_effects", "reload_button", "switch_button", "reload_on_crosshair", "hold_fire_scope",
-	"freelook_button", "chat", "friend_chat", "show_career", "push_to_talk", "friend_requests", "direct_connect", "minimap_turns"]
+	"freelook_button", "chat", "friend_chat", "show_career", "push_to_talk", "friend_requests", "direct_connect", "minimap_turns", "team_fill"]
 ## What each kind of buzz (vibrate()) needs on: the reference's vibration rows (CONTROLS) and,
 ## out of a match, the lobby's (ONLINE).
 const VIBRATE_KEYS := {"footsteps": "vibrate_footsteps", "damage": "vibrate_damage", "shooting": "vibrate_shooting",

@@ -87,6 +87,33 @@ func run(at: Node) -> int:
 	_check((lobby.dialogs.modal.find_child("CodePadShown", true, false) as Label).text.replace(" ", "") == "4213", "GROUP CODE's keypad shows the digits as a code")
 	await at.shot("r07_group_code_pad")
 	lobby.dialogs.close_modal()
+	# RECENT: a player met in a match who is no friend gets ADD FRIEND, not a greyed "+".
+	var stranger := "tour-r-stranger".sha256_text().left(32)
+	Game.profile.recent = [{"id": stranger, "name": "DRIFTER"}, {"id": ids[0], "name": "FRIEND ONE"}]
+	lobby.social.open("recent")
+	await at.wait(0.5)
+	modal = lobby.dialogs.modal
+	_check(modal != null and modal.find_child("SocialAdd_" + Cloud.friend_code(stranger), true, false) != null
+		and modal.find_child("SocialInvite_" + Cloud.friend_code(stranger), true, false) == null
+		and modal.find_child("SocialInvite_" + Cloud.friend_code(ids[0]), true, false) != null,
+		"RECENT: ADD FRIEND on a stranger, the invite + on a friend")
+	await at.shot("r08_social_recent")
+	lobby.dialogs.close_modal()
+	# In a group already: the keypad says so at once and stays open (it closes only for its own join).
+	var me_was := cloud.my_id
+	if cloud.my_id == "":
+		cloud.my_id = "tour-r-me".sha256_text().left(32)
+	cloud.group = {"gid": "d4".repeat(16), "leader": cloud.my_id, "status": "idle", "mode": "lonewolf", "size": 2,
+		"members": [{"id": cloud.my_id, "name": "ME", "bundle": "default"}, {"id": ids[0], "name": "FRIEND ONE", "bundle": "default"}]}
+	lobby.social.open_pad()
+	await at.wait(1.2)
+	modal = lobby.dialogs.modal
+	var pad_state := modal.find_child("CodePadState", true, false) as Label if modal else null
+	_check(pad_state != null and pad_state.text.begins_with("EXIT YOUR GROUP FIRST"), "the keypad stays open in a group and says EXIT YOUR GROUP FIRST")
+	await at.shot("r09_code_pad_in_group")
+	lobby.dialogs.close_modal()
+	cloud.group = {}
+	cloud.my_id = me_was
 	Game.profile = saved_profile
 	return _fails
 
