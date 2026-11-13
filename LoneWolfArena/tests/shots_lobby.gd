@@ -117,9 +117,9 @@ func run(at: Node) -> int:
 	var hub := NetRooms.hub()
 	var rooms_was := hub.cards.duplicate(true)
 	var rnow := int(Time.get_unix_time_from_system())
-	for r: Array in [["tour-r-1", "FRIDAY FIGHTS", "NIGHTFOX21", 1, 1, "FIRST TO 5 · HP 200", false, "314159"],
-			["tour-r-2", "SQUAD NIGHT", "EMBER_7", 4, 5, "FIRST TO 4 · ONE GUN", true, "271828"],
-			["tour-r-3", "SNIPERS ONLY", "VEXA", 2, 4, "FIRST TO 4 · HP 100", false, "161803"]]:
+	for r: Array in [["tour-r-1", "FRIDAY FIGHTS", "NIGHTFOX21", 1, 1, "FIRST TO 5 - HP 200", false, "314159"],
+			["tour-r-2", "SQUAD NIGHT", "EMBER_7", 4, 5, "FIRST TO 4 - ONE GUN", true, "271828"],
+			["tour-r-3", "SNIPERS ONLY", "VEXA", 2, 4, "FIRST TO 4 - HP 100", false, "161803"]]:
 		var rid := String(r[0]).sha256_text().left(32)
 		hub.cards[rid] = {"id": rid, "name": r[1], "host": r[2], "size": r[3], "filled": r[4], "total": 2 * int(r[3]), "rules": r[5],
 			"pw": r[6], "code": r[7], "ts": rnow - hub.cards.size()}

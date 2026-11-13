@@ -91,7 +91,7 @@ func _rooms() -> void:
 	var id := key.save_to_string(true).sha256_text().left(32)
 	var oid := other.save_to_string(true).sha256_text().left(32)
 	var now := int(Time.get_unix_time_from_system())
-	var f := {"host": "HOSTY", "name": "FRIDAY FIGHTS", "size": 2, "filled": 1, "total": 4, "rules": "FIRST TO 4 · HP 200",
+	var f := {"host": "HOSTY", "name": "FRIDAY FIGHTS", "size": 2, "filled": 1, "total": 4, "rules": "FIRST TO 4 - HP 200",
 		"pw": false, "code": "123456"}
 	var r := NetRooms.new()
 	_check(r.take(id, _room_card(key, f, now), now) and r.list(now).size() == 1 and String(r.list(now)[0].name) == "FRIDAY FIGHTS"

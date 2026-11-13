@@ -30,14 +30,12 @@ var hosting := ""
 var _every := 0.0
 var _sent_sig := ""
 
-static var _hub: NetRooms
-
-
-## The one list every page reads.
+## The one list every page reads, kept on the Game autoload (meta "net_rooms"; a static of this
+## script holding its own instance would never be freed at exit).
 static func hub() -> NetRooms:
-	if _hub == null:
-		_hub = NetRooms.new()
-	return _hub
+	if not Game.has_meta("net_rooms"):
+		Game.set_meta("net_rooms", NetRooms.new())
+	return Game.get_meta("net_rooms") as NetRooms
 
 
 ## The signed text of a card.
@@ -158,7 +156,7 @@ static func my_fields(cloud: Cloud) -> Dictionary:
 ## The rules in a few words for a list row (the first two of RoomRules.summary).
 static func summary(rules: Dictionary, team: bool) -> String:
 	var parts: Array = RoomRules.summary(RoomRules.sanitize(rules), team)
-	return " · ".join(parts.slice(0, 2)).left(FIELD_MAX)
+	return " - ".join(parts.slice(0, 2)).left(FIELD_MAX)       # (what Game.clean_text keeps)
 
 
 ## Starts publishing the room this phone just opened as PUBLIC.
