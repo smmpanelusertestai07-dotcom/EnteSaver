@@ -191,7 +191,7 @@ func open(kind := "online", back := false) -> void:
 				open(tk))
 		tabs.add_child(b)
 	# BLOCKED (bottom left, as the reference's list of blocked players): PROFILE's BLOCKED tab.
-	var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 52))
+	var blk := UI.button("BLOCKED", 17, "light", Vector2(0, 56))
 	blk.name = "FriendsBlocked"
 	blk.icon = UI.icon_texture("v_guest")
 	blk.add_theme_constant_override("icon_max_width", 24)
@@ -248,7 +248,7 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	my_id.size_flags_vertical = Control.SIZE_FILL
 	me.add_child(UI.spacer(0))
 	me.add_child(my_id)
-	var copy := UI.button("COPY", 16, "light", Vector2(96, 52))
+	var copy := UI.button("COPY", 16, "light", Vector2(96, 56))
 	copy.pressed.connect(func() -> void:
 		DisplayServer.clipboard_set(Cloud.friend_code(Game.cloud_service().my_id))
 		_net_note = "ID COPIED"
@@ -262,9 +262,9 @@ func _build_friends_tab(v: VBoxContainer) -> void:
 	le.name = "FriendSearch"
 	le.text = _friend_query
 	le.size_flags_horizontal = Control.SIZE_FILL
-	le.custom_minimum_size = Vector2(250, 52)
+	le.custom_minimum_size = Vector2(250, 56)
 	me.add_child(le)
-	var go := UI.search_button(52.0)
+	var go := UI.search_button(56.0)
 	go.name = "FriendSearchGo"
 	go.tooltip_text = "SEARCH"
 	var search := func() -> void:
@@ -697,14 +697,14 @@ func _player_row(cloud: Cloud, id: String, who: String, waiting: String, online_
 	row.add_child(status_label(cloud, id, presence_tag(online_tag, playing)))
 	if not Game.is_friend(id) and (cloud.peers.has(id) or cloud.directory.has(id)):
 		var asked := cloud.friend_asked(id)
-		var add := UI.button("ASKED" if asked else "ADD FRIEND", 16, "dark" if asked else "light", Vector2(150, 52))
+		var add := UI.button("ASKED" if asked else "ADD FRIEND", 16, "dark" if asked else "light", Vector2(150, 56))
 		add.disabled = asked
 		add.pressed.connect(add_friend.bind(id))
 		row.add_child(add)
 	if cloud.peers.has(id):
 		# (while a challenge waits, the room it set up names its player: Cloud.opponent)
 		var theirs := waiting != "" and String(cloud.opponent.get("id", "")) == id
-		var b := UI.button("CANCEL" if theirs else "DUEL 1 VS 1", 17, "light" if theirs else "primary", Vector2(170, 52))
+		var b := UI.button("CANCEL" if theirs else "DUEL 1 VS 1", 17, "light" if theirs else "primary", Vector2(170, 56))
 		b.name = "Cancel_" + Cloud.friend_code(id) if theirs else "Duel_" + Cloud.friend_code(id)
 		b.disabled = playing and not theirs
 		b.pressed.connect(func() -> void:
@@ -819,7 +819,7 @@ func _fill_requests(cloud: Cloud) -> void:
 		row.add_child(ask)
 		for a: Array in [["DECLINE", false, "light"], ["ACCEPT", true, "primary"]]:
 			var yes := bool(a[1])
-			var b := UI.button(String(a[0]), 17, String(a[2]), Vector2(140, 52))
+			var b := UI.button(String(a[0]), 17, String(a[2]), Vector2(140, 56))
 			b.name = "Friend" + String(a[0]).capitalize()
 			b.disabled = cloud.status != "online"     # an answer goes through the relay (offline it would come back)
 			b.pressed.connect(func() -> void:
@@ -864,7 +864,7 @@ func _fill_friends(cloud: Cloud, waiting: String) -> void:
 		var seen := "  ·  " + _ago(int(cloud.directory[id].ts)) if cloud.directory.has(id) else "  ·  OFFLINE"
 		var row := _player_row(cloud, id, String(cloud.peers[id].name) if on else who, waiting, "  ·  ONLINE" if on else seen)
 		row.add_child(LobbyNet.chat_button(lobby, id, who, "friends"))       # (scripts/lobby_net.gd)
-		var rm := UI.button("REMOVE", 15, "dark", Vector2(112, 52))
+		var rm := UI.button("REMOVE", 15, "dark", Vector2(112, 56))
 		rm.name = "FriendRemove"
 		rm.pressed.connect(func() -> void:
 			# Asked first, as on the player card (it sits right beside DUEL 1 VS 1).
