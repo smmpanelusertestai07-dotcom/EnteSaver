@@ -31,6 +31,7 @@ func run(autotest: Node) -> int:
 	_check_gait_playback()
 	_check_procedural_layers()
 	await _check_carry_and_sprint()
+	_check_stance_clips()
 	await _check_swap_and_flinch()
 	await _check_throw()
 	at.log_line("ANIM CHECK DONE bad=%d" % bad)
@@ -72,14 +73,16 @@ func _lowest_toe(m: CharacterModel, clip: String) -> float:
 func _check_clips_and_toes() -> void:
 	var m1 := _model()
 	for clip in ["reload", "pump", "heal", "throw", "swap", "hit_react", "prone_idle", "prone_fwd", "punch_r", "punch_l",
-			"carry_idle", "carry_run_a", "carry_run_b", "sprint_fwd"]:
+			"carry_idle", "carry_run_a", "carry_run_b", "sprint_fwd", "jump_air", "jump_land", "victory_pose", "prone_up",
+			"lobby_hip", "lobby_shift", "lobby_look"]:
 		_expect(m1.anim.has_animation(clip), "clip merged: " + clip)
 	var toe1 := _lowest_toe(m1, "run_fwd")
 	var m2 := _model()      # second character: must not flip the shared clips back
 	var toe2 := _lowest_toe(m2, "run_fwd")
 	_expect(toe1 > -0.035, "run_fwd toes stay above the floor (lowest tip %.3f m)" % toe1)
 	_expect(absf(toe1 - toe2) < 0.002, "toe fix applied once (second model %.3f m)" % toe2)
-	for clip in ["crouch_fwd", "prone_fwd", "reload", "sprint_fwd", "carry_idle", "runx_fwd", "runx_left", "runx_right", "runx_back"]:
+	for clip in ["crouch_fwd", "prone_fwd", "reload", "sprint_fwd", "carry_idle", "runx_fwd", "runx_left", "runx_right", "runx_back",
+			"jump_land", "prone_up", "victory_pose", "lobby_hip", "lobby_shift", "lobby_look"]:
 		var lo := _lowest_toe(m1, clip)
 		_expect(lo > -0.035, "%s toes stay above the floor (lowest tip %.3f m)" % [clip, lo])
 	m1.queue_free()
@@ -183,6 +186,60 @@ func _check_procedural_layers() -> void:
 	_expect(absf(m.aim_mod.twist) > 0.3, "the lobby idle looks round (%.2f rad)" % m.aim_mod.twist)
 	m.revive()
 	_expect(m.aim_mod.twist == 0.0 and m.anim.speed_scale == 1.0, "no look round or pace change after the lobby")
+	m.queue_free()
+
+
+## anims_extra2's one-shots: a jump plays jump_air from its take-off, walking off a ledge from its
+## fall; a touch-down standing still plays jump_land (no crouch dip), running it is the dip; standing
+## up from prone plays prone_up (about 1 s), which moving cuts short; the results' victory pose
+## and the lobby's gesture clips.
+func _check_stance_clips() -> void:
+	var m := _model()
+	m.equip_weapon("weapon_ar")
+	var dt := 1.0 / 60.0
+	for _i in 30:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	_expect(String((m.tree.tree_root as AnimationNodeBlendTree).get_node("jump").get("animation")) == "jump_air", "the air layer plays jump_air")
+	m.on_jump()
+	_expect(m._jumped and m._air >= 0.5, "a jump goes straight into the take-off")
+	for _i in 40:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, false, dt)
+	m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	_expect(m._land_clip and int(m.tree.get("parameters/jump_land_shot/request")) == AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE,
+		"a touch-down standing still plays jump_land")
+	var dip := 0.0
+	for _i in 30:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+		dip = maxf(dip, float(m.tree.get("parameters/crouch_blend/blend_amount")))
+	_expect(dip < 0.01, "and no crouch dip on top of it (%.2f)" % dip)
+	for _i in 40:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, false, dt)
+	m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	dip = 0.0
+	for _i in 20:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+		dip = maxf(dip, float(m.tree.get("parameters/crouch_blend/blend_amount")))
+	_expect(not m._land_clip and dip > 0.2, "a touch-down running bends the knees in step (dip %.2f), no landing clip" % dip)
+	for _i in 60:
+		m.update_locomotion(Vector2.ZERO, Fighter.Stance.PRONE, true, dt)
+	m.update_locomotion(Vector2.ZERO, Fighter.Stance.STAND, true, dt)
+	var up_len := m.anim.get_animation("prone_up").length
+	_expect(m.standing_up() and up_len > 0.8 and up_len < 1.2, "prone -> stand plays prone_up (%.2f s)" % up_len)
+	for _i in 10:
+		m.update_locomotion(Vector2(0, Fighter.RUN_SPEED), Fighter.Stance.STAND, true, dt)
+	_expect(not m.standing_up(), "moving cuts the stand-up short")
+	m.play_victory("victory_pose")
+	_expect(m.anim.current_animation == "victory_pose" and not m.tree.active, "the results' victory pose plays")
+	m.revive()
+	m.play_lobby()
+	m._gesture_in = 0.0
+	m._process(dt)                  # first gesture: the look round
+	m._look_to = 0.0
+	m._look = 0.0
+	m._gesture_in = 0.0
+	m._process(dt)                  # second: a gesture clip
+	_expect(String(m.anim.current_animation) in CharacterModel.LOBBY_GESTURES, "the lobby plays a gesture clip (%s)" % m.anim.current_animation)
+	m.revive()
 	m.queue_free()
 
 

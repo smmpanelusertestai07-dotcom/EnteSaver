@@ -13,6 +13,12 @@ Clips:
                           blended a <-> b with the stride like the fists): a = left hand forward.
   sprint_fwd (loop 0.62 s) sprint at 5.5 m/s: strong forward lean, long strides, high heel kick,
                           the arms pumping, the gun low in the right hand.
+  jump_air (0.9 s)        take-off, tuck, legs reaching down for the landing (held while falling).
+  jump_land (0.4 s)       the knees give on touch-down and the body comes back up (from standing).
+  victory_pose (loop 3 s) results: the right fist straight up, the left hand on the hip, chest out.
+  prone_up (1.0 s)        from prone over one knee to standing.
+  lobby_hip, lobby_shift, lobby_look (3 s each) lobby gestures from lobby_idle and back to it: the
+                          hand on the hip, the weight over to one leg, a look round.
 
 Run headless (Blender 4.5 LTS):
   blender -b --factory-startup -P tools/anim/anim_extra2.py -- [--only a,b] [--out X.glb] [--no-export]
@@ -240,6 +246,212 @@ def sprint_pose(t):
     return pose
 
 
+# ============================================================================= jump and landing
+JUMP_T = 0.9
+JUMP_FALL = 0.55            # the game seeks here when the body leaves the ground without a jump
+
+
+def jump_pose(t):
+    """Take-off (legs extended, toes pointed, 0.12 s), tuck (0.42 s), then the legs reach down for
+    the landing and hold there (falling). animate.pose_jump's 0.6 s, retimed."""
+    u = AN.interp_keys([(0.0, 0.0), (0.12, 0.08), (0.42, 0.3), (0.75, 0.6), (JUMP_T, 0.6)], t)
+    return AN.pose_jump(u)
+
+
+LAND_T = 0.4
+
+
+def land_pose(t):
+    """Touch-down from a jump or a fall: the knees give (deepest at 0.09 s), the chest dips, and the
+    body is back up in the idle stance at 0.4 s. Feet flat where the idle has them."""
+    dip = AE.spline([(0.0, 0.25), (0.09, 1.0), (0.2, 0.75), (LAND_T, 0.0)], t)
+    pose = A.Pose()
+    pr, sp, neck, head, cl, cr = AN.idle_upper_rots()
+    pr = rot(X, 9.0 * dip) @ pr
+    sp = [rot(X, 4.0 * dip) @ m for m in sp]
+    neck = neck @ rot(X, -6.0 * dip)
+    head = head @ rot(X, -8.0 * dip)
+    pos = AN.PELVIS_REST + Vector((0.0, 0.035 * dip, -AN.PELVIS_DROP_IDLE - 0.24 * dip))
+    AN.set_upper(pose, pos, pr, sp, neck, head, cl, cr)
+    legs(pose, AN.idle_feet())
+    AN.rifle_arms(pose, offset=Vector((0, 0, -0.02 * dip)))
+    return pose
+
+
+# ============================================================================= victory pose
+VICTORY_T = 3.0
+
+
+def hip_hand(pose, s, w=1.0):
+    """The hand on the hip (fingers forward-down, elbow out), blended in by w from the current arm."""
+    side = RIGHT if s == "r" else -RIGHT
+    Pf = AE.pelvis_frame(pose)
+    P3 = Pf.to_3x3()
+    wrist_hip = Pf @ (side * 0.215 + FWD * 0.0 + UP * 0.085)
+    f_hip = P3 @ (FWD * 0.75 - UP * 0.55 - side * 0.25)
+    p_hip = P3 @ (-side)
+    S = pose.head("upperarm_" + s)
+    wrist0 = pose.head("hand_" + s)
+    f0, p0 = AE.hand_axes(pose.P["hand_" + s], s)
+    wrist = wrist0.lerp(wrist_hip, w)
+    pole = S + side * 0.5 - FWD * 0.15 - UP * 0.1
+    pose.two_bone("upperarm_" + s, "lowerarm_" + s, wrist, pole)
+    f = f0.lerp(f_hip, w)
+    p = p0.lerp(p_hip, w)
+    pose.set_orient("hand_" + s, AE.hand_matrix(s, wrist, f, p).to_3x3())
+    pose.fingers(s, AE.lerp_curls(RELAX, LOOSE, w), thumb=(15, 10, 6))
+    pose.fk()
+
+
+def victory_pose_fn(t):
+    """The results' pose: square to the camera, feet apart, chest out, the right fist straight up,
+    the left hand on the hip; breathing, the fist pushes up a little now and then."""
+    ph = 2 * math.pi * t / VICTORY_T
+    br = math.sin(2 * ph)
+    push = 0.5 - 0.5 * math.cos(ph)
+    pose = A.Pose()
+    pr = rot(Y, -2.0) @ rot(X, -2.0)
+    sp = [rot(X, -2.0), rot(X, -3.0 + 0.5 * br), rot(X, -4.0 - 0.8 * br) @ rot(Y, 2.0)]
+    neck = rot(X, -3.0)
+    head = rot(X, -9.0 - 2.0 * push) @ rot(Z, 6.0)
+    AN.set_upper(pose, AN.PELVIS_REST + Vector((0.015, 0.0, -0.02 + 0.002 * br)), pr, sp, neck, head,
+                 rot(X, 1.0 * br), rot(X, -8.0 - 4.0 * push) @ rot(Y, -6.0))
+    legs(pose, AN.standing_feet(0.17, 14.0), knee_out=0.12)
+    S = pose.head("upperarm_r")
+    wrist = S + UP * (0.49 + 0.03 * push) + RIGHT * 0.14 + FWD * 0.03
+    pose.two_bone("upperarm_r", "lowerarm_r", wrist, S + RIGHT * 0.6 - FWD * 0.2)
+    pose.set_orient("hand_r", AE.hand_matrix("r", wrist, UP + RIGHT * 0.05, FWD).to_3x3())
+    pose.fingers("r", AE.FIST, thumb=AE.FIST_THUMB)
+    pose.fk()
+    AN.free_arm(pose, "l", pose.head("upperarm_l") - UP * 0.5, pose.head("upperarm_l") - FWD * 0.3)
+    hip_hand(pose, "l")
+    return pose
+
+
+# ============================================================================= prone stand-up
+PRONE_UP_T = 1.0
+
+
+def kneel_pose():
+    """Half-way up: the right knee on the ground, the left foot planted ahead, chest upright, rifle held."""
+    pose = A.Pose()
+    pr = rot(Z, -14.0) @ rot(X, 8.0)
+    sp = [rot(Z, -5.0) @ rot(X, 4.0), rot(Z, -5.0) @ rot(X, 4.0), rot(Z, -6.0) @ rot(X, 3.0)]
+    AN.set_upper(pose, Vector((0.0, 0.10, 0.50)), pr, sp, rot(Z, 12.0) @ rot(X, -6.0), rot(Z, 18.0) @ rot(X, -8.0),
+                 rot(Z, -12.0) @ rot(X, 4.0), rot(Z, 4.0))
+    feet = {"l": AN.foot_at("l", Vector((0.14, -0.30, 0.008)), -8.0, 0.0),
+            "r": AN.foot_at("r", Vector((-0.12, 0.42, 0.008)), -10.0, -62.0)}
+    pose.fk()
+    for side, s in ((1, "l"), (-1, "r")):
+        ankle, Q, toe = feet[s]
+        knee_pole = ankle + Vector((side * 0.05, -0.9, 0.3)) if s == "l" else ankle + Vector((side * 0.05, -0.6, -0.2))
+        pose.two_bone("thigh_" + s, "calf_" + s, ankle, knee_pole)
+        pose.foot_orient(s, Q)
+        pose.set_delta("ball_" + s, rot(X, toe))
+        pose.fk()
+    AN.rifle_arms(pose)
+    return pose
+
+
+def blend_poses(pa, pb, w):
+    """Per-bone slerp of the local rotations (and the pelvis offset) of two poses."""
+    pose = A.Pose()
+    for n in pose.B:
+        qa, qb = pa.B[n].to_quaternion(), pb.B[n].to_quaternion()
+        if qa.dot(qb) < 0:
+            qb.negate()
+        M = qa.slerp(qb, w).to_matrix().to_4x4()
+        M.translation = pa.B[n].translation.lerp(pb.B[n].translation, w)
+        pose.B[n] = M
+    pose.fk()
+    return pose
+
+
+_UP_KEYS = {}
+
+
+def prone_up_pose(t):
+    """Prone -> kneel (0.5 s) -> standing idle (1.0 s): the chest comes up first, then the legs.
+    Body and arms blend bone by bone; the legs are placed by IK on the blended ankle path (on the
+    floor, never under it), the knees bending down then forward."""
+    if not _UP_KEYS:
+        _UP_KEYS["prone"] = AE.prone_idle_pose(0.0)
+        _UP_KEYS["kneel"] = kneel_pose()
+        _UP_KEYS["stand"] = AN.pose_idle(0.0)
+    if t <= 0.5:
+        a, b, w = _UP_KEYS["prone"], _UP_KEYS["kneel"], smooth(t / 0.5)
+    else:
+        a, b, w = _UP_KEYS["kneel"], _UP_KEYS["stand"], smooth((t - 0.5) / 0.5)
+    pose = blend_poses(a, b, w)
+    for s in ("l", "r"):
+        side = 1.0 if s == "l" else -1.0
+        ankle = a.head("foot_" + s).lerp(b.head("foot_" + s), w)
+        ankle.z = max(ankle.z, 0.075)
+        qa = a.P["foot_" + s].to_quaternion()
+        qb = b.P["foot_" + s].to_quaternion()
+        if qa.dot(qb) < 0:
+            qb.negate()
+        Qf = qa.slerp(qb, w).to_matrix() @ A.REST["foot_" + s].to_3x3().inverted()
+        knee_a, knee_b = a.head("calf_" + s), b.head("calf_" + s)
+        knee = knee_a.lerp(knee_b, w)
+        knee.z = max(knee.z, 0.06)
+        hip = pose.head("thigh_" + s)
+        pole = knee + (knee - (hip + ankle) * 0.5) * 2.0 + Vector((side * 0.03, 0, 0))
+        pose.two_bone("thigh_" + s, "calf_" + s, ankle, pole)
+        pose.foot_orient(s, Qf)
+        pose.fk()                   # (the toes keep their blended bend)
+    # anything still under the floor (a toe, a knee) lifts the body by that much
+    low = min(min(pose.head(n + "_" + s).z for n in ("calf", "foot")) for s in "lr")
+    tips = min((pose.P["ball_" + s] @ Vector((0, 0.07, 0))).z for s in "lr")
+    dip = min(low - 0.05, tips - 0.01, 0.0)
+    if dip < 0.0:
+        pose.B["pelvis"].translation += A.REL["pelvis"].to_3x3().inverted() @ Vector((0, 0, -dip))
+        pose.fk()
+    return pose
+
+
+# ============================================================================= lobby gestures
+LOBBY_G_T = 3.0
+
+
+def _gesture_w(t, a=0.55, b=2.35):
+    return smooth(t / a) * (1.0 - smooth((t - b) / (LOBBY_G_T - b)))
+
+
+def lobby_hip_pose(t):
+    """The left hand goes to the hip, stays a moment, comes back down."""
+    pose = AN.pose_lobby(t, 4.0)
+    hip_hand(pose, "l", _gesture_w(t))
+    return pose
+
+
+def lobby_shift_pose(t):
+    """The weight goes over to the right leg (the hip out, the left knee soft) and back."""
+    w = _gesture_w(t, 0.7, 2.2)
+    base = AN.pose_lobby(t, 4.0)
+    pose = A.Pose()
+    pos = AN.PELVIS_REST + Vector((-0.045 * w, 0.0, -0.014 - 0.012 * w))
+    AN.set_upper(pose, pos, rot(Y, 5.0 * w) @ rot(Z, -4.0 * w), [rot(Y, -2.5 * w)] * 3, rot(Y, -2.0 * w),
+                 rot(Z, 6.0 * w) @ rot(Y, -3.0 * w), rot(Z, 2.0), rot(Z, -2.0))
+    feet = AN.standing_feet(0.12, 10.0, (-0.02 - 0.05 * w, 0.03))
+    legs(pose, feet, knee_out=0.10 + 0.06 * w)
+    for n in base.B:
+        if n.startswith(("clavicle", "upperarm", "lowerarm", "hand", "thumb", "index", "middle", "ring", "pinky")):
+            pose.B[n] = base.B[n].copy()
+    pose.fk()
+    return pose
+
+
+def lobby_look_pose(t):
+    """A look round: the shoulders and the head turn to the left, then over to the right, and back."""
+    yaw = AE.spline([(0.0, 0.0), (0.7, 28.0), (1.4, 26.0), (2.1, -18.0), (LOBBY_G_T, 0.0)], t)
+    pose = AN.pose_lobby(t, 4.0)
+    for n, k in (("spine_02", 0.15), ("spine_03", 0.2), ("neck_01", 0.25), ("head", 0.4)):
+        pose.B[n] = pose.B[n] @ (A.REST[n].to_3x3().inverted() @ rot(Z, yaw * k) @ A.REST[n].to_3x3()).to_4x4()
+    pose.fk()
+    return pose
+
+
 # ============================================================================= registry / build
 ANIMS = [
     # name, frames (last == first for loops), loop, pose fn(t)
@@ -247,6 +459,13 @@ ANIMS = [
     ("carry_run_a", 1, False, lambda t: carry_run_pose(1.0)),
     ("carry_run_b", 1, False, lambda t: carry_run_pose(-1.0)),
     ("sprint_fwd", int(round(SPRINT_T * FPS)), True, sprint_pose),
+    ("jump_air", int(round(JUMP_T * FPS)), False, jump_pose),
+    ("jump_land", int(round(LAND_T * FPS)), False, land_pose),
+    ("victory_pose", int(round(VICTORY_T * FPS)), True, victory_pose_fn),
+    ("prone_up", int(round(PRONE_UP_T * FPS)), False, prone_up_pose),
+    ("lobby_hip", int(round(LOBBY_G_T * FPS)), False, lobby_hip_pose),
+    ("lobby_shift", int(round(LOBBY_G_T * FPS)), False, lobby_shift_pose),
+    ("lobby_look", int(round(LOBBY_G_T * FPS)), False, lobby_look_pose),
 ]
 
 

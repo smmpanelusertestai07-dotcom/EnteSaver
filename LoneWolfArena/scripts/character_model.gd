@@ -33,6 +33,15 @@ const SPRINT_AUTHORED := 5.5
 ## (carry_idle at rest, carry_run_a/b on the arms while moving) until the fighter fires or aims
 ## (raise_gun / aiming); it goes back down READY_HOLD s after the last shot.
 const READY_HOLD := 2.0
+## jump_air (anims_extra2): a jump seeks it to 0 (take-off, tuck, legs reaching down, then held);
+## leaving the ground without a jump (a ledge) seeks it to JUMP_FALL. jump_land plays on a
+## touch-down from a real fall while (nearly) standing still; moving, the knees give through the
+## crouch dip (land_dip), which keeps the legs in step.
+const JUMP_FALL := 0.55
+const LAND_CLIP_MAX_SPEED := 1.5
+## prone_up (1 s): standing up from prone while not moving; moving or a shot cuts it short.
+const PRONE_UP_MAX_SPEED := 0.8
+const LOBBY_GESTURES := ["lobby_hip", "lobby_shift", "lobby_look"]
 const CARRY_BONES := ["clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]
 ## The moving cycle has the full blend weight from this share of the stance's base speed; below it
 ## it is mixed with the idle, which shortens the stride by the same factor.
@@ -159,6 +168,12 @@ var _carry_gun := 0.0        # how far the gun follows the hand instead of the a
 var _sprint_amt := 0.0
 var _aim_muzzle := Vector3.ZERO     # the muzzle in model space at the last moment of the aim pose
 var _aim_muzzle_ok := false
+var _jumped := false              # on_jump since the last time on the floor
+var _was_floor := true
+var _land_clip := false           # this touch-down plays jump_land (no crouch dip)
+var _last_stance := -1
+var _prone_up_until := 0.0
+var _gesture_n := 0               # the lobby's gestures alternate: a look round, then a clip
 
 
 static func manifest() -> Dictionary:
@@ -437,7 +452,7 @@ func _build_tree() -> void:
 	root.add_node("prone", prone, Vector2(0, 400))
 	root.add_node("prone_ts", AnimationNodeTimeScale.new(), Vector2(150, 400))
 	root.add_node("prone_blend", AnimationNodeBlend2.new(), Vector2(450, 200))
-	root.add_node("jump", _anim_node("jump"), Vector2(300, 550))
+	root.add_node("jump", _anim_node("jump_air" if anim.has_animation("jump_air") else "jump"), Vector2(300, 550))
 	root.add_node("jump_seek", AnimationNodeTimeSeek.new(), Vector2(450, 550))
 	root.add_node("air_blend", AnimationNodeBlend2.new(), Vector2(600, 300))
 	root.connect_node("loco_ts", 0, "loco")
@@ -451,6 +466,18 @@ func _build_tree() -> void:
 	root.connect_node("air_blend", 0, "prone_blend")
 	root.connect_node("air_blend", 1, "jump_seek")
 	var last := "air_blend"
+	# Full-body one-shots over the stance layers: the landing and the stand-up from prone.
+	for clip in ["jump_land", "prone_up"]:
+		if not anim.has_animation(clip):
+			continue
+		var fs := AnimationNodeOneShot.new()
+		fs.fadein_time = 0.05 if clip == "jump_land" else 0.12
+		fs.fadeout_time = 0.15 if clip == "jump_land" else 0.25
+		root.add_node(clip, _anim_node(clip), Vector2(600, 1200))
+		root.add_node(clip + "_shot", fs, Vector2(650, 300))
+		root.connect_node(clip + "_shot", 0, last)
+		root.connect_node(clip + "_shot", 1, clip)
+		last = clip + "_shot"
 	# The gun carried low while moving: carry_run_a <-> b on the arms with the stride (like the fists).
 	if anim.has_animation("carry_run_a"):
 		var cb := AnimationNodeBlend2.new()
@@ -559,6 +586,7 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 	if speed > 0.15:
 		_fwd_sign = move_toward(_fwd_sign, -1.0 if v.y < -0.3 * speed else 1.0, delta * 6.0)
 	_track_landing(on_floor, delta)
+	_stance_clips(stance, on_floor)
 	_crouch_amt = move_toward(_crouch_amt, 1.0 if stance == Fighter.Stance.CROUCH else 0.0, delta * 5.0)
 	_prone_amt = move_toward(_prone_amt, 1.0 if stance == Fighter.Stance.PRONE else 0.0, delta * 2.6)
 	_air = move_toward(_air, 0.0 if on_floor else 1.0, delta * 6.0)
@@ -569,7 +597,7 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 		# (standing, the crouch space only shows through a landing dip: its idle, bent knees)
 		tree.set("parameters/crouch/blend_position", _loco if _crouch_amt > 0.02 else Vector2.ZERO)
 		tree.set("parameters/prone/blend_position", gait_weight(_speed, Fighter.Stance.PRONE, _run_authored))
-		tree.set("parameters/crouch_blend/blend_amount", maxf(_crouch_amt, land_dip()))
+		tree.set("parameters/crouch_blend/blend_amount", maxf(_crouch_amt, 0.0 if _land_clip else land_dip()))
 		tree.set("parameters/prone_blend/blend_amount", _prone_amt)
 		tree.set("parameters/air_blend/blend_amount", _air)
 		# The feet cover the real speed (any weapon class, the fists, walk to sprint).
@@ -582,7 +610,7 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 			tree.set("parameters/sprint_blend/blend_amount", _sprint_amt)
 			tree.set("parameters/sprint_ts/scale", clampf(_speed / SPRINT_AUTHORED, 0.5, 1.6))
 		if anim.has_animation("carry_run_a"):
-			tree.set("parameters/carry_blend/blend_amount", _carry * gait_weight(_speed, Fighter.Stance.STAND, _run_authored) * (1.0 - _sprint_amt))
+			tree.set("parameters/carry_blend/blend_amount", _carry * maxf(gait_weight(_speed, Fighter.Stance.STAND, _run_authored), _air) * (1.0 - _sprint_amt))
 			tree.set("parameters/carry_swing/blend_amount", _stride_phase())
 		if anim.has_animation("heal"):
 			tree.set("parameters/heal_blend/blend_amount", _heal_amt)
@@ -611,7 +639,7 @@ func update_locomotion(v: Vector2, stance: int, on_floor: bool, delta: float) ->
 ## (about 0.35 s) and snap up to the aim (about 0.1 s); the gun follows the hand while carried.
 func _update_carry(stance: int, on_floor: bool, delta: float) -> void:
 	var up := gun_up()
-	var standing := stance == Fighter.Stance.STAND and weapon_id != "" and not _healing
+	var standing := stance == Fighter.Stance.STAND and weapon_id != "" and not _healing and not standing_up()
 	var want := 0.0 if up or not standing else 1.0
 	_carry = move_toward(_carry, want, delta * (3.0 if want > _carry else 10.0))
 	var sprint_on := sprint and standing and on_floor and _speed > Fighter.RUN_SPEED * 0.8 and anim != null and anim.has_animation("sprint_fwd")
@@ -675,8 +703,38 @@ func _track_landing(on_floor: bool, delta: float) -> void:
 	if _air_time >= LAND_MIN_AIR:
 		_land_left = LAND_TIME
 		_land_peak = clampf(0.2 + _air_time * 0.45, 0.25, 0.6)
+		_land_clip = _speed < LAND_CLIP_MAX_SPEED and tree != null and tree.active and anim.has_animation("jump_land")
+		if _land_clip:
+			tree.set("parameters/jump_land_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 	_air_time = 0.0
 	_land_left = maxf(_land_left - delta, 0.0)
+	if _land_left <= 0.0:
+		_land_clip = false
+
+
+## The jump's fall part when the body leaves the ground without a jump; the stand-up from prone.
+func _stance_clips(stance: int, on_floor: bool) -> void:
+	if tree == null or not tree.active:
+		return
+	if _was_floor and not on_floor and not _jumped and anim.has_animation("jump_air"):
+		tree.set("parameters/jump_seek/seek_request", JUMP_FALL)
+	if on_floor:
+		_jumped = false
+	_was_floor = on_floor
+	var now := Time.get_ticks_msec() / 1000.0
+	if anim.has_animation("prone_up"):
+		if _last_stance == Fighter.Stance.PRONE and stance == Fighter.Stance.STAND and _speed < PRONE_UP_MAX_SPEED:
+			tree.set("parameters/prone_up_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+			_prone_up_until = now + anim.get_animation("prone_up").length
+		elif now < _prone_up_until and (_speed > PRONE_UP_MAX_SPEED or stance != Fighter.Stance.STAND or gun_up()):
+			tree.set("parameters/prone_up_shot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
+			_prone_up_until = 0.0
+	_last_stance = stance
+
+
+## Getting up from prone (prone_up playing).
+func standing_up() -> bool:
+	return Time.get_ticks_msec() / 1000.0 < _prone_up_until
 
 
 ## 0..~0.6: how far the knees give right now (a smooth bump over LAND_TIME, no pop in or out).
@@ -758,8 +816,10 @@ func on_punch() -> void:
 
 
 func on_jump() -> void:
+	_jumped = true
 	if tree and tree.active:
 		tree.set("parameters/jump_seek/seek_request", 0.0)
+		_air = maxf(_air, 0.5)            # (the take-off is short: no slow fade into it)
 
 
 ## Upper-body reload, stretched to the weapon's reload time; the gun follows the hand.
@@ -873,23 +933,27 @@ func revive() -> void:
 		(_fb.hips as Node3D).rotation.x = 0.0
 
 
-func play_victory() -> void:
+## clip: "victory" (the cheer, the match's end) or "victory_pose" (the results: fist up, hand on hip).
+func play_victory(clip := "victory") -> void:
 	_end_lobby()
 	if weapon_node:
 		weapon_node.visible = false
 	show_weapon = false
 	if aim_mod:
 		aim_mod.pitch = 0.0
-	if anim and anim.has_animation("victory"):
+	if anim and not anim.has_animation(clip):
+		clip = "victory"
+	if anim and anim.has_animation(clip):
 		if tree:
 			tree.active = false
-		anim.play("victory", 0.25)
+		anim.play(clip, 0.25)
 
 
 func play_lobby(cheer := false) -> void:
 	_lobby = true
 	_lobby_cheer = cheer
 	_gesture_in = randf_range(3.0, 5.5)
+	_gesture_n = 0
 	_cheer_left = 0.0
 	_look_to = 0.0
 	set_process(true)
@@ -928,9 +992,16 @@ func _process(delta: float) -> void:
 	if _gesture_in <= 0.0 and _cheer_left <= 0.0 and absf(_look) < 0.02:
 		_gesture_in = randf_range(5.0, 9.0)
 		anim.speed_scale = randf_range(0.88, 1.1)     # the weight shifts at a pace of their own
+		_gesture_n += 1
+		var clips: Array = LOBBY_GESTURES.filter(func(c: String) -> bool: return anim.has_animation(c))
 		if _lobby_cheer and anim.has_animation("victory") and randf() < 0.3:
 			anim.play("victory", 0.4)
 			_cheer_left = anim.get_animation("victory").length / anim.speed_scale - 0.2
+		elif _gesture_n % 2 == 0 and not clips.is_empty():
+			# a gesture clip (the hand on the hip, the weight over, a look round), then the idle again
+			var g: String = clips[randi() % clips.size()]
+			anim.play(g, 0.4)
+			_cheer_left = anim.get_animation(g).length / anim.speed_scale - 0.35
 		else:
 			_look_to = randf_range(0.45, 0.75) * (1.0 if randf() < 0.5 else -1.0)
 			_look_hold = randf_range(1.2, 2.0)
