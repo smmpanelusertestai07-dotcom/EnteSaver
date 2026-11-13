@@ -972,6 +972,31 @@ func _field(caption: String, value: String, font_size: int, kind: String, color:
 	return v
 
 
+## An outfit as its wardrobe picture (node PlayerOutfit, the name as its tooltip): the portrait on
+## the outfit's colour glow with its colour bar, as the WARDROBE's cards.
+static func outfit_thumb(id: String) -> Control:
+	var t := Control.new()
+	t.name = "PlayerOutfit"
+	t.custom_minimum_size = Vector2(66, 86)
+	t.tooltip_text = String(CharacterModel.bundle_info(id).name)
+	t.mouse_filter = Control.MOUSE_FILTER_PASS
+	t.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var col := LobbyWardrobe.outfit_color(id)
+	var pic := UI.texture("bundle_%s.png" % id)
+	var glow := UI.radial_glow(Color(col, 0.55))
+	t.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, t.size)
+		t.draw_rect(r, Color(0.075, 0.072, 0.07, 0.97))
+		t.draw_texture_rect(glow, Rect2(0, 0, r.size.x, r.size.y - 4), false)
+		if pic:
+			var ph := r.size.y - 8.0
+			var pw := ph * 0.75
+			t.draw_texture_rect(pic, Rect2((r.size.x - pw) * 0.5, 2, pw, ph), false)
+		t.draw_rect(Rect2(0, r.size.y - 4, r.size.x, 4), col)
+		t.draw_rect(r, Color(1, 1, 1, 0.18), false, 1.0))
+	return t
+
+
 ## COPY says COPIED for a moment.
 func _copied(b: Button) -> void:
 	b.text = "COPIED"
@@ -1253,9 +1278,7 @@ func _fill_player() -> void:
 	row.add_child(gap)
 	if not (peer.is_empty() and card.is_empty()):           # the outfit only when this phone has seen it
 		var outfit := CharacterModel.bundle_info(String(peer.get("bundle", card.get("bundle", "default"))))
-		var of := _field("OUTFIT", String(outfit.name), 21, "bold", LobbyWardrobe.outfit_color(String(outfit.id)), "PlayerOutfit")
-		of.custom_minimum_size = Vector2(200, 0)
-		row.add_child(of)
+		row.add_child(outfit_thumb(String(outfit.id)))
 	var sig := String(card.get("signature", ""))
 	var sig_text := "“%s”" % sig
 	if sig == "":

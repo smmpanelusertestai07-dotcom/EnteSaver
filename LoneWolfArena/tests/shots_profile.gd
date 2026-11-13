@@ -306,6 +306,8 @@ func _tour_cards(lobby: Node, cloud: Cloud) -> void:
 		and _text(pop, "PlayerSignature") == "“%s”" % FRIEND[6] and pop.find_child("PlayerDuel", true, false) != null
 		and (pop.find_child("PlayerFriend", true, false) as Button).text == "REMOVE FRIEND",
 		"a friend's card: picture, banner, level, ONLINE NOW, signature, DUEL 1 VS 1 and REMOVE FRIEND")
+	_check(pop != null and pop.find_child("PlayerOutfit", true, false) != null and not (pop.find_child("PlayerOutfit", true, false) is Label),
+		"a friend's card shows the outfit's wardrobe picture, not its name")
 	if pop:
 		_touch_targets(pop, "a friend's card")
 	await _at.shot("p06_card_friend_online")
