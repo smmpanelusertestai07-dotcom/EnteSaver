@@ -2,8 +2,9 @@ extends Node
 ## Settings screenshot tour (every page of the lobby's settings, a selected CONTROLS row, the
 ## lower half of the long pages):
 ##   tools/qa/capture.sh <out_dir> 1280x720 script:res://tests/shots_settings.gd
-## Checks that every page builds, no row's control runs past the screen's right edge and the
-## preview pages show their picture. Returns the number of failed checks.
+## Checks that every page builds, no row's control runs past the screen's right edge, the
+## preview pages show their picture and the HUD page draws the player's own layout (set_6_hud_moved:
+## FIRE moved to the bottom middle, no left fire button). Returns the number of failed checks.
 
 var _fails := 0
 
@@ -37,6 +38,24 @@ func run(at: Node) -> int:
 				sp._select("freelook_button")
 				await at.wait(0.3)
 			await at.shot("set_%d_%s_more" % [page, tab_name])
+	# The HUD page shows the player's own layout: FIRE moved to the middle and made smaller, the
+	# left fire button off (the picture follows a layout saved while it shows).
+	var saved_layout: Dictionary = Game.hud_layout
+	var saved_left := int(Game.settings.left_fire)
+	sp._show_tab(6)
+	await at.wait(0.3)
+	var lay := HudLayout.current()
+	lay.fire_r.x = 0.5
+	lay.fire_r.y = 0.82
+	lay.fire_r.a = "c"
+	lay.fire_r.s = 0.18
+	Game.settings.left_fire = HUD.LEFT_FIRE_OFF
+	Game.hud_layout = HudLayout.to_save(lay)
+	await at.wait(0.4)
+	_check(sp.find_child("HudTile", true, false) != null and is_same(sp._hud_seen, Game.hud_layout), "hud: the picture follows the saved layout", at)
+	await at.shot("set_6_hud_moved")
+	Game.hud_layout = saved_layout
+	Game.settings.left_fire = saved_left
 	sp._show_tab(2)
 	sp._select("joystick")
 	await at.wait(0.4)

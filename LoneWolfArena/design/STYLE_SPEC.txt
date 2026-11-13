@@ -188,8 +188,10 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   near-black #0D0B0E (SEG_OFF) with a thin light border. Sliders: number, [-], yellow bar with a
   white grip, [+]. Square RESET (circular arrow) bottom-left of the content on pages with
   settings; no save button (changes apply at once).
-  HUD: a large picture of our own HUD (assets/ui/settings/hud.png) under a yellow trapezoid tab
-  "MY HUD" in a 2 px yellow frame, a yellow CUSTOM button on it (the editor).
+  HUD: a large picture of the player's own HUD (their saved layout drawn by the HUD's own drawing
+  over our arena without a HUD, assets/ui/settings/arena.png: a moved FIRE shows where they put
+  it, buttons turned off in CONTROLS are left out) under a yellow trapezoid tab "MY HUD" in a 2 px
+  yellow frame, a yellow CUSTOM button on it (the editor).
   CONTROLS and SENSITIVITY: a picture pane on the left (40 % of the content, 340-520 px): our HUD
   screenshot cropped around the row's button, the button ringed in dashed yellow, a yellow callout
   with a shadow (a white drag trail and two yellow turn arrows for camera rows), and under it the
