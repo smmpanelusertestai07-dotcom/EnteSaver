@@ -91,8 +91,9 @@ func _placement() -> void:
 		"no podium + plate; with members the hero stands further left")
 	for i in Lobby.MEMBER_SPOTS.size():
 		_check((Lobby.MEMBER_SPOTS[i] as Vector3).x > 0.5, "member spot %d is right of the hero" % i)
-	_check(Lobby.fill_needed(2, 1) and Lobby.fill_needed(2, 2) and not Lobby.fill_needed(2, 4) and Lobby.fill_needed(4, 4),
-		"FILL EMPTY PLACES matters unless a DUO group of 4 fills the match by itself")
+	_check(Lobby.fill_needed(2, 1) and not Lobby.fill_needed(2, 2) and not Lobby.fill_needed(2, 3) and not Lobby.fill_needed(2, 4)
+		and Lobby.fill_needed(4, 1) and Lobby.fill_needed(4, 3) and not Lobby.fill_needed(4, 4),
+		"FILL EMPTY PLACES matters only for a group smaller than one team (a whole team searches for opponents)")
 	_check(LobbyDialogs.size_box_allowed(true, false) and LobbyDialogs.size_box_allowed(false, false) and not LobbyDialogs.size_box_allowed(false, true),
 		"the TEAM panel opens for a member too (read-only), never during a search")
 	_check(LobbyDialogs.team_rows_shown("lonewolf", false, false, true) and not LobbyDialogs.team_rows_shown("training", false, false, true)

@@ -623,8 +623,8 @@ func _pick(m: String) -> void:
 ## the leader's JOIN BY CODE is on, else THE LEADER SHARES THE GROUP CODE), the tick JOIN BY CODE
 ## (GroupCodeSwitch: Cloud.set_code_join, the leader's or a solo's; a member sees the leader's
 ## read-only) and the tick FILL EMPTY PLACES (TeamFillTick, the leader's or a solo's: the setting
-## team_fill, on by default; off, a DUO / SQUAD START never looks for other players, so only a
-## group that fills the match by itself starts: Lobby.fill_needed). Then a picture tile per team
+## team_fill, on by default; off, a DUO / SQUAD START never puts other players in the group's own
+## team, so only a whole team starts, still searching for opponents: Lobby.fill_needed). Then a picture tile per team
 ## size of the card's mode (SizeTile_<1|2|4>: SOLO / DUO / SQUAD with one, two or four figures; in
 ## LONE WOLF with a group of exactly two SOLO reads DUEL with YOU VS <NAME> under it, as SELECT
 ## MODE's chip: size_tile_text); the current one has a yellow frame and the tick corner. A tile

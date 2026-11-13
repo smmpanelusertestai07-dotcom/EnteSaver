@@ -549,8 +549,9 @@ listed here. If a part needs something new from the core, add it in its own file
   GroupCodeRow (`LobbyTeam.code_row`) or GroupCodeNote (`LobbyTeam.code_note`), the tick
   GroupCodeSwitch (JOIN BY CODE = `Cloud.set_code_join`) and, for the leader or a solo, the tick
   TeamFillTick (FILL EMPTY PLACES = setting `team_fill`, default true; off, `Lobby.start_group`
-  refuses a DUO / SQUAD START that needs players from outside the group: `Lobby.fill_needed(size,
-  group_n)`, true unless a DUO group of 4): a tile and SELECT MODE's
+  refuses a DUO / SQUAD START that needs strangers in the group's own team: `Lobby.fill_needed(size,
+  group_n)`, true when group_n < `NetGroup.per_team(size)` (a solo, a SQUAD group of 2 or 3); a
+  whole team still searches for opponents; not in a room): a tile and SELECT MODE's
   size chips both go through `LobbyDialogs.pick_size(m, n)`); the
   opponent chips `Diff_EASY|NORMAL|HARD|DUMMY` (row `Difficulty`) are on the TRAINING GROUND card:
   a tap picks TRAINING GROUND with that opponent and closes SELECT MODE; DUMMY sets

@@ -1208,8 +1208,8 @@ func start_group(size: int) -> void:
 	Game.team_match = {}
 	var word := String(LobbyDialogs.SIZE_NAMES.get(size, "DUO"))
 	var n := LobbyTeam.members().size() if LobbyTeam.in_group() else 1
-	if not bool(Game.settings.get("team_fill", true)) and fill_needed(size, n):
-		dialogs.notice("LONE WOLF %s" % word, "FILL EMPTY PLACES is off: only a group that fills the match by itself starts (a DUO of 4 players). Invite more players, or tick FILL EMPTY PLACES in the TEAM panel (the figure on the mode card).")
+	if not bool(Game.settings.get("team_fill", true)) and fill_needed(size, n) and not Game.cloud_service().in_room():
+		dialogs.notice("LONE WOLF %s" % word, "FILL EMPTY PLACES is off: no other players join your team, so only a whole team starts (%d players in %s). Invite more players, or tick FILL EMPTY PLACES in the TEAM panel (the figure on the mode card)." % [NetGroup.per_team(size), word])
 		return
 	var why := Game.cloud_service().group_start(size)
 	if why != "":
@@ -1217,11 +1217,13 @@ func start_group(size: int) -> void:
 
 
 ## Whether START in DUO / SQUAD (`size` a team) with a group of `group_n` players needs players
-## from outside the group (the search): every time but a DUO group of 4, which plays 2 VS 2 among
-## itself (GROUPS.txt 1). With the TEAM panel's FILL EMPTY PLACES off (setting team_fill) such a
-## START does not search and says why.
+## from outside the group IN ITS OWN TEAM: when the group is smaller than one team (a solo, a SQUAD
+## group of 2 or 3). A whole team (a DUO pair, a SQUAD of 4) only searches for opponents, a DUO
+## group of 4 plays 2 VS 2 among itself, and a group too big for its team gets Cloud.group_start's
+## own refusal (GROUPS.txt 1). With the TEAM panel's FILL EMPTY PLACES off (setting team_fill) a
+## START that needs places filled does not search and says why.
 static func fill_needed(size: int, group_n: int) -> bool:
-	return not (size == 2 and group_n == 4)
+	return not (size == 2 and group_n == 4) and group_n < NetGroup.per_team(size)
 
 
 ## A group of exactly two with SOLO: the leader's START plays the plain 1 vs 1 between the two
