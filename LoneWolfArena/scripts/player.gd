@@ -285,6 +285,8 @@ func body_holds() -> bool:
 func face_aim() -> void:
 	body_turn = 0.0
 	_turn_aim = aim_yaw
+	if alive:
+		rotation.y = aim_yaw     # (an aim turned since the last tick: the body faces it now too)
 	if model != null:
 		model.rotation.y = 0.0
 		if model.aim_mod:
@@ -953,6 +955,12 @@ func drawn_position() -> Vector3:
 
 
 func _process(delta: float) -> void:
+	if alive:
+		# The body faces the aim on every frame, not only at the physics tick (Fighter sets it
+		# there too): body_turn below is taken against this frame's aim, so at 90 / 120 FPS a
+		# frame without a tick drew the held body one frame's drag off (a wobble while the camera
+		# went round it) and the turning body stepped at the ticks.
+		rotation.y = aim_yaw
 	if model != null:
 		model.position = global_basis.inverse() * (drawn_position() - global_position)
 	super._process(delta)

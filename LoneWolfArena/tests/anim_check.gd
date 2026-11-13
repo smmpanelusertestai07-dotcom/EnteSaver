@@ -11,7 +11,8 @@ extends Node
 ## - at more frames than physics ticks the camera and the own model move between ticks
 ## - free look with no button: standing still a drag takes the camera round to the character's
 ##   face and the body stays; firing turns the body to the crosshair at once; moving turns it back
-##   and a drag while running turns the run; the eye button (when on) still turns only the camera
+##   and a drag while running turns the run; the eye button (when on) still turns only the camera;
+##   at 120 FPS with fewer physics ticks the held body's drawn yaw stays fixed while the camera turns
 ## - a gun pick keeps the frame-rate governor's resolution; bullet holes share one MultiMesh;
 ##   a frag kill reads FRAG; the target dummy's CHANGE GUN slot reopens the weapon pick
 ## Prints "ANIM CHECK DONE bad=N" and exits with N.
@@ -316,6 +317,9 @@ func _check_free_look(arena: Node, p: Player) -> void:
 	await at.wait(0.5)
 	var vh := get_viewport().get_visible_rect().size.y
 	var px_per_deg := vh / 130.0 / (maxf(float(Game.settings.sens_general), 1.0) / 100.0)
+	await _check_free_look_frames(arena, p, px_per_deg)
+	p.face_aim()
+	await get_tree().process_frame
 	var body0 := _model_fwd(p)
 	var aim0 := p.aim_yaw
 	for i in 12:                                    # 180 degrees in a dozen drag events
@@ -391,6 +395,45 @@ func _check_free_look(arena: Node, p: Player) -> void:
 	for pair in others:
 		(pair[0] as Fighter).frozen = bool(pair[1])
 	hud.process_mode = Node.PROCESS_MODE_INHERIT
+
+
+## At more frames than physics ticks a second (90 / 120 FPS) a drag on every frame turns the
+## camera round the held body on every frame, and the body's drawn world yaw does not move at all
+## (it used to step back by a frame's drag on the frames without a tick and forward at the tick).
+func _check_free_look_frames(arena: Node, p: Player, px_per_deg: float) -> void:
+	var fps := Engine.max_fps
+	var ticks := Engine.physics_ticks_per_second
+	Engine.max_fps = 120
+	Engine.physics_ticks_per_second = 20        # several frames to each tick, even on a slow machine
+	await get_tree().physics_frame
+	await get_tree().process_frame
+	var frames: Array = []                      # [physics frames, body yaw, camera yaw] as drawn
+	var sampler := Sampler.new()
+	sampler.on_frame = func() -> void:
+		var fwd := _model_fwd(p)
+		var cam := _flat(-p.camera.global_basis.z)
+		frames.append([Engine.get_physics_frames(), atan2(-fwd.x, -fwd.z), atan2(-cam.x, -cam.z), p.body_holds()])
+	arena.add_child(sampler)
+	await get_tree().process_frame
+	for i in 36:                                # 3 degrees a frame: 108 degrees round
+		p.add_look(Vector2(-3.0 * px_per_deg, 0.0))
+		await get_tree().process_frame
+	sampler.queue_free()
+	Engine.physics_ticks_per_second = ticks
+	Engine.max_fps = fps
+	var no_tick := 0
+	var cam_moved := 0
+	var wobble := 0.0
+	var held := true
+	for i in range(1, frames.size()):
+		held = held and bool(frames[i][3])
+		wobble = maxf(wobble, absf(wrapf(float(frames[i][1]) - float(frames[0][1]), -PI, PI)))
+		if int(frames[i][0]) == int(frames[i - 1][0]):
+			no_tick += 1
+			cam_moved += 1 if absf(wrapf(float(frames[i][2]) - float(frames[i - 1][2]), -PI, PI)) > deg_to_rad(1.0) else 0
+	var turned := absf(wrapf(float(frames[-1][2]) - float(frames[0][2]), -PI, PI))
+	_expect(held and no_tick > 0 and cam_moved >= no_tick * 0.8 and turned > deg_to_rad(90.0) and wobble < deg_to_rad(0.3),
+		"free look at 120 FPS: the camera turns on frames between ticks (%d of %d, %.0f deg) and the held body stays (%.2f deg off)" % [cam_moved, no_tick, rad_to_deg(turned), rad_to_deg(wobble)])
 
 
 ## Where the drawn character faces (flat, world).

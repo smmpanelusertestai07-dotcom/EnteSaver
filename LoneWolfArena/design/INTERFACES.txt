@@ -218,7 +218,9 @@ listed here. If a part needs something new from the core, add it in its own file
 - free look with no button (the default camera, as the reference's): the look drag always turns
   the camera and the aim together; while `body_holds()` (alive, standing still under
   `BODY_HOLD_SPEED`, not firing, aiming, sprinting, throwing or holding an item) the drawn body keeps
-  its facing and `body_turn` (= drawn yaw - aim yaw, also `model.rotation.y`) takes the turn, so
+  its facing and `body_turn` (= drawn yaw - aim yaw, also `model.rotation.y`; the player sets its
+  own `rotation.y = aim_yaw` in `_process` as well, so at 90 / 120 FPS the held body's world yaw
+  stays fixed on frames without a physics tick) takes the turn, so
   the camera goes round to the character's face; the head looks toward the aim up to
   `HEAD_FOLLOW` (`AimSpineModifier.twist`); the held body's gun (`model.set_aim` direction) points
   the way the drawn body faces, not along the camera. `face_aim()` zeroes it at once and puts the
