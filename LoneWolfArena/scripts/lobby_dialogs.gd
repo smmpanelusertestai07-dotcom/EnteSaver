@@ -1,13 +1,17 @@
 class_name LobbyDialogs
 extends RefCounted
 ## The lobby's popups: the popup frame they share (open_modal / close_modal, one at a time, in
-## `modal`; back() is the header X and Android back: a popup's own way back, else close), SELECT
-## MODE (with TRAINING GROUND's opponent chips; the "?" on each card opens that mode's picture
-## help, mode_help: scripts/mode_help.gd), the player name editor with the first-start name
+## `modal`; back() is the header X and Android back: a popup's own way back, else close), the
+## full pages' frame (open_page: FRIENDS, SELECT MODE, HOW TO PLAY from it), SELECT MODE (a full
+## page with the mode cards, TRAINING GROUND's opponent chips and the other ways to play; the "?" on
+## each card opens that mode's picture help, mode_help: scripts/mode_help.gd), the player name editor with the first-start name
 ## prompt, a confirmation (confirm()), a message with one OK (notice()) and the "Quit the game?"
 ## dialog. The lobby makes it (Lobby.dialogs) and its parts open popups through it; everything is
-## built under the lobby's UI layer. (HOW TO PLAY is in SETTINGS: scripts/how_to_play.gd.)
-## Node names: Modal (or QuitDialog) with its Frame, Close, Mode_<training|lonewolf>, Sizes with
+## built under the lobby's UI layer. (HOW TO PLAY is in SETTINGS, and on SELECT MODE's bottom row:
+## scripts/how_to_play.gd.)
+## Node names: Modal (or QuitDialog) with its Frame (a page: PageBg, PageTitle, PageTabs, PageFoot,
+## PageBody), Close, ModeTabs / ModeTab, ModeCards, Mode_<training|lonewolf> (ModeTitle, ModeStart),
+## ModeWays with ModeWay_<room|local|help>, Sizes with
 ## Size_<1|2|4> (SOLO, DUO, SQUAD: on both mode cards; LONE WOLF's SOLO in a group of two reads
 ## DUEL · YOU VS <NAME>: size_chip_text), Difficulty with
 ## Diff_<EASY|NORMAL|HARD|DUMMY>, ModeStats, NameEdit, NameRandom, NamePreview, NameOk,
@@ -84,8 +88,10 @@ func open_modal(title: String, width := 980.0, top := false) -> VBoxContainer:
 ## boxed side tabs on the left (the returned "tabs" VBox, PAGE_TAB_W wide), a foot strip under it
 ## ("foot": light buttons such as BLOCKED) and the content column on the right ("body", node
 ## "PageBody"). One page or popup at a time, in `modal` like a popup.
+## side_tabs false (SELECT MODE, HOW TO PLAY): no side tabs or foot strip, the body spans the page;
+## with no title the body starts at the top (the page puts its own tab bar there).
 const PAGE_TAB_W := 0.16
-func open_page(title: String) -> Dictionary:
+func open_page(title: String, side_tabs := true) -> Dictionary:
 	close_modal()
 	modal = Control.new()
 	modal.name = "Modal"
@@ -153,6 +159,15 @@ func open_page(title: String) -> Dictionary:
 	body.offset_top = 76
 	body.offset_bottom = -14
 	inner.add_child(body)
+	if not side_tabs:
+		tabs.visible = false
+		foot.visible = false
+		body.anchor_left = 0.0
+		body.offset_left = 22
+		if title == "":
+			body.offset_top = 4
+	# the X last, so it is hit-tested before a body that reaches up beside it (no title)
+	inner.move_child(close, -1)
 	modal.modulate.a = 0.0
 	modal.create_tween().tween_property(modal, "modulate:a", 1.0, 0.12)
 	return {"tabs": tabs, "foot": foot, "body": body, "title": t}
@@ -225,11 +240,24 @@ func notice(title: String, text: String) -> void:
 
 # ---------------------------------------------------------------- select mode
 
-## SELECT MODE (the lobby's mode card opens it): the two modes as cards (art, name, map, what
-## START plays, this player's numbers in it). A tap on a card picks its mode, which START then
-## plays (kept as the setting "mode"), and closes the popup; on TRAINING GROUND's card the chips
-## pick its opponent too (a bot's level, kept as the setting "difficulty", or the target dummy for
-## this session: Game.practice), which also picks TRAINING GROUND.
+## SELECT MODE (the lobby's mode card opens it): a full page laid out like the reference's mode
+## page (open_page without side tabs: the X box top right, Android back closes it). A tab bar at the
+## top centre with its one tab MODES (ModeTabs / ModeTab: yellow caps over a yellow underline); the
+## two modes as big picture cards side by side (Mode_<m>: the mode's art filling the card, the name
+## in big white caps at the lower left, CARGO CAGE and what START plays under it, the size chips,
+## TRAINING GROUND's opponent chips, the player's numbers ModeStats, the "?" Help_<m> in the top
+## right corner; the picked card has a 2 px yellow frame); and a bottom row of dark buttons with an
+## icon and a caps label for the other ways to play (ModeWays: ModeWay_room CUSTOM ROOM and
+## ModeWay_local PLAY WITHOUT INTERNET open FRIENDS on those tabs, ModeWay_help HOW TO PLAY opens
+## the help as a page whose X and back come back here). A tap on a card picks its mode, which START
+## then plays (kept as the setting "mode"), and closes the page; on TRAINING GROUND's card the
+## chips pick its opponent too (a bot's level, kept as the setting "difficulty", or the target dummy
+## for this session: Game.practice), which also picks TRAINING GROUND. A group member gets a notice
+## instead (the leader picks).
+const MODE_WAYS := [["room", "CUSTOM ROOM", "v_friends"], ["local", "PLAY WITHOUT INTERNET", "v_online"],
+	["help", "HOW TO PLAY", "v_info"]]
+
+
 func select_mode() -> void:
 	if LobbyTeam.is_member():
 		# In a group the leader picks (Cloud.group's mode / size, shown on the mode card).
@@ -237,14 +265,92 @@ func select_mode() -> void:
 		notice("SELECT MODE", "%s picks the mode while you are in their group: %s %s. EXIT GROUP to pick your own." % [
 			who if who != "" else "The leader", Game.mode_name(), String(SIZE_NAMES.get(Game.team_size, "SOLO"))])
 		return
-	var v := open_modal("SELECT MODE", 980.0)
+	var page := open_page("", false)
+	modal.set_meta("mode_page", true)
+	var v: VBoxContainer = page.body
+	v.add_child(_mode_tabs())
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 20)
+	row.name = "ModeCards"
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 18)
 	v.add_child(row)
 	for m: String in Game.MODE_NAMES:
 		row.add_child(_mode_choice(m))
-	v.add_child(UI.label("On CARGO CAGE. SOLO: 1 vs 1, first to %d rounds, the gun picked every 2 rounds. DUO / SQUAD: teams, first to %d, knock down and revive." % [
-		Game.ROUNDS_TO_WIN, TeamArena.TEAM_ROUNDS_TO_WIN], 16, UI.TEXT_DIM, "semi"))
+	var ways := HBoxContainer.new()
+	ways.name = "ModeWays"
+	ways.alignment = BoxContainer.ALIGNMENT_END
+	ways.add_theme_constant_override("separation", 8)
+	v.add_child(ways)
+	for w: Array in MODE_WAYS:
+		ways.add_child(_mode_way(String(w[0]), String(w[1]), String(w[2])))
+
+
+## The mode page's tab bar (ModeTabs): one tab, MODES (ModeTab), yellow caps over a 3 px yellow
+## underline, on a thin line across the top centre (the reference's tab bar, our one tab).
+func _mode_tabs() -> Control:
+	var bar := Control.new()
+	bar.name = "ModeTabs"
+	bar.custom_minimum_size = Vector2(0, 60)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.draw.connect(func() -> void:
+		var s := bar.size
+		var y := s.y - 1.0
+		bar.draw_line(Vector2(s.x * 0.28, y), Vector2(s.x * 0.72, y), Color(1, 1, 1, 0.16), 1.0))
+	var tab := UI.label("MODES", 28, UI.ACCENT, "heavy")
+	tab.name = "ModeTab"
+	tab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tab.anchor_left = 0.5
+	tab.anchor_right = 0.5
+	tab.anchor_bottom = 1.0
+	tab.offset_left = -130
+	tab.offset_right = 130
+	tab.offset_bottom = -4
+	tab.draw.connect(func() -> void:
+		var w := UI.font("heavy").get_string_size(tab.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 28).x + 48.0
+		tab.draw_rect(Rect2((tab.size.x - w) * 0.5, tab.size.y, w, 3), UI.ACCENT))
+	bar.add_child(tab)
+	return bar
+
+
+## A button of the mode page's bottom row (ModeWay_<kind>): dark, an icon and a caps label.
+func _mode_way(kind: String, text: String, icon_name: String) -> Button:
+	var b := UI.button(text, 18, "dark", Vector2(0, 60))
+	b.name = "ModeWay_" + kind
+	b.icon = UI.icon_texture(icon_name)
+	b.add_theme_constant_override("icon_max_width", 28)
+	b.add_theme_constant_override("h_separation", 10)
+	b.custom_minimum_size.x = maxf(200.0, UI.font("bold").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x + 84.0)
+	b.pressed.connect(func() -> void:
+		if kind == "help":
+			how_to_play()
+		else:
+			lobby.friends.open(kind))
+	return b
+
+
+## HOW TO PLAY from the mode page: the help (HowToPlay.page()) as a full page; its X and Android
+## back come back to SELECT MODE.
+func how_to_play() -> void:
+	var page := open_page("HOW TO PLAY", false)
+	(page.body as VBoxContainer).add_child(HowToPlay.page())
+	modal.set_meta("on_back", select_mode)
+
+
+## What START plays in a mode at the current team size, for its card on the mode page (the lobby's
+## mode card says the same for the picked mode: Lobby.mode_format).
+static func start_line(m: String, size := Game.team_size, teams_online := Game.TEAMS_ONLINE) -> String:
+	var word := String(SIZE_NAMES.get(size, "SOLO"))
+	if m != "training":
+		if size == 1:
+			return "1 VS 1 ONLINE"
+		return "%s  ·  %d VS %d ONLINE" % [word, size, size] if teams_online else "%s: NEXT UPDATE" % word
+	var level := String(Game.DIFFICULTY_NAMES[clampi(int(Game.settings.difficulty), 0, Game.DIFFICULTY_NAMES.size() - 1)])
+	if size > 1:
+		return "%s  ·  BOT: %s" % [word, level]
+	if Game.practice and Game.mode == "training":
+		return "TARGET DUMMY"
+	return "1 VS BOT: %s  ·  FIRST TO %d" % [level, Game.rounds_to_win()]
 
 
 ## What a mode's card in SELECT MODE says under its name for a team size (1 SOLO, 2 DUO, 4 SQUAD):
@@ -264,31 +370,39 @@ static func mode_lines(m: String, size: int, teams_online := Game.TEAMS_ONLINE) 
 	return ["%s · YOU + %s VS %d BOTS · BOT: %s" % [word, mates, size, level], "DUMMY IS SOLO ONLY"]
 
 
-## One mode's card in SELECT MODE (node Mode_<m>): yellow outline and tick on the current mode;
-## TRAINING GROUND's has the opponent chips (row Difficulty).
+## One mode's card on the mode page (node Mode_<m>): the mode's art filling the card, darkened
+## towards its foot where the words sit; a 2 px yellow frame on the current mode. TRAINING GROUND's
+## has the opponent chips (row Difficulty); LONE WOLF's keeps their height empty so both cards' names
+## and size chips line up.
 func _mode_choice(m: String) -> Button:
 	var info: Dictionary = MODE_INFO.get(m, MODE_INFO[Game.DEFAULT_MODE])
 	var card := Button.new()
 	card.name = "Mode_" + m
 	card.focus_mode = Control.FOCUS_NONE
-	card.custom_minimum_size = Vector2(440, 400)
+	card.custom_minimum_size = Vector2(420, 380)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card.clip_contents = true
 	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		card.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-	var art_h := 150.0
 	card.draw.connect(func() -> void:
 		var s := card.size
-		card.draw_rect(Rect2(Vector2.ZERO, s), Color(0.1, 0.095, 0.09, 0.97))
-		Lobby.draw_mode_art(card, m, Rect2(0, 0, s.x, art_h))
-		card.draw_rect(Rect2(0, art_h - 3, s.x, 3), Color(UI.AMBER, 0.9))
-		var picked := Game.mode == m
-		if picked:
-			card.draw_rect(Rect2(Vector2(1.5, 1.5), s - Vector2(3, 3)), UI.ACCENT, false, 3.0)
-			UI.draw_tick_corner(card, s, 40.0)
+		Lobby.draw_mode_art(card, m, Rect2(Vector2.ZERO, s))
+		var y0 := s.y * 0.22
+		var y1 := maxf(s.y - 300.0, y0 + 40.0)
+		var clear := Color(0.03, 0.025, 0.04, 0.0)
+		var dark := Color(0.03, 0.025, 0.04, 0.86)
+		card.draw_polygon(PackedVector2Array([Vector2(0, y0), Vector2(s.x, y0), Vector2(s.x, y1), Vector2(0, y1)]),
+			PackedColorArray([clear, clear, dark, dark]))
+		card.draw_rect(Rect2(0, y1, s.x, s.y - y1), dark)
+		if card.is_pressed():
+			card.draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, 0.15))
+		if Game.mode == m:
+			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), UI.ACCENT, false, 2.0)
 		elif card.is_hovered() or card.is_pressed():
 			card.draw_rect(Rect2(Vector2(1, 1), s - Vector2(2, 2)), Color(1, 1, 1, 0.6), false, 2.0)
 		else:
-			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.14), false, 1.0))
+			card.draw_rect(Rect2(Vector2(0.5, 0.5), s - Vector2(1, 1)), Color(1, 1, 1, 0.16), false, 1.0))
 	for sig in ["mouse_entered", "mouse_exited", "button_down", "button_up"]:
 		card.connect(sig, card.queue_redraw)
 	card.add_child(_help_button(m))
@@ -298,39 +412,41 @@ func _mode_choice(m: String) -> Button:
 	tag.position = Vector2(12, 12)
 	tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(tag)
-	# The text under the art fills the card down to its bottom edge (the numbers sit there).
+	# The words sit at the card's foot over the darkened art, the numbers on the bottom line.
 	var v := VBoxContainer.new()
 	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	v.offset_left = 18
-	v.offset_right = -18
-	v.offset_top = art_h + 8
+	v.offset_left = 20
+	v.offset_right = -20
 	v.offset_bottom = -12
+	v.alignment = BoxContainer.ALIGNMENT_END
 	v.add_theme_constant_override("separation", 0)
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(v)
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 12)
-	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(UI.label(Game.mode_name(m), 32, UI.AMBER, "heavy"))
-	var map_l := UI.label("CARGO CAGE", 22, UI.TEXT, "heavy")
-	map_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	head.add_child(map_l)
-	v.add_child(head)
+	var name_l := UI.shadowed(UI.label(Game.mode_name(m), 44, UI.TEXT, "heavy"), Vector2(0, 3), Color(0, 0, 0, 0.7))
+	name_l.name = "ModeTitle"
+	v.add_child(name_l)
+	var where := UI.label("CARGO CAGE  ·  START: %s" % start_line(m), 18, UI.ACCENT, "heavy")
+	where.name = "ModeStart"
+	UI.ellipsis(where)
+	v.add_child(where)
 	var lines := mode_lines(m, Game.team_size)
 	for i in maxi(lines.size(), 2):         # two lines on both cards: their chips line up
-		v.add_child(UI.label(String(lines[i]) if i < lines.size() else " ", 15, UI.TEXT_DIM, "bold"))
+		var l := UI.label(String(lines[i]) if i < lines.size() else " ", 15, Color(UI.TEXT, 0.78), "bold")
+		UI.ellipsis(l)
+		v.add_child(l)
 	v.add_child(UI.spacer(8))
 	v.add_child(_size_chips(m))
+	v.add_child(UI.spacer(6))
 	if m == "training":
-		v.add_child(UI.spacer(6))
 		v.add_child(_opponent_chips())
-	var fill := UI.spacer(0)
-	fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(fill)
+	else:
+		var keep := UI.spacer(UI.TOUCH_MIN)
+		keep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.add_child(keep)
+	v.add_child(UI.spacer(8))
 	var n: Dictionary = (Game.profile.modes as Dictionary).get(m, {})
 	var stats := UI.label("MATCHES %d   ·   WINS %d   ·   KILLS %d" % [int(n.get("matches", 0)), int(n.get("wins", 0)), int(n.get("kills", 0))],
-		15, UI.TEXT, "bold")
+		15, UI.TEXT_DIM, "bold")
 	stats.name = "ModeStats"
 	v.add_child(stats)
 	card.pressed.connect(func() -> void:
@@ -367,7 +483,7 @@ func _help_button(m: String) -> Button:
 
 
 ## A mode's picture help (ModeHelp: its pages with dots, arrows and swipe) in a popup; its X and
-## Android back go back to SELECT MODE.
+## Android back go back to the mode page (SELECT MODE).
 func mode_help(m: String) -> ModeHelp:
 	var v := open_modal("%s · HOW IT PLAYS" % Game.mode_name(m), 980.0)
 	var help := ModeHelp.new(m)

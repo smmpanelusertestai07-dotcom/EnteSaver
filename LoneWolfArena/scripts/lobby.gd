@@ -813,7 +813,7 @@ func _build_chat_strip(root: Control) -> void:
 	strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	strip.offset_left = 12
 	strip.offset_right = 12 + 470
-	strip.offset_top = -12 - UI.TOUCH_MIN - 8 - 48
+	strip.offset_top = -12 - UI.TOUCH_MIN - 8 - UI.TOUCH_MIN      # a full 56 px touch target
 	strip.offset_bottom = -12 - UI.TOUCH_MIN - 8
 	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		strip.add_theme_stylebox_override(st, StyleBoxEmpty.new())
@@ -821,12 +821,12 @@ func _build_chat_strip(root: Control) -> void:
 	ticker.name = "ChatTicker"
 	UI.outlined(ticker, 3, Color(0, 0, 0, 0.6))
 	ticker.position = Vector2(62, 0)
-	ticker.size = Vector2(404, 48)
+	ticker.size = Vector2(404, UI.TOUCH_MIN)
 	ticker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	strip.add_child(ticker)
 	strip.draw.connect(func() -> void:
 		var hot := strip.is_pressed()
-		var r := Rect2(0, 2, 52, 44)
+		var r := Rect2(0, (strip.size.y - 44.0) * 0.5, 52, 44)     # the icon square, centred
 		strip.draw_rect(r, Color(0, 0, 0, 0.62) if not hot else Color(UI.ACCENT, 0.35))
 		strip.draw_rect(r, Color(1, 1, 1, 0.22), false, 1.0)
 		# our speech bubble: a rounded box with a tail and three dots
@@ -836,11 +836,11 @@ func _build_chat_strip(root: Control) -> void:
 			b.position + Vector2(5, b.size.y + 8)]), UI.TEXT)
 		for i in 3:
 			strip.draw_circle(b.position + Vector2(8 + i * 7, b.size.y * 0.5), 2.2, UI.INK)
-		strip.draw_rect(Rect2(58, 12, 2, 24), Color(1, 1, 1, 0.5))
+		strip.draw_rect(Rect2(58, strip.size.y * 0.5 - 12, 2, 24), Color(1, 1, 1, 0.5))
 		var n := NetChat.unread_total()
 		if n > 0:
-			strip.draw_circle(Vector2(48, 6), 9.0, UI.BAD)
-			strip.draw_string(UI.font("bold"), Vector2(39, 11), str(mini(n, 9)), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE))
+			strip.draw_circle(r.position + Vector2(48, 4), 9.0, UI.BAD)
+			strip.draw_string(UI.font("bold"), r.position + Vector2(39, 9), str(mini(n, 9)), HORIZONTAL_ALIGNMENT_CENTER, 18, 13, Color.WHITE))
 	strip.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
 		var who := chat_ticker_friend()

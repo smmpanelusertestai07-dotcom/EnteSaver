@@ -44,6 +44,8 @@ var _status: Label
 var _shown := ""
 var _t := 0.0
 var _dir_on := false
+var _people: VBoxContainer          # the friends column (refreshed by _refresh_people)
+var _people_sig := ""
 
 
 ## A CHAT button for a friend (with the unread count).
@@ -74,13 +76,12 @@ static func open(owner_lobby: Lobby, friend_id: String, friend_name: String, bac
 	owner_lobby.ui.add_child(modal)
 	dlg.modal = modal
 	modal.set_meta("on_back", w.go_back)
-	# the lobby beside the panel: dimmed a little, a tap there closes the chat
+	# the lobby beside the panel: dimmed a little, a tap there closes the chat; it covers the whole
+	# screen behind the panel, so no lobby button under the chat can be pressed while it is open
 	var outside := Button.new()
 	outside.name = "ChatOutside"
 	outside.focus_mode = Control.FOCUS_NONE
-	outside.anchor_left = PANEL_W
-	outside.anchor_right = 1.0
-	outside.anchor_bottom = 1.0
+	UI.full_rect(outside)
 	var dim := UI.box(Color(0, 0, 0, 0.18), 0, 0, Color.TRANSPARENT, 0.0)
 	for st: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		outside.add_theme_stylebox_override(st, dim)
@@ -106,11 +107,15 @@ static func open(owner_lobby: Lobby, friend_id: String, friend_name: String, bac
 	v.add_theme_constant_override("separation", 0)
 	safe.add_child(v)
 	w.build(v)
-	frame.position.x = -40.0
+	# the slide: both horizontal offsets together (a position tween would bake a transient height,
+	# from a layout pass where the wrapped notes are still narrow, into offset_bottom)
+	frame.offset_left = -40.0
+	frame.offset_right = -40.0
 	modal.modulate.a = 0.0
 	var tw := modal.create_tween().set_parallel()
 	tw.tween_property(modal, "modulate:a", 1.0, 0.14)
-	tw.tween_property(frame, "position:x", 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	for side: String in ["offset_left", "offset_right"]:
+		tw.tween_property(frame, side, 0.0, 0.16).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 
 
 func build(v: VBoxContainer) -> void:
@@ -150,14 +155,18 @@ func build(v: VBoxContainer) -> void:
 	people.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	people.add_theme_constant_override("separation", 2)
 	people_sc.add_child(people)
-	_fill_people(people)
-	UI.drag_scroll(people_sc, people)
+	_people = people
+	_refresh_people()
 	var sep := ColorRect.new()
 	sep.color = Color(1, 1, 1, 0.08)
 	sep.custom_minimum_size = Vector2(1, 0)
 	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	body.add_child(sep)
+	# (typing lifts only the input row and the quick phrases: LobbyFriends._apply_lift pads this
+	# from below, the history shrinks, the panel and its header stay put)
 	var conv_m := MarginContainer.new()
+	conv_m.name = "ChatConv"
+	conv_m.set_meta("lift_pad", 8)
 	conv_m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for side: String in ["left", "right", "top", "bottom"]:
 		conv_m.add_theme_constant_override("margin_" + side, 12 if side in ["left", "right"] else 8)
@@ -222,10 +231,32 @@ func build(v: VBoxContainer) -> void:
 	row.add_child(send_b)
 	var cloud := Game.cloud_service()
 	cloud.friend_chat_changed.connect(_on_message)
+	cloud.peers_changed.connect(_refresh_people)
 	if cloud.friend_key(id) == "":
 		_dir_on = true
 		cloud.start_directory("chat")       # their key comes with their player card
 	refresh()
+
+
+## The friends column follows every friend's unread count and online dot: filled again whenever
+## a message comes in from anyone (friend_chat_changed), the players online change (peers_changed)
+## or, checked with the conversation twice a second, the friends or player cards changed.
+func _refresh_people() -> void:
+	if _people == null or not is_instance_valid(_people):
+		return
+	var cloud := Game.cloud_service()
+	var sig := ""
+	for f: String in Game.profile.friends:
+		sig += "%s:%s:%d:%s:%s|" % [f, String(Game.profile.friends[f].name), NetChat.unread(f) if f != id else 0,
+			cloud.peers.has(f), String((cloud.directory.get(f, {}) as Dictionary).get("avatar", "")) + ("b" if Game.is_blocked(f) else "")]
+	if sig == _people_sig:
+		return
+	_people_sig = sig
+	for c in _people.get_children():
+		_people.remove_child(c)
+		c.queue_free()
+	_fill_people(_people)
+	UI.drag_scroll(_people.get_parent() as ScrollContainer, _people)
 
 
 ## The friends column: every friend (not blocked), the ones with unread messages first, then the
@@ -259,6 +290,8 @@ func _fill_people(people: VBoxContainer) -> void:
 		var avatar := String(card.get("avatar", Game.DEFAULT_PROFILE.avatar))
 		var unread := NetChat.unread(f) if f != id else 0     # (the open one is marked read)
 		var online := cloud.peers.has(f)
+		b.set_meta("unread", unread)
+		b.set_meta("online", online)
 		b.draw.connect(func() -> void:
 			var s := b.size
 			if on:
@@ -293,6 +326,8 @@ func _exit_tree() -> void:
 		return
 	if cloud.friend_chat_changed.is_connected(_on_message):
 		cloud.friend_chat_changed.disconnect(_on_message)
+	if cloud.peers_changed.is_connected(_refresh_people):
+		cloud.peers_changed.disconnect(_refresh_people)
 	if _dir_on:
 		cloud.stop_directory("chat")
 
@@ -308,6 +343,7 @@ func _on_message(from: String) -> void:
 	if from == id:
 		Audio.play("ui_select", -6.0)
 		refresh()
+	_refresh_people()           # another friend's unread count
 
 
 ## Fills the list again when something changed (messages, presence); marks the messages read.
@@ -320,6 +356,7 @@ func refresh() -> void:
 	_status.text = "ONLINE NOW" if online else ("OFFLINE" if cloud.status == "online" else "YOU ARE OFFLINE")
 	_status.add_theme_color_override("font_color", LobbyProfile.ONLINE_GREEN if online else UI.TEXT_DIM)
 	NetChat.mark_read(id)
+	_refresh_people()
 	var key := "%d|%s" % [msgs.size(), str(msgs.back()) if not msgs.is_empty() else ""]
 	if key == _shown:
 		return

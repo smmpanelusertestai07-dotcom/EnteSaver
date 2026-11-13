@@ -68,13 +68,56 @@ func run(at: Node) -> int:
 	await at.wait(0.6)
 	_check(lobby.dialogs.modal.find_child("FriendAccept", true, false) != null, "REQUESTS has ACCEPT")
 	await at.shot("l04_requests")
-	lobby.friends.open("online")
+	# The REQUESTS tab's count follows a new request and one answered.
+	var tab_req := lobby.dialogs.modal.find_child("Tab_requests", true, false) as Button
+	var asker2 := "tour-l-asker2".sha256_text().left(32)
+	cloud.friend_requests[asker2] = {"name": "ORBIT", "pk": "", "ts": now}
 	await at.wait(0.6)
-	_check(lobby.dialogs.modal.find_child("OnlineHead", true, false) != null, "PLAYERS lists who is online")
+	_check(tab_req != null and tab_req.text == "REQUESTS  2", "a new request counts on the REQUESTS tab (%s)" % (tab_req.text if tab_req else "none"))
+	cloud.friend_requests.erase(asker2)
+	cloud.friend_requests.erase(asker)
+	await at.wait(0.6)
+	_check(tab_req != null and tab_req.text == "REQUESTS", "answered requests leave the REQUESTS tab's count (%s)" % (tab_req.text if tab_req else "none"))
+	cloud.friend_requests[asker] = {"name": "SABRE", "pk": "", "ts": now}
+	lobby.friends.open("online")
+	# (opening a tab asks the cloud to connect: with no relay that can turn the tour's held "online"
+	# into CONNECTING before the list is filled, depending on when the refused connection was seen;
+	# the tour holds it online, the list follows within its 0.4 s refresh)
+	cloud.status = "online"
+	await at.wait(0.6)
+	_check(lobby.dialogs.modal.find_child("OnlineHead", true, false) != null, "PLAYERS lists who is online (status %s)" % cloud.status)
 	await at.shot("l05_players")
 	lobby.friends.open("room")
 	await at.wait(0.6)
 	await at.shot("l06_room")
+	# A RUNNING room (SQUAD, this phone hosts): the ID and password, the places, CLOSE ROOM and START,
+	# all inside the page's height.
+	var me_id := cloud.my_id if cloud.my_id != "" else "tour-l-me".sha256_text().left(32)
+	var my_was := cloud.my_id
+	cloud.my_id = me_id
+	cloud.room_code = "482913"
+	cloud.room_pin = "5521"
+	cloud._grp = {"gid": "tour"}
+	var mem := [{"id": me_id, "name": String(Game.profile.name), "bundle": "default", "team": 0, "slot": 0},
+		{"id": ids.NIGHTFOX21, "name": "NIGHTFOX21", "bundle": "shadow", "team": 0, "slot": 1},
+		{"id": ids.KITE, "name": "KITE", "bundle": "default", "team": 1, "slot": 4},
+		{"id": ids.EMBER_7, "name": "EMBER_7", "bundle": "default", "team": 1, "slot": 5}]
+	cloud.group = {"room": "482913", "size": 4, "leader": me_id, "members": mem, "status": "idle"}
+	lobby.friends.open("room")
+	cloud.status = "online"
+	await at.wait(0.6)
+	var rstart := lobby.dialogs.modal.find_child("RoomStart", true, false) as Control
+	var rhead := lobby.dialogs.modal.find_child("RoomHead", true, false) as Control
+	var vs_r := lobby.get_viewport().get_visible_rect().size
+	_check(rstart != null and rhead != null and rstart.get_global_rect().end.y <= vs_r.y and rhead.global_position.y >= 60.0
+		and rstart.get_global_rect().end.x <= vs_r.x, "a running room's places and START fit the page (START ends at %.0f of %.0f)" % [
+		rstart.get_global_rect().end.y if rstart else -1.0, vs_r.y])
+	await at.shot("l06b_room_running")
+	cloud.group = {}
+	cloud._grp = {}
+	cloud.room_code = ""
+	cloud.room_pin = ""
+	cloud.my_id = my_was
 	lobby.friends.open("local")
 	await at.wait(0.6)
 	await at.shot("l07_no_internet")
@@ -91,6 +134,57 @@ func run(at: Node) -> int:
 	_check(chat != null and chat.find_child("ChatWindow", true, false) != null and chat.find_children("ChatMine*", "", true, false).size() == 2
 		and chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) != null, "the chat panel shows the messages and the friends")
 	await at.shot("l08_chat")
+	# The friends column follows another friend's new message and who is online.
+	var kite_row := chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) if chat else null
+	var kite_n := int(kite_row.get_meta("unread", -1)) if kite_row else -1
+	NetChat.add(ids.KITE, now - 5, false, "STILL THERE?")
+	Game.cloud_service().friend_chat_changed.emit(ids.KITE)
+	await at.wait(0.1)
+	kite_row = chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) if chat else null
+	_check(kite_row != null and int(kite_row.get_meta("unread", -1)) == kite_n + 1,
+		"the chat's friends column counts another friend's new message (%d -> %d)" % [kite_n, int(kite_row.get_meta("unread", -1)) if kite_row else -1])
+	var kite_on := bool(kite_row.get_meta("online", false)) if kite_row else false
+	var peers_was: Dictionary = Game.cloud_service().peers.duplicate()
+	if kite_on:
+		Game.cloud_service().peers.erase(ids.KITE)
+	else:
+		Game.cloud_service().peers[ids.KITE] = {"name": "KITE", "bundle": "", "pk": "", "seen": Time.get_ticks_msec(), "im": false}
+	Game.cloud_service().peers_changed.emit()
+	await at.wait(0.1)
+	kite_row = chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) if chat else null
+	_check(kite_row != null and bool(kite_row.get_meta("online", kite_on)) != kite_on, "the chat's friends column follows who is online")
+	Game.cloud_service().peers = peers_was
+	Game.cloud_service().peers_changed.emit()
+	# Typing: the panel and its header stay put, only the input row (and the quick phrases) rise
+	# above the keyboard; the dim behind the panel covers the whole lobby so nothing under it is
+	# pressed while the chat is open.
+	var cframe := chat.find_child("Frame", true, false) as Control if chat else null
+	var cclose := chat.find_child("Close", true, false) as Control if chat else null
+	var cfield := chat.find_child("ChatField", true, false) as LineEdit if chat else null
+	var cout := chat.find_child("ChatOutside", true, false) as Control if chat else null
+	if cframe and cclose and cfield and cout:
+		# (the tour opened FRIENDS just before: the panel is exactly the screen's height, the field on it)
+		var vs0 := lobby.get_viewport().get_visible_rect().size
+		_check(absf(cframe.size.y - vs0.y) < 1.0 and Rect2(Vector2.ZERO, vs0).encloses(cfield.get_global_rect()),
+			"the chat panel is the screen's height with its field on screen (panel %.0f of %.0f, field %s)" % [
+			cframe.size.y, vs0.y, str(cfield.get_global_rect())])
+		var fy := cframe.global_position.y
+		var xy := cclose.global_position.y
+		var ly := cfield.global_position.y
+		lobby.friends._lift_for_keyboard(cfield, true)
+		await at.wait(0.3)
+		var vs := lobby.get_viewport().get_visible_rect().size
+		_check(is_equal_approx(cframe.global_position.y, fy) and is_equal_approx(cclose.global_position.y, xy) and absf(cframe.size.y - vs.y) < 1.0
+			and cfield.global_position.y < ly - 100.0 and cfield.get_global_rect().end.y <= vs.y * 0.6,
+			"typing in the chat lifts only the input row (field %.0f -> %.0f), the panel stays" % [ly, cfield.global_position.y])
+		_check(cout.get_global_rect().has_point(Vector2(5, vs.y - 5)) and cout.get_global_rect().has_point(Vector2(vs.x - 5, 5)),
+			"the chat's outside covers the whole lobby")
+		await at.shot("l08c_chat_typing")
+		lobby.friends._lift_for_keyboard(cfield, false)
+		await at.wait(0.2)
+		_check(absf(cfield.global_position.y - ly) < 1.0, "the input row comes back down after typing")
+	else:
+		_check(false, "the chat panel has its Frame, Close, field and outside")
 	# a left camera cutout: the panel's background still starts at the edge, its content clear of it
 	UI.margins_for_test = Vector2(90, 0)
 	lobby.dialogs.close_modal()
@@ -101,7 +195,7 @@ func run(at: Node) -> int:
 	var tab := chat.find_child("ChatTab_friends", true, false) as Control if chat else null
 	var kite := chat.find_child("ChatPerson_" + Cloud.friend_code(ids.KITE), true, false) as Control if chat else null
 	_check(frame != null and tab != null and kite != null and is_zero_approx(frame.global_position.x)
-		and tab.global_position.x >= 90.0 and kite.global_position.x >= 90.0, "the chat panel's content keeps clear of a left cutout")
+		and absf(frame.size.y - lobby.get_viewport().get_visible_rect().size.y) < 1.0 and tab.global_position.x >= 90.0 and kite.global_position.x >= 90.0, "the chat panel's content keeps clear of a left cutout")
 	await at.shot("l08b_chat_cutout")
 	UI.margins_for_test = Vector2(-1, -1)
 	var outside := chat.find_child("ChatOutside", true, false) as Button if chat else null
@@ -118,6 +212,37 @@ func run(at: Node) -> int:
 	lobby.dialogs.select_mode()
 	await at.wait(0.6)
 	await at.shot("l10_select_mode")
+	_check_mode_page(lobby)
+	# a real tap on the X's centre closes the page (the body reaches up beside it)
+	var mclose := lobby.dialogs.modal.find_child("Close", true, false) as Control if lobby.dialogs.modal else null
+	var has_x := mclose != null
+	if has_x:
+		var at_x: Vector2 = lobby.get_tree().root.get_final_transform() * mclose.get_global_rect().get_center()
+		at.touch(0, at_x, true)
+		await at.wait(0.08)
+		at.touch(0, at_x, false)
+		await at.wait(0.3)
+	_check(has_x and lobby.dialogs.modal == null, "a tap on the mode page's X closes it")
+	# With a left camera cutout the page keeps its cards and buttons clear of it.
+	UI.margins_for_test = Vector2(90, 40)
+	lobby.dialogs.close_modal()
+	lobby.dialogs.select_mode()
+	await at.wait(0.6)
+	var cards := lobby.dialogs.modal.find_child("ModeCards", true, false) as Control if lobby.dialogs.modal else null
+	_check(cards != null and cards.global_position.x >= 90.0, "the mode page keeps clear of a left cutout")
+	_check_mode_page(lobby)
+	await at.shot("l10b_select_mode_cutout")
+	UI.margins_for_test = Vector2(-1, -1)
+	# HOW TO PLAY on its bottom row: a page whose X comes back to the mode page.
+	var how := lobby.dialogs.modal.find_child("ModeWay_help", true, false) as Button if lobby.dialogs.modal else null
+	if how:
+		how.pressed.emit()
+	await at.wait(0.4)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("HowToScroll", true, false) != null, "HOW TO PLAY opens from the mode page")
+	await at.shot("l10c_mode_how_to_play")
+	lobby.dialogs.back()
+	await at.wait(0.3)
+	_check(lobby.dialogs.modal != null and lobby.dialogs.modal.find_child("Mode_lonewolf", true, false) != null, "HOW TO PLAY's X goes back to the mode page")
 	lobby.dialogs.close_modal()
 	lobby.dialogs.open_size_box()
 	await at.wait(0.4)
@@ -142,3 +267,29 @@ func _check(ok: bool, what: String) -> void:
 		print("FAIL  " + what)
 	else:
 		print("ok    " + what)
+
+
+## SELECT MODE as a page: the MODES tab, both cards side by side filling the page between the tab bar
+## and the bottom row, inside the screen, the picked card framed; the bottom row's three ways.
+func _check_mode_page(lobby: Lobby) -> void:
+	var page := lobby.dialogs.modal
+	var vs := lobby.get_viewport().get_visible_rect().size
+	var tab := page.find_child("ModeTab", true, false) as Label if page else null
+	var a := page.find_child("Mode_training", true, false) as Control if page else null
+	var b := page.find_child("Mode_lonewolf", true, false) as Control if page else null
+	var ways := page.find_child("ModeWays", true, false) as Control if page else null
+	_check(page != null and page.has_meta("page") and tab != null and tab.text == "MODES", "SELECT MODE is a page with the MODES tab")
+	if a == null or b == null or ways == null:
+		_check(false, "the mode page has both cards and the bottom row")
+		return
+	var ra := a.get_global_rect()
+	var rb := b.get_global_rect()
+	_check(absf(ra.position.y - rb.position.y) < 1.0 and ra.end.x < rb.position.x and ra.size.y >= 300.0 and rb.end.x <= vs.x
+		and ra.end.y < ways.get_global_rect().position.y and ways.get_global_rect().end.y <= vs.y,
+		"the mode cards stand side by side above the bottom row, on the screen (%s %s)" % [str(ra), str(rb)])
+	for k: String in ["room", "local", "help"]:
+		var w := ways.find_child("ModeWay_" + k, true, false) as Button
+		_check(w != null and w.size.y >= UI.TOUCH_MIN and w.get_global_rect().end.x <= vs.x, "the bottom row has %s" % k)
+	var ta := a.find_child("ModeTitle", true, false) as Control
+	var tb := b.find_child("ModeTitle", true, false) as Control
+	_check(ta != null and tb != null and absf(ta.global_position.y - tb.global_position.y) < 1.0, "both cards' names line up")

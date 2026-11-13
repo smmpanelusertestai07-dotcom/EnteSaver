@@ -130,9 +130,17 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   the right edge at mid height opens FRIENDS on PLAYERS; bottom-right the mode card (purple to blue
   ramp, 2 px yellow frame, the mode name white) (TRAINING GROUND /
   CARGO CAGE / "BOT: NORMAL · FIRST TO 5" or "TARGET DUMMY"; LONE WOLF / CARGO CAGE / "1 VS 1
-  ONLINE"; a tap opens SELECT MODE: the two mode cards, TRAINING GROUND's with the opponent chips
-  EASY, NORMAL, HARD, DUMMY, each card with a small "?" at the art's top right opening a 4-page
-  picture help with page dots, arrows and swipe; a figure in a dark disc at the card's right end
+  ONLINE"; a tap opens SELECT MODE, a full page laid out like the reference's mode page: the X box
+  top right, a tab bar at the top centre with its one tab MODES (yellow caps over a 3 px yellow
+  underline on a thin line), the two modes as big picture cards side by side filling the page (the
+  mode's art filling the card, darkened towards the foot; a small yellow tag VS BOT / ONLINE top
+  left; the name in big white caps at the lower left, the yellow line "CARGO CAGE · START: <what
+  START plays>" under it, two grey lines, the size chips, TRAINING GROUND's opponent chips EASY,
+  NORMAL, HARD, DUMMY, the player's numbers at the foot; the picked card framed 2 px yellow), each
+  card with a small "?" at its top right opening a 4-page picture help with page dots, arrows and
+  swipe; a bottom row at the right of dark rectangular buttons with an icon and a caps label:
+  CUSTOM ROOM, PLAY WITHOUT INTERNET (FRIENDS on those tabs) and HOW TO PLAY (a page whose X comes
+  back to the mode page); a figure in a dark disc at the card's right end
   opens a compact box just above the card with the team-size tiles SOLO / DUO / SQUAD (DUEL in a
   group of two), the current one framed yellow with the tick corner) and the big yellow START (LONE WOLF: searches for a match). Searching
   has no popup: a dark search tab with a yellow edge hangs from the top centre (about x 0.37-0.63,
@@ -160,7 +168,9 @@ on the weapon panel's corner aside). Our own decisions where it departs from the
   unread count; the open one lit with a yellow edge); the conversation: NAME #CODE and ONLINE NOW /
   OFFLINE, message rows (picture, name (yours yellow), "TODAY 17:16", a dark bubble with a thin grey
   border, everyone's on the left), the encryption line, our quick phrases as dark chips (a tap
-  sends one), the field and the yellow SEND; a tap on the lobby beside the panel goes back.
+  sends one), the field and the yellow SEND; a tap on the lobby beside the panel goes back (the
+  dim behind it covers the whole lobby). Typing keeps the panel and its header in place: only the
+  input row and the quick phrases rise above the keyboard, the conversation shrinks.
 - Wardrobe (WARDROBE): every outfit free and unlocked (no prices, ranks or rarity tabs);
   3-column item cards with the rendered outfit portrait and the outfit's own colour bar, live
   preview on the podium, EQUIP and BACK.

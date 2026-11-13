@@ -432,7 +432,7 @@ listed here. If a part needs something new from the core, add it in its own file
   `QuitConfirm`); it is ignored during the START overlay.
 - The lobby (`Lobby`, scripts/lobby.gd: stage, top bar, the bottom bar `BottomBar` with WARDROBE
   `BundlesButton`, PROFILE `ProfileButton` and ONLINE 1 VS 1 `OnlineButton`, the chat strip above it
-  `ChatStrip` (its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
+  `ChatStrip` (UI.TOUCH_MIN tall, its icon and ticker centred; its ticker `ChatTicker`, `chat_ticker_friend()`: the friend it opens), ADD
   `AddFriendButton` on the right (FRIENDS on PLAYERS), FRIENDS `FriendsButton` and the gear
   `SettingsButton` top-right, mode card, START, settings, input; the reference's layout: no text
   menu, stats chips, name plate or version) makes four helpers that build under its `ui` and reach
@@ -494,8 +494,13 @@ listed here. If a part needs something new from the core, add it in its own file
   "mode"; `Game.MODE_NAMES`, `Game.mode_name(m := "")`, `Game.ROUNDS_TO_WIN` (5) and
   `Game.rounds_to_win(online_match)`. The lobby's mode card (`ModeCard`: `ModeName`,
   `ModeFormat`: `Lobby.mode_format()`, "BOT: <level>  ·  FIRST TO n", "TARGET DUMMY" or "1 VS 1
-  ONLINE") opens SELECT MODE (a `Modal` with the cards `Mode_training` / `Mode_lonewolf`; each
-  card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
+  ONLINE") opens SELECT MODE (`LobbyDialogs.select_mode()`: a full page, `open_page("", false)`
+  with no side tabs, in `Modal`: the tab bar `ModeTabs` / `ModeTab` "MODES", the cards
+  `Mode_training` / `Mode_lonewolf` in `ModeCards` (`ModeTitle`, `ModeStart`: "CARGO CAGE · START:
+  <LobbyDialogs.start_line(m)>"), the bottom row `ModeWays` with `ModeWay_room` / `ModeWay_local`
+  (FRIENDS on CUSTOM ROOM / PLAY WITHOUT INTERNET) and `ModeWay_help` (`how_to_play()`: HOW TO PLAY
+  as a page, X and back return to SELECT MODE); X and back close it; a group member gets a notice
+  instead; each card's "?" `Help_<m>` opens that mode's picture help, `LobbyDialogs.mode_help(m)` -> `ModeHelp`
   (scripts/mode_help.gd: `ModeHelp.PAGES`, `pages_of(m)`, `show_page(i)`, `turn(step)`, nodes
   HelpPicture, HelpTitle, HelpText, HelpDots / HelpDot_<i>, HelpPrev, HelpNext; X and back return to
   SELECT MODE). The figure `SizeBoxButton` at the mode card's right end opens the team-size box
@@ -599,14 +604,17 @@ listed here. If a part needs something new from the core, add it in its own file
   signed, retained on ROOT/fm/<to>/<from> until read) / signal `friend_chat_changed(id)`; the
   lobby's chat panel and CHAT buttons are `LobbyNet` (scripts/lobby_net.gd: `chat_button`, `open`:
   the panel from the left in `dialogs.modal`, "ChatWindow", its "Frame" (to the screen's edge; the
-  content in "Safe", clear of a left cutout), "ChatOutside" (a tap
-  beside it goes back), "ChatTab_friends", "Close", the friends column "ChatPeople" with
-  "ChatPerson_<code>", "ChatField", "ChatSend", quick phrases "Quick_<n>", "FriendChat", message
+  content in "Safe", clear of a left cutout), "ChatOutside" (the whole screen behind the panel: a
+  tap beside it goes back, nothing in the lobby under it can be pressed), "ChatTab_friends", "Close",
+  the friends column "ChatPeople" with "ChatPerson_<code>" (metas "unread", "online"; filled again on
+  every friend_chat_changed and peers_changed), the conversation "ChatConv" (typing pads it from
+  below, LobbyFriends._apply_lift: only the input row and the quick phrases rise, the panel and its
+  header stay), "ChatField", "ChatSend", quick phrases "Quick_<n>", "FriendChat", message
   rows "ChatMine_<n>" / "ChatTheirs_<n>", `time_text(ts, now, tz_s)`).
   Lobby notices (lobby only, never in a match): `LobbyNet.toast(lobby, text, caption, on_tap,
   icon)` ("LobbyToast" in the lobby's CanvasLayer "NoticeLayer", layer 20, TOAST_S): a friend's
-  message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while that
-  chat is open, a match loads, FRIENDS CHAT is off or they are blocked) and a friend request that
+  message ("NAME: " + `NetChat.first_words`, a soft sound, the tap opens that chat; not while the
+  chat panel is open (another friend's message only sounds there), a match loads, FRIENDS CHAT is off or they are blocked) and a friend request that
   comes while a popup is open (the tap opens FRIENDS); `LobbyNet.set_badge(row, n)` ("UnreadBadge")
   puts `NetChat.unread_total()` on the lobby's FRIENDS button (`FriendsButton`). Voice `NetVoice` (IMA
   ADPCM 8 kHz, `Cloud.send_voice(frame)` / `voice_received(frame)`, bus "VoiceIn"; played on the
