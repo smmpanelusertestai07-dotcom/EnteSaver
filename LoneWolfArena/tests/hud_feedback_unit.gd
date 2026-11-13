@@ -14,6 +14,7 @@ static func run(runner: Node) -> void:
 	me._test_migration_v8()
 	me._test_hit_bloom()
 	me._test_minimap_whole()
+	me._test_break_controls()
 
 
 func _check(cond: bool, what: String) -> void:
@@ -130,3 +131,32 @@ func _test_minimap_whole() -> void:
 		"on a big map the view follows the player")
 	_check(HudMinimap.view_m(Rect2(-100, -100, 200, 200)) == HudMinimap.VIEW_M, "a map too big to show whole keeps the 28 m window")
 	_check(shown.get_center().distance_to(mr.get_center()) < 0.01, "the map sits in the middle of the view (%.0f %% of the view is outside its long walls)" % (outside * 100.0))
+
+
+## A stand-in arena in the break (phase 3).
+class BreakArena extends Node:
+	var phase := 3
+
+
+## The round break keeps the controls for a player still standing; a dead one gets them back at the
+## next round's band; the match's end shows none.
+func _test_break_controls() -> void:
+	var hud := _hud()
+	var a := BreakArena.new()
+	var me := Player.new()
+	hud.player = me
+	hud.arena = a
+	_check(hud.controls_shown(), "in the fight the controls show")
+	hud.match_over = true
+	hud._break = {"age": RoundRules.BREAK_RESULT_AT + 0.5, "title": "VICTORY", "round": 2}
+	_check(hud.controls_shown(), "the break: a living player keeps the controls")
+	me.alive = false
+	_check(not hud.controls_shown(), "the break: a dead player has no controls")
+	hud._break.age = RoundRules.BREAK_BAND_AT + 0.2
+	_check(hud.controls_shown(), "from the next round's band everyone has the controls")
+	me.alive = true
+	hud._result = {"title": "VICTORY", "age": 0.5, "sub": ""}
+	_check(not hud.controls_shown(), "the match's end: no controls")
+	hud.free()
+	me.free()
+	a.free()

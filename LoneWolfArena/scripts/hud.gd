@@ -216,6 +216,21 @@ func show_break(title: String, mine: int, theirs: int, won: int, next_round: int
 ## The step of the break on screen ("" outside one): "beat", "result", "score", "band". The band
 ## stays for as long as the arena is in its break: online the guest's break ends with the host's
 ## word, which can come a moment after the sequence's own length.
+## Whether the controls and the weapon panel are drawn: through the fight; in the break between
+## rounds (round 8, like the reference) for a player still standing, and for everyone from the next
+## round's band (RoundRules.BREAK_BAND_AT); never at the match's end. Taps stay ignored while the
+## match is frozen (match_over).
+func controls_shown() -> bool:
+	if not match_over:
+		return true
+	if player == null or result_title() != "":
+		return false
+	var step := break_step()
+	if step == "":
+		return false
+	return player.alive or step == "band"
+
+
 func break_step() -> String:
 	if _break.is_empty() or arena == null or int(arena.get("phase")) != 3:
 		return ""
@@ -977,11 +992,11 @@ func _draw() -> void:
 		_draw_heal(c, u)
 	_draw_kill_x(u)
 	_draw_damage_numbers(u)
-	if not match_over:
+	if controls_shown():
 		# The panel first: a button the player put over it stays in sight (and takes the taps there,
 		# see _widget_at); the gear sits on the panel's corner. DUO / SQUAD: out of the round (the
 		# camera on a teammate) only the gear stays.
-		if team == null or player.alive:
+		if team == null or player.alive or match_over:
 			_draw_weapon_panel(vs)
 			_draw_controls(vs)
 		_draw_button("settings", vs)
