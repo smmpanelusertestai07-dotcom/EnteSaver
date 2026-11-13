@@ -20,7 +20,7 @@ const BUNDLE_INFO := [
 ]
 const LOOP_ANIMS := ["idle", "run_fwd", "run_back", "run_left", "run_right", "crouch_idle", "crouch_fwd", "lobby_idle",
 	"victory", "heal", "prone_idle", "prone_fwd", "runx_fwd", "runx_back", "runx_left", "runx_right", "carry_idle",
-	"sprint_fwd"]
+	"sprint_fwd", "victory_pose"]
 ## Speeds (m/s) at which the in-place cycles were authored; playback is scaled to the real speed.
 ## The long-stride runx_* cycles (anims_extra) replace the base run_* jog when present.
 const RUN_AUTHORED := 2.0
