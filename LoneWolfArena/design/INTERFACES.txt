@@ -257,9 +257,25 @@ listed here. If a part needs something new from the core, add it in its own file
 - Procedural animation on top of the clips (CharacterModel): `sprint` (set by the fighter each
   tick) bends the chest forward `SPRINT_LEAN`; a running turn rolls `root_scene` about the feet
   (`LEAN_PER_TURN`, at most `LEAN_MAX`); `play_lobby(cheer := false)`: lobby_idle at a varying pace
-  with a look round (twist) every 5-9 s, and with cheer the victory clip now and then; it ends on
-  `play_victory` / `play_death` / `revive`. `AimSpineModifier`: `pitch` + `kick` about
-  `axis_world` on the spine, then `twist` about world up on chest, neck and head.
+  with a gesture every 5-9 s, alternately the look round (twist) and one of `LOBBY_GESTURES`
+  (lobby_hip, lobby_shift, lobby_look clips), and with cheer the victory clip now and then; it ends
+  on `play_victory(clip := "victory")` / `play_death` / `revive`. `AimSpineModifier`: `pitch` +
+  `kick` about `axis_world` on the spine, then `twist` about world up on chest, neck and head.
+- Clips (`CharacterModel.EXTRA_GLBS` merged into the character's player, loaded once and preloaded
+  by the boot screen): anims_extra.glb (tools/character/anim_extra.py) and anims_extra2.glb
+  (tools/anim/anim_extra2.py, Blender 4.5, our own keyframes). Hip carry: standing with a gun, the
+  gun hangs low in the right hand (the idle point of the `loco` blend space mixes idle with
+  carry_idle, parameters/loco/idle/carry/blend_amount; moving, carry_run_a/b on `CARRY_BONES` with
+  the stride) unless `gun_up()`: `aiming` (= Fighter.ads, set each tick, remotes too) or a shot
+  within `READY_HOLD` s (`raise_gun()`, called by `on_fire`, `on_punch` and `place_gun`: the gun
+  points along the aim at once, the arms follow in ~0.1 s). While carried the gun follows the hand
+  and `muzzle_position()` is the aim pose's muzzle (shots and cover checks unchanged). Sprint
+  (`sprint` + standing + fast): sprint_fwd full body at `_speed / SPRINT_AUTHORED` (5.5 m/s).
+  Jump: the `jump` node plays jump_air (seek 0 on `on_jump`, `JUMP_FALL` when leaving the ground
+  without one); a touch-down after `LAND_MIN_AIR` below `LAND_CLIP_MAX_SPEED` fires jump_land (no
+  crouch dip), faster keeps the in-step `land_dip`. PRONE -> STAND below `PRONE_UP_MAX_SPEED` fires
+  prone_up (1 s, `standing_up()`), cut short by moving, another stance or `gun_up()`. The results'
+  win plays `play_victory("victory_pose")`. The runx_* cycles get the base clips' toe fix.
 - Online hit checks (a hit does not say which weapon made it): `Fighter.net_arms()` = the gun and
   the fists, + the sidearm while `held_recently(Weapons.SIDE)` (a RemoteFighter: its states had
   index 2 now or within `RemoteFighter.HELD_GRACE_MS`); `Weapons.hit_cap(defs, zone)`,
