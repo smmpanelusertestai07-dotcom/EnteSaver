@@ -262,6 +262,39 @@ static func ping_spot(w: Dictionary, vs: Vector2) -> Variant:
 	return Vector2(c.x + 0.12 * unit(vs), c.y)
 
 
+## The chip beside a left gear `w` (ping_spot), kept clear of `avoid` (the score bar): {} when the
+## gear sits in the right half, else {"rect": the chip's whole box (bars, number, the DIRECT / RELAY
+## tag under it), "compact": bool, "pos": the bars' left end and vertical centre, "h": the bars'
+## height}. On a 16:9 screen with a camera cutout on the left the gear moves right by the cutout and
+## the chip would run into the score bar: it moves left (never onto the gear), and where even that
+## is not enough it stacks the number under the bars (compact) right beside the gear.
+static func ping_box(w: Dictionary, vs: Vector2, avoid: Rect2) -> Dictionary:
+	var spot: Variant = ping_spot(w, vs)
+	if spot == null:
+		return {}
+	var u := unit(vs)
+	var c := center(w, vs)
+	var h := 0.034 * u
+	var wide := ping_width(h, 15, false)
+	var lo := c.x + touch_radius(w, vs) + 6.0            # never on the gear's touch area
+	var hi := avoid.position.x - 8.0 if avoid.has_area() else vs.x
+	var x := minf((spot as Vector2).x, hi - wide)
+	if x >= lo:
+		return {"rect": Rect2(x, c.y - h * 0.5, wide, h + 18.0), "compact": false, "pos": Vector2(x, c.y), "h": h}
+	var hc := 0.026 * u
+	var narrow := ping_width(hc, 12, true)
+	var top := c.y - hc - 4.0
+	return {"rect": Rect2(lo, top, narrow, hc + 30.0), "compact": true, "pos": Vector2(lo, top + hc * 0.5), "h": hc}
+
+
+## The chip's width: the four bars and "999 ms" beside them, or (compact) the wider of the bars and
+## the number under them.
+static func ping_width(h: float, font_size: int, compact: bool) -> float:
+	var bars := 4.0 * h * 0.26 + h * 0.14
+	var num := HudDraw.text_width("999 ms", font_size, "bold")
+	return maxf(bars, num) if compact else bars + num
+
+
 static func minimap_rect(w: Dictionary, vs: Vector2) -> Rect2:
 	var s := size_px(w, vs)
 	return Rect2(center(w, vs) - Vector2(s, s) * 0.5, Vector2(s, s))

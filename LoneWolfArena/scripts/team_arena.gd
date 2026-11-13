@@ -58,10 +58,12 @@ var _applying := 0                        # inside _apply_decision: downs it cau
 var _spectate_killer: Fighter             # who took the player out (followed when no teammate is UP)
 var _shadow_t := 0.0
 var _shadow_cut := {}                     # fighter -> true while its shadow is cut (SHADOW_CUT_M)
+var all_human := false                    # an all-human match (Game.team_match "multi"): no bots
 
 
 func _ready() -> void:
 	team_size = int(Game.team_match.get("size", 2))
+	all_human = bool(Game.team_match.get("multi", false))
 	super()
 
 
@@ -162,8 +164,10 @@ func members(t: int) -> Array[Fighter]:
 
 
 ## Team `t`'s leader (the flag in the HUD's team list): online the group's leader, who hosts
-## (TeamArenaNet.host_id), when on team `t`; else the first player of `t` who is not a bot (offline
-## the player); else its first member.
+## (TeamArenaNet.host_id), when on team `t`; in an all-human match (Game.team_match "multi") a team
+## without the host has no leader this phone knows (its group's leader is not in the roster): null,
+## no flag; else (offline, co-op) the first player of `t` who is not a bot (offline the player);
+## else its first member.
 func team_leader(t: int) -> Fighter:
 	var list := members(t)
 	var hid: Variant = get("host_id")
@@ -172,6 +176,8 @@ func team_leader(t: int) -> Fighter:
 		var hf := slot_fighter(int((slot_of as Dictionary)[hid]))
 		if hf != null and hf.team == t:
 			return hf
+	if all_human:
+		return null
 	for f: Fighter in list:
 		if not f is Bot:
 			return f

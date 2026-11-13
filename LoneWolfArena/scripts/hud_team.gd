@@ -109,12 +109,11 @@ static func slot_color(n: int) -> Color:
 
 
 ## The player's team's leader (the flag in the list): the arena's team_leader() (online the group's
-## leader), else the first member.
+## leader; null in an all-human match for a team without the host: no flag), else the first member.
 func leader() -> Fighter:
 	if arena != null and arena.has_method("team_leader"):
 		var l: Variant = arena.call("team_leader", my_team())
-		if l is Fighter:
-			return l
+		return l as Fighter if l is Fighter else null
 	var list := members(my_team())
 	return list[0] if not list.is_empty() else null
 
@@ -286,6 +285,9 @@ func blocked_rects() -> Array[Rect2]:
 	out.append(hud.score_rect())
 	var net := hud.get_node_or_null("HudNet") as HudNet
 	if net != null:
+		var ping := HudLayout.ping_box(hud.layout.settings, vs, hud.score_rect())
+		if not ping.is_empty():
+			out.append(ping.rect)          # the ping chip beside the gear (online)
 		var cs := net.button_centers()
 		for id: String in cs:
 			var c: Vector2 = cs[id]

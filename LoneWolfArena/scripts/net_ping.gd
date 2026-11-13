@@ -64,7 +64,8 @@ static func match_ms(peer_rtt: int, relay_rtt: int, connected: bool) -> int:
 
 
 ## Draws the bars and "NN ms" from `pos` (left end, vertical centre), `h` px tall; returns the width.
-static func draw(ci: CanvasItem, pos: Vector2, h: float, ms: int, font_size: int, alpha := 1.0) -> float:
+## bars_only: the bars alone (the HUD's compact chip writes the number under them).
+static func draw(ci: CanvasItem, pos: Vector2, h: float, ms: int, font_size: int, alpha := 1.0, bars_only := false) -> float:
 	var col := color(ms)
 	var lit := bars(ms)
 	var bw := h * 0.17
@@ -75,6 +76,8 @@ static func draw(ci: CanvasItem, pos: Vector2, h: float, ms: int, font_size: int
 		var c := col if i < lit else UNLIT
 		ci.draw_rect(r, Color(c, c.a * alpha))
 	var x := pos.x + 4 * (bw + gap) + h * 0.14
+	if bars_only:
+		return x - pos.x
 	var w := HudDraw.text(ci, label(ms), Vector2(x, pos.y + h * 0.04), font_size, Color(col, alpha), 0, 3, "bold")
 	return x - pos.x + w
 

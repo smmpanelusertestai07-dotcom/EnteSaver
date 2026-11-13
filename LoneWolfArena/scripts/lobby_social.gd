@@ -9,7 +9,8 @@ extends RefCounted
 ## joins a friend's group by its code: Cloud.join_group_code). Each row (SocialRow_<code>): the
 ## player's picture, name and where they are, and the invite "+" (SocialInvite_<code>: a GROUP
 ## INVITE through LobbyTeam.ask_friend; greyed when they are offline, in a match, already in the
-## group, or this player may not invite). No friends: ADD FRIENDS (opens FRIENDS > PLAYERS).
+## group, or this player may not invite); a RECENT player who is not a friend has ADD FRIEND there
+## instead (SocialAdd_<code>: Cloud.request_friend; ASKED once sent). No friends: ADD FRIENDS (opens FRIENDS > PLAYERS).
 ## Hidden while online teams are off and in a custom room. The lobby makes it (Lobby.social).
 
 const STATUS := [["JOIN ME ANYTIME", Color(0.38, 0.86, 0.44)], ["ONLINE", Color(0.98, 0.78, 0.2)], ["BUSY", Color(0.92, 0.3, 0.3)]]
@@ -236,11 +237,28 @@ func _row(cloud: Cloud, id: String, who: String) -> Control:
 	var mates := LobbyTeam.members().map(func(m: Dictionary) -> String: return String(m.id))
 	var where := "IN YOUR TEAM" if mates.has(id) else ("IN A MATCH" if playing else ("ONLINE" if on else "OFFLINE"))
 	col.add_child(UI.label(where, 13, LobbyProfile.ONLINE_GREEN if where == "ONLINE" else UI.TEXT_DIM, "bold"))
+	if not Game.is_friend(id):
+		# (RECENT: only a friend can be invited, so a stranger's row offers ADD FRIEND instead of a
+		# greyed "+"; ASKED once the request went out)
+		var asked := cloud.friend_asked(id)
+		var add := UI.button("ASKED" if asked else "ADD FRIEND", 13, "dark" if asked else "light", Vector2(104, 52))
+		add.name = "SocialAdd_" + code
+		add.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		add.disabled = asked
+		add.pressed.connect(func() -> void:
+			Audio.play("ui_click", -4.0)
+			if cloud.request_friend(id):
+				LobbyNet.toast(lobby, "FRIEND REQUEST SENT", who, Callable())
+				open()
+			else:
+				LobbyNet.toast(lobby, "COULD NOT SEND THE REQUEST", "TRY AGAIN WHEN ONLINE", Callable()))
+		row.add_child(add)
+		return row
 	var plus := UI.button("+", 26, "primary", Vector2(52, 52))
 	plus.name = "SocialInvite_" + code
 	plus.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var may := LobbyTeam.is_leader() and (not LobbyTeam.in_group() or LobbyTeam.members().size() < LobbyTeam.group_max())
-	plus.disabled = not (on and not playing and not mates.has(id) and may and Game.is_friend(id))
+	plus.disabled = not (on and not playing and not mates.has(id) and may)
 	plus.pressed.connect(func() -> void:
 		Audio.play("ui_click", -4.0)
 		lobby.team.ask_friend(id, who))
@@ -252,7 +270,8 @@ func _row(cloud: Cloud, id: String, who: String) -> Control:
 
 ## GROUP CODE: a keypad (CodePad) for a friend's Cloud.CODE_LEN-digit group code: keys
 ## CodeKey_<0-9>, CodeKeyBack (yellow), CodeKeyPaste, CodeKeyGo (yellow tick: Cloud.join_group_code);
-## the line under it follows Cloud.code_state and the pad closes once this player is in the group.
+## the line under it follows Cloud.code_state and the pad closes once the join it started let this
+## player in (a player already in a group reads EXIT YOUR GROUP FIRST there and the pad stays open).
 func open_pad() -> void:
 	var v := lobby.dialogs.open_modal("GROUP CODE", 520.0, true)
 	v.name = "CodePad"
@@ -283,7 +302,9 @@ func open_pad() -> void:
 		_pad_asked = why == ""
 		_pad_state.text = why if why != "" else LobbyTeam.code_state_text(Game.cloud_service().code_state))
 	v.add_child(go)
-	_pad_state = UI.label("Enter a friend's %d-digit GROUP CODE (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN, 16, UI.TEXT_DIM, "semi")
+	# (in a group already the code cannot be used: said at once, and the pad stays open)
+	_pad_state = UI.label("EXIT YOUR GROUP FIRST: a code joins another group." if LobbyTeam.in_group()
+		else "Enter a friend's %d-digit GROUP CODE (their JOIN BY CODE must be ON)." % Cloud.CODE_LEN, 16, UI.TEXT_DIM, "semi")
 	_pad_state.name = "CodePadState"
 	_pad_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_pad_state.custom_minimum_size = Vector2(440, 0)
@@ -317,7 +338,9 @@ func _follow_pad() -> void:
 	if not is_instance_valid(_pad_state) or not _pad_state.is_inside_tree():
 		_pad_state = null
 		return
-	if LobbyTeam.in_group():
+	# Closes once the join this pad started let the player in (not for a player who was in a group
+	# already: their JOIN reads EXIT YOUR GROUP FIRST and the pad stays).
+	if _pad_asked and LobbyTeam.in_group():
 		_pad_state = null
 		lobby.dialogs.close_modal()
 		return

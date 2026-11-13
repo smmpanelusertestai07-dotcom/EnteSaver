@@ -331,12 +331,19 @@ func _draw_ping() -> void:
 	var gear: Dictionary = hud.layout.settings
 	var gc := HudLayout.center(gear, vs)
 	var top := gc.y + HudLayout.radius(gear, vs) + 8.0 if gc.x > pr.end.x else 8.0
-	var spot: Variant = HudLayout.ping_spot(gear, vs)
-	if spot != null:
-		# Beside the gear (the reference's place): the bars and the number, the DIRECT / RELAY tag under.
-		var h := 0.034 * HudLayout.unit(vs)
+	var chip := HudLayout.ping_box(gear, vs, hud.score_rect())
+	if not chip.is_empty():
+		# Beside the gear (the reference's place): the bars and the number, the DIRECT / RELAY tag
+		# under; clear of the score bar (HudLayout.ping_box: compact, the number under the bars).
+		var spot: Vector2 = chip.pos
+		var h := float(chip.h)
+		if bool(chip.compact):
+			NetPing.draw(self, spot, h, ms, 12, 1.0, true)
+			HudDraw.text(self, NetPing.label(ms), Vector2(spot.x, spot.y + h * 0.5 + 10.0), 12, col, 0, 3, "bold")
+			_draw_tag(Vector2(spot.x, spot.y + h * 0.5 + 23.0), 0)
+			return
 		NetPing.draw(self, spot, h, ms, 15)
-		_draw_tag(Vector2((spot as Vector2).x, (spot as Vector2).y + h * 0.5 + 9.0), 0)
+		_draw_tag(Vector2(spot.x, spot.y + h * 0.5 + 9.0), 0)
 		return
 	if right - pr.end.x >= 34.0:
 		var w := right - pr.end.x - 2.0
