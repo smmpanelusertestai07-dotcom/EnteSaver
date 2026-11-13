@@ -8,7 +8,8 @@ extends Node3D
 ## bottom-left (WARDROBE, ONLINE 1 VS 1); bottom-right the mode card (TRAINING GROUND with the
 ## bot's level or the target dummy, or LONE WOLF, on CARGO CAGE; a tap opens SELECT MODE, where
 ## the opponent and the team size SOLO / DUO / SQUAD are picked too; the figure at its right end
-## opens the compact team-size box above it, LobbyDialogs.open_size_box) and the big START. START plays
+## opens the TEAM panel above it: the group code, JOIN BY CODE, FILL EMPTY PLACES and the size
+## tiles, LobbyDialogs.open_size_box) and the big START. START plays
 ## the card's mode at its size (start_route): TRAINING GROUND shows the match loading overlay
 ## (Loading.start_match) and enters the arena (DUO / SQUAD: the player and bot teammates against
 ## bots, TeamArena.offline_match); LONE WOLF searches for a random opponent (SOLO: QUICK MATCH,
@@ -17,9 +18,10 @@ extends Node3D
 ## (SearchTab, scripts/lobby_search.gd) drops from the top centre with the time searched and a
 ## cancel X, START turns into the greyed MATCHING... plate, and the lobby stays usable (a tap on the
 ## mode card says CANCEL THE SEARCH FIRST; the match found closes whatever window is open). In
-## LONE WOLF the GROUP bar under the player card (LobbyTeam, scripts/lobby_team.gd) invites online
-## friends into a group of up to 4; the other members stand on the podium beside the hero, smaller,
-## with name plates and a LEADER mark (show_group_members); only the leader's START works (a member
+## LONE WOLF the right-hand social panel (LobbySocial) invites online friends into a group of up to
+## 4; in a group the TEAM bar under the player card (LobbyTeam, scripts/lobby_team.gd) opens the
+## TEAM panel; the hero steps left and the other members stand to its right, smaller, with name
+## plates and a LEADER mark (show_group_members); only the leader's START works (a member
 ## sees GroupWaitLeader "WAITING FOR <LEADER> TO START" in its place). WARDROBE opens the outfit picker
 ## (every outfit free: item cards, preview on the podium, EQUIP / BACK). CUSTOM HUD and HOW TO PLAY
 ## are in SETTINGS (the gear).
